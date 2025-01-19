@@ -10,6 +10,7 @@ import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner,
 import { PromptConfig } from "./prompt_config";
 import { EditableField } from "@/app/lib/components/editable-field";
 import { RelativeTime } from "@primer/react";
+import { CodeEditor } from "./code_editor";
 
 import {
     ResizableHandle,
@@ -21,8 +22,9 @@ import { apiV1 } from "rowboat-shared";
 import { publishWorkflow, renameWorkflow, saveWorkflow } from "@/app/actions";
 import { PublishedBadge } from "./published_badge";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "@/app/lib/components/icons";
-import { CopyIcon, Layers2Icon, RadioIcon, RedoIcon, UndoIcon } from "lucide-react";
+import { CodeIcon, CopyIcon, EyeIcon, Layers2Icon, RadioIcon, RedoIcon, UndoIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
+import clsx from "clsx";
 
 enablePatches();
 
@@ -39,6 +41,7 @@ interface StateItem {
     publishSuccess: boolean;
     pendingChanges: boolean;
     chatKey: number;
+    mode: "visual" | "code";
 }
 
 interface State {
@@ -49,6 +52,12 @@ interface State {
 }
 
 export type Action = {
+    type: "set_mode";
+    mode: "visual" | "code";
+} | {
+    type: "code_update";
+    workflow: z.infer<typeof Workflow>;
+} | {
     type: "update_workflow_name";
     name: string;
 } | {
@@ -142,6 +151,12 @@ function reducer(state: State, action: Action): State {
     const isLive = state.present.workflow._id == state.present.publishedWorkflowId;
 
     switch (action.type) {
+        case "set_mode": {
+            newState = produce(state, draft => {
+                draft.present.mode = action.mode;
+            });
+            break;
+        }
         case "undo": {
             if (state.currentIndex <= 0) return state;
             newState = produce(state, draft => {
@@ -203,6 +218,14 @@ function reducer(state: State, action: Action): State {
                 state.present,
                 (draft) => {
                     switch (action.type) {
+                        case "code_update":
+                            draft.workflow = {
+                                ...action.workflow,
+                                _id: state.present.workflow._id,
+                                createdAt: state.present.workflow.createdAt,
+                                lastUpdatedAt: state.present.workflow.lastUpdatedAt,
+                            }
+                            break;  
                         case "select_agent":
                             draft.selection = {
                                 type: "agent",
@@ -483,6 +506,7 @@ export function WorkflowEditor({
         inversePatches: [],
         currentIndex: 0,
         present: {
+            mode: "visual",
             publishing: false,
             selection: null,
             workflow: workflow,
@@ -702,6 +726,26 @@ export function WorkflowEditor({
                         </DropdownItem>
                     </DropdownMenu>
                 </Dropdown>
+                <div className="flex items-center gap-1">
+                    <button
+                        className={clsx(`px-1 flex items-center gap-1 text-gray-400 hover:text-black`, {
+                            "bg-gray-200": state.present.mode === "visual"
+                        })}
+                        onClick={() => dispatch({ type: "set_mode", mode: "visual" })}
+                    >
+                        <EyeIcon size={16} />
+                        <div className="text-xs">Visual</div>
+                    </button>
+                    <button
+                        className={clsx(`p-1 flex items-center gap-1 text-gray-400 hover:text-black`, {
+                            "bg-gray-200": state.present.mode === "code"
+                        })}
+                        onClick={() => dispatch({ type: "set_mode", mode: "code" })}
+                    >
+                        <CodeIcon size={16} />
+                        <div className="text-xs">Code</div>
+                    </button>
+                </div>
             </div>
             {showCopySuccess && <div className="flex items-center gap-2">
                 <div className="text-green-500">Copied to clipboard</div>
@@ -749,61 +793,69 @@ export function WorkflowEditor({
             </div>
         </div>
         <ResizablePanelGroup direction="horizontal" className="grow flex overflow-auto gap-1">
-            <ResizablePanel minSize={10} defaultSize={15}>
-                <EntityList
-                    agents={state.present.workflow.agents}
-                    tools={state.present.workflow.tools}
-                    prompts={state.present.workflow.prompts}
-                    selectedEntity={state.present.selection}
-                    startAgentName={state.present.workflow.startAgent}
-                    onSelectAgent={handleSelectAgent}
-                    onSelectTool={handleSelectTool}
-                    onSelectPrompt={handleSelectPrompt}
-                    onAddAgent={handleAddAgent}
-                    onAddTool={handleAddTool}
-                    onAddPrompt={handleAddPrompt}
-                    onToggleAgent={handleToggleAgent}
-                    onSetMainAgent={handleSetMainAgent}
-                    onDeleteAgent={handleDeleteAgent}
-                    onDeleteTool={handleDeleteTool}
-                    onDeletePrompt={handleDeletePrompt}
-                />
-            </ResizablePanel>
-            <ResizableHandle />
-            <ResizablePanel minSize={20} defaultSize={60} className="overflow-auto">
-                <ChatApp
-                    key={'' + state.present.chatKey}
-                    hidden={state.present.selection !== null}
-                    projectId={state.present.workflow.projectId}
+            {state.present.mode === "code" && <ResizablePanel minSize={10} defaultSize={85}>
+                <CodeEditor
                     workflow={state.present.workflow}
-                    messageSubscriber={updateChatMessages}
+                    dispatch={dispatch}
                 />
-                {state.present.selection?.type === "agent" && <AgentConfig
-                    key={state.present.selection.name}
-                    agent={state.present.workflow.agents.find((agent) => agent.name === state.present.selection!.name)!}
-                    usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
-                    agents={state.present.workflow.agents}
-                    tools={state.present.workflow.tools}
-                    prompts={state.present.workflow.prompts}
-                    dataSources={dataSources}
-                    handleUpdate={handleUpdateAgent.bind(null, state.present.selection.name)}
-                    handleClose={handleUnselectAgent}
-                />}
-                {state.present.selection?.type === "tool" && <ToolConfig
-                    key={state.present.selection.name}
-                    tool={state.present.workflow.tools.find((tool) => tool.name === state.present.selection!.name)!}
-                    usedToolNames={new Set(state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name))}
-                    handleUpdate={handleUpdateTool.bind(null, state.present.selection.name)}
-                    handleClose={handleUnselectTool}
-                />}
-                {state.present.selection?.type === "prompt" && <PromptConfig
-                    key={state.present.selection.name}
-                    prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
-                    usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
-                    handleUpdate={handleUpdatePrompt.bind(null, state.present.selection.name)}
-                    handleClose={handleUnselectPrompt}
-                />}
-            </ResizablePanel>
+            </ResizablePanel>}
+            {state.present.mode === "visual" && <>
+                <ResizablePanel minSize={10} defaultSize={15}>
+                    <EntityList
+                        agents={state.present.workflow.agents}
+                        tools={state.present.workflow.tools}
+                        prompts={state.present.workflow.prompts}
+                        selectedEntity={state.present.selection}
+                        startAgentName={state.present.workflow.startAgent}
+                        onSelectAgent={handleSelectAgent}
+                        onSelectTool={handleSelectTool}
+                        onSelectPrompt={handleSelectPrompt}
+                        onAddAgent={handleAddAgent}
+                        onAddTool={handleAddTool}
+                        onAddPrompt={handleAddPrompt}
+                        onToggleAgent={handleToggleAgent}
+                        onSetMainAgent={handleSetMainAgent}
+                        onDeleteAgent={handleDeleteAgent}
+                        onDeleteTool={handleDeleteTool}
+                        onDeletePrompt={handleDeletePrompt}
+                    />
+                </ResizablePanel>
+                <ResizableHandle />
+                <ResizablePanel minSize={20} defaultSize={60} className="overflow-auto">
+                    <ChatApp
+                        key={'' + state.present.chatKey}
+                        hidden={state.present.selection !== null}
+                        projectId={state.present.workflow.projectId}
+                        workflow={state.present.workflow}
+                        messageSubscriber={updateChatMessages}
+                    />
+                    {state.present.selection?.type === "agent" && <AgentConfig
+                        key={state.present.selection.name}
+                        agent={state.present.workflow.agents.find((agent) => agent.name === state.present.selection!.name)!}
+                        usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
+                        agents={state.present.workflow.agents}
+                        tools={state.present.workflow.tools}
+                        prompts={state.present.workflow.prompts}
+                        dataSources={dataSources}
+                        handleUpdate={handleUpdateAgent.bind(null, state.present.selection.name)}
+                        handleClose={handleUnselectAgent}
+                    />}
+                    {state.present.selection?.type === "tool" && <ToolConfig
+                        key={state.present.selection.name}
+                        tool={state.present.workflow.tools.find((tool) => tool.name === state.present.selection!.name)!}
+                        usedToolNames={new Set(state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name))}
+                        handleUpdate={handleUpdateTool.bind(null, state.present.selection.name)}
+                        handleClose={handleUnselectTool}
+                    />}
+                    {state.present.selection?.type === "prompt" && <PromptConfig
+                        key={state.present.selection.name}
+                        prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
+                        usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
+                        handleUpdate={handleUpdatePrompt.bind(null, state.present.selection.name)}
+                        handleClose={handleUnselectPrompt}
+                    />}
+                </ResizablePanel>
+            </>}
             <ResizableHandle />
             <ResizablePanel minSize={10} defaultSize={25}>
                 <Copilot
