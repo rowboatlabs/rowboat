@@ -52,8 +52,16 @@ Before running RowBoat, ensure you have:
    - Update your `.env` file with the following configurations:
 
      ```ini
-     # OpenAI Configuration
+     # AI Model Configuration (choose one provider)
+     # For OpenAI
+     COPILOT_MODEL=openai/gpt-4o
      OPENAI_API_KEY=your-openai-api-key
+
+     # For AWS Bedrock
+     COPILOT_MODEL=aws/us.anthropic.claude-3-sonnet-20240229-v1:0
+     AWS_ACCESS_KEY_ID=your-aws-access-key
+     AWS_SECRET_ACCESS_KEY=your-aws-secret-key
+     AWS_REGION=your-aws-region
 
      # Auth0 Configuration
      AUTH0_SECRET=your-generated-secret               # Generated using openssl command

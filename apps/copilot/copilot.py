@@ -1,11 +1,10 @@
-from openai import OpenAI
-from flask import Flask, request, jsonify
-from pydantic import BaseModel, ValidationError
-from typing import List, Dict, Any, Literal
+from langchain_openai import ChatOpenAI
+from langchain_aws import ChatBedrock
+from pydantic import BaseModel
+from typing import List, Literal
 import json
+import os
 from lib import AgentContext, PromptContext, ToolContext, ChatContext
-
-openai_client = OpenAI()
 
 class UserMessage(BaseModel):
     role: Literal["user"]
@@ -622,6 +621,27 @@ def get_response(
         current_workflow_config: str,
         context: AgentContext | PromptContext | ToolContext | ChatContext | None = None
     ) -> str:
+    # Get model from environment variable and parse provider/model
+    model_string = os.getenv('MODEL', 'openai/gpt-4o')  # Default to openai/gpt-4o if not set
+    try:
+        provider, model_name = model_string.split('/')
+    except ValueError:
+        raise ValueError("Model string must be in format 'provider_name/model_name'")
+
+    # Initialize appropriate chat model based on provider
+    if provider == "openai":
+        chat = ChatOpenAI(
+            model=model_name,
+            response_format={"type": "json_object"}
+        )
+    elif provider == "aws":
+        chat = ChatBedrock(
+            model_id=model_name,
+            region_name=os.getenv('AWS_REGION'),
+        )
+    else:
+        raise ValueError(f"Provider '{provider}' not supported")
+
     # if context is provided, create a prompt for the context
     if context:
         match context:
@@ -667,15 +687,15 @@ The current workflow config is:
 User: {last_message.content}
 """
 
-    updated_msgs = [{"role": "system", "content": sys_prompt}] + [
-        message.model_dump() for message in messages
+    # Convert messages to LangChain format
+    langchain_messages = [
+        {"role": "system", "content": sys_prompt},
+        *[message.model_dump() for message in messages]
     ]
-    print(json.dumps(updated_msgs, indent=2))
 
-    response = openai_client.chat.completions.create(
-        model="gpt-4o",
-        messages=updated_msgs,
-        response_format={"type": "json_object"}
-    )
+    print(json.dumps(langchain_messages, indent=2))
 
-    return response.choices[0].message.content
+    # Call LangChain chat model
+    response = chat.invoke(langchain_messages)
+
+    return response.content

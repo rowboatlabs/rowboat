@@ -5,7 +5,9 @@ A Flask-based application that helps design and manage multi-agent AI systems fo
 ## Prerequisites
 
 - Python 3.8+
-- OpenAI API key
+- One of the following:
+  - OpenAI API key for GPT-4
+  - AWS credentials for Bedrock access
 
 ## Installation
 
@@ -21,10 +23,21 @@ source venv/bin/activate  # On Windows, use: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Set up your OpenAI API key:
-```bash
-export OPENAI_API_KEY='your-api-key-here'  # On Windows, use: set OPENAI_API_KEY=your-api-key-here
-```
+4. Configure your AI provider:
+
+   **Option 1: OpenAI**
+   ```bash
+   export MODEL='openai/gpt-4o'
+   export OPENAI_API_KEY='your-api-key-here'
+   ```
+
+   **Option 2: AWS Bedrock**
+   ```bash
+   export MODEL='aws/us.anthropic.claude-3-sonnet-20240229-v1:0'
+   export AWS_ACCESS_KEY_ID='your-aws-access-key'
+   export AWS_SECRET_ACCESS_KEY='your-aws-secret-key'
+   export AWS_REGION='your-aws-region'
+   ```
 
 ## Running the Application
 
