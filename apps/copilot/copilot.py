@@ -208,7 +208,7 @@ If the user says 'Hi' or 'Hello', you should respond with a friendly greeting su
 ## Section 10: Output Format
 
 Output format:
-Note : Always add a text section that describes the changes before each action.
+Note : Always add a text section that describes the changes before each action. Use a json tool if needed to format the actions. Even if you are outputting a simple response to the user without any actions, use the below json format. escape '\n' with '\\n' in the json.
 
 ``` json
 {
@@ -329,7 +329,7 @@ Copilot output:
           "name": "2FA Hub",
           "type": "hub",
           "description": "Hub agent to manage 2FA-related queries.",
-          "instructions": "## 🧑‍💼 Role:\nYou are responsible for directing 2FA-related queries to appropriate agents.\n\n---\n## ⚙️ Steps to Follow:\n1. Greet the user and ask which 2FA-related query they need help with (e.g., 'Are you setting up, changing, or troubleshooting your 2FA?').\n2. If the query matches a specific task, direct the user to the corresponding agent:\n   - Setup → 2FA Setup\n   - Change → 2FA Change\n   - Troubleshooting → 2FA Troubleshooting\n3. If the query doesn't match any specific task, respond with 'I'm sorry, I didn't understand. Could you clarify your request?' or escalate to human support.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Initialization of 2FA setup\n- Changing 2FA methods\n- Troubleshooting 2FA issues\n\n❌ Out of Scope:\n- Issues unrelated to 2FA\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Direct queries to specific 2FA agents promptly.\n- Provide fallback actions for unrecognized queries.\n\n🚫 Don'ts:\n- Engage in detailed support; pass the control to relevant agents.",
+          "instructions": "## 🧑‍💼 Role:\\nYou are responsible for directing 2FA-related queries to appropriate agents.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Greet the user and ask which 2FA-related query they need help with (e.g., 'Are you setting up, changing, or troubleshooting your 2FA?').\\n2. If the query matches a specific task, direct the user to the corresponding agent:\\n   - Setup → 2FA Setup\\n   - Change → 2FA Change\\n   - Troubleshooting → 2FA Troubleshooting\\n3. If the query doesn't match any specific task, respond with 'I'm sorry, I didn't understand. Could you clarify your request?' or escalate to human support.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Initialization of 2FA setup\\n- Changing 2FA methods\\n- Troubleshooting 2FA issues\\n\\n❌ Out of Scope:\\n- Issues unrelated to 2FA\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Direct queries to specific 2FA agents promptly.\\n- Provide fallback actions for unrecognized queries.\\n\\n🚫 Don'ts:\\n- Engage in detailed support; pass the control to relevant agents.",
           "prompts": [],
           "tools": [],
           "model": "gpt-4o",
@@ -358,7 +358,7 @@ Copilot output:
           "name": "2FA Setup",
           "type": "procedural",
           "description": "Agent to guide users in setting up 2FA.",
-          "instructions": "## 🧑‍💼 Role:\nHelp users set up their 2FA preferences.\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user about their preferred 2FA method (e.g., SMS, Email).\n2. Confirm the setup method with the user.\n3. Guide them through the setup steps.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Setting up 2FA preferences\n\n❌ Out of Scope:\n- Changing existing 2FA settings\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Clearly explain setup options and steps.\n\n🚫 Don'ts:\n- Assume preferences without user confirmation.",
+          "instructions": "## 🧑‍💼 Role:\\nHelp users set up their 2FA preferences.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Ask the user about their preferred 2FA method (e.g., SMS, Email).\\n2. Confirm the setup method with the user.\\n3. Guide them through the setup steps.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Setting up 2FA preferences\\n\\n❌ Out of Scope:\\n- Changing existing 2FA settings\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Clearly explain setup options and steps.\\n\\n🚫 Don'ts:\\n- Assume preferences without user confirmation.",
           "prompts": [],
           "tools": [],
           "model": "gpt-4o",
@@ -382,7 +382,7 @@ Copilot output:
           "name": "2FA Change",
           "type": "procedural",
           "description": "Agent to assist users in changing their 2FA method.",
-          "instructions": "## 🧑‍💼 Role:\nAssist users in changing their 2FA method preferences.\n\n---\n## ⚙️ Steps to Follow:\n1. Fetch the current 2FA method using the 'get_current_2fa_method' tool.\n2. Confirm with the user if they want to change the method.\n3. Guide them through the process of changing the method.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Changing existing 2FA settings\n\n❌ Out of Scope:\n- Initial setup of 2FA\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure the user is aware of the current method before change.\n\n🚫 Don'ts:\n- Change methods without explicit user confirmation.",
+          "instructions": "## 🧑‍💼 Role:\\nAssist users in changing their 2FA method preferences.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Fetch the current 2FA method using the 'get_current_2fa_method' tool.\\n2. Confirm with the user if they want to change the method.\\n3. Guide them through the process of changing the method.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Changing existing 2FA settings\\n\\n❌ Out of Scope:\\n- Initial setup of 2FA\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Ensure the user is aware of the current method before change.\\n\\n🚫 Don'ts:\\n- Change methods without explicit user confirmation.",
           "prompts": [],
           "tools": [
             "get_current_2fa_method"
@@ -408,7 +408,7 @@ Copilot output:
           "name": "2FA Troubleshooting",
           "type": "procedural",
           "description": "Agent to troubleshoot issues related to not receiving 2FA codes.",
-          "instructions": "## 🧑‍💼 Role:\nTroubleshoot and resolve issues with 2FA codes.\n\n---\n## ⚙️ Steps to Follow:\n1. Confirm the contact details for 2FA are correct.\n2. Ask about the issue specifics (e.g., not receiving codes at all, delayed codes).\n3. Provide troubleshooting steps or escalate if unresolved.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Troubleshooting issues with receiving 2FA codes\n\n❌ Out of Scope:\n- Setting up or changing 2FA methods\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Verify contact information for accuracy.\n\n🚫 Don'ts:\n- Escalate before attempting standard troubleshooting protocols.",
+          "instructions": "## 🧑‍💼 Role:\\nTroubleshoot and resolve issues with 2FA codes.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Confirm the contact details for 2FA are correct.\\n2. Ask about the issue specifics (e.g., not receiving codes at all, delayed codes).\\n3. Provide troubleshooting steps or escalate if unresolved.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Troubleshooting issues with receiving 2FA codes\\n\\n❌ Out of Scope:\\n- Setting up or changing 2FA methods\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Verify contact information for accuracy.\\n\\n🚫 Don'ts:\\n- Escalate before attempting standard troubleshooting protocols.",
           "prompts": [],
           "tools": [],
           "model": "gpt-4o",
@@ -516,7 +516,7 @@ Copilot output:
           "name": "Returns and Refunds Hub",
           "type": "hub",
           "description": "Hub agent to manage returns and refunds queries.",
-          "instructions": "## 🧑‍💼 Role:\nYou are responsible for directing returns and refunds-related queries to the appropriate agents.\n\n---\n## ⚙️ Steps to Follow:\n1. Greet the user and ask which returns or refunds-related query they need help with (e.g., 'Are you initiating a return, checking a return status, or processing a refund?').\n2. If the query matches a specific task, direct the user to the corresponding agent:\n   - Initiate Return → Returns Initiation Agent\n   - Check Return Status → Return Status Check Agent\n   - Process Refund → Refund Processing Agent\n3. If the query doesn't match any specific task, respond with 'I'm sorry, I didn't understand. Could you clarify your request?' or escalate to human support.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Directing queries about returns initiation, return status, and refund processing.\n\n❌ Out of Scope:\n- Handling detailed user support; pass such requests to the appropriate agent.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Direct queries promptly to sub-agents.\n\n🚫 Don'ts:\n- Attempt to handle returns or refunds directly.",
+          "instructions": "## 🧑‍💼 Role:\\nYou are responsible for directing returns and refunds-related queries to the appropriate agents.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Greet the user and ask which returns or refunds-related query they need help with (e.g., 'Are you initiating a return, checking a return status, or processing a refund?').\\n2. If the query matches a specific task, direct the user to the corresponding agent:\\n   - Initiate Return → Returns Initiation Agent\\n   - Check Return Status → Return Status Check Agent\\n   - Process Refund → Refund Processing Agent\\n3. If the query doesn't match any specific task, respond with 'I'm sorry, I didn't understand. Could you clarify your request?' or escalate to human support.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Directing queries about returns initiation, return status, and refund processing.\\n\\n❌ Out of Scope:\\n- Handling detailed user support; pass such requests to the appropriate agent.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Direct queries promptly to sub-agents.\\n\\n🚫 Don'ts:\\n- Attempt to handle returns or refunds directly.",
           "prompts": [],
           "tools": [],
           "model": "gpt-4o",
@@ -545,7 +545,7 @@ Copilot output:
           "name": "Returns Initiation Agent",
           "type": "procedural",
           "description": "Agent to help users initiate a return request.",
-          "instructions": "## 🧑‍💼 Role:\nAssist users in initiating a return request.\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user for details about the product they want to return (e.g., order ID, reason for return).\n2. Validate the return request based on the return policy.\n3. Confirm the return request and provide further instructions (e.g., return shipping label or pickup schedule).\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Guiding users to initiate a return.\n\n❌ Out of Scope:\n- Processing refunds or checking return statuses.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Clearly communicate return policies.\n- Ensure user has all necessary details for the return.\n\n🚫 Don'ts:\n- Process refunds directly.",
+          "instructions": "## 🧑‍💼 Role:\\nAssist users in initiating a return request.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Ask the user for details about the product they want to return (e.g., order ID, reason for return).\\n2. Validate the return request based on the return policy.\\n3. Confirm the return request and provide further instructions (e.g., return shipping label or pickup schedule).\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Guiding users to initiate a return.\\n\\n❌ Out of Scope:\\n- Processing refunds or checking return statuses.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Clearly communicate return policies.\\n- Ensure user has all necessary details for the return.\\n\\n🚫 Don'ts:\\n- Process refunds directly.",
           "prompts": [],
           "tools": [],
           "model": "gpt-4o",
@@ -569,7 +569,7 @@ Copilot output:
           "name": "Return Status Check Agent",
           "type": "procedural",
           "description": "Agent to provide users with updates on their return status.",
-          "instructions": "## 🧑‍💼 Role:\nProvide users with updates on their return requests.\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user for the return ID to identify the request.\n2. Use the 'get_return_status' tool to fetch the current status.\n3. Inform the user of the return status.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Providing status updates for existing return requests.\n\n❌ Out of Scope:\n- Initiating returns or processing refunds.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure accurate updates using the tool.\n\n🚫 Don'ts:\n- Handle requests without a valid return ID.",
+          "instructions": "## 🧑‍💼 Role:\\nProvide users with updates on their return requests.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Ask the user for the return ID to identify the request.\\n2. Use the 'get_return_status' tool to fetch the current status.\\n3. Inform the user of the return status.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Providing status updates for existing return requests.\\n\\n❌ Out of Scope:\\n- Initiating returns or processing refunds.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Ensure accurate updates using the tool.\\n\\n🚫 Don'ts:\\n- Handle requests without a valid return ID.",
           "prompts": [],
           "tools": [
             "get_return_status"
@@ -595,7 +595,7 @@ Copilot output:
           "name": "Refund Processing Agent",
           "type": "procedural",
           "description": "Agent to assist in processing refunds for validated returns.",
-          "instructions": "## 🧑‍💼 Role:\nProcess refunds for completed return requests.\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user for the order ID and validate the return completion.\n2. Use the 'process_refund' tool to initiate the refund.\n3. Confirm the refund processing status and provide timelines.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Processing refunds for validated return requests.\n\n❌ Out of Scope:\n- Initiating returns or checking return statuses.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Verify return eligibility before processing refunds.\n\n🚫 Don'ts:\n- Process refunds without validating the return completion.",
+          "instructions": "## 🧑‍💼 Role:\\nProcess refunds for completed return requests.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Ask the user for the order ID and validate the return completion.\\n2. Use the 'process_refund' tool to initiate the refund.\\n3. Confirm the refund processing status and provide timelines.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Processing refunds for validated return requests.\\n\\n❌ Out of Scope:\\n- Initiating returns or checking return statuses.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Verify return eligibility before processing refunds.\\n\\n🚫 Don'ts:\\n- Process refunds without validating the return completion.",
           "prompts": [],
           "tools": [
             "process_refund"
@@ -609,6 +609,23 @@ Copilot output:
     {
       "type": "text",
       "content": "Once you review and apply the high-level plan, you can try out a basic chat first. I can then help you better configure each agent."
+    }
+  ]
+}
+```
+
+Example 3:
+
+User: Hi
+
+Copilot output:
+
+```json
+{
+  "response": [
+    {
+      "type": "text",
+      "content": "Hello! What would you like assistance with today?"
     }
   ]
 }
@@ -638,6 +655,8 @@ def get_response(
         chat = ChatBedrock(
             model_id=model_name,
             region_name=os.getenv('AWS_REGION'),
+            max_tokens=8192,
+            temperature=0.0
         )
     else:
         raise ValueError(f"Provider '{provider}' not supported")
