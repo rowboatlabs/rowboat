@@ -20,16 +20,26 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
   const [criteria, setCriteria] = useState(scenario.criteria || '');
   const [context, setContext] = useState(scenario.context || '');
 
-  // Save changes whenever any field changes
+  // Replace the existing useEffect with this debounced version
   useEffect(() => {
-    onSave({
-      ...scenario,
-      name,
-      description,
-      criteria,
-      context,
-    });
-  }, [name, description, criteria, context]);
+    const timeoutId = setTimeout(() => {
+      // Only save if any value has actually changed
+      if (name !== scenario.name ||
+          description !== scenario.description ||
+          criteria !== scenario.criteria ||
+          context !== scenario.context) {
+        onSave({
+          ...scenario,
+          name,
+          description,
+          criteria,
+          context,
+        });
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [name, description, criteria, context, onSave, scenario]);
 
   return (
     <div>

@@ -46,6 +46,7 @@ export async function createScenario(projectId: string, name: string, descriptio
         name,
         description,
         context: '',
+        criteria: '',
         lastUpdatedAt: now,
         createdAt: now,
     });
@@ -56,7 +57,12 @@ export async function createScenario(projectId: string, name: string, descriptio
 export async function updateScenario(
     projectId: string,
     scenarioId: string,
-    updates: { name?: string; description?: string; context?: string }
+    updates: { 
+        name?: string; 
+        description?: string; 
+        context?: string;
+        criteria?: string;
+    }
 ): Promise<void> {
     await projectAuthCheck(projectId);
 

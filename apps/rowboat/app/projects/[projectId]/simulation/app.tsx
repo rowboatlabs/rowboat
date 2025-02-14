@@ -214,8 +214,10 @@ export default function SimulationApp() {
       );
       setActiveRun(newRun);
 
-      // Check for the NEXT_PUBLIC_ prefixed env variable
-      if (process.env.NEXT_PUBLIC_MOCK_SIMULATION_RESULTS === 'true') {
+      // Safely check for mock simulation flag
+      const shouldMock = process.env.NEXT_PUBLIC_MOCK_SIMULATION_RESULTS === 'true';
+      
+      if (shouldMock) {
         console.log('Using mock simulation...');  // Debug log
         
         // First update run to 'running' status

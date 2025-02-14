@@ -6,7 +6,6 @@ import { PlaygroundChat } from "../../../lib/types/types";
 import { Workflow } from "../../../lib/types/workflow_types";
 import { SimulationData } from "../../../lib/types/testing_types";
 import { SimulationScenarioData } from "../../../lib/types/testing_types";
-import { SimulateScenarioOption, SimulateURLOption } from "./simulation-options";
 import { Chat } from "./chat";
 import { useSearchParams, useRouter } from "next/navigation";
 import { ActionButton, Pane } from "../workflow/pane";
@@ -36,7 +35,6 @@ export function App({
     const initialChatId = useMemo(() => searchParams.get('chatId'), [searchParams]);
     const [existingChatId, setExistingChatId] = useState<string | null>(initialChatId);
     const [loadingChat, setLoadingChat] = useState<boolean>(false);
-    const [viewSimulationMenu, setViewSimulationMenu] = useState<boolean>(false);
     const [counter, setCounter] = useState<number>(0);
     const [chat, setChat] = useState<z.infer<typeof PlaygroundChat>>({
         projectId,
@@ -48,7 +46,7 @@ export function App({
 
     const beginSimulation = useCallback((data: z.infer<typeof SimulationData>) => {
         setExistingChatId(null);
-        setViewSimulationMenu(false);
+        setLoadingChat(true);
         setCounter(counter + 1);
         setChat({
             projectId,
@@ -88,7 +86,7 @@ export function App({
 
     function handleNewChatButtonClick() {
         setExistingChatId(null);
-        setViewSimulationMenu(false);
+        setLoadingChat(true);
         setCounter(counter + 1);
         setChat({
             projectId,
@@ -100,7 +98,7 @@ export function App({
     }
 
     return (
-        <Pane title={viewSimulationMenu ? <SimulateLabel /> : "Chat"} actions={[
+        <Pane title="Chat" actions={[
             <ActionButton
                 key="new-chat"
                 icon={<MessageSquarePlusIcon size={16} />}
@@ -117,10 +115,10 @@ export function App({
             </ActionButton>,
         ]}>
             <div className="h-full overflow-auto">
-                {!viewSimulationMenu && loadingChat && <div className="flex justify-center items-center h-full">
+                {loadingChat && <div className="flex justify-center items-center h-full">
                     <Spinner />
                 </div>}
-                {!viewSimulationMenu && !loadingChat && <Chat
+                {!loadingChat && <Chat
                     key={existingChatId || 'chat-' + counter}
                     chat={chat}
                     initialChatId={existingChatId || null}
@@ -128,7 +126,6 @@ export function App({
                     workflow={workflow}
                     messageSubscriber={messageSubscriber}
                 />}
-                {viewSimulationMenu && <SimulateScenarioOption beginSimulation={beginSimulation} projectId={projectId} />}
             </div>
         </Pane>
     );
