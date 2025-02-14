@@ -19,7 +19,7 @@ import { type WithStringId } from '../../../lib/types/types';
 import { Scenario, SimulationRun, SimulationResult } from "../../../lib/types/testing_types";
 import { z } from 'zod';
 import { SimulationResultCard, ScenarioResultCard } from './components/RunComponents';
-import { ScenarioViewer, ScenarioEditor } from './components/ScenarioComponents';
+import { ScenarioViewer } from './components/ScenarioComponents';
 
 type ScenarioType = WithStringId<z.infer<typeof Scenario>>;
 type SimulationRunType = WithStringId<z.infer<typeof SimulationRun>>;
@@ -339,19 +339,11 @@ export default function SimulationApp() {
       {/* Main content */}
       <div className="flex-1 p-6 overflow-auto">
         {selectedScenario ? (
-          isEditing ? (
-            <ScenarioEditor
-              scenario={selectedScenario}
-              onSave={handleUpdateScenario}
-              onCancel={() => setIsEditing(false)}
-            />
-          ) : (
-            <ScenarioViewer
-              scenario={selectedScenario}
-              onEdit={() => setIsEditing(true)}
-              onClose={handleCloseScenario}
-            />
-          )
+          <ScenarioViewer
+            scenario={selectedScenario}
+            onSave={handleUpdateScenario}
+            onClose={handleCloseScenario}
+          />
         ) : (
           <div className="space-y-6">
             <div className="flex justify-between items-center mb-6">
