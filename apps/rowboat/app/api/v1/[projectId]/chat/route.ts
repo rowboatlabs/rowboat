@@ -52,17 +52,23 @@ export async function POST(
             logger.log(`Project ${projectId} not found`);
             return Response.json({ error: "Project not found" }, { status: 404 });
         }
-        if (!project.publishedWorkflowId) {
+
+        // if workflow id is provided in the request, use it, else use the published workflow id
+        let workflowId = result.data.workflowId;
+        if (!workflowId) {
+            workflowId = project.publishedWorkflowId;
+        }
+        if (!workflowId) {
             logger.log(`Project ${projectId} has no published workflow`);
             return Response.json({ error: "Project has no published workflow" }, { status: 404 });
         }
         // fetch workflow
         const workflow = await agentWorkflowsCollection.findOne({
             projectId: projectId,
-            _id: new ObjectId(project.publishedWorkflowId),
+            _id: new ObjectId(workflowId),
         });
         if (!workflow) {
-            logger.log(`Workflow ${project.publishedWorkflowId} not found for project ${projectId}`);
+            logger.log(`Workflow ${workflowId} not found for project ${projectId}`);
             return Response.json({ error: "Workflow not found" }, { status: 404 });
         }
 

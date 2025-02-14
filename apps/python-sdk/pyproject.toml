@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rowboat"
-version = "1.0.2"
+version = "1.0.4"
 authors = [
     { name = "Your Name", email = "your.email@example.com" },
 ]

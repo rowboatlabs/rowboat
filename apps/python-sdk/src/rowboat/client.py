@@ -26,13 +26,15 @@ class Client:
         messages: List[ApiMessage],
         state: Optional[Dict[str, Any]] = None,
         skip_tool_calls: bool = False,
-        max_turns: int = 3
+        max_turns: int = 3,
+        workflow_id: Optional[str] = None
     ) -> ApiResponse:
         request = ApiRequest(
             messages=messages,
             state=state,
             skipToolCalls=skip_tool_calls,
-            maxTurns=max_turns
+            maxTurns=max_turns,
+            workflowId=workflow_id
         )
         response = requests.post(self.base_url, headers=self.headers, data=request.model_dump_json())
 
@@ -80,7 +82,8 @@ class Client:
         tools: Optional[Dict[str, Callable[..., str]]] = None,
         state: Optional[Dict[str, Any]] = None,
         max_turns: int = 3,
-        skip_tool_calls: bool = False
+        skip_tool_calls: bool = False,
+        workflow_id: Optional[str] = None
     ) -> Tuple[List[ApiMessage], Optional[Dict[str, Any]]]:
         """Stateless chat method that handles a single conversation turn with multiple tool call rounds"""
         
@@ -98,7 +101,8 @@ class Client:
                 messages=current_messages,
                 state=current_state,
                 skip_tool_calls=skip_tool_calls,
-                max_turns=max_turns
+                max_turns=max_turns,
+                workflow_id=workflow_id
             )
 
             current_messages.extend(response_data.messages)
@@ -136,7 +140,8 @@ class StatefulChat:
         tools: Optional[Dict[str, Callable[..., str]]] = None,
         system_prompt: Optional[str] = None,
         max_turns: int = 3,
-        skip_tool_calls: bool = False
+        skip_tool_calls: bool = False,
+        workflow_id: Optional[str] = None
     ) -> None:
         self.client = client
         self.tools = tools
@@ -144,7 +149,7 @@ class StatefulChat:
         self.state: Optional[Dict[str, Any]] = None
         self.max_turns = max_turns
         self.skip_tool_calls = skip_tool_calls
-        
+        self.workflow_id = workflow_id
         if system_prompt:
             self.messages.append(SystemMessage(role='system', content=system_prompt))
 
@@ -161,7 +166,8 @@ class StatefulChat:
             tools=self.tools,
             state=self.state,
             max_turns=self.max_turns,
-            skip_tool_calls=self.skip_tool_calls
+            skip_tool_calls=self.skip_tool_calls,
+            workflow_id=self.workflow_id
         )
         
         # Update internal state

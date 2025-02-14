@@ -109,6 +109,7 @@ export const ApiRequest = z.object({
     state: z.unknown(),
     skipToolCalls: z.boolean().optional(),
     maxTurns: z.number().optional(),
+    workflowId: z.string().optional(),
 });
 
 export const ApiResponse = z.object({
