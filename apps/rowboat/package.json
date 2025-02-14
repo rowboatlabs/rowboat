@@ -18,7 +18,7 @@
     "@aws-sdk/client-s3": "^3.743.0",
     "@aws-sdk/s3-request-presigner": "^3.743.0",
     "@google/generative-ai": "^0.21.0",
-    "@heroicons/react": "^2.1.1",
+    "@heroicons/react": "^2.2.0",
     "@langchain/core": "^0.3.7",
     "@langchain/textsplitters": "^0.1.0",
     "@mendable/firecrawl-js": "^1.0.3",

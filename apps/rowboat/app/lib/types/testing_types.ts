@@ -35,6 +35,8 @@ export const SimulationRun = z.object({
 });
 
 export const SimulationResult = z.object({
+    projectId: z.string(),
+    runId: z.string(),
     scenarioId: z.string(),
     result: z.union([z.literal('pass'), z.literal('fail')]),
     details: z.string()
