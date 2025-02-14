@@ -1,11 +1,11 @@
 'use server';
 
 import { ObjectId } from "mongodb";
-import { scenariosCollection, simulationRunsCollection, simulationResultsCollection } from "../lib/mongodb";
+import { scenariosCollection, simulationRunsCollection, simulationResultsCollection, simulationAggregateResultsCollection } from "../lib/mongodb";
 import { z } from 'zod';
 import { projectAuthCheck } from "./project_actions";
 import { type WithStringId } from "../lib/types/types";
-import { Scenario, SimulationRun, SimulationResult } from "../lib/types/testing_types";
+import { Scenario, SimulationRun, SimulationResult, SimulationAggregateResult } from "../lib/types/testing_types";
 import { SimulationScenarioData } from "../lib/types/testing_types";
 
 export async function getScenarios(projectId: string): Promise<WithStringId<z.infer<typeof Scenario>>[]> {
@@ -209,4 +209,45 @@ export async function createRunResult(
 
     const insertResult = await simulationResultsCollection.insertOne(resultDoc);
     return insertResult.insertedId.toString();
+}
+
+export async function createAggregateResult(
+    projectId: string,
+    runId: string,
+    total: number,
+    pass: number,
+    fail: number
+): Promise<void> {
+    await projectAuthCheck(projectId);
+
+    await simulationAggregateResultsCollection.insertOne({
+        projectId,
+        runId,
+        total,
+        pass,
+        fail,
+    });
+}
+
+export async function getAggregateResult(
+    projectId: string,
+    runId: string
+): Promise<z.infer<typeof SimulationAggregateResult> | null> {
+    await projectAuthCheck(projectId);
+
+    const result = await simulationAggregateResultsCollection.findOne({
+        projectId,
+        runId,
+    });
+
+    if (!result) return null;
+
+    // Only include the fields defined in the schema
+    return {
+        projectId: result.projectId,
+        runId: result.runId,
+        total: result.total,
+        pass: result.pass,
+        fail: result.fail
+    };
 } 

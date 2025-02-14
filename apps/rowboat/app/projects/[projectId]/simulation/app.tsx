@@ -14,6 +14,8 @@ import {
     createRun,
     createRunResult,
     updateRunStatus,
+    createAggregateResult,
+    getAggregateResult,
 } from '../../../actions/simulation_actions';
 import { type WithStringId } from '../../../lib/types/types';
 import { Scenario, SimulationRun, SimulationResult } from "../../../lib/types/testing_types";
@@ -37,18 +39,16 @@ const dummySimulator = async (scenario: ScenarioType, runId: string, projectId: 
   await new Promise(resolve => setTimeout(resolve, 500));
   const passed = Math.random() > 0.5;
   
-  // Create the result object with explicitly typed result
   const result: z.infer<typeof SimulationResult> = {
     projectId: projectId,
     runId: runId,
     scenarioId: scenario._id,
-    result: passed ? 'pass' : 'fail' as const,  // explicitly type as literal
+    result: passed ? 'pass' : 'fail' as const,
     details: passed 
       ? "The bot successfully completed the conversation"
       : "The bot could not handle the conversation",
   };
 
-  // Write to DB using server action
   await createRunResult(
     projectId,
     runId,
@@ -207,30 +207,40 @@ export default function SimulationApp() {
     setSimulationReport(null);
 
     try {
-      // Create a new run using server action
       const newRun = await createRun(
         projectId as string,
         scenarios.map(s => s._id)
       );
       setActiveRun(newRun);
 
-      // Safely check for mock simulation flag
       const shouldMock = process.env.NEXT_PUBLIC_MOCK_SIMULATION_RESULTS === 'true';
       
       if (shouldMock) {
-        console.log('Using mock simulation...');  // Debug log
+        console.log('Using mock simulation...');
         
-        // First update run to 'running' status
         await updateRunStatus(projectId as string, newRun._id, 'running');
         
-        // Generate and save all mock results
-        await Promise.all(
+        // Run all scenarios and collect results
+        const mockResults = await Promise.all(
           scenarios.map(scenario => 
             dummySimulator(scenario, newRun._id, projectId as string)
           )
         );
 
-        // Update run status to completed
+        // Calculate aggregate results
+        const total = scenarios.length;
+        const pass = mockResults.filter(r => r.result === 'pass').length;
+        const fail = mockResults.filter(r => r.result === 'fail').length;
+
+        // Store aggregate results
+        await createAggregateResult(
+          projectId as string,
+          newRun._id,
+          total,
+          pass,
+          fail
+        );
+
         await updateRunStatus(
           projectId as string, 
           newRun._id, 
@@ -238,11 +248,9 @@ export default function SimulationApp() {
           new Date().toISOString()
         );
 
-        // Fetch the results back from DB to ensure consistency
         const results = await getRunResults(projectId as string, newRun._id);
         setRunResults(results);
         
-        // Refresh the run to get its updated state
         const updatedRun = await getRun(projectId as string, newRun._id);
         setActiveRun(updatedRun);
       }

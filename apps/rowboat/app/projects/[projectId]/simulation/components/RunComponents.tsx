@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { WithStringId } from '../../../../lib/types/types';
-import { Scenario, SimulationRun, SimulationResult } from "../../../../lib/types/testing_types";
+import { Scenario, SimulationRun, SimulationResult, SimulationAggregateResult } from "../../../../lib/types/testing_types";
 import { z } from 'zod';
+import { getAggregateResult } from '../../../../actions/simulation_actions';
 
 type ScenarioType = WithStringId<z.infer<typeof Scenario>>;
 type SimulationRunType = WithStringId<z.infer<typeof SimulationRun>>;
@@ -19,6 +20,15 @@ interface SimulationResultCardProps {
 export const SimulationResultCard = ({ run, results, scenarios }: SimulationResultCardProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedScenarios, setExpandedScenarios] = useState<Set<string>>(new Set());
+  const [aggregateResult, setAggregateResult] = useState<z.infer<typeof SimulationAggregateResult> | null>(null);
+
+  useEffect(() => {
+    if (run.projectId && run._id) {
+      getAggregateResult(run.projectId, run._id)
+        .then(setAggregateResult)
+        .catch(console.error);
+    }
+  }, [run.projectId, run._id]);
 
   const statusLabelClass = "px-3 py-1 rounded text-xs min-w-[60px] text-center uppercase font-semibold";
 
@@ -46,10 +56,10 @@ export const SimulationResultCard = ({ run, results, scenarios }: SimulationResu
     });
   };
 
-  // Calculate statistics and duration
-  const totalScenarios = run.scenarioIds.length;
-  const passedScenarios = results.filter(r => r.result === 'pass').length;
-  const failedScenarios = results.filter(r => r.result === 'fail').length;
+  // Replace the manual calculations with aggregate results
+  const totalScenarios = aggregateResult?.total ?? run.scenarioIds.length;
+  const passedScenarios = aggregateResult?.pass ?? 0;
+  const failedScenarios = aggregateResult?.fail ?? 0;
 
   const getDuration = () => {
     if (!run.completedAt) return 'In Progress';

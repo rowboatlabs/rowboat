@@ -7,7 +7,7 @@ import { Project } from "./types/project_types";
 import { EmbeddingDoc } from "./types/datasource_types";
 import { DataSourceDoc } from "./types/datasource_types";
 import { DataSource } from "./types/datasource_types";
-import { Scenario, SimulationResult, SimulationRun } from "./types/testing_types";
+import { Scenario, SimulationResult, SimulationRun, SimulationAggregateResult } from "./types/testing_types";
 import { z } from 'zod';
 
 const client = new MongoClient(process.env["MONGODB_CONNECTION_STRING"] || "mongodb://localhost:27017");
@@ -24,3 +24,4 @@ export const scenariosCollection = db.collection<z.infer<typeof Scenario>>("scen
 export const apiKeysCollection = db.collection<z.infer<typeof ApiKey>>("api_keys");
 export const simulationRunsCollection = db.collection<z.infer<typeof SimulationRun>>("simulation_runs");
 export const simulationResultsCollection = db.collection<z.infer<typeof SimulationResult>>("simulation_results");
+export const simulationAggregateResultsCollection = db.collection<z.infer<typeof SimulationAggregateResult>>("simulation_aggregate_results");

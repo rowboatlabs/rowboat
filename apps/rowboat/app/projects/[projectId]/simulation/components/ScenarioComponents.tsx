@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { PencilIcon, XMarkIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline';
+import { useState, useEffect, useCallback } from 'react';
+import { XMarkIcon } from '@heroicons/react/24/outline';
 import { WithStringId } from '../../../../lib/types/types';
 import { Scenario } from "../../../../lib/types/testing_types";
 import { z } from 'zod';
@@ -15,31 +15,44 @@ interface ScenarioViewerProps {
 }
 
 export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProps) {
-  const [name, setName] = useState(scenario.name);
-  const [description, setDescription] = useState(scenario.description);
-  const [criteria, setCriteria] = useState(scenario.criteria || '');
-  const [context, setContext] = useState(scenario.context || '');
+  const [editedScenario, setEditedScenario] = useState<ScenarioType>(scenario);
+  const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
 
-  // Replace the existing useEffect with this debounced version
+  // Reset state when scenario changes
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      // Only save if any value has actually changed
-      if (name !== scenario.name ||
-          description !== scenario.description ||
-          criteria !== scenario.criteria ||
-          context !== scenario.context) {
-        onSave({
-          ...scenario,
-          name,
-          description,
-          criteria,
-          context,
-        });
-      }
-    }, 500); // 500ms debounce
+    setEditedScenario(scenario);
+  }, [scenario]);
 
-    return () => clearTimeout(timeoutId);
-  }, [name, description, criteria, context, onSave, scenario]);
+  const handleChange = useCallback((field: keyof ScenarioType, value: string) => {
+    setEditedScenario(prev => ({
+      ...prev,
+      [field]: value,
+    }));
+
+    // Clear existing timeout
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+    }
+
+    // Set new timeout
+    const timeoutId = setTimeout(() => {
+      onSave({
+        ...editedScenario,
+        [field]: value,
+      });
+    }, 500);
+
+    setSaveTimeout(timeoutId);
+  }, [editedScenario, onSave, saveTimeout]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeout) {
+        clearTimeout(saveTimeout);
+      }
+    };
+  }, [saveTimeout]);
 
   return (
     <div>
@@ -58,8 +71,8 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
           <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">NAME</div>
           <input
             type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            value={editedScenario.name}
+            onChange={(e) => handleChange('name', e.target.value)}
             className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           />
         </div>
@@ -69,8 +82,8 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
         <div className="flex flex-col">
           <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">DESCRIPTION</div>
           <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            value={editedScenario.description}
+            onChange={(e) => handleChange('description', e.target.value)}
             className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[24px] resize-none"
             style={{ height: 'auto', minHeight: '24px' }}
             onInput={(e) => {
@@ -86,8 +99,8 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
         <div className="flex flex-col">
           <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">CRITERIA</div>
           <textarea
-            value={criteria}
-            onChange={(e) => setCriteria(e.target.value)}
+            value={editedScenario.criteria}
+            onChange={(e) => handleChange('criteria', e.target.value)}
             className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[24px] resize-none"
             style={{ height: 'auto', minHeight: '24px' }}
             onInput={(e) => {
@@ -103,8 +116,8 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
         <div className="flex flex-col">
           <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">CONTEXT</div>
           <textarea
-            value={context}
-            onChange={(e) => setContext(e.target.value)}
+            value={editedScenario.context}
+            onChange={(e) => handleChange('context', e.target.value)}
             className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[24px] resize-none"
             style={{ height: 'auto', minHeight: '24px' }}
             onInput={(e) => {

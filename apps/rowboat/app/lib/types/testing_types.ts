@@ -43,3 +43,10 @@ export const SimulationResult = z.object({
     details: z.string()
 });
 
+export const SimulationAggregateResult = z.object({
+    projectId: z.string(),
+    runId: z.string(),
+    total: z.number(),
+    pass: z.number(),
+    fail: z.number(),
+});
