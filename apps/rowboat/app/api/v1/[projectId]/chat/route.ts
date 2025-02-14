@@ -54,13 +54,10 @@ export async function POST(
         }
 
         // if workflow id is provided in the request, use it, else use the published workflow id
-        let workflowId = result.data.workflowId;
+        let workflowId = result.data.workflowId ?? project.publishedWorkflowId;
         if (!workflowId) {
-            workflowId = project.publishedWorkflowId;
-        }
-        if (!workflowId) {
-            logger.log(`Project ${projectId} has no published workflow`);
-            return Response.json({ error: "Project has no published workflow" }, { status: 404 });
+            logger.log(`No workflow id provided in request or project has no published workflow`);
+            return Response.json({ error: "No workflow id provided in request or project has no published workflow" }, { status: 404 });
         }
         // fetch workflow
         const workflow = await agentWorkflowsCollection.findOne({
