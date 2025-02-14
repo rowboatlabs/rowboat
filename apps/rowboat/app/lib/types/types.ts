@@ -107,6 +107,8 @@ export const ApiMessage = z.union([
 export const ApiRequest = z.object({
     messages: z.array(ApiMessage),
     state: z.unknown(),
+    skipToolCalls: z.boolean().optional(),
+    maxTurns: z.number().optional(),
 });
 
 export const ApiResponse = z.object({

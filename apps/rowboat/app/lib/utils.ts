@@ -1,20 +1,26 @@
 import { convertFromAgenticAPIChatMessages } from "./types/agents_api_types";
 import { ClientToolCallRequest } from "./types/tool_types";
-import { ClientToolCallJwt } from "./types/tool_types";
+import { ClientToolCallJwt, GetInformationToolResult } from "./types/tool_types";
 import { ClientToolCallRequestBody } from "./types/tool_types";
 import { AgenticAPIChatResponse } from "./types/agents_api_types";
 import { AgenticAPIChatRequest } from "./types/agents_api_types";
-import { Workflow } from "./types/workflow_types";
+import { Workflow, WorkflowAgent } from "./types/workflow_types";
 import { AgenticAPIChatMessage } from "./types/agents_api_types";
 import { z } from "zod";
-import { projectsCollection } from "./mongodb";
+import { dataSourceDocsCollection, dataSourcesCollection, projectsCollection } from "./mongodb";
 import { apiV1 } from "rowboat-shared";
 import { SignJWT } from "jose";
 import crypto from "crypto";
+import { ObjectId } from "mongodb";
+import { embeddingModel } from "./embedding";
+import { embed } from "ai";
+import { qdrantClient } from "./qdrant";
+import { EmbeddingRecord } from "./types/datasource_types";
+import { ApiMessage } from "./types/types";
 
 export async function callClientToolWebhook(
     toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number],
-    messages: z.infer<typeof apiV1.ChatMessage>[],
+    messages: z.infer<typeof ApiMessage>[],
     projectId: string,
 ): Promise<unknown> {
     const project = await projectsCollection.findOne({
@@ -105,4 +111,110 @@ export async function getAgenticApiResponse(
         state: result.state,
         rawAPIResponse: result,
     };
+}
+
+export async function runRAGToolCall(
+    projectId: string,
+    query: string,
+    sourceIds: string[],
+    returnType: z.infer<typeof WorkflowAgent>['ragReturnType'],
+    k: number,
+): Promise<z.infer<typeof GetInformationToolResult>> {
+    // create embedding for question
+    const embedResult = await embed({
+        model: embeddingModel,
+        value: query,
+    });
+
+    // fetch all data sources for this project
+    const sources = await dataSourcesCollection.find({
+        projectId: projectId,
+        active: true,
+    }).toArray();
+    const validSourceIds = sources
+        .filter(s => sourceIds.includes(s._id.toString())) // id should be in sourceIds
+        .filter(s => s.active) // should be active
+        .map(s => s._id.toString());
+
+    // if no sources found, return empty response
+    if (validSourceIds.length === 0) {
+        return {
+            results: [],
+        };
+    }
+
+    // perform qdrant vector search
+    const qdrantResults = await qdrantClient.query("embeddings", {
+        query: embedResult.embedding,
+        filter: {
+            must: [
+                { key: "projectId", match: { value: projectId } },
+                { key: "sourceId", match: { any: validSourceIds } },
+            ],
+        },
+        limit: k,
+        with_payload: true,
+    });
+
+    // if return type is chunks, return the chunks
+    let results = qdrantResults.points.map((point) => {
+        const { title, name, content, docId, sourceId } = point.payload as z.infer<typeof EmbeddingRecord>['payload'];
+        return {
+            title,
+            name,
+            content,
+            docId,
+            sourceId,
+        };
+    });
+
+    if (returnType === 'chunks') {
+        return {
+            results,
+        };
+    }
+
+    // otherwise, fetch the doc contents from mongodb
+    const docs = await dataSourceDocsCollection.find({
+        _id: { $in: results.map(r => new ObjectId(r.docId)) },
+    }).toArray();
+
+    // map the results to the docs
+    results = results.map(r => {
+        const doc = docs.find(d => d._id.toString() === r.docId);
+        return {
+            ...r,
+            content: doc?.content || '',
+        };
+    });
+
+    return {
+        results,
+    };
+}
+// create a PrefixLogger class that wraps console.log with a prefix
+// and allows chaining with a parent logger
+export class PrefixLogger {
+    private prefix: string;
+    private parent: PrefixLogger | null;
+
+    constructor(prefix: string, parent: PrefixLogger | null = null) {
+        this.prefix = prefix;
+        this.parent = parent;
+    }
+
+    log(...args: any[]) {
+        const timestamp = new Date().toISOString();
+        const prefix = '[' + this.prefix + ']';
+
+        if (this.parent) {
+            this.parent.log(prefix, ...args);
+        } else {
+            console.log(timestamp, prefix, ...args);
+        }
+    }
+
+    child(childPrefix: string): PrefixLogger {
+        return new PrefixLogger(childPrefix, this);
+    }
 }

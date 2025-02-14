@@ -10,7 +10,7 @@ import { WithId } from 'mongodb';
 import { embedMany } from 'ai';
 import { embeddingModel } from '../lib/embedding';
 import { qdrantClient } from '../lib/qdrant';
-import { PrefixLogger } from './shared';
+import { PrefixLogger } from "../lib/utils";
 
 const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
 

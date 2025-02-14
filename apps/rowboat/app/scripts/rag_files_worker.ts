@@ -10,7 +10,7 @@ import { WithId } from 'mongodb';
 import { embedMany } from 'ai';
 import { embeddingModel } from '../lib/embedding';
 import { qdrantClient } from '../lib/qdrant';
-import { PrefixLogger } from './shared';
+import { PrefixLogger } from "../lib/utils";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { uploadsS3Client } from '../lib/uploads_s3_client';

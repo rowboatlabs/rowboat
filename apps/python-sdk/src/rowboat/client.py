@@ -25,10 +25,14 @@ class Client:
         self, 
         messages: List[ApiMessage],
         state: Optional[Dict[str, Any]] = None,
+        skip_tool_calls: bool = False,
+        max_turns: int = 3
     ) -> ApiResponse:
         request = ApiRequest(
             messages=messages,
-            state=state
+            state=state,
+            skipToolCalls=skip_tool_calls,
+            maxTurns=max_turns
         )
         response = requests.post(self.base_url, headers=self.headers, data=request.model_dump_json())
 
@@ -75,7 +79,8 @@ class Client:
         messages: List[ApiMessage],
         tools: Optional[Dict[str, Callable[..., str]]] = None,
         state: Optional[Dict[str, Any]] = None,
-        max_turns: int = 3
+        max_turns: int = 3,
+        skip_tool_calls: bool = False
     ) -> Tuple[List[ApiMessage], Optional[Dict[str, Any]]]:
         """Stateless chat method that handles a single conversation turn with multiple tool call rounds"""
         
@@ -91,7 +96,9 @@ class Client:
             # call api
             response_data = self._call_api(
                 messages=current_messages,
-                state=current_state
+                state=current_state,
+                skip_tool_calls=skip_tool_calls,
+                max_turns=max_turns
             )
 
             current_messages.extend(response_data.messages)
@@ -128,11 +135,15 @@ class StatefulChat:
         client: Client,
         tools: Optional[Dict[str, Callable[..., str]]] = None,
         system_prompt: Optional[str] = None,
+        max_turns: int = 3,
+        skip_tool_calls: bool = False
     ) -> None:
         self.client = client
         self.tools = tools
         self.messages: List[ApiMessage] = []
         self.state: Optional[Dict[str, Any]] = None
+        self.max_turns = max_turns
+        self.skip_tool_calls = skip_tool_calls
         
         if system_prompt:
             self.messages.append(SystemMessage(role='system', content=system_prompt))
@@ -148,7 +159,9 @@ class StatefulChat:
         new_messages, new_state = self.client.chat(
             messages=self.messages,
             tools=self.tools,
-            state=self.state
+            state=self.state,
+            max_turns=self.max_turns,
+            skip_tool_calls=self.skip_tool_calls
         )
         
         # Update internal state

@@ -29,7 +29,7 @@ import { embeddingModel } from "../lib/embedding";
 import { apiV1 } from "rowboat-shared";
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { Claims, getSession } from "@auth0/nextjs-auth0";
-import { callClientToolWebhook, getAgenticApiResponse } from "../lib/utils";
+import { callClientToolWebhook, getAgenticApiResponse, runRAGToolCall } from "../lib/utils";
 import { assert } from "node:console";
 import { check_query_limit } from "../lib/rate_limiting";
 import { QueryLimitError } from "../lib/client_utils";
@@ -313,77 +313,7 @@ export async function getInformationTool(
 ): Promise<z.infer<typeof GetInformationToolResult>> {
     await projectAuthCheck(projectId);
 
-    // create embedding for question
-    const embedResult = await embed({
-        model: embeddingModel,
-        value: query,
-    });
-
-    // fetch all data sources for this project
-    const sources = await dataSourcesCollection.find({
-        projectId: projectId,
-        active: true,
-    }).toArray();
-    const validSourceIds = sources
-        .filter(s => sourceIds.includes(s._id.toString())) // id should be in sourceIds
-        .filter(s => s.active) // should be active
-        .map(s => s._id.toString());
-
-    // if no sources found, return empty response
-    if (validSourceIds.length === 0) {
-        return {
-            results: [],
-        };
-    }
-
-    // perform qdrant vector search
-    const qdrantResults = await qdrantClient.query("embeddings", {
-        query: embedResult.embedding,
-        filter: {
-            must: [
-                { key: "projectId", match: { value: projectId } },
-                { key: "sourceId", match: { any: validSourceIds } },
-            ],
-        },
-        limit: k,
-        with_payload: true,
-    });
-
-    // if return type is chunks, return the chunks
-    let results = qdrantResults.points.map((point) => {
-        const { title, name, content, docId, sourceId } = point.payload as z.infer<typeof EmbeddingRecord>['payload'];
-        return {
-            title,
-            name,
-            content,
-            docId,
-            sourceId,
-        };
-    });
-
-    if (returnType === 'chunks') {
-        return {
-            results,
-        };
-    }
-
-    // otherwise, fetch the doc contents from mongodb
-    const docs = await dataSourceDocsCollection.find({
-        _id: { $in: results.map(r => new ObjectId(r.docId)) },
-    }).toArray();
-
-    // map the results to the docs
-    results = results.map(r => {
-        const doc = docs.find(d => d._id.toString() === r.docId);
-        return {
-            ...r,
-            content: doc?.content || '',
-        };
-    });
-
-    return {
-        results,
-    };
+    return await runRAGToolCall(projectId, query, sourceIds, returnType, k);
 }
 
 export async function simulateUserResponse(
