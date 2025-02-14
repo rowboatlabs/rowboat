@@ -3,6 +3,7 @@ export const Scenario = z.object({
     projectId: z.string(),
     name: z.string().min(1, "Name cannot be empty"),
     description: z.string().min(1, "Description cannot be empty"),
+    criteria: z.string().default(''),
     context: z.string().default(''),
     createdAt: z.string().datetime(),
     lastUpdatedAt: z.string().datetime(),

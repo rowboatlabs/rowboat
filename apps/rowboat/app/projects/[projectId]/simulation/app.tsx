@@ -225,6 +225,12 @@ const SimulationResultCard = ({ run, results, scenarios }: SimulationResultCardP
                         </div>
                       </div>
                       <div>
+                        <div className="text-sm font-medium mb-1">Criteria</div>
+                        <div className="text-sm text-gray-700">
+                          {scenario.criteria || 'No criteria specified'}
+                        </div>
+                      </div>
+                      <div>
                         <div className="text-sm font-medium mb-1">Context</div>
                         <div className="text-sm text-gray-700">
                           {scenario.context || 'No context provided'}
@@ -283,8 +289,12 @@ const ScenarioResultCard = ({ scenario, result }: ScenarioResultCardProps) => {
             <div className="text-sm">{scenario.description}</div>
           </div>
           <div>
+            <div className="text-sm font-medium text-gray-600">Criteria</div>
+            <div className="text-sm">{scenario.criteria}</div>
+          </div>
+          <div>
             <div className="text-sm font-medium text-gray-600">Context</div>
-            <div className="text-sm">{scenario.context || 'No context provided'}</div>
+            <div className="text-sm">{scenario.context}</div>
           </div>
           {result && (
             <div>
@@ -408,6 +418,7 @@ export default function SimulationApp() {
       {
         name: updatedScenario.name,
         description: updatedScenario.description,
+        criteria: updatedScenario.criteria,
         context: updatedScenario.context,
       }
     );
@@ -675,6 +686,13 @@ function ScenarioViewer({
         <div className="border-t border-gray-200 my-4"></div>
         
         <div className="flex flex-col">
+          <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">CRITERIA</div>
+          <div className="text-base whitespace-pre-wrap">{scenario.criteria}</div>
+        </div>
+
+        <div className="border-t border-gray-200 my-4"></div>
+        
+        <div className="flex flex-col">
           <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">CONTEXT</div>
           <div className="text-base whitespace-pre-wrap">{scenario.context}</div>
         </div>
@@ -694,6 +712,7 @@ function ScenarioEditor({
 }) {
   const [name, setName] = useState(scenario.name);
   const [description, setDescription] = useState(scenario.description);
+  const [criteria, setCriteria] = useState(scenario.criteria || '');
   const [context, setContext] = useState(scenario.context || '');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -702,6 +721,7 @@ function ScenarioEditor({
       ...scenario,
       name,
       description,
+      criteria,
       context,
     });
   };
@@ -735,6 +755,7 @@ function ScenarioEditor({
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 px-3 py-2"
+            placeholder="An identifiable scenario name"
           />
         </div>
 
@@ -747,6 +768,20 @@ function ScenarioEditor({
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
             className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 px-3 py-2"
+            placeholder="Specify the user scenario that the simulator should simulate"
+          />
+        </div>
+
+        <div className="border-t border-gray-200 my-4"></div>
+
+        <div>
+          <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">CRITERIA</div>
+          <textarea
+            value={criteria}
+            onChange={(e) => setCriteria(e.target.value)}
+            rows={4}
+            className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 px-3 py-2"
+            placeholder="Enter success criteria for this scenario"
           />
         </div>
 
@@ -759,6 +794,7 @@ function ScenarioEditor({
             onChange={(e) => setContext(e.target.value)}
             rows={4}
             className="mt-1 block w-full rounded-md border-2 border-gray-300 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 px-3 py-2"
+            placeholder="Provide context about the user to the assistant at the start of chat"
           />
         </div>
       </form>
