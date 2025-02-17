@@ -43,9 +43,9 @@ class JobService:
             api_key = get_api_key(job.projectId)
             result = await simulate_scenarios(scenarios, job.id, job.workflowId, api_key)
 
-            if result:
-                set_simulation_run_to_completed(job)
-                logging.info(f"Job {job.id} completed.")
+
+            set_simulation_run_to_completed(job)
+            logging.info(f"Job {job.id} completed.")
 
     def start(self):
         """
@@ -60,9 +60,5 @@ class JobService:
             loop.close()
 
 if __name__ == "__main__":
-    # Example usage:
-    # Replace these with your actual URI, database, and collection.
     service = JobService()
-    asyncio.run(service.poll_and_process_jobs(max_iterations=2))
-    #asyncio.run(service.poll_and_process_jobs(max_iterations=2))
-    #service.start()
+    service.start()

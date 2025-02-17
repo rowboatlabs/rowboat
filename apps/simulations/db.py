@@ -38,18 +38,16 @@ def get_pending_simulation_run():
             id=str(doc["_id"]),
             projectId=doc["projectId"],
             status="running",
-            scenarioIds=doc["scenarioIds"], 
+            scenarioIds=doc["scenarioIds"],
             workflowId=doc["workflowId"],
             startedAt=doc["startedAt"],
             completedAt=doc.get("completedAt")
         )
     return None
 
-
 def set_simulation_run_to_completed(simulation_run: SimulationRun):
     collection = get_collection(SIMULATIONS_COLLECTION_NAME)
-    collection.update_one({"_id": simulation_run.id}, {"$set": {"status": "completed"}})
-
+    collection.update_one({"_id": ObjectId(simulation_run.id)}, {"$set": {"status": "completed"}})
 
 def get_scenarios_for_run(simulation_run: SimulationRun):
     if simulation_run is None:
@@ -64,7 +62,7 @@ def get_scenarios_for_run(simulation_run: SimulationRun):
                 name=doc["name"],
                 description=doc["description"],
                 criteria=doc["criteria"],
-                context=doc["context"], 
+                context=doc["context"],
                 createdAt=doc["createdAt"],
                 lastUpdatedAt=doc["lastUpdatedAt"]
             ))
