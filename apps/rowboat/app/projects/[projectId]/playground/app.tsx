@@ -98,22 +98,26 @@ export function App({
     }
 
     return (
-        <Pane title="Chat" actions={[
-            <ActionButton
-                key="new-chat"
-                icon={<MessageSquarePlusIcon size={16} />}
-                onClick={handleNewChatButtonClick}
-            >
-                New chat
-            </ActionButton>,
-            <ActionButton
-                key="simulate"
-                icon={<PlayIcon size={16} />}
-                onClick={handleSimulateButtonClick}
-            >
-                Simulate
-            </ActionButton>,
-        ]}>
+        <Pane 
+            title="PLAYGROUND" 
+            tooltip="Test your agents and see their responses in this interactive chat interface"
+            actions={[
+                <ActionButton
+                    key="new-chat"
+                    icon={<MessageSquarePlusIcon size={16} />}
+                    onClick={handleNewChatButtonClick}
+                >
+                    New chat
+                </ActionButton>,
+                <ActionButton
+                    key="simulate"
+                    icon={<PlayIcon size={16} />}
+                    onClick={handleSimulateButtonClick}
+                >
+                    Simulate
+                </ActionButton>,
+            ]}
+        >
             <div className="h-full overflow-auto">
                 {loadingChat && <div className="flex justify-center items-center h-full">
                     <Spinner />

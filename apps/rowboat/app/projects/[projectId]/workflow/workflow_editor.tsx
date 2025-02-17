@@ -29,6 +29,8 @@ import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/i
 import { CopyIcon, Layers2Icon, RadioIcon, RedoIcon, Sparkles, UndoIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
 import { CopilotMessage } from "../../../lib/types/copilot_types";
+import { InfoIcon } from "lucide-react";
+import { clsx } from "clsx";
 
 enablePatches();
 
@@ -760,7 +762,7 @@ export function WorkflowEditor({
                 </div>}
                 {!isLive && <>
                     <button
-                        className="p-1 text-gray-400 hover:text-black"
+                        className="p-1 text-gray-400 hover:text-black hover:cursor-pointer"
                         title="Undo"
                         disabled={state.currentIndex <= 0}
                         onClick={() => dispatch({ type: "undo" })}
@@ -768,7 +770,7 @@ export function WorkflowEditor({
                         <UndoIcon size={16} />
                     </button>
                     <button
-                        className="p-1 text-gray-400 hover:text-black"
+                        className="p-1 text-gray-400 hover:text-black hover:cursor-pointer"
                         title="Redo"
                         disabled={state.currentIndex >= state.patches.length}
                         onClick={() => dispatch({ type: "redo" })}
@@ -776,7 +778,7 @@ export function WorkflowEditor({
                         <RedoIcon size={16} />
                     </button>
                     <button
-                        className="p-1 text-blue-600 hover:text-blue-800"
+                        className="p-1 text-blue-600 hover:text-blue-800 hover:cursor-pointer"
                         title="Toggle Copilot"
                         onClick={() => setShowCopilot(!showCopilot)}
                     >

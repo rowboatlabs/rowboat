@@ -105,7 +105,10 @@ export function EntityList({
     }, [selectedEntity]);
 
     return (
-        <Pane title="Index">
+        <Pane 
+            title="WORKFLOW" 
+            tooltip="Browse and manage your agents, tools, and prompts in this sidebar"
+        >
             <div className="overflow-auto flex flex-col gap-1 justify-start">
                 {/* Agents Section */}
                 <SectionHeader title="Agents" onAdd={() => onAddAgent({})} />

@@ -1,26 +1,44 @@
 import clsx from "clsx";
+import { InfoIcon } from "lucide-react";
+import { Tooltip } from "@nextui-org/react";
 
 export function Pane({
     title,
     actions = null,
     children,
     fancy = false,
+    tooltip = null,
 }: {
     title: React.ReactNode;
     actions?: React.ReactNode[] | null;
     children: React.ReactNode;
     fancy?: boolean;
+    tooltip?: string | null;
 }) {
     return <div className={clsx("h-full flex flex-col overflow-auto rounded-md p-1", {
         "bg-gray-100": !fancy,
         "bg-blue-100": fancy,
     })}>
         <div className="shrink-0 flex justify-between items-center gap-2 px-2 py-1 rounded-t-sm">
-            <div className={clsx("text-xs font-semibold uppercase", {
-                "text-gray-400": !fancy,
-                "text-blue-500": fancy,
-            })}>
-                {title}
+            <div className="flex items-center gap-1">
+                <div className={clsx("text-xs font-semibold uppercase", {
+                    "text-gray-400": !fancy,
+                    "text-blue-500": fancy,
+                })}>
+                    {title}
+                </div>
+                {tooltip && (
+                    <Tooltip 
+                        content={tooltip}
+                        placement="right"
+                        className="cursor-help"
+                    >
+                        <InfoIcon size={12} className={clsx({
+                            "text-gray-400": !fancy,
+                            "text-blue-500": fancy,
+                        })} />
+                    </Tooltip>
+                )}
             </div>
             {!actions && <div className="w-4 h-4" />}
             {actions && <div className={clsx("rounded-md hover:text-gray-800 px-2 text-sm flex items-center gap-2", {
