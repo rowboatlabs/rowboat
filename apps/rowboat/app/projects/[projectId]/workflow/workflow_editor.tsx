@@ -26,8 +26,9 @@ import { apiV1 } from "rowboat-shared";
 import { publishWorkflow, renameWorkflow, saveWorkflow } from "../../../actions/workflow_actions";
 import { PublishedBadge } from "./published_badge";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
-import { CopyIcon, Layers2Icon, RadioIcon, RedoIcon, UndoIcon } from "lucide-react";
+import { CopyIcon, Layers2Icon, RadioIcon, RedoIcon, Sparkles, UndoIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
+import { CopilotMessage } from "../../../lib/types/copilot_types";
 
 enablePatches();
 
@@ -524,6 +525,13 @@ export function WorkflowEditor({
     const saving = useRef(false);
     const isLive = state.present.workflow._id == state.present.publishedWorkflowId;
     const [showCopySuccess, setShowCopySuccess] = useState(false);
+    const [showCopilot, setShowCopilot] = useState(false);
+    const [copilotWidth, setCopilotWidth] = useState(25);
+    const [copilotKey, setCopilotKey] = useState(0);
+    const [copilotMessages, setCopilotMessages] = useState<z.infer<typeof CopilotMessage>[]>([]);
+    const [loadingResponse, setLoadingResponse] = useState(false);
+    const [loadingMessage, setLoadingMessage] = useState("Thinking...");
+    const [responseError, setResponseError] = useState<string | null>(null);
 
     console.log(`workflow editor chat key: ${state.present.chatKey}`);
 
@@ -767,6 +775,13 @@ export function WorkflowEditor({
                     >
                         <RedoIcon size={16} />
                     </button>
+                    <button
+                        className="p-1 text-blue-600 hover:text-blue-800"
+                        title="Toggle Copilot"
+                        onClick={() => setShowCopilot(!showCopilot)}
+                    >
+                        <Sparkles size={16} />
+                    </button>
                 </>}
             </div>
         </div>
@@ -792,7 +807,11 @@ export function WorkflowEditor({
                 />
             </ResizablePanel>
             <ResizableHandle />
-            <ResizablePanel minSize={20} defaultSize={60} className="overflow-auto">
+            <ResizablePanel 
+                minSize={20} 
+                defaultSize={showCopilot ? 85 - copilotWidth : 85} 
+                className="overflow-auto"
+            >
                 <ChatApp
                     key={'' + state.present.chatKey}
                     hidden={state.present.selection !== null}
@@ -826,23 +845,45 @@ export function WorkflowEditor({
                     handleClose={handleUnselectPrompt}
                 />}
             </ResizablePanel>
-            <ResizableHandle />
-            <ResizablePanel minSize={10} defaultSize={25}>
-                <Copilot
-                    projectId={state.present.workflow.projectId}
-                    workflow={state.present.workflow}
-                    dispatch={dispatch}
-                    chatContext={
-                        state.present.selection ? {
-                            type: state.present.selection.type,
-                            name: state.present.selection.name
-                        } : chatMessages.length > 0 ? {
-                            type: 'chat',
-                            messages: chatMessages
-                        } : undefined
-                    }
-                />
-            </ResizablePanel>
+            {showCopilot && <>
+                <ResizableHandle />
+                <ResizablePanel 
+                    minSize={10} 
+                    defaultSize={copilotWidth}
+                    onResize={(size) => setCopilotWidth(size)}
+                >
+                    <Copilot
+                        key={copilotKey}
+                        projectId={state.present.workflow.projectId}
+                        workflow={state.present.workflow}
+                        dispatch={dispatch}
+                        chatContext={
+                            state.present.selection ? {
+                                type: state.present.selection.type,
+                                name: state.present.selection.name
+                            } : chatMessages.length > 0 ? {
+                                type: 'chat',
+                                messages: chatMessages
+                            } : undefined
+                        }
+                        onNewChat={() => {
+                            setCopilotKey(prev => prev + 1);
+                            setCopilotMessages([]);
+                            setLoadingResponse(false);
+                            setLoadingMessage("Thinking...");
+                            setResponseError(null);
+                        }}
+                        messages={copilotMessages}
+                        setMessages={setCopilotMessages}
+                        loadingResponse={loadingResponse}
+                        setLoadingResponse={setLoadingResponse}
+                        loadingMessage={loadingMessage}
+                        setLoadingMessage={setLoadingMessage}
+                        responseError={responseError}
+                        setResponseError={setResponseError}
+                    />
+                </ResizablePanel>
+            </>}
         </ResizablePanelGroup>
     </div>;
 }

@@ -174,23 +174,35 @@ function App({
     workflow,
     dispatch,
     chatContext=undefined,
+    messages,
+    setMessages,
+    loadingResponse,
+    setLoadingResponse,
+    loadingMessage,
+    setLoadingMessage,
+    responseError,
+    setResponseError,
 }: {
     projectId: string;
     workflow: z.infer<typeof Workflow>;
     dispatch: (action: WorkflowDispatch) => void;
     chatContext?: z.infer<typeof CopilotChatContext>;
+    messages: z.infer<typeof CopilotMessage>[];
+    setMessages: (messages: z.infer<typeof CopilotMessage>[]) => void;
+    loadingResponse: boolean;
+    setLoadingResponse: (loading: boolean) => void;
+    loadingMessage: string;
+    setLoadingMessage: (message: string) => void;
+    responseError: string | null;
+    setResponseError: (error: string | null) => void;
 }) {
-    const [messages, setMessages] = useState<z.infer<typeof CopilotMessage>[]>([]);
-    const [loadingResponse, setLoadingResponse] = useState(false);
-    const [loadingMessage, setLoadingMessage] = useState("Thinking...");
-    const [responseError, setResponseError] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [appliedChanges, setAppliedChanges] = useState<Record<string, boolean>>({});
     const [discardContext, setDiscardContext] = useState(false);
     const [lastRequest, setLastRequest] = useState<unknown | null>(null);
     const [lastResponse, setLastResponse] = useState<unknown | null>(null);
 
-    // Cycle through loading messages until reaching the last one
+    // First useEffect for loading messages
     useEffect(() => {
         setLoadingMessage("Thinking");
         if (!loadingResponse) return;
@@ -210,7 +222,7 @@ function App({
         }, 4000);
 
         return () => clearInterval(interval);
-    }, [loadingResponse, messages]);
+    }, [loadingResponse, setLoadingMessage]);
 
     // Reset discardContext when chatContext changes
     useEffect(() => {
@@ -328,7 +340,7 @@ function App({
         }
     }, [dispatch, appliedChanges, messages]);
 
-    // get copilot response
+    // Second useEffect for copilot response
     useEffect(() => {
         let ignore = false;
 
@@ -383,7 +395,16 @@ function App({
         return () => {
             ignore = true;
         };
-    }, [messages, projectId, responseError, workflow, effectiveContext]);
+    }, [
+        messages,
+        projectId,
+        responseError,
+        workflow,
+        effectiveContext,
+        setLoadingResponse,
+        setMessages,
+        setResponseError
+    ]);
 
     function handleCopyChat() {
         const jsonString = JSON.stringify({
@@ -483,18 +504,30 @@ export function Copilot({
     workflow,
     chatContext=undefined,
     dispatch,
+    onNewChat,
+    messages,
+    setMessages,
+    loadingResponse,
+    setLoadingResponse,
+    loadingMessage,
+    setLoadingMessage,
+    responseError,
+    setResponseError,
 }: {
     projectId: string;
     workflow: z.infer<typeof Workflow>;
     chatContext?: z.infer<typeof CopilotChatContext>;
     dispatch: (action: WorkflowDispatch) => void;
+    onNewChat: () => void;
+    messages: z.infer<typeof CopilotMessage>[];
+    setMessages: (messages: z.infer<typeof CopilotMessage>[]) => void;
+    loadingResponse: boolean;
+    setLoadingResponse: (loading: boolean) => void;
+    loadingMessage: string;
+    setLoadingMessage: (message: string) => void;
+    responseError: string | null;
+    setResponseError: (error: string | null) => void;
 }) {
-    const [key, setKey] = useState(0);
-
-    function handleNewChat() {
-        setKey(key + 1);
-    }
-
     return (
         <Pane fancy title="Copilot" actions={[
             <ActionButton
@@ -505,18 +538,24 @@ export function Copilot({
                         <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h14m-7 7V5" />
                     </svg>
                 }
-                onClick={handleNewChat}
+                onClick={onNewChat}
             >
-                Ask
+                New
             </ActionButton>
         ]}>
             <App
-                key={key}
                 projectId={projectId}
                 workflow={workflow}
                 dispatch={dispatch}
                 chatContext={chatContext}
-
+                messages={messages}
+                setMessages={setMessages}
+                loadingResponse={loadingResponse}
+                setLoadingResponse={setLoadingResponse}
+                loadingMessage={loadingMessage}
+                setLoadingMessage={setLoadingMessage}
+                responseError={responseError}
+                setResponseError={setResponseError}
             />
         </Pane>
     );
