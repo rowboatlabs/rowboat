@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+// Relevant to new simulation features
+
 export const Scenario = z.object({
     projectId: z.string(),
     name: z.string().min(1, "Name cannot be empty"),
@@ -10,24 +12,12 @@ export const Scenario = z.object({
     lastUpdatedAt: z.string().datetime(),
 });
 
-export const SimulationArticleData = z.object({
-    articleUrl: z.string(),
-    articleTitle: z.string().default('').optional(),
-    articleContent: z.string().default('').optional(),
-});
-
 export const SimulationScenarioData = z.object({
     scenario: z.string(),
     context: z.string().default(''),
 });
 
-export const SimulationChatMessagesData = z.object({
-    chatMessages: z.string(),
-});
-
-export const SimulationData = z.union([SimulationArticleData, SimulationScenarioData, SimulationChatMessagesData]);
-
-// Relevant to simulation batch runs feature
+export const SimulationData = z.union([SimulationScenarioData]);
 
 export const SimulationAggregateResult = z.object({
     total: z.number(),
@@ -50,4 +40,16 @@ export const SimulationResult = z.object({
     scenarioId: z.string(),
     result: z.union([z.literal('pass'), z.literal('fail')]),
     details: z.string()
+});
+
+// Legacy
+
+export const SimulationArticleData = z.object({
+    articleUrl: z.string(),
+    articleTitle: z.string().default('').optional(),
+    articleContent: z.string().default('').optional(),
+});
+
+export const SimulationChatMessagesData = z.object({
+    chatMessages: z.string(),
 });
