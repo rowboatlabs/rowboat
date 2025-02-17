@@ -27,6 +27,8 @@ export const SimulationChatMessagesData = z.object({
 
 export const SimulationData = z.union([SimulationArticleData, SimulationScenarioData, SimulationChatMessagesData]);
 
+// Relevant to simulation batch runs feature
+
 export const SimulationAggregateResult = z.object({
     total: z.number(),
     pass: z.number(),
