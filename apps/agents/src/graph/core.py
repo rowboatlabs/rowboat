@@ -7,7 +7,7 @@ from src.swarm.core import Swarm
 
 from .guardrails import post_process_response
 from .tools import create_error_tool_call
-from .types import AgentRole, PromptType, ErrorType
+from .types import AgentRole, PromptType, ErrorType, ExecutionEngine
 from .helpers.access import get_agent_data_by_name, get_agent_by_name, get_agent_config_by_name, get_tool_config_by_name, get_tool_config_by_type, get_external_tools, get_prompt_by_type, pop_agent_config_by_type, get_agent_by_type
 from .helpers.transfer import create_transfer_function_to_agent, create_transfer_function_to_parent_agent
 from .helpers.state import add_recent_messages_to_history, construct_state_from_response, reset_current_turn, reset_current_turn_agent_history
@@ -50,7 +50,7 @@ def clear_agent_fields(agent):
     
     return agent
 
-def get_agents(agent_configs, tool_configs, localize_history, available_tool_mappings, agent_data, start_turn_with_start_agent, children_aware_of_parent, universal_sys_msg):
+def get_base_agents(agent_configs, tool_configs, localize_history, available_tool_mappings, agent_data, universal_sys_msg):
     # Create Agent objects
     agents = []
 
@@ -142,6 +142,12 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
     for agent in agents:
         agent.children = {agent_.name: agent_ for agent_ in agents if agent_.name in agent.children_names}
 
+    for agent in agents:
+        agent = add_universal_system_message_to_agent(agent, universal_sys_msg)
+        
+    return agents
+
+def get_swarm_agents(agents, children_aware_of_parent):
     # Generate transfer functions for transferring to children agents
     logger.info("Generating transfer functions for transferring to children agents")
     transfer_functions = {
@@ -184,10 +190,23 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
             assert agent.most_recent_parent.name in agent.candidate_parent_functions, f"Most recent parent {agent.most_recent_parent.name} not found in candidate parent functions for agent {agent.name}"
             agent.parent_function = agent.candidate_parent_functions[agent.most_recent_parent.name]
 
-    for agent in agents:
-        agent = add_universal_system_message_to_agent(agent, universal_sys_msg)
-        
     return agents
+
+def get_agents(agent_configs, tool_configs, localize_history, available_tool_mappings, agent_data, children_aware_of_parent, universal_sys_msg, engine: ExecutionEngine = ExecutionEngine.SWARM):
+    """Main function that creates and sets up agents"""
+    if engine == ExecutionEngine.SWARM:
+        base_agents = get_base_agents(agent_configs, tool_configs, 
+            localize_history, available_tool_mappings, agent_data, 
+            universal_sys_msg)
+        swarm_agents = get_swarm_agents(base_agents, 
+        children_aware_of_parent)
+        return swarm_agents
+    
+    elif engine == ExecutionEngine.LANGGRAPH:
+        raise NotImplementedError("LangGraph execution engine not yet implemented")
+    
+    else:
+        raise ValueError(f"Unknown execution engine: {engine}")
 
 def check_request_validity(messages, agent_configs, tool_configs, prompt_configs, max_overall_turns):
 
@@ -350,7 +369,6 @@ def run_turn(messages, start_agent_name, agent_configs, tool_configs, available_
         available_tool_mappings=available_tool_mappings,
         agent_data=state.get("agent_data", []),
         localize_history=localize_history,
-        start_turn_with_start_agent=start_turn_with_start_agent,
         children_aware_of_parent=children_aware_of_parent,
         universal_sys_msg=universal_sys_msg
     )

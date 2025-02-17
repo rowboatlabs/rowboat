@@ -16,3 +16,7 @@ class ErrorType(Enum):
     FATAL = "fatal"
     ESCALATE = "escalate"
 
+class ExecutionEngine(Enum):
+    SWARM = "swarm"
+    LANGGRAPH = "langgraph"
+
