@@ -1,6 +1,7 @@
 from rowboat import Client, StatefulChat
 from typing import List
 import json
+import os
 from openai import OpenAI
 from scenario_types import Scenario, SimulationResult, SimulationAggregateResult
 from db import write_simulation_result, write_simulation_aggregate_result
@@ -8,7 +9,7 @@ from db import write_simulation_result, write_simulation_aggregate_result
 
 openai_client = OpenAI()
 MODEL_NAME = "gpt-4o"
-HOST = "http://127.0.0.1:3000"
+ROWBOAT_API_HOST = os.environ.get("ROWBOAT_API_HOST", "http://127.0.0.1:3000").strip()
 
 def simulate_scenario(scenario: Scenario, rowboat_client: Client, workflow_id: str, max_iterations: int = 5) -> str:
     """
@@ -96,7 +97,7 @@ def simulate_scenario(scenario: Scenario, rowboat_client: Client, workflow_id: s
 async def simulate_scenarios(scenarios: List[Scenario], runId: str, workflow_id: str, api_key: str, max_iterations: int = 5):
     project_id = scenarios[0].projectId
     client = Client(
-        host=HOST,
+        host=ROWBOAT_API_HOST,
         project_id=project_id,
         api_key=api_key
     )

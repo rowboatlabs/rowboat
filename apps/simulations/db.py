@@ -1,9 +1,10 @@
 from pymongo import MongoClient
 from bson import ObjectId
+import os
 from scenario_types import SimulationRun, Scenario, SimulationResult, SimulationAggregateResult
 
-MONGO_URI = "mongodb://localhost:27017"
-DB_NAME = "rowboat"
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/rowboat").strip()
+
 SCENARIOS_COLLECTION_NAME = "scenarios"
 API_KEYS_COLLECTION = "api_keys"
 SIMULATIONS_COLLECTION_NAME = "simulation_runs"
@@ -12,7 +13,7 @@ SIMULATION_AGGREGATE_RESULT_COLLECTION_NAME = "simulation_aggregate_result"
 
 def get_db():
     client = MongoClient(MONGO_URI)
-    return client[DB_NAME]
+    return client.get_default_database()
 
 def get_collection(collection_name: str):
     db = get_db()
