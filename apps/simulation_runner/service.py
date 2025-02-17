@@ -44,7 +44,7 @@ class JobService:
             result = await simulate_scenarios(scenarios, job.id, job.workflowId, api_key)
 
 
-            set_simulation_run_to_completed(job)
+            set_simulation_run_to_completed(job, result)
             logging.info(f"Job {job.id} completed.")
 
     def start(self):

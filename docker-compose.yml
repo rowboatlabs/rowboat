@@ -60,6 +60,16 @@ services:
       - SIGNING_SECRET=${SIGNING_SECRET}
     restart: unless-stopped 
 
+  simulation_runner:
+    build:
+      context: ./apps/simulation_runner
+      dockerfile: Dockerfile
+    environment:
+      - MONGODB_URI=${MONGODB_CONNECTION_STRING}
+      - ROWBOAT_API_HOST=http://rowboat:3000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    restart: unless-stopped
+
   docs:
     build:
       context: ./apps/docs

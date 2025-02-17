@@ -4,7 +4,7 @@ import json
 import os
 from openai import OpenAI
 from scenario_types import Scenario, SimulationResult, SimulationAggregateResult
-from db import write_simulation_result, write_simulation_aggregate_result
+from db import write_simulation_result, set_simulation_run_to_completed
 
 
 openai_client = OpenAI()
@@ -115,10 +115,9 @@ async def simulate_scenarios(scenarios: List[Scenario], runId: str, workflow_id:
         results.append(simulation_result)
         write_simulation_result(simulation_result)
 
-    aggregate_result = SimulationAggregateResult(
-        total=len(scenarios),
-        pass_count=sum(1 for result in results if result.result == "pass"),
-        fail=sum(1 for result in results if result.result == "fail")
-    )
-    write_simulation_aggregate_result(aggregate_result)
-    return True
+    aggregate_result = SimulationAggregateResult(**{
+        "total": len(scenarios),
+        "pass": sum(1 for result in results if result.result == "pass"),
+        "fail": sum(1 for result in results if result.result == "fail")
+    })
+    return aggregate_result

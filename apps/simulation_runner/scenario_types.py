@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 run_status = Literal["pending", "running", "completed", "cancelled", "failed"]
 
@@ -34,5 +34,5 @@ class SimulationResult(BaseModel):
 
 class SimulationAggregateResult(BaseModel):
     total: int
-    pass_count: int
+    pass_: int = Field(..., alias='pass')
     fail: int

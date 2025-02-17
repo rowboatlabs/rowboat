@@ -3,7 +3,7 @@ from bson import ObjectId
 import os
 from scenario_types import SimulationRun, Scenario, SimulationResult, SimulationAggregateResult
 
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/rowboat").strip()
+MONGO_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017/rowboat").strip()
 
 SCENARIOS_COLLECTION_NAME = "scenarios"
 API_KEYS_COLLECTION = "api_keys"
@@ -46,9 +46,9 @@ def get_pending_simulation_run():
         )
     return None
 
-def set_simulation_run_to_completed(simulation_run: SimulationRun):
+def set_simulation_run_to_completed(simulation_run: SimulationRun, aggregate_result: SimulationAggregateResult):
     collection = get_collection(SIMULATIONS_COLLECTION_NAME)
-    collection.update_one({"_id": ObjectId(simulation_run.id)}, {"$set": {"status": "completed"}})
+    collection.update_one({"_id": ObjectId(simulation_run.id)}, {"$set": {"status": "completed", "aggregateResults": aggregate_result.model_dump(by_alias=True)}})
 
 def get_scenarios_for_run(simulation_run: SimulationRun):
     if simulation_run is None:
@@ -71,8 +71,4 @@ def get_scenarios_for_run(simulation_run: SimulationRun):
 
 def write_simulation_result(result: SimulationResult):
     collection = get_collection(SIMULATION_RESULT_COLLECTION_NAME)
-    collection.insert_one(result.model_dump())
-
-def write_simulation_aggregate_result(result: SimulationAggregateResult):
-    collection = get_collection(SIMULATION_AGGREGATE_RESULT_COLLECTION_NAME)
     collection.insert_one(result.model_dump())
