@@ -1,6 +1,6 @@
 "use client";
 import { WorkflowTool } from "../../../lib/types/workflow_types";
-import { Accordion, AccordionItem, Button, Checkbox, Select, SelectItem, Switch } from "@nextui-org/react";
+import { Accordion, AccordionItem, Button, Checkbox, Select, SelectItem, Switch, RadioGroup, Radio } from "@nextui-org/react";
 import { z } from "zod";
 import { ActionButton, Pane } from "./pane";
 import { EditableField } from "../../../lib/components/editable-field";
@@ -8,6 +8,8 @@ import { Divider } from "@nextui-org/react";
 import { Label } from "../../../lib/components/label";
 import { TrashIcon, XIcon } from "lucide-react";
 import { useState } from "react";
+import { Link as NextUILink } from "@nextui-org/react";
+import Link from "next/link";
 
 export function ParameterConfig({
     param,
@@ -225,28 +227,70 @@ export function ToolConfig({
 
                 <Divider />
 
-                <Checkbox
-                    key="mockInPlayground"
-                    size="sm"
-                    isSelected={tool.mockInPlayground ?? false}
-                    onValueChange={(value) => handleUpdate({
-                        ...tool,
-                        mockInPlayground: value
-                    })}
-                >
-                    Mock tool in Playground
-                </Checkbox>
-                {tool.mockInPlayground && <Checkbox
-                    key="autoSubmitMockedResponse"
-                    size="sm"
-                    isSelected={tool.autoSubmitMockedResponse ?? false}
-                    onValueChange={(value) => handleUpdate({
-                        ...tool,
-                        autoSubmitMockedResponse: value
-                    })}
-                >
-                    Auto-submit mocked response
-                </Checkbox>}
+                <Label label="TOOL RESPONSES" />
+
+                <div className="ml-4 flex flex-col gap-2">
+                    <RadioGroup
+                        defaultValue="mock"
+                        value={tool.mockInPlayground ? "mock" : "api"}
+                        onValueChange={(value) => handleUpdate({
+                            ...tool,
+                            mockInPlayground: value === "mock",
+                            autoSubmitMockedResponse: value === "mock" ? true : undefined
+                        })}
+                        orientation="horizontal"
+                        classNames={{
+                            wrapper: "gap-8",
+                            label: "text-sm"
+                        }}
+                    >
+                        <Radio 
+                            value="mock" 
+                            size="sm"
+                            classNames={{
+                                base: "max-w-[50%]",
+                                label: "text-sm font-normal"
+                            }}
+                        >
+                            Mock tool responses in playground
+                        </Radio>
+                        <Radio 
+                            value="api"
+                            size="sm"
+                            classNames={{
+                                base: "max-w-[50%]",
+                                label: "text-sm font-normal"
+                            }}
+                        >
+                            Connect tool to your API
+                        </Radio>
+                    </RadioGroup>
+
+                    {tool.mockInPlayground && (
+                        <div className="ml-0">
+                            <Checkbox
+                                key="autoSubmitMockedResponse"
+                                size="sm"
+                                classNames={{
+                                    label: "text-xs font-normal"
+                                }}
+                                isSelected={tool.autoSubmitMockedResponse ?? true}
+                                onValueChange={(value) => handleUpdate({
+                                    ...tool,
+                                    autoSubmitMockedResponse: value
+                                })}
+                            >
+                                Auto-submit mocked response in playground
+                            </Checkbox>
+                        </div>
+                    )}
+
+                    {!tool.mockInPlayground && (
+                        <div className="ml-0 text-danger text-xs">
+                            Please configure your webhook in the <strong>Integrate</strong> page if you haven&apos;t already.
+                        </div>
+                    )}
+                </div>
 
                 <Divider />
 
