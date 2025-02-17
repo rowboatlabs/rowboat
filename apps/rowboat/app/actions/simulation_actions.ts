@@ -250,4 +250,4 @@ export async function getAggregateResult(
         pass: result.pass,
         fail: result.fail
     };
-} 
+}
