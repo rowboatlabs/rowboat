@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { PlusIcon, PencilIcon, XMarkIcon, DocumentDuplicateIcon, EllipsisVerticalIcon, TrashIcon, ChevronRightIcon, PlayIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, PencilIcon, XMarkIcon, EllipsisVerticalIcon, TrashIcon, ChevronRightIcon, PlayIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
 import { useParams, useRouter } from 'next/navigation';
 import { 
     getScenarios, 
@@ -15,13 +15,14 @@ import {
     createRunResult,
     updateRunStatus,
     createAggregateResult,
-    getAggregateResult,
 } from '../../../actions/simulation_actions';
 import { type WithStringId } from '../../../lib/types/types';
 import { Scenario, SimulationRun, SimulationResult } from "../../../lib/types/testing_types";
+import { Workflow } from "../../../lib/types/workflow_types";
 import { z } from 'zod';
 import { SimulationResultCard, ScenarioResultCard } from './components/RunComponents';
 import { ScenarioViewer } from './components/ScenarioComponents';
+import { fetchWorkflow } from '../../../actions/workflow_actions';
 
 type ScenarioType = WithStringId<z.infer<typeof Scenario>>;
 type SimulationRunType = WithStringId<z.infer<typeof SimulationRun>>;
@@ -75,6 +76,7 @@ export default function SimulationApp() {
   const [runResults, setRunResults] = useState<SimulationResultType[]>([]);
   const [isLoadingRuns, setIsLoadingRuns] = useState(true);
   const [allRunResults, setAllRunResults] = useState<Record<string, SimulationResultType[]>>({});
+  const [workflowVersions, setWorkflowVersions] = useState<Record<string, WithStringId<z.infer<typeof Workflow>>>>({});
 
   // Load scenarios on mount
   useEffect(() => {
@@ -207,58 +209,82 @@ export default function SimulationApp() {
     setSimulationReport(null);
 
     try {
-      const newRun = await createRun(
-        projectId as string,
-        scenarios.map(s => s._id)
-      );
-      setActiveRun(newRun);
+        // Get workflowId from localStorage
+        const workflowId = localStorage.getItem(`lastWorkflowId_${projectId}`);
+        if (!workflowId) {
+            throw new Error('No workflow selected. Please select a workflow first.');
+        }
 
-      const shouldMock = process.env.NEXT_PUBLIC_MOCK_SIMULATION_RESULTS === 'true';
-      
-      if (shouldMock) {
-        console.log('Using mock simulation...');
-        
-        await updateRunStatus(projectId as string, newRun._id, 'running');
-        
-        // Run all scenarios and collect results
-        const mockResults = await Promise.all(
-          scenarios.map(scenario => 
-            dummySimulator(scenario, newRun._id, projectId as string)
-          )
+        // First verify the workflow exists before creating the run
+        try {
+            await fetchWorkflow(projectId as string, workflowId);
+        } catch (error) {
+            // If workflow doesn't exist, clear localStorage and throw error
+            localStorage.removeItem(`lastWorkflowId_${projectId}`);
+            throw new Error('Selected workflow no longer exists. Please select a new workflow.');
+        }
+
+        const newRun = await createRun(
+            projectId as string,
+            scenarios.map(s => s._id),
+            workflowId
         );
+        setActiveRun(newRun);
 
-        // Calculate and store aggregate results before marking as complete
-        const total = scenarios.length;
-        const pass = mockResults.filter(r => r.result === 'pass').length;
-        const fail = mockResults.filter(r => r.result === 'fail').length;
+        // Fetch and store workflow version
+        const workflow = await fetchWorkflow(projectId as string, workflowId);
+        setWorkflowVersions(prev => ({
+            ...prev,
+            [workflowId]: workflow
+        }));
 
-        await createAggregateResult(
-          projectId as string,
-          newRun._id,
-          total,
-          pass,
-          fail
-        );
-
-        await updateRunStatus(
-          projectId as string, 
-          newRun._id, 
-          'completed',
-          new Date().toISOString()
-        );
-
-        const results = await getRunResults(projectId as string, newRun._id);
-        setRunResults(results);
+        const shouldMock = process.env.NEXT_PUBLIC_MOCK_SIMULATION_RESULTS === 'true';
         
-        const updatedRun = await getRun(projectId as string, newRun._id);
-        setActiveRun(updatedRun);
-      }
-      
-      await fetchRuns();
+        if (shouldMock) {
+            console.log('Using mock simulation...');
+            
+            await updateRunStatus(projectId as string, newRun._id, 'running');
+            
+            // Run all scenarios and collect results
+            const mockResults = await Promise.all(
+                scenarios.map(scenario => 
+                    dummySimulator(scenario, newRun._id, projectId as string)
+                )
+            );
+
+            // Calculate and store aggregate results before marking as complete
+            const total = scenarios.length;
+            const pass = mockResults.filter(r => r.result === 'pass').length;
+            const fail = mockResults.filter(r => r.result === 'fail').length;
+
+            await createAggregateResult(
+                projectId as string,
+                newRun._id,
+                total,
+                pass,
+                fail
+            );
+
+            await updateRunStatus(
+                projectId as string, 
+                newRun._id, 
+                'completed',
+                new Date().toISOString()
+            );
+
+            const results = await getRunResults(projectId as string, newRun._id);
+            setRunResults(results);
+            
+            const updatedRun = await getRun(projectId as string, newRun._id);
+            setActiveRun(updatedRun);
+        }
+        
+        await fetchRuns();
     } catch (error) {
-      console.error('Error starting scenarios:', error);
+        console.error('Error starting scenarios:', error);
+        // Maybe show an error toast here
     } finally {
-      setIsRunning(false);
+        setIsRunning(false);
     }
   };
 
@@ -269,6 +295,41 @@ export default function SimulationApp() {
     router.push(`/projects/${projectId}/workflow`);
     setMenuOpenScenarioId(null);
   };
+
+  // Add useEffect to fetch workflow versions for existing runs
+  useEffect(() => {
+    if (!projectId || !runs.length) return;
+
+    const fetchWorkflowVersions = async () => {
+        const workflowIds = Array.from(new Set(runs.map(run => run.workflowId)));
+        const versions: Record<string, WithStringId<z.infer<typeof Workflow>>> = {};
+
+        for (const workflowId of workflowIds) {
+            try {
+                const workflow = await fetchWorkflow(projectId as string, workflowId);
+                versions[workflowId] = workflow;
+            } catch (error) {
+                console.error(`Error fetching workflow ${workflowId}:`, error);
+                // Add a placeholder for deleted workflows
+                versions[workflowId] = {
+                    _id: workflowId,
+                    name: "Deleted Workflow",
+                    projectId: projectId as string,
+                    agents: [],
+                    prompts: [],
+                    tools: [],
+                    startAgent: "",
+                    createdAt: "",
+                    lastUpdatedAt: "",
+                };
+            }
+        }
+
+        setWorkflowVersions(versions);
+    };
+
+    fetchWorkflowVersions();
+  }, [projectId, runs]);
 
   return (
     <div className="flex h-screen">
@@ -382,6 +443,7 @@ export default function SimulationApp() {
                             run={run}
                             results={allRunResults[run._id] || []}
                             scenarios={scenarios}
+                            workflow={workflowVersions[run.workflowId]}
                         />
                     ))}
                 </div>

@@ -125,7 +125,8 @@ export async function getRun(projectId: string, runId: string): Promise<WithStri
 
 export async function createRun(
     projectId: string, 
-    scenarioIds: string[]
+    scenarioIds: string[],
+    workflowId: string
 ): Promise<WithStringId<z.infer<typeof SimulationRun>>> {
     await projectAuthCheck(projectId);
 
@@ -133,6 +134,7 @@ export async function createRun(
         projectId,
         status: 'pending' as const,
         scenarioIds,
+        workflowId,
         startedAt: new Date().toISOString(),
     };
 

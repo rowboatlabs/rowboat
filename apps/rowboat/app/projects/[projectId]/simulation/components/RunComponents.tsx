@@ -5,7 +5,7 @@ import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { WithStringId } from '../../../../lib/types/types';
 import { Scenario, SimulationRun, SimulationResult, SimulationAggregateResult } from "../../../../lib/types/testing_types";
 import { z } from 'zod';
-import { getAggregateResult } from '../../../../actions/simulation_actions';
+import { Workflow } from "../../../../lib/types/workflow_types";
 
 type ScenarioType = WithStringId<z.infer<typeof Scenario>>;
 type SimulationRunType = WithStringId<z.infer<typeof SimulationRun>>;
@@ -15,18 +15,32 @@ interface SimulationResultCardProps {
   run: SimulationRunType;
   results: SimulationResultType[];
   scenarios: ScenarioType[];
+  workflow?: WithStringId<z.infer<typeof Workflow>>;
 }
 
-export const SimulationResultCard = ({ run, results, scenarios }: SimulationResultCardProps) => {
+export const SimulationResultCard = ({ run, results, scenarios, workflow }: SimulationResultCardProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedScenarios, setExpandedScenarios] = useState<Set<string>>(new Set());
 
-  // Replace the manual calculations with aggregate results from the run object
   const totalScenarios = run.aggregateResults?.total ?? run.scenarioIds.length;
   const passedScenarios = run.aggregateResults?.pass ?? 0;
   const failedScenarios = run.aggregateResults?.fail ?? 0;
 
   const statusLabelClass = "px-3 py-1 rounded text-xs min-w-[60px] text-center uppercase font-semibold";
+  const getStatusClass = (status: string) => {
+    switch (status) {
+      case 'completed':
+      case 'pass':
+        return `${statusLabelClass} bg-green-100 text-green-800`;
+      case 'failed':
+      case 'fail':
+        return `${statusLabelClass} bg-red-100 text-red-800`;
+      case 'running':
+      case 'pending':
+      default:
+        return `${statusLabelClass} bg-yellow-100 text-yellow-800`;
+    }
+  };
 
   const formatMainTitle = (date: string) => {
     return `Run from ${new Date(date).toLocaleString('en-US', { 
@@ -89,26 +103,30 @@ export const SimulationResultCard = ({ run, results, scenarios }: SimulationResu
             {formatMainTitle(run.startedAt)}
           </div>
         </div>
-        <span className={`${statusLabelClass} ${
-          run.status === 'completed' ? 'bg-green-100 text-green-800' :
-          run.status === 'failed' ? 'bg-red-100 text-red-800' :
-          'bg-yellow-100 text-yellow-800'
-        }`}>
+        <span className={getStatusClass(run.status)}>
           {run.status}
         </span>
       </div>
 
       {isExpanded && (
         <div className="p-4 border-t">
-          {/* Simplified timing information */}
-          <div className="mb-6 text-sm text-gray-500 space-y-1">
-            <div className="flex items-center">
-              <span className="w-24 text-gray-600">Completed:</span>
-              <span>{run.completedAt ? formatDateTime(run.completedAt) : 'Not completed'}</span>
+          {/* Workflow and timing information in a grid */}
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            {workflow && (
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <div className="text-sm font-medium text-gray-600 mb-1">Workflow Version</div>
+                <div className="font-medium">{workflow.name}</div>
+              </div>
+            )}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm font-medium text-gray-600 mb-1">Completed</div>
+              <div className="text-sm">
+                {run.completedAt ? formatDateTime(run.completedAt) : 'Not completed'}
+              </div>
             </div>
-            <div className="flex items-center">
-              <span className="w-24 text-gray-600">Duration:</span>
-              <span>{getDuration()}</span>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm font-medium text-gray-600 mb-1">Duration</div>
+              <div className="text-sm">{getDuration()}</div>
             </div>
           </div>
 
@@ -156,9 +174,7 @@ export const SimulationResultCard = ({ run, results, scenarios }: SimulationResu
                       <span className="font-medium text-gray-900">{scenario.name}</span>
                     </div>
                     {result && (
-                      <span className={`${statusLabelClass} ${
-                        result.result === 'pass' ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900'
-                      }`}>
+                      <span className={getStatusClass(result.result)}>
                         {result.result}
                       </span>
                     )}
