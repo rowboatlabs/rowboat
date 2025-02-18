@@ -47,13 +47,17 @@ export const SimulationAggregateResult = z.object({
 
 export const SimulationRun = z.object({
     projectId: z.string(),
-    status: z.enum(['pending', 'running', 'completed', 'cancelled', 'failed']),
     scenarioIds: z.array(z.string()),
     workflowId: z.string(),
+    status: z.enum(['pending', 'running', 'completed', 'cancelled', 'failed', 'error']),
     startedAt: z.string(),
     completedAt: z.string().optional(),
-    aggregateResults: SimulationAggregateResult.optional(),
-});
+    aggregateResults: z.object({
+      total: z.number(),
+      pass: z.number(),
+      fail: z.number(),
+    }).optional(),
+  });
 
 export const SimulationResult = z.object({
     projectId: z.string(),

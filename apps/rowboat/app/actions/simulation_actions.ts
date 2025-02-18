@@ -246,4 +246,29 @@ export async function getAggregateResult(
     if (!run || !run.aggregateResults) return null;
 
     return run.aggregateResults;
+<<<<<<< HEAD
 } 
+=======
+}
+
+export async function deleteRun(projectId: string, runId: string) {
+    try {
+        // Delete the run using the collection directly
+        await simulationRunsCollection.deleteOne({
+            _id: new ObjectId(runId),
+            projectId: projectId
+        });
+
+        // Delete associated results using the collection directly
+        await simulationResultsCollection.deleteMany({
+            runId: runId,
+            projectId: projectId
+        });
+
+        return { success: true };
+    } catch (error) {
+        console.error('Error deleting run:', error);
+        throw new Error('Failed to delete run');
+    }
+} 
+>>>>>>> 4261c70 (Add Run managemement options and pagination to simulations)

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { PlusIcon, PencilIcon, XMarkIcon, EllipsisVerticalIcon, TrashIcon, ChevronRightIcon, PlayIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, PencilIcon, XMarkIcon, EllipsisVerticalIcon, TrashIcon, ChevronRightIcon, PlayIcon, ChevronDownIcon, ChevronLeftIcon } from '@heroicons/react/24/outline';
 import { useParams, useRouter } from 'next/navigation';
 import { 
     getScenarios, 
@@ -15,6 +15,7 @@ import {
     createRunResult,
     updateRunStatus,
     createAggregateResult,
+    deleteRun,
 } from '../../../actions/simulation_actions';
 import { type WithStringId } from '../../../lib/types/types';
 import { Scenario, SimulationRun, SimulationResult } from "../../../lib/types/testing_types";
@@ -77,6 +78,13 @@ export default function SimulationApp() {
   const [isLoadingRuns, setIsLoadingRuns] = useState(true);
   const [allRunResults, setAllRunResults] = useState<Record<string, SimulationResultType[]>>({});
   const [workflowVersions, setWorkflowVersions] = useState<Record<string, WithStringId<z.infer<typeof Workflow>>>>({});
+  const [menuOpenId, setMenuOpenIdState] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const runsPerPage = 10;
+
+  const setMenuOpenId = useCallback((id: string | null) => {
+    setMenuOpenIdState(id);
+  }, []);
 
   // Load scenarios on mount
   useEffect(() => {
@@ -216,8 +224,9 @@ export default function SimulationApp() {
         }
 
         // First verify the workflow exists before creating the run
+        let workflow;
         try {
-            await fetchWorkflow(projectId as string, workflowId);
+            workflow = await fetchWorkflow(projectId as string, workflowId);
         } catch (error) {
             // If workflow doesn't exist, clear localStorage and throw error
             localStorage.removeItem(`lastWorkflowId_${projectId}`);
@@ -231,8 +240,7 @@ export default function SimulationApp() {
         );
         setActiveRun(newRun);
 
-        // Fetch and store workflow version
-        const workflow = await fetchWorkflow(projectId as string, workflowId);
+        // Store workflow version
         setWorkflowVersions(prev => ({
             ...prev,
             [workflowId]: workflow
@@ -282,7 +290,7 @@ export default function SimulationApp() {
         await fetchRuns();
     } catch (error) {
         console.error('Error starting scenarios:', error);
-        // Maybe show an error toast here
+        alert(error instanceof Error ? error.message : 'An error occurred while starting scenarios');
     } finally {
         setIsRunning(false);
     }
@@ -296,7 +304,7 @@ export default function SimulationApp() {
     setMenuOpenScenarioId(null);
   };
 
-  // Add useEffect to fetch workflow versions for existing runs
+  // Update the workflow versions fetching effect
   useEffect(() => {
     if (!projectId || !runs.length) return;
 
@@ -310,17 +318,17 @@ export default function SimulationApp() {
                 versions[workflowId] = workflow;
             } catch (error) {
                 console.error(`Error fetching workflow ${workflowId}:`, error);
-                // Add a placeholder for deleted workflows
+                // Add a placeholder for deleted/invalid workflows
                 versions[workflowId] = {
                     _id: workflowId,
-                    name: "Deleted Workflow",
+                    name: "Deleted/Invalid Workflow",
                     projectId: projectId as string,
                     agents: [],
                     prompts: [],
                     tools: [],
                     startAgent: "",
-                    createdAt: "",
-                    lastUpdatedAt: "",
+                    createdAt: new Date().toISOString(),
+                    lastUpdatedAt: new Date().toISOString(),
                 };
             }
         }
@@ -330,6 +338,31 @@ export default function SimulationApp() {
 
     fetchWorkflowVersions();
   }, [projectId, runs]);
+
+  const handleCancelRun = async (runId: string) => {
+    if (!projectId) return;
+    try {
+      await updateRunStatus(projectId as string, runId, 'cancelled');
+      await fetchRuns(); // Refresh the runs list
+    } catch (error) {
+      console.error('Error cancelling run:', error);
+    }
+  };
+
+  const handleDeleteRun = async (runId: string) => {
+    if (!projectId) return;
+    try {
+      await deleteRun(projectId as string, runId);
+      await fetchRuns(); // Refresh the runs list
+    } catch (error) {
+      console.error('Error deleting run:', error);
+    }
+  };
+
+  const indexOfLastRun = currentPage * runsPerPage;
+  const indexOfFirstRun = indexOfLastRun - runsPerPage;
+  const currentRuns = runs.slice(indexOfFirstRun, indexOfLastRun);
+  const totalPages = Math.ceil(runs.length / runsPerPage);
 
   return (
     <div className="flex h-screen">
@@ -436,17 +469,56 @@ export default function SimulationApp() {
             ) : runs.length === 0 ? (
                 <div className="text-center py-4 text-gray-500">No simulation runs yet</div>
             ) : (
-                <div className="space-y-4">
-                    {runs.map((run) => (
-                        <SimulationResultCard 
-                            key={run._id}
-                            run={run}
-                            results={allRunResults[run._id] || []}
-                            scenarios={scenarios}
-                            workflow={workflowVersions[run.workflowId]}
-                        />
-                    ))}
-                </div>
+                <>
+                    <div className="space-y-4">
+                        {currentRuns.map((run) => (
+                            <SimulationResultCard 
+                                key={run._id}
+                                run={run}
+                                results={allRunResults[run._id] || []}
+                                scenarios={scenarios}
+                                workflow={workflowVersions[run.workflowId]}
+                                onCancelRun={handleCancelRun}
+                                onDeleteRun={handleDeleteRun}
+                                menuOpenId={menuOpenId}
+                                setMenuOpenId={setMenuOpenId}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Pagination Controls */}
+                    {totalPages > 1 && (
+                        <div className="flex justify-center items-center space-x-4 mt-6">
+                            <button
+                                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                                disabled={currentPage === 1}
+                                className={`p-2 rounded-full ${
+                                    currentPage === 1 
+                                        ? 'text-gray-400 cursor-not-allowed' 
+                                        : 'text-gray-600 hover:bg-gray-100'
+                                }`}
+                            >
+                                <ChevronLeftIcon className="h-5 w-5" />
+                            </button>
+                            
+                            <span className="text-sm text-gray-600">
+                                Page {currentPage} of {totalPages}
+                            </span>
+                            
+                            <button
+                                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                                disabled={currentPage === totalPages}
+                                className={`p-2 rounded-full ${
+                                    currentPage === totalPages 
+                                        ? 'text-gray-400 cursor-not-allowed' 
+                                        : 'text-gray-600 hover:bg-gray-100'
+                                }`}
+                            >
+                                <ChevronRightIcon className="h-5 w-5" />
+                            </button>
+                        </div>
+                    )}
+                </>
             )}
           </div>
         )}
