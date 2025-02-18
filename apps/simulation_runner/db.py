@@ -13,7 +13,7 @@ SIMULATION_AGGREGATE_RESULT_COLLECTION_NAME = "simulation_aggregate_result"
 
 def get_db():
     client = MongoClient(MONGO_URI)
-    return client.get_default_database()
+    return client["rowboat"]
 
 def get_collection(collection_name: str):
     db = get_db()
