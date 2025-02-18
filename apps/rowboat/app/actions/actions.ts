@@ -29,7 +29,7 @@ import { embeddingModel } from "../lib/embedding";
 import { apiV1 } from "rowboat-shared";
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { Claims, getSession } from "@auth0/nextjs-auth0";
-import { callClientToolWebhook, getAgenticApiResponse, runRAGToolCall } from "../lib/utils";
+import { callClientToolWebhook, getAgenticApiResponse, mockToolResponse, runRAGToolCall } from "../lib/utils";
 import { assert } from "node:console";
 import { check_query_limit } from "../lib/rate_limiting";
 import { QueryLimitError } from "../lib/client_utils";
@@ -267,41 +267,7 @@ export async function suggestToolResponse(toolId: string, projectId: string, mes
         throw new QueryLimitError();
     }
 
-    const prompt = `
-# Your Specific Task:
-Here is a chat between a user and a customer support assistant.
-The assistant has requested a tool call with ID {{toolID}}.
-Your job is to come up with an example of the data that the tool call should return.
-The current date is {{date}}.
-
-CONVERSATION:
-{{messages}}
-`
-        .replace('{{toolID}}', toolId)
-        .replace(`{{date}}`, new Date().toISOString())
-        .replace('{{messages}}', JSON.stringify(messages.map((m) => {
-            let tool_calls;
-            if ('tool_calls' in m && m.role == 'assistant') {
-                tool_calls = m.tool_calls;
-            }
-            let { role, content } = m;
-            return {
-                role,
-                content,
-                tool_calls,
-            }
-        })));
-    // console.log(prompt);
-
-    const { object } = await generateObject({
-        model: openai("gpt-4o"),
-        prompt: prompt,
-        schema: z.object({
-            result: z.any(),
-        }),
-    });
-
-    return JSON.stringify(object);
+    return await mockToolResponse(toolId, messages);
 }
 
 export async function getInformationTool(

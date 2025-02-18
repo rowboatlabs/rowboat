@@ -5,7 +5,7 @@ import { ObjectId } from "mongodb";
 import { authCheck } from "../../utils";
 import { ApiRequest, ApiResponse } from "../../../../lib/types/types";
 import { AgenticAPIChatRequest, AgenticAPIChatMessage, convertFromAgenticApiToApiMessages, convertFromApiToAgenticApiMessages, convertWorkflowToAgenticAPI } from "../../../../lib/types/agents_api_types";
-import { getAgenticApiResponse, callClientToolWebhook, runRAGToolCall } from "../../../../lib/utils";
+import { getAgenticApiResponse, callClientToolWebhook, runRAGToolCall, mockToolResponse } from "../../../../lib/utils";
 import { check_query_limit } from "../../../../lib/rate_limiting";
 import { apiV1 } from "rowboat-shared";
 import { PrefixLogger } from "../../../../lib/utils";
@@ -136,18 +136,27 @@ export async function POST(
                         }
                     } else {
                         logger.log(`Running client tool webhook for tool ${toolCall.function.name}`);
-                        // run other tool calls by calling the client tool webhook
+
                         try {
-                            result = await callClientToolWebhook(
-                                toolCall,
-                                currentMessages,
-                                projectId,
-                            );
-                            logger.log(`Client tool webhook call completed for tool ${toolCall.function.name}`);
+                            // if tool is supposed to be mocked, mock it
+                            const workflowTool = workflow.tools.find(t => t.name === toolCall.function.name);
+                            if (workflowTool?.mockInPlayground) {
+                                logger.log(`Mocking tool call ${toolCall.function.name}`);
+                                result = await mockToolResponse(toolCall.id, currentMessages);
+                            } else {
+                                // else run the tool call by calling the client tool webhook
+                                logger.log(`Running client tool webhook for tool ${toolCall.function.name}`);
+                                result = await callClientToolWebhook(
+                                    toolCall,
+                                    currentMessages,
+                                    projectId,
+                                );
+                            }
                         } catch (e) {
-                            logger.log(`Error calling client tool webhook: ${e}`);
-                            return Response.json({ error: "Error calling client tool webhook" }, { status: 500 });
+                            logger.log(`Error in tool call ${toolCall.function.name}: ${e}`);
+                            return Response.json({ error: `Error in tool call ${toolCall.function.name}` }, { status: 500 });
                         }
+                        logger.log(`Tool call ${toolCall.function.name} completed`);
                     }
 
                     toolCallResultMessages.push({

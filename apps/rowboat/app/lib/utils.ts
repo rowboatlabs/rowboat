@@ -13,10 +13,11 @@ import { SignJWT } from "jose";
 import crypto from "crypto";
 import { ObjectId } from "mongodb";
 import { embeddingModel } from "./embedding";
-import { embed } from "ai";
+import { embed, generateObject } from "ai";
 import { qdrantClient } from "./qdrant";
 import { EmbeddingRecord } from "./types/datasource_types";
 import { ApiMessage } from "./types/types";
+import { openai } from "@ai-sdk/openai";
 
 export async function callClientToolWebhook(
     toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number],
@@ -217,4 +218,42 @@ export class PrefixLogger {
     child(childPrefix: string): PrefixLogger {
         return new PrefixLogger(childPrefix, this);
     }
+}
+
+export async function mockToolResponse(toolId: string, messages: z.infer<typeof ApiMessage>[]): Promise<string> {
+    const prompt = `
+# Your Specific Task:
+Here is a chat between a user and a customer support assistant.
+The assistant has requested a tool call with ID {{toolID}}.
+Your job is to come up with an example of the data that the tool call should return.
+The current date is {{date}}.
+
+CONVERSATION:
+{{messages}}
+`
+        .replace('{{toolID}}', toolId)
+        .replace(`{{date}}`, new Date().toISOString())
+        .replace('{{messages}}', JSON.stringify(messages.map((m) => {
+            let tool_calls;
+            if ('tool_calls' in m && m.role == 'assistant') {
+                tool_calls = m.tool_calls;
+            }
+            let { role, content } = m;
+            return {
+                role,
+                content,
+                tool_calls,
+            }
+        })));
+    // console.log(prompt);
+
+    const { object } = await generateObject({
+        model: openai("gpt-4o"),
+        prompt: prompt,
+        schema: z.object({
+            result: z.any(),
+        }),
+    });
+
+    return JSON.stringify(object);
 }

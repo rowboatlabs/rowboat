@@ -252,7 +252,7 @@ export function ToolConfig({
                                 label: "text-sm font-normal"
                             }}
                         >
-                            Mock tool responses in playground
+                            Mock tool responses
                         </Radio>
                         <Radio 
                             value="api"
