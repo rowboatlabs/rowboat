@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, ChangeEvent } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { WithStringId } from '../../../../lib/types/types';
 import { Scenario } from "../../../../lib/types/testing_types";
@@ -23,24 +23,25 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
     setEditedScenario(scenario);
   }, [scenario]);
 
-  const handleChange = useCallback((field: keyof ScenarioType, value: string) => {
+  const handleChange = useCallback((field: keyof ScenarioType, event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    event.preventDefault();
+    const value = event.target.value;
+    
     setEditedScenario(prev => ({
       ...prev,
       [field]: value,
     }));
 
-    // Clear existing timeout
     if (saveTimeout) {
       clearTimeout(saveTimeout);
     }
 
-    // Set new timeout
     const timeoutId = setTimeout(() => {
       onSave({
         ...editedScenario,
         [field]: value,
       });
-    }, 500);
+    }, 1000); // Increased debounce time to 1 second
 
     setSaveTimeout(timeoutId);
   }, [editedScenario, onSave, saveTimeout]);
@@ -53,6 +54,11 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
       }
     };
   }, [saveTimeout]);
+
+  const adjustTextareaHeight = useCallback((element: HTMLTextAreaElement) => {
+    element.style.height = 'auto';
+    element.style.height = `${element.scrollHeight}px`;
+  }, []);
 
   return (
     <div>
@@ -72,8 +78,10 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
           <input
             type="text"
             value={editedScenario.name}
-            onChange={(e) => handleChange('name', e.target.value)}
+            onChange={(e) => handleChange('name', e)}
             className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            autoComplete="off"
+            spellCheck="false"
           />
         </div>
         
@@ -83,14 +91,12 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
           <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">DESCRIPTION</div>
           <textarea
             value={editedScenario.description}
-            onChange={(e) => handleChange('description', e.target.value)}
+            onChange={(e) => handleChange('description', e)}
+            onInput={(e) => adjustTextareaHeight(e.target as HTMLTextAreaElement)}
             className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[24px] resize-none"
             style={{ height: 'auto', minHeight: '24px' }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = 'auto';
-              target.style.height = `${target.scrollHeight}px`;
-            }}
+            autoComplete="off"
+            spellCheck="false"
           />
         </div>
         
@@ -100,14 +106,12 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
           <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">CRITERIA</div>
           <textarea
             value={editedScenario.criteria}
-            onChange={(e) => handleChange('criteria', e.target.value)}
+            onChange={(e) => handleChange('criteria', e)}
+            onInput={(e) => adjustTextareaHeight(e.target as HTMLTextAreaElement)}
             className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[24px] resize-none"
             style={{ height: 'auto', minHeight: '24px' }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = 'auto';
-              target.style.height = `${target.scrollHeight}px`;
-            }}
+            autoComplete="off"
+            spellCheck="false"
           />
         </div>
 
@@ -117,14 +121,12 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
           <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">CONTEXT</div>
           <textarea
             value={editedScenario.context}
-            onChange={(e) => handleChange('context', e.target.value)}
+            onChange={(e) => handleChange('context', e)}
+            onInput={(e) => adjustTextareaHeight(e.target as HTMLTextAreaElement)}
             className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[24px] resize-none"
             style={{ height: 'auto', minHeight: '24px' }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = 'auto';
-              target.style.height = `${target.scrollHeight}px`;
-            }}
+            autoComplete="off"
+            spellCheck="false"
           />
         </div>
       </div>

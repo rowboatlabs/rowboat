@@ -174,6 +174,17 @@ export default function SimulationApp() {
 
   const handleUpdateScenario = async (updatedScenario: ScenarioType) => {
     if (!projectId) return;
+    
+    // First verify the scenario exists and get its current state
+    const currentScenarios = await getScenarios(projectId as string);
+    const existingScenario = currentScenarios.find(s => s._id === updatedScenario._id);
+    
+    if (!existingScenario) {
+      console.error('Scenario not found');
+      return;
+    }
+
+    // Only update the specific fields that have changed
     await updateScenario(
       projectId as string,
       updatedScenario._id,
@@ -184,9 +195,11 @@ export default function SimulationApp() {
         context: updatedScenario.context,
       }
     );
-    // Refresh scenarios list
+
+    // Refresh scenarios list and update only the modified scenario
     const updatedScenarios = await getScenarios(projectId as string);
     setScenarios(updatedScenarios);
+    
     const refreshedScenario = updatedScenarios.find(s => s._id === updatedScenario._id);
     if (refreshedScenario) {
       setSelectedScenario(refreshedScenario);
