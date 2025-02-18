@@ -254,14 +254,11 @@ function reducer(state: State, action: Action): State {
                                 description: "",
                                 disabled: false,
                                 instructions: "",
-                                prompts: [],
-                                tools: [],
                                 model: "gpt-4o",
                                 locked: false,
                                 toggleAble: true,
                                 ragReturnType: "chunks",
                                 ragK: 3,
-                                connectedAgents: [],
                                 controlType: "retain",
                                 ...action.agent
                             });
@@ -331,10 +328,6 @@ function reducer(state: State, action: Action): State {
                             draft.workflow.agents = draft.workflow.agents.filter(
                                 (agent) => agent.name !== action.name
                             );
-                            draft.workflow.agents = draft.workflow.agents.map(agent => ({
-                                ...agent,
-                                connectedAgents: agent.connectedAgents.filter(connectedAgent => connectedAgent !== action.name)
-                            }));
                             draft.selection = null;
                             draft.pendingChanges = true;
                             draft.chatKey++;
@@ -346,10 +339,6 @@ function reducer(state: State, action: Action): State {
                             draft.workflow.tools = draft.workflow.tools.filter(
                                 (tool) => tool.name !== action.name
                             );
-                            draft.workflow.agents = draft.workflow.agents.map(agent => ({
-                                ...agent,
-                                tools: agent.tools.filter(toolName => toolName !== action.name)
-                            }));
                             draft.selection = null;
                             draft.pendingChanges = true;
                             draft.chatKey++;
@@ -361,10 +350,6 @@ function reducer(state: State, action: Action): State {
                             draft.workflow.prompts = draft.workflow.prompts.filter(
                                 (prompt) => prompt.name !== action.name
                             );
-                            draft.workflow.agents = draft.workflow.agents.map(agent => ({
-                                ...agent,
-                                prompts: agent.prompts.filter(promptName => promptName !== action.name)
-                            }));
                             draft.selection = null;
                             draft.pendingChanges = true;
                             draft.chatKey++;
@@ -379,14 +364,14 @@ function reducer(state: State, action: Action): State {
                             if (action.agent.name && draft.workflow.startAgent === action.name) {
                                 draft.workflow.startAgent = action.agent.name;
                             }
-                            if (action.agent.name && action.agent.name !== action.name) {
-                                draft.workflow.agents = draft.workflow.agents.map(agent => ({
-                                    ...agent,
-                                    connectedAgents: agent.connectedAgents.map(connectedAgent =>
-                                        connectedAgent === action.name ? action.agent.name! : connectedAgent
-                                    )
-                                }));
-                            }
+                            // if (action.agent.name && action.agent.name !== action.name) {
+                            //     draft.workflow.agents = draft.workflow.agents.map(agent => ({
+                            //         ...agent,
+                            //         connectedAgents: agent.connectedAgents.map(connectedAgent =>
+                            //             connectedAgent === action.name ? action.agent.name! : connectedAgent
+                            //         )
+                            //     }));
+                            // }
                             if (action.agent.name && draft.selection?.type === "agent" && draft.selection.name === action.name) {
                                 draft.selection = {
                                     type: "agent",
@@ -407,14 +392,14 @@ function reducer(state: State, action: Action): State {
                             draft.workflow.tools = draft.workflow.tools.map((tool) =>
                                 tool.name === action.name ? { ...tool, ...action.tool } : tool
                             );
-                            if (action.tool.name && action.tool.name !== action.name) {
-                                draft.workflow.agents = draft.workflow.agents.map(agent => ({
-                                    ...agent,
-                                    tools: agent.tools.map(toolName =>
-                                        toolName === action.name ? action.tool.name! : toolName
-                                    )
-                                }));
-                            }
+                            // if (action.tool.name && action.tool.name !== action.name) {
+                            //     draft.workflow.agents = draft.workflow.agents.map(agent => ({
+                            //         ...agent,
+                            //         tools: agent.tools.map(toolName =>
+                            //             toolName === action.name ? action.tool.name! : toolName
+                            //         )
+                            //     }));
+                            // }
                             if (action.tool.name && draft.selection?.type === "tool" && draft.selection.name === action.name) {
                                 draft.selection = {
                                     type: "tool",
@@ -435,12 +420,12 @@ function reducer(state: State, action: Action): State {
                             draft.workflow.prompts = draft.workflow.prompts.map((prompt) =>
                                 prompt.name === action.name ? { ...prompt, ...action.prompt } : prompt
                             );
-                            draft.workflow.agents = draft.workflow.agents.map(agent => ({
-                                ...agent,
-                                prompts: agent.prompts.map(promptName =>
-                                    promptName === action.name ? action.prompt.name! : promptName
-                                )
-                            }));
+                            // draft.workflow.agents = draft.workflow.agents.map(agent => ({
+                            //     ...agent,
+                            //     prompts: agent.prompts.map(promptName =>
+                            //         promptName === action.name ? action.prompt.name! : promptName
+                            //     )
+                            // }));
                             if (action.prompt.name && draft.selection?.type === "prompt" && draft.selection.name === action.name) {
                                 draft.selection = {
                                     type: "prompt",
@@ -842,6 +827,9 @@ export function WorkflowEditor({
                 {state.present.selection?.type === "prompt" && <PromptConfig
                     key={state.present.selection.name}
                     prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
+                    agents={state.present.workflow.agents}
+                    tools={state.present.workflow.tools}
+                    prompts={state.present.workflow.prompts}
                     usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
                     handleUpdate={handleUpdatePrompt.bind(null, state.present.selection.name)}
                     handleClose={handleUnselectPrompt}

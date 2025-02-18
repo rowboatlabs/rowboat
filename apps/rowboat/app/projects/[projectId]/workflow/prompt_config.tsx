@@ -1,21 +1,53 @@
 "use client";
-import { WorkflowPrompt } from "../../../lib/types/workflow_types";
-import { Divider, Input, Textarea } from "@nextui-org/react";
+import { WorkflowAgent, WorkflowPrompt, WorkflowTool } from "../../../lib/types/workflow_types";
+import { Divider } from "@nextui-org/react";
 import { z } from "zod";
 import { ActionButton, Pane } from "./pane";
 import { EditableField } from "../../../lib/components/editable-field";
 
 export function PromptConfig({
     prompt,
+    agents,
+    tools,
+    prompts,
     usedPromptNames,
     handleUpdate,
     handleClose,
 }: {
     prompt: z.infer<typeof WorkflowPrompt>,
+    agents: z.infer<typeof WorkflowAgent>[],
+    tools: z.infer<typeof WorkflowTool>[],
+    prompts: z.infer<typeof WorkflowPrompt>[],
     usedPromptNames: Set<string>,
     handleUpdate: (prompt: z.infer<typeof WorkflowPrompt>) => void,
     handleClose: () => void,
 }) {
+    const atMentions = [];
+    for (const a of agents) {
+        const id = `agent:${a.name}`;
+        atMentions.push({
+            id,
+            value: id,
+        });
+    }
+    for (const p of prompts) {
+        if (p.name === prompt.name) {
+            continue;
+        }
+        const id = `prompt:${p.name}`;
+        atMentions.push({
+            id,
+            value: id,
+        });
+    }
+    for (const tool of tools) {
+        const id = `tool:${tool.name}`;
+        atMentions.push({
+            id,
+            value: id,
+        });
+    }
+
     return <Pane title={prompt.name} actions={[
         <ActionButton
             key="close"
@@ -67,6 +99,8 @@ export function PromptConfig({
                     markdown
                     label="Prompt"
                     multiline
+                    mentions
+                    mentionsAtValues={atMentions}
                 />
             </div>
         </div>

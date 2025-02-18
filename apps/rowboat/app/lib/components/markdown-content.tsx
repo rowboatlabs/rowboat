@@ -1,5 +1,6 @@
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useMemo } from 'react'
 
 export default function MarkdownContent({ content }: { content: string }) {
     return <Markdown
@@ -49,8 +50,19 @@ export default function MarkdownContent({ content }: { content: string }) {
                 return <blockquote className='py-2 bg-gray-200 px-1'>{children}</blockquote>;
             },
             a(props) {
-                const { children, className, node, ...rest } = props
-                return <a className="inline-flex items-center gap-1" target="_blank" {...rest} >
+                const { children, href, className, node, ...rest } = props;
+
+                // If this is a mention link, render it with mention styling
+                if (href === '#mention') {
+                    return (
+                        <span className="inline-block bg-[#e0f2fe] text-[#1e40af] px-1.5 py-0.5 rounded whitespace-nowrap">
+                            {children}
+                        </span>
+                    );
+                }
+
+                // Otherwise render normal link (your existing link component)
+                return <a className="inline-flex items-center gap-1" target="_blank" href={href} {...rest} >
                     <span className='underline'>
                         {children}
                     </span>

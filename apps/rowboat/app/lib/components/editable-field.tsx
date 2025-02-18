@@ -4,6 +4,9 @@ import { useClickAway } from "../../../hooks/use-click-away";
 import MarkdownContent from "./markdown-content";
 import clsx from "clsx";
 import { Label } from "./label";
+import dynamic from "next/dynamic";
+import { Match } from "./mentions_editor";
+const MentionsEditor = dynamic(() => import('./mentions_editor'), { ssr: false });
 
 interface EditableFieldProps {
     value: string;
@@ -16,6 +19,8 @@ interface EditableFieldProps {
     className?: string;
     validate?: (value: string) => { valid: boolean; errorMessage?: string };
     light?: boolean;
+    mentions?: boolean;
+    mentionsAtValues?: Match[];
 }
 
 export function EditableField({
@@ -29,6 +34,8 @@ export function EditableField({
     className = "flex flex-col gap-1",
     validate,
     light = false,
+    mentions = false,
+    mentionsAtValues = [],
 }: EditableFieldProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [localValue, setLocalValue] = useState(value);
@@ -115,24 +122,26 @@ export function EditableField({
                     </Button>
                 </div>}
             </div>}
-            {isEditing ? (
-                multiline ? (
-                    <Textarea
-                        {...commonProps}
-                        minRows={3}
-                        maxRows={20}
-                    />
-                ) : (
-                    <Input {...commonProps} />
-                )
-            ) : (
+            {isEditing ? <>
+                {mentions && <MentionsEditor
+                    atValues={mentionsAtValues}
+                    value={value}
+                    placeholder={placeholder}
+                    onValueChange={setLocalValue}
+                />}
+                {multiline && !mentions && <Textarea
+                    {...commonProps}
+                    minRows={3}
+                    maxRows={20}
+                />}
+                {!multiline && <Input {...commonProps} />}
+            </> : (
                 <div
                     onClick={() => !locked && setIsEditing(true)}
                     className={clsx("text-sm px-2 py-1 rounded-md", {
-                        "bg-blue-50": markdown && !locked,
-                        "bg-gray-50": light,
+                        "bg-gray-50": (markdown && !locked) || light,
                         "hover:bg-blue-50 cursor-pointer": light && !locked,
-                        "hover:bg-gray-50 cursor-pointer": !light && !locked,
+                        "hover:bg-gray-100 cursor-pointer": !light && !locked,
                         "cursor-default": locked,
                     })}
                 >

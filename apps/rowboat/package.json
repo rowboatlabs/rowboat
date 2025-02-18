@@ -39,6 +39,8 @@
     "mongodb": "^6.8.0",
     "next": "^14.2.13",
     "openai": "^4.67.2",
+    "quill": "^2.0.3",
+    "quill-mention": "^6.0.2",
     "react": "^18.3.1",
     "react-diff-viewer-continued": "^3.4.0",
     "react-dom": "^18.3.1",

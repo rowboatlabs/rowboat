@@ -76,3 +76,32 @@ html, body {
     @apply bg-background text-foreground;
   }
 }
+
+/* Add these styles alongside your other global styles */
+.ql-mention-list-container {
+    border: 1px solid #e2e8f0;
+    border-radius: 0.375rem;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    background-color: white;
+    z-index: 1000;
+}
+
+.ql-mention-list {
+    padding: 0.5rem 0;
+}
+
+/* Styles for mentions in the editor */
+.ql-editor .mention {
+    background-color: #e0f2fe;  /* light blue bg */
+    color: #1e40af;            /* darker blue text */
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+/* Style for the @ symbol */
+.ql-editor .mention .ql-mention-denotation-char {
+    color: #3b82f6;  /* blue color for @ symbol */
+    font-weight: normal;
+}

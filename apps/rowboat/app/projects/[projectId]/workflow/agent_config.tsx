@@ -1,8 +1,7 @@
 "use client";
 import { WithStringId } from "../../../lib/types/types";
 import { AgenticAPITool } from "../../../lib/types/agents_api_types";
-import { WorkflowPrompt } from "../../../lib/types/workflow_types";
-import { WorkflowAgent } from "../../../lib/types/workflow_types";
+import { WorkflowPrompt, WorkflowAgent } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { Button, Divider, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Input, Radio, RadioGroup, Select, SelectItem } from "@nextui-org/react";
 import { z } from "zod";
@@ -10,7 +9,7 @@ import { DataSourceIcon } from "../../../lib/components/datasource-icon";
 import { ActionButton, Pane } from "./pane";
 import { EditableField } from "../../../lib/components/editable-field";
 import { Label } from "../../../lib/components/label";
-import { PlusIcon, XIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import { List } from "./config_list";
 
 export function AgentConfig({
@@ -32,6 +31,32 @@ export function AgentConfig({
     handleUpdate: (agent: z.infer<typeof WorkflowAgent>) => void,
     handleClose: () => void,
 }) {
+    const atMentions = [];
+    for (const a of agents) {
+        if (a.disabled || a.name === agent.name) {
+            continue;
+        }
+        const id = `agent:${a.name}`;
+        atMentions.push({
+            id,
+            value: id,
+        });
+    }
+    for (const prompt of prompts) {
+        const id = `prompt:${prompt.name}`;
+        atMentions.push({
+            id,
+            value: id,
+        });
+    }
+    for (const tool of tools) {
+        const id = `tool:${tool.name}`;
+        atMentions.push({
+            id,
+            value: id,
+        });
+    }
+
     return <Pane title={agent.name} actions={[
         <ActionButton
             key="close"
@@ -101,6 +126,8 @@ export function AgentConfig({
                     markdown
                     label="Instructions"
                     multiline
+                    mentions
+                    mentionsAtValues={atMentions}
                 />
             </div>
 
@@ -121,46 +148,6 @@ export function AgentConfig({
                     label="Examples"
                     multiline
                 />
-            </div>
-
-            <Divider />
-
-            <div className="flex flex-col gap-4 items-start">
-                <Label label="Prompts" />
-                <List
-                    items={agent.prompts.map((prompt) => ({
-                        id: prompt,
-                        node: <div>{prompt}</div>
-                    }))}
-                    onRemove={(id) => {
-                        const newPrompts = agent.prompts.filter((p) => p !== id);
-                        handleUpdate({
-                            ...agent,
-                            prompts: newPrompts
-                        });
-                    }}
-                />
-                <Dropdown size="sm">
-                    <DropdownTrigger>
-                        <Button
-                            variant="light"
-                            size="sm"
-                            startContent={<PlusIcon size={16} />}
-                        >
-                            Add prompt
-                        </Button>
-                    </DropdownTrigger>
-                    <DropdownMenu onAction={(key) => handleUpdate({
-                        ...agent,
-                        prompts: [...agent.prompts, key as string]
-                    })}>
-                        {prompts.filter((prompt) => !agent.prompts.includes(prompt.name)).map((prompt) => (
-                            <DropdownItem key={prompt.name}>
-                                {prompt.name}
-                            </DropdownItem>
-                        ))}
-                    </DropdownMenu>
-                </Dropdown>
             </div>
 
             <Divider />
@@ -242,88 +229,6 @@ export function AgentConfig({
                 </div>
                 <Divider />
             </>}
-
-
-            <div className="flex flex-col gap-4 items-start">
-                <Label label="Tools" />
-                <List
-                    items={agent.tools.map((tool) => ({
-                        id: tool,
-                        node: <div>{tool}</div>
-                    }))}
-                    onRemove={(id) => {
-                        const newTools = agent.tools.filter((t) => t !== id);
-                        handleUpdate({
-                            ...agent,
-                            tools: newTools
-                        });
-                    }}
-                />
-                <Dropdown>
-                    <DropdownTrigger>
-                        <Button
-                            variant="light"
-                            size="sm"
-                            startContent={<PlusIcon size={16} />}
-                        >
-                            Add tool
-                        </Button>
-                    </DropdownTrigger>
-                    <DropdownMenu onAction={(key) => handleUpdate({
-                        ...agent,
-                        tools: [...(agent.tools || []), key as string]
-                    })}>
-                        {tools.filter((tool) => !(agent.tools || []).includes(tool.name)).map((tool) => (
-                            <DropdownItem key={tool.name}>
-                                <div className="font-mono">{tool.name}</div>
-                            </DropdownItem>
-                        ))}
-                    </DropdownMenu>
-                </Dropdown>
-            </div>
-
-            <Divider />
-            <div className="flex flex-col gap-4 items-start">
-                <Label label="Connected agents" />
-                <List
-                    items={agent.connectedAgents?.map((connectedAgentName) => ({
-                        id: connectedAgentName,
-                        node: <div>{connectedAgentName}</div>
-                    })) || []}
-                    onRemove={(id) => {
-                        const newAgents = (agent.connectedAgents || []).filter((a) => a !== id);
-                        handleUpdate({
-                            ...agent,
-                            connectedAgents: newAgents
-                        });
-                    }}
-                />
-                <Dropdown>
-                    <DropdownTrigger>
-                        <Button
-                            variant="light"
-                            size="sm"
-                            startContent={<PlusIcon size={16} />}
-                        >
-                            Connect agent
-                        </Button>
-                    </DropdownTrigger>
-                    <DropdownMenu onAction={(key) => handleUpdate({
-                        ...agent,
-                        connectedAgents: [...(agent.connectedAgents || []), key as string]
-                    })}>
-                        {agents.filter((a) =>
-                            a.name !== agent.name &&
-                            !(agent.connectedAgents || []).includes(a.name) &&
-                            !a.global
-                        ).map((a) => (
-                            <DropdownItem key={a.name}>
-                                <div>{a.name}</div>
-                            </DropdownItem>
-                        ))}
-                    </DropdownMenu>
-                </Dropdown>
-            </div>
 
             <Divider />
             <div className="flex flex-col gap-2 items-start">
