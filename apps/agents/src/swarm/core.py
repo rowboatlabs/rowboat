@@ -57,7 +57,7 @@ class Swarm:
         for tool in funcs_and_tools:
             params = tool["function"]["parameters"]
             params["properties"].pop(__CTX_VARS_NAME__, None)
-            if __CTX_VARS_NAME__ in params["required"]:
+            if __CTX_VARS_NAME__ in params.get("required", []):
                 params["required"].remove(__CTX_VARS_NAME__)
 
         create_params = {
