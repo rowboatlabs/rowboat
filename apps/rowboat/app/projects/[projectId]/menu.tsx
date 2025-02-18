@@ -57,7 +57,7 @@ export default function Menu({
         />
         <NavLink
             href={`/projects/${projectId}/simulation`}
-            label="Test (wip)"
+            label="Test"
             collapsed={collapsed}
             icon={<PlayIcon size={16} />}
             selected={pathname.startsWith(`/projects/${projectId}/simulation`)}
