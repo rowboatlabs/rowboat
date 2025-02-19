@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { PlusIcon, PencilIcon, XMarkIcon, EllipsisVerticalIcon, TrashIcon, ChevronRightIcon, PlayIcon, ChevronDownIcon, ChevronLeftIcon } from '@heroicons/react/24/outline';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { 
     getScenarios, 
     createScenario, 
@@ -22,15 +22,8 @@ import { Scenario, SimulationRun, SimulationResult } from "../../../lib/types/te
 import { Workflow } from "../../../lib/types/workflow_types";
 import { z } from 'zod';
 import { SimulationResultCard, ScenarioResultCard } from './components/RunComponents';
-import { ScenarioList, ScenarioViewer } from './components/ScenarioComponents';
+import { ScenarioViewer } from './components/ScenarioComponents';
 import { fetchWorkflow } from '../../../actions/workflow_actions';
-import { StructuredPanel, ActionButton } from "../../../lib/components/structured-panel";
-import {
-    ResizableHandle,
-    ResizablePanel,
-    ResizablePanelGroup,
-} from "../../../../components/ui/resizable"
-import { Pagination } from "../../../lib/components/pagination";
 
 type ScenarioType = WithStringId<z.infer<typeof Scenario>>;
 type SimulationRunType = WithStringId<z.infer<typeof SimulationRun>>;
@@ -72,7 +65,6 @@ const dummySimulator = async (scenario: ScenarioType, runId: string, projectId: 
 export default function SimulationApp() {
   const { projectId } = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [scenarios, setScenarios] = useState<ScenarioType[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioType | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -87,7 +79,7 @@ export default function SimulationApp() {
   const [allRunResults, setAllRunResults] = useState<Record<string, SimulationResultType[]>>({});
   const [workflowVersions, setWorkflowVersions] = useState<Record<string, WithStringId<z.infer<typeof Workflow>>>>({});
   const [menuOpenId, setMenuOpenIdState] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(Number(searchParams.get('page')) || 1);
+  const [currentPage, setCurrentPage] = useState(1);
   const runsPerPage = 10;
 
   const setMenuOpenId = useCallback((id: string | null) => {
@@ -375,34 +367,88 @@ export default function SimulationApp() {
     }
   };
 
-  // Add this effect to update currentPage when URL changes
-  useEffect(() => {
-    const page = Number(searchParams.get('page')) || 1;
-    setCurrentPage(page);
-  }, [searchParams]);
-
   const indexOfLastRun = currentPage * runsPerPage;
   const indexOfFirstRun = indexOfLastRun - runsPerPage;
   const currentRuns = runs.slice(indexOfFirstRun, indexOfLastRun);
   const totalPages = Math.ceil(runs.length / runsPerPage);
 
   return (
-    <ResizablePanelGroup direction="horizontal" className="h-screen gap-1">
-      <ResizablePanel minSize={10} defaultSize={15}>
-        <ScenarioList
-          scenarios={scenarios}
-          selectedId={selectedScenario?._id ?? null}
-          onSelect={(id) => setSelectedScenario(scenarios.find(s => s._id === id) ?? null)}
-          onAdd={createNewScenario}
-          onRunScenario={(id) => {
-            const scenario = scenarios.find(s => s._id === id);
-            if (scenario) runSingleScenario(scenario);
-          }}
-          onDeleteScenario={(id) => handleDeleteScenario(id)}
-        />
-      </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel minSize={20} defaultSize={85} className="overflow-auto">
+    <div className="flex h-screen">
+      {/* Left sidebar */}
+      <div className="w-64 border-r border-gray-200 p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Scenarios</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={createNewScenario}
+              className="p-2 rounded-full hover:bg-gray-100"
+              title="New Scenario"
+            >
+              <PlusIcon className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {scenarios.map(scenario => (
+            <div
+              key={scenario._id}
+              className={`p-2 rounded flex justify-between items-center ${
+                selectedScenario?._id === scenario._id
+                  ? 'bg-blue-100'
+                  : 'hover:bg-gray-100'
+              }`}
+            >
+              <div
+                onClick={() => setSelectedScenario(scenario)}
+                className="cursor-pointer flex-grow"
+              >
+                {scenario.name}
+              </div>
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuOpenScenarioId(menuOpenScenarioId === scenario._id ? null : scenario._id);
+                  }}
+                  className="p-1 rounded-full hover:bg-gray-200"
+                >
+                  <EllipsisVerticalIcon className="h-5 w-5 text-gray-600" />
+                </button>
+                {menuOpenScenarioId === scenario._id && (
+                  <div className="absolute right-0 mt-1 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
+                    <div className="py-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          runSingleScenario(scenario);
+                        }}
+                        className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
+                      >
+                        <PlayIcon className="h-4 w-4 mr-2" />
+                        Run Scenario
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteScenario(scenario._id);
+                        }}
+                        className="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-gray-100 w-full"
+                      >
+                        <TrashIcon className="h-4 w-4 mr-2" />
+                        Delete Scenario
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 p-6 overflow-auto">
         {selectedScenario ? (
           <ScenarioViewer
             scenario={selectedScenario}
@@ -410,56 +456,81 @@ export default function SimulationApp() {
             onClose={handleCloseScenario}
           />
         ) : (
-          <StructuredPanel 
-            title="SIMULATION RUNS"
-            tooltip="Run and view simulations"
-            actions={[
-              <ActionButton
-                key="run-all"
+          <div className="space-y-6">
+            <div className="flex justify-between items-center mb-6">
+              <h1 className="text-2xl font-bold">Simulation Runs</h1>
+              <button
                 onClick={runAllScenarios}
-                disabled={isRunning}
-                icon={<PlayIcon className="w-4 h-4" />}
-                primary
+                disabled={isRunning || scenarios.length === 0}
+                className={`px-4 py-2 rounded-md text-white ${
+                  isRunning || scenarios.length === 0
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                Run All Scenarios
-              </ActionButton>
-            ]}
-          >
-            <div className="p-6">
-              {/* Runs list */}
-              {isLoadingRuns ? (
-                <div>Loading runs...</div>
-              ) : (
-                <div className="space-y-4">
-                  {currentRuns.map((run) => (
-                    <SimulationResultCard
-                      key={run._id}
-                      run={run}
-                      results={allRunResults[run._id] || []}
-                      scenarios={scenarios}
-                      workflow={workflowVersions[run.workflowId]}
-                      onCancelRun={handleCancelRun}
-                      onDeleteRun={handleDeleteRun}
-                      menuOpenId={menuOpenId}
-                      setMenuOpenId={setMenuOpenId}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {/* Pagination */}
-              {runs.length > runsPerPage && (
-                <div className="flex justify-center mt-4">
-                  <Pagination
-                    total={totalPages}
-                    page={currentPage}
-                  />
-                </div>
-              )}
+                {isRunning ? 'Running...' : 'Run All Scenarios'}
+              </button>
             </div>
-          </StructuredPanel>
+
+            {isLoadingRuns ? (
+                <div className="text-center py-4">Loading runs...</div>
+            ) : runs.length === 0 ? (
+                <div className="text-center py-4 text-gray-500">No simulation runs yet</div>
+            ) : (
+                <>
+                    <div className="space-y-4">
+                        {currentRuns.map((run) => (
+                            <SimulationResultCard 
+                                key={run._id}
+                                run={run}
+                                results={allRunResults[run._id] || []}
+                                scenarios={scenarios}
+                                workflow={workflowVersions[run.workflowId]}
+                                onCancelRun={handleCancelRun}
+                                onDeleteRun={handleDeleteRun}
+                                menuOpenId={menuOpenId}
+                                setMenuOpenId={setMenuOpenId}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Pagination Controls */}
+                    {totalPages > 1 && (
+                        <div className="flex justify-center items-center space-x-4 mt-6">
+                            <button
+                                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                                disabled={currentPage === 1}
+                                className={`p-2 rounded-full ${
+                                    currentPage === 1 
+                                        ? 'text-gray-400 cursor-not-allowed' 
+                                        : 'text-gray-600 hover:bg-gray-100'
+                                }`}
+                            >
+                                <ChevronLeftIcon className="h-5 w-5" />
+                            </button>
+                            
+                            <span className="text-sm text-gray-600">
+                                Page {currentPage} of {totalPages}
+                            </span>
+                            
+                            <button
+                                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                                disabled={currentPage === totalPages}
+                                className={`p-2 rounded-full ${
+                                    currentPage === totalPages 
+                                        ? 'text-gray-400 cursor-not-allowed' 
+                                        : 'text-gray-600 hover:bg-gray-100'
+                                }`}
+                            >
+                                <ChevronRightIcon className="h-5 w-5" />
+                            </button>
+                        </div>
+                    )}
+                </>
+            )}
+          </div>
         )}
-      </ResizablePanel>
-    </ResizablePanelGroup>
+      </div>
+    </div>
   );
 }

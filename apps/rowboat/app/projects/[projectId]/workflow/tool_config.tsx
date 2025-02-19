@@ -2,7 +2,7 @@
 import { WorkflowTool } from "../../../lib/types/workflow_types";
 import { Accordion, AccordionItem, Button, Checkbox, Select, SelectItem, Switch, RadioGroup, Radio } from "@nextui-org/react";
 import { z } from "zod";
-import { ActionButton, Pane } from "./pane";
+import { ActionButton, StructuredPanel } from "../../../lib/components/structured-panel";
 import { EditableField } from "../../../lib/components/editable-field";
 import { Divider } from "@nextui-org/react";
 import { Label } from "../../../lib/components/label";
@@ -31,7 +31,7 @@ export function ParameterConfig({
     handleDelete: (name: string) => void,
     handleRename: (oldName: string, newName: string) => void
 }) {
-    return <Pane
+    return <StructuredPanel
         title={param.name}
         actions={[
             <ActionButton
@@ -106,7 +106,7 @@ export function ParameterConfig({
                 Required
             </Checkbox>
         </div>
-    </Pane>;
+    </StructuredPanel>;
 }
 
 export function ToolConfig({
@@ -183,13 +183,11 @@ export function ToolConfig({
     }
 
     return (
-        <Pane title={tool.name} actions={[
+        <StructuredPanel title={tool.name} actions={[
             <ActionButton
                 key="close"
                 onClick={handleClose}
-                icon={<svg className="w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
-                    <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M6 18 17.94 6M18 18 6.06 6" />
-                </svg>}
+                icon={<XIcon className="w-4 h-4" />}
             >
                 Close
             </ActionButton>
@@ -343,6 +341,6 @@ export function ToolConfig({
                     Add Parameter
                 </Button>
             </div>
-        </Pane>
+        </StructuredPanel>
     );
 }

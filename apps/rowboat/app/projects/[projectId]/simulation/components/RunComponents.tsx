@@ -116,7 +116,7 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
           ) : (
             <ChevronRightIcon className="h-5 w-5 text-gray-400" />
           )}
-          <div className="text-lg font-semibold">
+          <div className="text-sm truncate">
             {formatMainTitle(run.startedAt)}
           </div>
         </div>
