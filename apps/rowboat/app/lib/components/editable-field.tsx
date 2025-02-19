@@ -19,13 +19,10 @@ interface EditableFieldProps {
     className?: string;
     validate?: (value: string) => { valid: boolean; errorMessage?: string };
     light?: boolean;
-<<<<<<< HEAD
     mentions?: boolean;
     mentionsAtValues?: Match[];
-=======
     showSaveButton?: boolean;
     error?: string | null;
->>>>>>> 0ddd390 (Refactor components and use in scenarios pages)
 }
 
 export function EditableField({
