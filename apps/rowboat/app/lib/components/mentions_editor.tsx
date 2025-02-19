@@ -3,17 +3,29 @@ import { useEffect, useRef } from 'react';
 import Quill, { Delta, Op } from 'quill';
 import { Mention, MentionBlot, MentionBlotData } from "quill-mention";
 import "quill/dist/quill.snow.css";
+import { CopyIcon } from 'lucide-react';
+import { CopyButton } from './copy-button';
 
 export type Match = {
     id: string;
     value: string;
-    [key: string]: string | undefined;
+    invalid?: boolean;
+    [key: string]: string | boolean | undefined;
 };
 
-Quill.register('blots/mention', MentionBlot);
+class CustomMentionBlot extends MentionBlot {
+    static render(data: any) {
+        const element = document.createElement('span');
+        element.className = data.invalid ? 'invalid' : '';
+        element.textContent = data.invalid ? `${data.value} (!)` : data.value;
+        return element;
+    }
+}
+
+Quill.register('blots/mention', CustomMentionBlot);
 Quill.register('modules/mention', Mention);
 
-function markdownToParts(markdown: string): (string | Match)[] {
+function markdownToParts(markdown: string, atValues: Match[]): (string | Match)[] {
     // Regex match for pattern [@type:name](#type:something) where type is tool/prompt/agent
     const mentionRegex = /\[@(tool|prompt|agent):([^\]]+)\]\(#mention\)/g;
     const parts: (string | Match)[] = [];
@@ -28,10 +40,15 @@ function markdownToParts(markdown: string): (string | Match)[] {
             parts.push(markdown.slice(lastIndex, match.index));
         }
 
+        // check if the match is valid
+        const matchValue = `${match[1]}:${match[2]}`;
+        const isInvalid = !atValues.some(atValue => atValue.id === matchValue);
+
         // parse the match into a mention
         parts.push({
             id: `${match[1]}:${match[2]}`,
             value: `${match[1]}:${match[2]}`,
+            invalid: isInvalid,
         });
 
         lastIndex = match.index + match[0].length;
@@ -56,6 +73,7 @@ function insertPartsIntoQuill(quill: Quill, parts: (string | Match)[]) {
                 id: part.id,
                 value: part.value,
                 denotationChar: '@',
+                invalid: part.invalid,
             }, Quill.sources.SILENT);
             index += 1;
         }
@@ -75,6 +93,28 @@ export default function MentionEditor({
 }) {
     const containerRef = useRef<HTMLDivElement>(null);
     const quillRef = useRef<Quill | null>(null);
+
+    function getMarkdown(): string {
+        if (!quillRef.current) {
+            return "";
+        }
+        // generate markdown representation of content
+        const markdown = quillRef.current.getContents().map((op) => {
+            if (op.insert && typeof op.insert === 'object' && 'mention' in op.insert) {
+                const mentionOp = op.insert as { mention: Match };
+                return `[@${mentionOp.mention.id}](#mention)`;
+            }
+            return op.insert;
+        }).join('');
+        return markdown;
+    }
+
+    function copyHandler() {
+        if (!quillRef.current) {
+            return;
+        }
+        navigator.clipboard.writeText(getMarkdown());
+    }
 
     useEffect(() => {
         if (!containerRef.current) {
@@ -124,21 +164,12 @@ export default function MentionEditor({
             quill.setContents([]);
 
             // convert the markdown to parts
-            const parts = markdownToParts(value);
+            const parts = markdownToParts(value, atValues);
             insertPartsIntoQuill(quill, parts);
 
             quill.on(Quill.events.TEXT_CHANGE, (delta: Delta, oldDelta: Delta, source: string) => {
                 if (onValueChange) {
-                    // generate markdown representation of content
-                    const markdown = quill.getContents().map((op) => {
-                        if (op.insert && typeof op.insert === 'object' && 'mention' in op.insert) {
-                            const mentionOp = op.insert as { mention: Match };
-                            return `[@${mentionOp.mention.id}](#mention)`;
-                        }
-                        return op.insert;
-                    }).join('');
-
-                    onValueChange(markdown);
+                    onValueChange(getMarkdown());
                 }
             });
             quillRef.current = quill;
@@ -153,5 +184,14 @@ export default function MentionEditor({
         }
     }, [atValues, onValueChange, placeholder, value]);
 
-    return <div ref={containerRef} />;
+    return <div className="relative">
+        <button className="absolute top-2 right-2 z-10">
+            <CopyButton
+                onCopy={copyHandler}
+                label="Copy"
+                successLabel="Copied!"
+            />
+        </button>
+        <div ref={containerRef} />
+    </div>;
 }

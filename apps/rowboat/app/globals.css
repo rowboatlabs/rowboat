@@ -102,6 +102,10 @@ html, body {
 
 /* Style for the @ symbol */
 .ql-editor .mention .ql-mention-denotation-char {
-    color: #3b82f6;  /* blue color for @ symbol */
+    color: #1e40af;  /* blue color for @ symbol */
     font-weight: normal;
+}
+
+.ql-editor .mention .invalid {
+  color: red;
 }

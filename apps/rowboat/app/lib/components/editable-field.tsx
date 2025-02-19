@@ -147,15 +147,15 @@ export function EditableField({
                 >
                     {value ? (<>
                         {markdown && <div className="max-h-[420px] overflow-y-auto">
-                            <MarkdownContent content={value} />
+                            <MarkdownContent content={value} atValues={mentionsAtValues} />
                         </div>}
                         {!markdown && <div className={`${multiline ? 'whitespace-pre-wrap max-h-[420px] overflow-y-auto' : 'flex items-center'}`}>
-                            {value}
+                            <MarkdownContent content={value} atValues={mentionsAtValues} />
                         </div>}
                     </>) : (
                         <>
                             {markdown && <div className="max-h-[420px] overflow-y-auto text-gray-400 italic">
-                                <MarkdownContent content={placeholder} />
+                                <MarkdownContent content={placeholder} atValues={mentionsAtValues} />
                             </div>}
                             {!markdown && <span className="text-gray-400 italic">{placeholder}</span>}
                         </>

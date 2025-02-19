@@ -1,8 +1,14 @@
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { useMemo } from 'react'
+import { Match } from './mentions_editor';
 
-export default function MarkdownContent({ content }: { content: string }) {
+export default function MarkdownContent({
+    content,
+    atValues = []
+}: {
+    content: string;
+    atValues?: Match[];
+}) {
     return <Markdown
         className="overflow-auto break-words"
         remarkPlugins={[remarkGfm]}
@@ -54,9 +60,36 @@ export default function MarkdownContent({ content }: { content: string }) {
 
                 // If this is a mention link, render it with mention styling
                 if (href === '#mention') {
+                    let label: string = '';
+                    // Check if children is an array and get the first text element
+                    if (Array.isArray(children) && children.length > 0) {
+                        const text = children[0];
+                        if (typeof text === 'string') {
+                            const parts = text.split('@');
+                            if (parts.length === 2) {
+                                label = parts[1];
+                            }
+                        }
+                    } else if (typeof children === 'string') {
+                        // Fallback for direct string children
+                        const parts = children.split('@');
+                        if (parts.length === 2) {
+                            label = parts[1];
+                        }
+                    }
+
+                    // check if the the mention is valid
+                    const invalid = !atValues.some(atValue => atValue.id === label);
+                    if (atValues.length > 0 && invalid) {
+                        return (
+                            <span className="inline-block bg-[#e0f2fe] text-[red] px-1.5 py-0.5 rounded whitespace-nowrap">
+                                @{label} (!)
+                            </span>
+                        );
+                    }
                     return (
                         <span className="inline-block bg-[#e0f2fe] text-[#1e40af] px-1.5 py-0.5 rounded whitespace-nowrap">
-                            {children}
+                            @{label}
                         </span>
                     );
                 }
