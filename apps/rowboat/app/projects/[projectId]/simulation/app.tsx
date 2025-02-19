@@ -196,14 +196,9 @@ export default function SimulationApp() {
       }
     );
 
-    // Refresh scenarios list and update only the modified scenario
+    // Just refresh the scenarios list without setting selected scenario
     const updatedScenarios = await getScenarios(projectId as string);
     setScenarios(updatedScenarios);
-    
-    const refreshedScenario = updatedScenarios.find(s => s._id === updatedScenario._id);
-    if (refreshedScenario) {
-      setSelectedScenario(refreshedScenario);
-    }
     setIsEditing(false);
   };
 
