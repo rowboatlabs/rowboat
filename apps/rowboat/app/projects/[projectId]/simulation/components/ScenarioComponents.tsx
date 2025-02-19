@@ -1,10 +1,15 @@
 'use client';
 
-import { useState, useEffect, useCallback, ChangeEvent } from 'react';
-import { XMarkIcon } from '@heroicons/react/24/outline';
+import { useState, useEffect, useCallback } from 'react';
+import { Save, EllipsisVerticalIcon, PlayIcon, TrashIcon, X } from "lucide-react";
 import { WithStringId } from '../../../../lib/types/types';
 import { Scenario } from "../../../../lib/types/testing_types";
 import { z } from 'zod';
+import { EditableField } from '../../../../lib/components/editable-field';
+import { FormSection } from '../../../../lib/components/form-section';
+import { StructuredPanel, ActionButton } from "../../../../lib/components/structured-panel";
+import clsx from "clsx";
+import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@nextui-org/react";
 
 type ScenarioType = WithStringId<z.infer<typeof Scenario>>;
 
@@ -17,17 +22,17 @@ interface ScenarioViewerProps {
 export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProps) {
   const [editedScenario, setEditedScenario] = useState<ScenarioType>(scenario);
   const [isDirty, setIsDirty] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
 
-  // Reset state when scenario changes
   useEffect(() => {
     setEditedScenario(scenario);
     setIsDirty(false);
   }, [scenario]);
 
-  const handleChange = useCallback((field: keyof ScenarioType, event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    event.preventDefault();
-    const value = event.target.value;
-    
+  const handleChange = useCallback((field: keyof ScenarioType, value: string) => {
+    if (field === 'name') {
+      setNameError(value.trim() ? null : 'Name is required');
+    }
     setEditedScenario(prev => ({
       ...prev,
       [field]: value,
@@ -36,95 +41,208 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
   }, []);
 
   const handleSave = useCallback(() => {
+    if (!editedScenario.name.trim()) {
+      setNameError('Name is required');
+      return;
+    }
     onSave(editedScenario);
     onClose();
   }, [editedScenario, onSave, onClose]);
 
-  const adjustTextareaHeight = useCallback((element: HTMLTextAreaElement) => {
-    element.style.height = 'auto';
-    element.style.height = `${element.scrollHeight}px`;
-  }, []);
-
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Scenario Details</h1>
-        <div className="flex gap-2">
-          {isDirty && (
-            <button
-              onClick={handleSave}
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-            >
-              Save
-            </button>
-          )}
-          <button
-            onClick={onClose}
-            className="p-2 rounded-full hover:bg-gray-100"
-            title="Close"
+    <StructuredPanel 
+      title="SCENARIO DETAILS"
+      actions={[
+        isDirty && (
+          <ActionButton
+            key="save"
+            onClick={handleSave}
+            icon={<Save className="w-4 h-4" />}
+            primary
           >
-            <XMarkIcon className="h-5 w-5 text-gray-600" />
-          </button>
-        </div>
-      </div>
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col">
-          <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">NAME</div>
-          <input
-            type="text"
+            Save
+          </ActionButton>
+        ),
+        <ActionButton
+          key="close"
+          onClick={onClose}
+          icon={<X className="w-4 h-4" />}
+        >
+          Close
+        </ActionButton>
+      ].filter(Boolean)}
+    >
+      <div className="flex flex-col gap-4 p-6 w-full">
+        <FormSection>
+          <EditableField
+            label="NAME"
             value={editedScenario.name}
-            onChange={(e) => handleChange('name', e)}
-            className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            autoComplete="off"
-            spellCheck="false"
+            onChange={(value) => handleChange('name', value)}
+            multiline={false}
+            className="w-full"
+            showSaveButton={false}
+            placeholder="Enter an identifiable scenario name"
+            error={nameError}
           />
-        </div>
+        </FormSection>
         
-        <div className="border-t border-gray-200 my-4"></div>
-        
-        <div className="flex flex-col">
-          <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">DESCRIPTION</div>
-          <textarea
+        <FormSection>
+          <EditableField
+            label="DESCRIPTION"
             value={editedScenario.description}
-            onChange={(e) => handleChange('description', e)}
-            onInput={(e) => adjustTextareaHeight(e.target as HTMLTextAreaElement)}
-            className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[24px] resize-none"
-            style={{ height: 'auto', minHeight: '24px' }}
-            autoComplete="off"
-            spellCheck="false"
+            onChange={(value) => handleChange('description', value)}
+            multiline={true}
+            className="w-full"
+            showSaveButton={false}
+            placeholder="Describe the user scenario to be simulated"
           />
-        </div>
+        </FormSection>
         
-        <div className="border-t border-gray-200 my-4"></div>
-        
-        <div className="flex flex-col">
-          <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">CRITERIA</div>
-          <textarea
+        <FormSection>
+          <EditableField
+            label="CRITERIA"
             value={editedScenario.criteria}
-            onChange={(e) => handleChange('criteria', e)}
-            onInput={(e) => adjustTextareaHeight(e.target as HTMLTextAreaElement)}
-            className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[24px] resize-none"
-            style={{ height: 'auto', minHeight: '24px' }}
-            autoComplete="off"
-            spellCheck="false"
+            onChange={(value) => handleChange('criteria', value)}
+            multiline={true}
+            className="w-full"
+            showSaveButton={false}
+            placeholder="Enter success criteria for this scenario to pass in a simulation"
           />
-        </div>
-
-        <div className="border-t border-gray-200 my-4"></div>
+        </FormSection>
         
-        <div className="flex flex-col">
-          <div className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">CONTEXT</div>
-          <textarea
+        <FormSection>
+          <EditableField
+            label="CONTEXT"
             value={editedScenario.context}
-            onChange={(e) => handleChange('context', e)}
-            onInput={(e) => adjustTextareaHeight(e.target as HTMLTextAreaElement)}
-            className="text-base border border-gray-200 rounded px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[24px] resize-none"
-            style={{ height: 'auto', minHeight: '24px' }}
-            autoComplete="off"
-            spellCheck="false"
+            onChange={(value) => handleChange('context', value)}
+            multiline={true}
+            className="w-full"
+            showSaveButton={false}
+            placeholder="Provide context about the user to the assistant at the start of chat"
           />
-        </div>
+        </FormSection>
       </div>
-    </div>
+    </StructuredPanel>
   );
+}
+
+function SectionHeader({ title, onAdd }: { title: string; onAdd: () => void }) {
+    return (
+        <div className="flex items-center justify-between px-2 py-1 mt-4 first:mt-0 border-b border-gray-200">
+            <div className="text-xs font-semibold text-gray-400 uppercase">{title}</div>
+            <ActionButton
+                icon={<svg className="w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
+                    <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h14m-7 7V5" />
+                </svg>}
+                onClick={onAdd}
+            >
+                Add
+            </ActionButton>
+        </div>
+    );
+}
+
+function ListItem({ 
+    name, 
+    isSelected, 
+    onClick,
+    rightElement
+}: { 
+    name: string;
+    isSelected: boolean;
+    onClick: () => void;
+    rightElement?: React.ReactNode;
+}) {
+    return (
+        <button
+            onClick={onClick}
+            className={clsx("flex items-center justify-between rounded-md px-2 py-1", {
+                "bg-gray-100": isSelected,
+                "hover:bg-gray-50": !isSelected,
+            })}
+        >
+            <div className="truncate text-sm">{name}</div>
+            {rightElement}
+        </button>
+    );
+}
+
+function ScenarioDropdown({
+    name,
+    onRun,
+    onDelete,
+}: {
+    name: string;
+    onRun: () => void;
+    onDelete: () => void;
+}) {
+    return (
+        <Dropdown>
+            <DropdownTrigger>
+                <EllipsisVerticalIcon size={16} />
+            </DropdownTrigger>
+            <DropdownMenu
+                onAction={(key) => {
+                    if (key === 'run') onRun();
+                    if (key === 'delete') onDelete();
+                }}
+            >
+                <DropdownItem 
+                    key="run" 
+                    startContent={<PlayIcon className="w-4 h-4" />}
+                >
+                    Run scenario
+                </DropdownItem>
+                <DropdownItem 
+                    key="delete" 
+                    className="text-danger"
+                    startContent={<TrashIcon className="w-4 h-4" />}
+                >
+                    Delete
+                </DropdownItem>
+            </DropdownMenu>
+        </Dropdown>
+    );
+}
+
+export function ScenarioList({ 
+    scenarios, 
+    selectedId, 
+    onSelect, 
+    onAdd,
+    onRunScenario,
+    onDeleteScenario,
+}: {
+    scenarios: ScenarioType[];
+    selectedId: string | null;
+    onSelect: (id: string) => void;
+    onAdd: () => void;
+    onRunScenario: (id: string) => void;
+    onDeleteScenario: (id: string) => void;
+}) {
+    return (
+        <StructuredPanel 
+            title="TESTS"
+            tooltip="Browse and manage your test scenarios"
+        >
+            <div className="overflow-auto flex flex-col gap-1 justify-start">
+                <SectionHeader title="Scenarios" onAdd={onAdd} />
+                {scenarios.map((scenario) => (
+                    <ListItem
+                        key={scenario._id}
+                        name={scenario.name}
+                        isSelected={selectedId === scenario._id}
+                        onClick={() => onSelect(scenario._id)}
+                        rightElement={
+                            <ScenarioDropdown 
+                                name={scenario.name}
+                                onRun={() => onRunScenario(scenario._id)}
+                                onDelete={() => onDeleteScenario(scenario._id)}
+                            />
+                        }
+                    />
+                ))}
+            </div>
+        </StructuredPanel>
+    );
 } 

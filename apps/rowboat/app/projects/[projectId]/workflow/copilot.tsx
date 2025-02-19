@@ -1,6 +1,6 @@
 'use client';
 import { Button, Textarea } from "@nextui-org/react";
-import { ActionButton, Pane } from "./pane";
+import { ActionButton, StructuredPanel } from "../../../lib/components/structured-panel";
 import { useEffect, useRef, useState, createContext, useContext, useCallback } from "react";
 import { CopilotChatContext } from "../../../lib/types/copilot_types";
 import { CopilotMessage } from "../../../lib/types/copilot_types";
@@ -529,7 +529,7 @@ export function Copilot({
     setResponseError: (error: string | null) => void;
 }) {
     return (
-        <Pane 
+        <StructuredPanel 
             fancy 
             title="COPILOT" 
             tooltip="Get AI assistance for creating and improving your multi-agent system"
@@ -562,6 +562,6 @@ export function Copilot({
                 responseError={responseError}
                 setResponseError={setResponseError}
             />
-        </Pane>
+        </StructuredPanel>
     );
 }

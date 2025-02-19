@@ -4,7 +4,7 @@ import { WorkflowPrompt } from "../../../lib/types/workflow_types";
 import { WorkflowAgent } from "../../../lib/types/workflow_types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@nextui-org/react";
 import { useRef, useEffect } from "react";
-import { ActionButton, Pane } from "./pane";
+import { ActionButton, StructuredPanel } from "../../../lib/components/structured-panel";
 import clsx from "clsx";
 import { EllipsisVerticalIcon } from "lucide-react";
 
@@ -105,7 +105,7 @@ export function EntityList({
     }, [selectedEntity]);
 
     return (
-        <Pane 
+        <StructuredPanel 
             title="WORKFLOW" 
             tooltip="Browse and manage your agents, tools, and prompts in this sidebar"
         >
@@ -163,7 +163,7 @@ export function EntityList({
                     />
                 ))}
             </div>
-        </Pane>
+        </StructuredPanel>
     );
 }
 

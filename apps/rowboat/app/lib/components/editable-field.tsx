@@ -16,6 +16,8 @@ interface EditableFieldProps {
     className?: string;
     validate?: (value: string) => { valid: boolean; errorMessage?: string };
     light?: boolean;
+    showSaveButton?: boolean;
+    error?: string | null;
 }
 
 export function EditableField({
@@ -29,6 +31,8 @@ export function EditableField({
     className = "flex flex-col gap-1",
     validate,
     light = false,
+    showSaveButton = multiline,
+    error,
 }: EditableFieldProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [localValue, setLocalValue] = useState(value);
@@ -88,9 +92,9 @@ export function EditableField({
 
     return (
         <div ref={ref} className={clsx("flex flex-col gap-1", className)}>
-            {(label || isEditing && multiline) && <div className="flex items-center gap-2 justify-between">
+            {(label || isEditing && showSaveButton) && <div className="flex items-center gap-2 justify-between">
                 {label && <Label label={label} />}
-                {isEditing && multiline && <div className="flex items-center gap-2">
+                {isEditing && showSaveButton && <div className="flex items-center gap-2">
                     <Button
                         size="sm"
                         variant="light"
@@ -145,12 +149,17 @@ export function EditableField({
                         </div>}
                     </>) : (
                         <>
-                            {markdown && <div className="max-h-[420px] overflow-y-auto text-gray-400 italic">
+                            {markdown && <div className="max-h-[420px] overflow-y-auto text-gray-400">
                                 <MarkdownContent content={placeholder} />
                             </div>}
-                            {!markdown && <span className="text-gray-400 italic">{placeholder}</span>}
+                            {!markdown && <span className="text-gray-400">{placeholder}</span>}
                         </>
                     )}
+                </div>
+            )}
+            {error && (
+                <div className="text-xs text-red-500 mt-1">
+                    {error}
                 </div>
             )}
         </div>
