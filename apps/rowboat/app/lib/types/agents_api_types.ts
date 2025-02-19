@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Workflow, WorkflowAgent, WorkflowPrompt, WorkflowTool } from "./workflow_types";
+import { ConnectedEntity, sanitizeTextWithMentions, Workflow, WorkflowAgent, WorkflowPrompt, WorkflowTool } from "./workflow_types";
 import { apiV1 } from "rowboat-shared";
 import { ApiMessage } from "./types";
 
@@ -21,11 +21,12 @@ export const AgenticAPIChatMessage = z.object({
         z.literal('internal'),
         z.literal('external'),
     ]).optional(),
-});export const AgenticAPIAgent = WorkflowAgent
+});
+
+export const AgenticAPIAgent = WorkflowAgent
     .omit({
         disabled: true,
         examples: true,
-        prompts: true,
         locked: true,
         toggleAble: true,
         global: true,
@@ -35,12 +36,18 @@ export const AgenticAPIChatMessage = z.object({
     })
     .extend({
         hasRagSources: z.boolean().default(false).optional(),
+        tools: z.array(z.string()),
+        prompts: z.array(z.string()),
+        connectedAgents: z.array(z.string()),
     });
+
 export const AgenticAPIPrompt = WorkflowPrompt;
+
 export const AgenticAPITool = WorkflowTool.omit({
     mockInPlayground: true,
     autoSubmitMockedResponse: true,
 });
+
 export const AgenticAPIChatRequest = z.object({
     messages: z.array(AgenticAPIChatMessage),
     state: z.unknown(),
@@ -49,10 +56,12 @@ export const AgenticAPIChatRequest = z.object({
     prompts: z.array(WorkflowPrompt),
     startAgent: z.string(),
 });
+
 export const AgenticAPIChatResponse = z.object({
     messages: z.array(AgenticAPIChatMessage),
     state: z.unknown(),
 });
+
 export function convertWorkflowToAgenticAPI(workflow: z.infer<typeof Workflow>): {
     agents: z.infer<typeof AgenticAPIAgent>[];
     tools: z.infer<typeof AgenticAPITool>[];
@@ -62,30 +71,41 @@ export function convertWorkflowToAgenticAPI(workflow: z.infer<typeof Workflow>):
     return {
         agents: workflow.agents
             .filter(agent => !agent.disabled)
-            .map(agent => ({
-                name: agent.name,
-                type: agent.type,
-                description: agent.description,
-                instructions: agent.instructions +
-                    '\n\n' + agent.prompts.map(prompt => workflow.prompts.find(p => p.name === prompt)?.prompt
-                    ).join('\n\n') +
-                    (agent.examples ? '\n\n# Examples\n' + agent.examples : ''),
-                tools: agent.tools,
-                model: agent.model,
-                hasRagSources: agent.ragDataSources ? agent.ragDataSources.length > 0 : false,
-                connectedAgents: agent.connectedAgents,
-                controlType: agent.controlType,
-            })),
+            .map(agent => {
+                const { sanitized, entities } = sanitizeTextWithMentions(agent.instructions, workflow);
+
+                const agenticAgent: z.infer<typeof AgenticAPIAgent> = {
+                    name: agent.name,
+                    type: agent.type,
+                    description: agent.description,
+                    instructions: sanitized,
+                    model: agent.model,
+                    hasRagSources: agent.ragDataSources ? agent.ragDataSources.length > 0 : false,
+                    controlType: agent.controlType,
+                    tools: entities.filter(e => e.type == 'tool').map(e => e.name),
+                    prompts: entities.filter(e => e.type == 'prompt').map(e => e.name),
+                    connectedAgents: entities.filter(e => e.type === 'agent').map(e => e.name),
+                };
+                return agenticAgent;
+            }),
         tools: workflow.tools.map(tool => {
             const { mockInPlayground, autoSubmitMockedResponse, ...rest } = tool;
             return {
                 ...rest,
             };
         }),
-        prompts: workflow.prompts,
+        prompts: workflow.prompts
+            .map(p => {
+                const { sanitized } = sanitizeTextWithMentions(p.prompt, workflow);
+                return {
+                    ...p,
+                    prompt: sanitized,
+                };
+            }),
         startAgent: workflow.startAgent,
     };
 }
+
 export function convertToAgenticAPIChatMessages(messages: z.infer<typeof apiV1.ChatMessage>[]): z.infer<typeof AgenticAPIChatMessage>[] {
     const converted: z.infer<typeof AgenticAPIChatMessage>[] = [];
 
@@ -144,6 +164,7 @@ export function convertToAgenticAPIChatMessages(messages: z.infer<typeof apiV1.C
 
     return converted;
 }
+
 export function convertFromAgenticAPIChatMessages(messages: z.infer<typeof AgenticAPIChatMessage>[]): z.infer<typeof apiV1.ChatMessage>[] {
     const converted: z.infer<typeof apiV1.ChatMessage>[] = [];
 
@@ -194,6 +215,7 @@ export function convertFromAgenticAPIChatMessages(messages: z.infer<typeof Agent
     }
     return converted;
 }
+
 export function convertFromApiToAgenticApiMessages(messages: z.infer<typeof ApiMessage>[]): z.infer<typeof AgenticAPIChatMessage>[] {
     return messages.map(m => {
         switch (m.role) {
@@ -259,6 +281,7 @@ export function convertFromApiToAgenticApiMessages(messages: z.infer<typeof ApiM
         }
     });
 }
+
 export function convertFromAgenticApiToApiMessages(messages: z.infer<typeof AgenticAPIChatMessage>[]): z.infer<typeof ApiMessage>[] {
     const converted: z.infer<typeof ApiMessage>[] = [];
 
@@ -299,4 +322,3 @@ export function convertFromAgenticApiToApiMessages(messages: z.infer<typeof Agen
     }
     return converted;
 }
-

@@ -29,8 +29,6 @@ import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/i
 import { CopyIcon, Layers2Icon, RadioIcon, RedoIcon, Sparkles, UndoIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
 import { CopilotMessage } from "../../../lib/types/copilot_types";
-import { InfoIcon } from "lucide-react";
-import { clsx } from "clsx";
 
 enablePatches();
 
@@ -170,7 +168,7 @@ function reducer(state: State, action: Action): State {
                 draft.currentIndex++;
                 draft.present.pendingChanges = true;
                 draft.present.chatKey++;
-             });
+            });
             break;
         }
         case "update_workflow_name": {
@@ -254,14 +252,11 @@ function reducer(state: State, action: Action): State {
                                 description: "",
                                 disabled: false,
                                 instructions: "",
-                                prompts: [],
-                                tools: [],
                                 model: "gpt-4o",
                                 locked: false,
                                 toggleAble: true,
                                 ragReturnType: "chunks",
                                 ragK: 3,
-                                connectedAgents: [],
                                 controlType: "retain",
                                 ...action.agent
                             });
@@ -331,10 +326,6 @@ function reducer(state: State, action: Action): State {
                             draft.workflow.agents = draft.workflow.agents.filter(
                                 (agent) => agent.name !== action.name
                             );
-                            draft.workflow.agents = draft.workflow.agents.map(agent => ({
-                                ...agent,
-                                connectedAgents: agent.connectedAgents.filter(connectedAgent => connectedAgent !== action.name)
-                            }));
                             draft.selection = null;
                             draft.pendingChanges = true;
                             draft.chatKey++;
@@ -346,10 +337,6 @@ function reducer(state: State, action: Action): State {
                             draft.workflow.tools = draft.workflow.tools.filter(
                                 (tool) => tool.name !== action.name
                             );
-                            draft.workflow.agents = draft.workflow.agents.map(agent => ({
-                                ...agent,
-                                tools: agent.tools.filter(toolName => toolName !== action.name)
-                            }));
                             draft.selection = null;
                             draft.pendingChanges = true;
                             draft.chatKey++;
@@ -361,10 +348,6 @@ function reducer(state: State, action: Action): State {
                             draft.workflow.prompts = draft.workflow.prompts.filter(
                                 (prompt) => prompt.name !== action.name
                             );
-                            draft.workflow.agents = draft.workflow.agents.map(agent => ({
-                                ...agent,
-                                prompts: agent.prompts.filter(promptName => promptName !== action.name)
-                            }));
                             draft.selection = null;
                             draft.pendingChanges = true;
                             draft.chatKey++;
@@ -373,26 +356,45 @@ function reducer(state: State, action: Action): State {
                             if (isLive) {
                                 break;
                             }
+
+                            // update agent data
                             draft.workflow.agents = draft.workflow.agents.map((agent) =>
                                 agent.name === action.name ? { ...agent, ...action.agent } : agent
                             );
-                            if (action.agent.name && draft.workflow.startAgent === action.name) {
-                                draft.workflow.startAgent = action.agent.name;
-                            }
+
+                            // if the agent is renamed
                             if (action.agent.name && action.agent.name !== action.name) {
+                                // update start agent pointer if this is the start agent
+                                if (action.agent.name && draft.workflow.startAgent === action.name) {
+                                    draft.workflow.startAgent = action.agent.name;
+                                }
+
+                                // update this agents references in other agents / prompts
                                 draft.workflow.agents = draft.workflow.agents.map(agent => ({
                                     ...agent,
-                                    connectedAgents: agent.connectedAgents.map(connectedAgent =>
-                                        connectedAgent === action.name ? action.agent.name! : connectedAgent
+                                    instructions: agent.instructions.replace(
+                                        `[@agent:${action.name}](#mention)`,
+                                        `[@agent:${action.agent.name}](#mention)`
                                     )
                                 }));
+                                draft.workflow.prompts = draft.workflow.prompts.map(prompt => ({
+                                    ...prompt,
+                                    prompt: prompt.prompt.replace(
+                                        `[@agent:${action.name}](#mention)`,
+                                        `[@agent:${action.agent.name}](#mention)`
+                                    )
+                                }));
+
+                                // update the selection pointer if this is the selected agent
+                                if (draft.selection?.type === "agent" && draft.selection.name === action.name) {
+                                    draft.selection = {
+                                        type: "agent",
+                                        name: action.agent.name
+                                    };
+                                }
                             }
-                            if (action.agent.name && draft.selection?.type === "agent" && draft.selection.name === action.name) {
-                                draft.selection = {
-                                    type: "agent",
-                                    name: action.agent.name
-                                };
-                            }
+
+                            // select this agent
                             draft.selection = {
                                 type: "agent",
                                 name: action.agent.name || action.name,
@@ -404,23 +406,40 @@ function reducer(state: State, action: Action): State {
                             if (isLive) {
                                 break;
                             }
+
+                            // update tool data
                             draft.workflow.tools = draft.workflow.tools.map((tool) =>
                                 tool.name === action.name ? { ...tool, ...action.tool } : tool
                             );
+
+                            // if the tool is renamed
                             if (action.tool.name && action.tool.name !== action.name) {
+                                // update this tools references in other agents / prompts
                                 draft.workflow.agents = draft.workflow.agents.map(agent => ({
                                     ...agent,
-                                    tools: agent.tools.map(toolName =>
-                                        toolName === action.name ? action.tool.name! : toolName
+                                    instructions: agent.instructions.replace(
+                                        `[@tool:${action.name}](#mention)`,
+                                        `[@tool:${action.tool.name}](#mention)`
                                     )
                                 }));
+                                draft.workflow.prompts = draft.workflow.prompts.map(prompt => ({
+                                    ...prompt,
+                                    prompt: prompt.prompt.replace(
+                                        `[@tool:${action.name}](#mention)`,
+                                        `[@tool:${action.tool.name}](#mention)`
+                                    )
+                                }));
+
+                                // if this is the selected tool, update the selection
+                                if (draft.selection?.type === "tool" && draft.selection.name === action.name) {
+                                    draft.selection = {
+                                        type: "tool",
+                                        name: action.tool.name
+                                    };
+                                }
                             }
-                            if (action.tool.name && draft.selection?.type === "tool" && draft.selection.name === action.name) {
-                                draft.selection = {
-                                    type: "tool",
-                                    name: action.tool.name
-                                };
-                            }
+
+                            // select this tool
                             draft.selection = {
                                 type: "tool",
                                 name: action.tool.name || action.name,
@@ -432,21 +451,40 @@ function reducer(state: State, action: Action): State {
                             if (isLive) {
                                 break;
                             }
+
+                            // update prompt data
                             draft.workflow.prompts = draft.workflow.prompts.map((prompt) =>
                                 prompt.name === action.name ? { ...prompt, ...action.prompt } : prompt
                             );
-                            draft.workflow.agents = draft.workflow.agents.map(agent => ({
-                                ...agent,
-                                prompts: agent.prompts.map(promptName =>
-                                    promptName === action.name ? action.prompt.name! : promptName
-                                )
-                            }));
-                            if (action.prompt.name && draft.selection?.type === "prompt" && draft.selection.name === action.name) {
-                                draft.selection = {
-                                    type: "prompt",
-                                    name: action.prompt.name
-                                };
+
+                            // if the prompt is renamed
+                            if (action.prompt.name && action.prompt.name !== action.name) {
+                                // update this prompts references in other agents / prompts
+                                draft.workflow.agents = draft.workflow.agents.map(agent => ({
+                                    ...agent,
+                                    instructions: agent.instructions.replace(
+                                        `[@prompt:${action.name}](#mention)`,
+                                        `[@prompt:${action.prompt.name}](#mention)`
+                                    )
+                                }));
+                                draft.workflow.prompts = draft.workflow.prompts.map(prompt => ({
+                                    ...prompt,
+                                    prompt: prompt.prompt.replace(
+                                        `[@prompt:${action.name}](#mention)`,
+                                        `[@prompt:${action.prompt.name}](#mention)`
+                                    )
+                                }));
+
+                                // if this is the selected prompt, update the selection
+                                if (draft.selection?.type === "prompt" && draft.selection.name === action.name) {
+                                    draft.selection = {
+                                        type: "prompt",
+                                        name: action.prompt.name
+                                    };
+                                }
                             }
+
+                            // select this prompt
                             draft.selection = {
                                 type: "prompt",
                                 name: action.prompt.name || action.name,
@@ -809,9 +847,9 @@ export function WorkflowEditor({
                 />
             </ResizablePanel>
             <ResizableHandle />
-            <ResizablePanel 
-                minSize={20} 
-                defaultSize={showCopilot ? 85 - copilotWidth : 85} 
+            <ResizablePanel
+                minSize={20}
+                defaultSize={showCopilot ? 85 - copilotWidth : 85}
                 className="overflow-auto"
             >
                 <ChatApp
@@ -842,6 +880,9 @@ export function WorkflowEditor({
                 {state.present.selection?.type === "prompt" && <PromptConfig
                     key={state.present.selection.name}
                     prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
+                    agents={state.present.workflow.agents}
+                    tools={state.present.workflow.tools}
+                    prompts={state.present.workflow.prompts}
                     usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
                     handleUpdate={handleUpdatePrompt.bind(null, state.present.selection.name)}
                     handleClose={handleUnselectPrompt}
@@ -849,8 +890,8 @@ export function WorkflowEditor({
             </ResizablePanel>
             {showCopilot && <>
                 <ResizableHandle />
-                <ResizablePanel 
-                    minSize={10} 
+                <ResizablePanel
+                    minSize={10}
                     defaultSize={copilotWidth}
                     onResize={(size) => setCopilotWidth(size)}
                 >
