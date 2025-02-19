@@ -6,7 +6,7 @@ import { DataSource } from "../../../lib/types/datasource_types";
 import { Button, Divider, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Input, Radio, RadioGroup, Select, SelectItem } from "@nextui-org/react";
 import { z } from "zod";
 import { DataSourceIcon } from "../../../lib/components/datasource-icon";
-import { ActionButton, Pane } from "./pane";
+import { ActionButton, StructuredPanel } from "../../../lib/components/structured-panel";
 import { EditableField } from "../../../lib/components/editable-field";
 import { Label } from "../../../lib/components/label";
 import { PlusIcon } from "lucide-react";
@@ -57,7 +57,7 @@ export function AgentConfig({
         });
     }
 
-    return <Pane title={agent.name} actions={[
+    return <StructuredPanel title={agent.name} actions={[
         <ActionButton
             key="close"
             onClick={handleClose}
@@ -269,5 +269,5 @@ export function AgentConfig({
                 </Select>
             </div>
         </div>
-    </Pane>;
+    </StructuredPanel>;
 }
