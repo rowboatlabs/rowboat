@@ -158,10 +158,8 @@ export function EditableField({
                         </div>}
                     </>) : (
                         <>
-                            {markdown && <div className="max-h-[420px] overflow-y-auto text-gray-400 italic">
-                                <MarkdownContent content={placeholder} atValues={mentionsAtValues} />
                             {markdown && <div className="max-h-[420px] overflow-y-auto text-gray-400">
-                                <MarkdownContent content={placeholder} />
+                                <MarkdownContent content={placeholder} atValues={mentionsAtValues} />
                             </div>}
                             {!markdown && <span className="text-gray-400">{placeholder}</span>}
                         </>
