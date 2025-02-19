@@ -416,7 +416,7 @@ export default function SimulationApp() {
             actions={[
               <ActionButton
                 key="run-all"
-                onClick={runAllScenarios}
+                onClick={() => void runAllScenarios()}
                 disabled={isRunning}
                 icon={<PlayIcon className="w-4 h-4" />}
                 primary

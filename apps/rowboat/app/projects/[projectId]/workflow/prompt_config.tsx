@@ -4,7 +4,7 @@ import { Divider } from "@nextui-org/react";
 import { z } from "zod";
 import { ActionButton, StructuredPanel } from "../../../lib/components/structured-panel";
 import { EditableField } from "../../../lib/components/editable-field";
-import { XIcon } from "@heroicons/react/24/outline";
+import { XMarkIcon } from "@heroicons/react/24/outline";
 
 export function PromptConfig({
     prompt,
@@ -53,7 +53,7 @@ export function PromptConfig({
         <ActionButton
             key="close"
             onClick={handleClose}
-            icon={<XIcon className="w-4 h-4" />}
+            icon={<XMarkIcon className="w-4 h-4" />}
         >
             Close
         </ActionButton>
