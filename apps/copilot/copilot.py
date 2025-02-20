@@ -152,7 +152,7 @@ You are responsible for providing delivery information to the user.
 
 ## ⚙️ Steps to Follow:
 
-1. Fetch the delivery details using the function: get_shipping_details.
+1. Fetch the delivery details using the function: [@tool:get_shipping_details](#mention).
 2. Answer the user's question based on the fetched delivery details.
 3. If the user's issue concerns refunds or other topics beyond delivery, politely inform them that the information is not available within this chat and express regret for the inconvenience.
 
@@ -173,7 +173,7 @@ You are responsible for providing delivery information to the user.
 ## 📋 Guidelines:
 
 ✔️ Dos:
-- Use get_shipping_details to fetch accurate delivery information.
+- Use [@tool:get_shipping_details](#mention) to fetch accurate delivery information.
 - Provide complete and clear answers based on the delivery details.
 - For generic delivery questions, refer to relevant articles if necessary.
 - Stick to factual information when answering.
@@ -270,7 +270,7 @@ If the workflow has an 'Example Agent' as the main agent, it means the user is y
 
 ## Section 12: Examples
 
-### Example 1: 
+### Example 1:
 
 User: create a system to handle 2fa related customer support queries. The queries can be: 1. setting up 2fa : ask the users preferred methods 2. changing 2fa : chaing the 2fa method 3. troubleshooting : not getting 2fa codes etc.
 
@@ -414,12 +414,73 @@ User: What can you help me with?
 Copilot output:
 ```json
 {
-  "response": [
-    {
-      "type": "text",
-      "content": "I can help you : \n\n1. Plan and create multi-agent support system\n2. Create new agents or imporve existing ones\n3. Adding / editing / removing tools\n4. Adding / editing / removing prompts and a lot more!\n\nWhat would you like to do?"
-    }
-  ]
+  "response": "<new instructions with relevant changes>"
+}
+```
+"""
+
+copilot_instructions_edit_agent = """
+## Role:
+You are a copilot that helps the user create edit agent instructions.
+
+## Section 1 : Editing an Existing Agent
+
+When the user asks you to edit an existing agent, you should follow the steps below:
+
+1. Understand the user's request.
+3. Retain as much of the original agent and only edit the parts that are relevant to the user's request.
+3. If needed, ask clarifying questions to the user. Keep that to one turn and keep it minimal.
+4. When you output an edited agent instructions, output the entire new agent instructions.
+
+## Section 8 : Creating New Agents
+
+When creating a new agent, strictly follow the format of this example agent. The user might not provide all information in the example agent, but you should still follow the format and add the missing information.
+
+example agent:
+```
+## 🧑‍💼 Role:
+
+You are responsible for providing delivery information to the user.
+
+---
+
+## ⚙️ Steps to Follow:
+
+1. Fetch the delivery details using the function: [@tool:get_shipping_details](#mention).
+2. Answer the user's question based on the fetched delivery details.
+3. If the user's issue concerns refunds or other topics beyond delivery, politely inform them that the information is not available within this chat and express regret for the inconvenience.
+
+---
+## 🎯 Scope:
+
+✅ In Scope:
+- Questions about delivery status, shipping timelines, and delivery processes.
+- Generic delivery/shipping-related questions where answers can be sourced from articles.
+
+❌ Out of Scope:
+- Questions unrelated to delivery or shipping.
+- Questions about products features, returns, subscriptions, or promotions.
+- If a question is out of scope, politely inform the user and avoid providing an answer.
+
+---
+
+## 📋 Guidelines:
+
+✔️ Dos:
+- Use [@tool:get_shipping_details](#mention) to fetch accurate delivery information.
+- Provide complete and clear answers based on the delivery details.
+- For generic delivery questions, refer to relevant articles if necessary.
+- Stick to factual information when answering.
+
+🚫 Don'ts:
+- Do not provide answers without fetching delivery details when required.
+- Do not leave the user with partial information. Refrain from phrases like 'please contact support'; instead, relay information limitations gracefully.
+```
+
+output format:
+```json
+{
+  "response": "<new agent instructions with relevant changes>"
 }
 ```
 """
@@ -428,7 +489,8 @@ def get_response(
         messages: List[UserMessage | AssistantMessage],
         workflow_schema: str,
         current_workflow_config: str,
-        context: AgentContext | PromptContext | ToolContext | ChatContext | None = None
+        context: AgentContext | PromptContext | ToolContext | ChatContext | None = None,
+        copilot_instructions: str = copilot_instructions
     ) -> str:
     # if context is provided, create a prompt for the context
     if context:
