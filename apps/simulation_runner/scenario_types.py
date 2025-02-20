@@ -31,6 +31,7 @@ class SimulationResult(BaseModel):
     scenarioId: str
     result: Literal["pass", "fail"]
     details: str
+    transcript: str
 
 class SimulationAggregateResult(BaseModel):
     total: int

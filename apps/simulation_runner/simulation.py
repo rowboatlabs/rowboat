@@ -4,7 +4,7 @@ import json
 import os
 from openai import OpenAI
 from scenario_types import Scenario, SimulationResult, SimulationAggregateResult
-from db import write_simulation_result, set_simulation_run_to_completed
+from db import write_simulation_result
 
 
 openai_client = OpenAI()
@@ -64,14 +64,14 @@ def simulate_scenario(scenario: Scenario, rowboat_client: Client, workflow_id: s
             "role": "system",
             "content": (
                 f"You are a neutral evaluator. Evaluate based on these criteria:\n{scenario.criteria}\n\nReturn ONLY a JSON object with format: "
-                '{"verdict": "pass"} if the support bot answered correctly, or {"verdict": "fail"} if not.'
+                '{"verdict": "pass", "details": <the reason for pass in 2 sentences>} if the support bot answered correctly, or {"verdict": "fail", "details": <the reason for fail in 2 sentences>} if not.'
             )
         },
         {
             "role": "user",
             "content": (
                 f"Here is the conversation transcript:\n\n{transcript_str}\n\n"
-                "Did the support bot answer correctly or not? Return only 'pass' or 'fail'."
+                "Did the support bot answer correctly or not? Return only 'pass' or 'fail' for verdict, and a brief 2 sentence explanation for details."
             )
         }
     ]
@@ -88,10 +88,11 @@ def simulate_scenario(scenario: Scenario, rowboat_client: Client, workflow_id: s
     else:
         response_json = json.loads(eval_response.choices[0].message.content)
         evaluation_result = response_json.get("verdict")
+        details = response_json.get("details")
         if evaluation_result is None:
             raise Exception("No verdict field found in evaluation response")
 
-    return(evaluation_result, transcript_str)
+    return(evaluation_result, details, transcript_str)
 
 
 async def simulate_scenarios(scenarios: List[Scenario], runId: str, workflow_id: str, api_key: str, max_iterations: int = 5):
@@ -103,14 +104,15 @@ async def simulate_scenarios(scenarios: List[Scenario], runId: str, workflow_id:
     )
     results = []
     for scenario in scenarios:
-        result, transcript = simulate_scenario(scenario, client, workflow_id, max_iterations)
+        result, details, transcript = simulate_scenario(scenario, client, workflow_id, max_iterations)
 
         simulation_result = SimulationResult(
             projectId=project_id,
             runId=runId,
             scenarioId=scenario.id,
             result=result,
-            details=transcript
+            details=details,
+            transcript=transcript
         )
         results.append(simulation_result)
         write_simulation_result(simulation_result)
