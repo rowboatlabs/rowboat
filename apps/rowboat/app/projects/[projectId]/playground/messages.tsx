@@ -218,7 +218,7 @@ function ToolCallHeader({
             {!result && <Spinner size="sm" />}
             {result && <CircleCheckIcon size={16} />}
             <div className='font-semibold text-sm'>
-                Function Call: <span className='bg-gray-100 px-2 py-1 rounded-lg font-medium'>{toolCall.function.name}</span>
+                Function Call: <code className='bg-gray-100 dark:bg-neutral-800 px-2 py-0.5 rounded font-mono'>{toolCall.function.name}</code>
             </div>
         </div>
     </div>;
@@ -570,7 +570,9 @@ function MockToolCall({
         <div className='border border-gray-300 dark:border-gray-700 p-2 pt-2 rounded-lg rounded-bl-none flex flex-col gap-2 mr-[30%] bg-white dark:bg-gray-900'>
             <div className="flex items-center gap-2">
                 <CircleCheckIcon size={16} className="text-gray-500 dark:text-gray-400" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Function Call: {toolCall.function.name}</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                    Function Call: <code className='bg-gray-100 dark:bg-neutral-800 px-2 py-0.5 rounded font-mono'>{toolCall.function.name}</code>
+                </span>
             </div>
 
             <div className='flex flex-col gap-2'>
@@ -657,7 +659,7 @@ function SystemMessage({
 }) {
     return (
         <div className="border border-gray-300 dark:border-gray-700 p-2 rounded-lg flex flex-col gap-2 bg-white dark:bg-gray-900">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">CONTEXT</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 font-medium">CONTEXT</div>
             <EditableField
                 light
                 value={content}

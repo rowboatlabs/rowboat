@@ -6,6 +6,7 @@ import { WithStringId } from '../../../../lib/types/types';
 import { Scenario, SimulationRun, SimulationResult, SimulationAggregateResult } from "../../../../lib/types/testing_types";
 import { z } from 'zod';
 import { Workflow } from "../../../../lib/types/workflow_types";
+import { clsx } from 'clsx';
 
 type ScenarioType = WithStringId<z.infer<typeof Scenario>>;
 type SimulationRunType = WithStringId<z.infer<typeof SimulationRun>>;
@@ -31,23 +32,23 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
   const passedScenarios = run.aggregateResults?.pass ?? 0;
   const failedScenarios = run.aggregateResults?.fail ?? 0;
 
-  const statusLabelClass = "w-[110px] px-3 py-1 rounded text-xs text-center uppercase font-semibold inline-block";
   const getStatusClass = (status: string) => {
+    const baseClass = "w-[110px] px-3 py-1 rounded text-xs text-center uppercase font-semibold inline-block";
     switch (status) {
       case 'completed':
       case 'pass':
-        return `${statusLabelClass} bg-green-50 text-green-800`;
+        return `${baseClass} bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-400`;
       case 'failed':
       case 'fail':
-        return `${statusLabelClass} bg-red-50 text-red-800`;
+        return `${baseClass} bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-400`;
       case 'error':
-        return `${statusLabelClass} bg-orange-50 text-orange-800`;
+        return `${baseClass} bg-orange-50 dark:bg-orange-900/20 text-orange-800 dark:text-orange-400`;
       case 'cancelled':
-        return `${statusLabelClass} bg-gray-50 text-gray-800`;
+        return `${baseClass} bg-gray-50 dark:bg-neutral-800 text-gray-800 dark:text-neutral-400`;
       case 'running':
       case 'pending':
       default:
-        return `${statusLabelClass} bg-yellow-50 text-yellow-800`;
+        return `${baseClass} bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-400`;
     }
   };
 
@@ -105,18 +106,24 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
   }, [menuOpenId, setMenuOpenId]);
 
   return (
-    <div className="border rounded-lg mb-4 shadow-sm">
+    <div className="border dark:border-neutral-800 rounded-lg mb-4 shadow-sm">
       <div 
-        className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+        className={clsx(
+          "p-4 flex items-center justify-between cursor-pointer",
+          "transition-colors duration-200",
+          "hover:bg-neutral-100 dark:hover:bg-neutral-800",
+          "border-b border-transparent",
+          isExpanded && "border-b-neutral-200 dark:border-b-neutral-800"
+        )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center space-x-2">
           {isExpanded ? (
-            <ChevronDownIcon className="h-5 w-5 text-gray-400" />
+            <ChevronDownIcon className="h-5 w-5 text-gray-400 dark:text-neutral-500" />
           ) : (
-            <ChevronRightIcon className="h-5 w-5 text-gray-400" />
+            <ChevronRightIcon className="h-5 w-5 text-gray-400 dark:text-neutral-500" />
           )}
-          <div className="text-sm truncate">
+          <div className="text-sm truncate dark:text-neutral-200">
             {formatMainTitle(run.startedAt)}
           </div>
         </div>
@@ -130,13 +137,13 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
                 e.stopPropagation();
                 setMenuOpenId(menuOpenId === run._id ? null : run._id);
               }}
-              className="p-1 rounded-full hover:bg-gray-100"
+              className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-neutral-700"
             >
-              <EllipsisVerticalIcon className="h-5 w-5 text-gray-600" />
+              <EllipsisVerticalIcon className="h-5 w-5 text-gray-600 dark:text-neutral-400" />
             </button>
             
             {menuOpenId === run._id && (
-              <div className="absolute right-0 mt-1 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
+              <div className="absolute right-0 mt-1 w-48 rounded-md shadow-lg bg-white dark:bg-neutral-900 ring-1 ring-black ring-opacity-5 dark:ring-neutral-700 z-10">
                 <div className="py-1">
                   {(run.status === 'running' || run.status === 'pending') && onCancelRun && (
                     <button
@@ -145,7 +152,7 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
                         onCancelRun(run._id);
                         setMenuOpenId(null);
                       }}
-                      className="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-gray-100 w-full"
+                      className="flex items-center px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-neutral-800 w-full"
                     >
                       <NoSymbolIcon className="h-4 w-4 mr-2" />
                       Cancel Run
@@ -153,7 +160,7 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
                   )}
                   <button
                     disabled
-                    className="flex items-center px-4 py-2 text-sm text-gray-400 w-full cursor-not-allowed whitespace-nowrap"
+                    className="flex items-center px-4 py-2 text-sm text-gray-400 dark:text-neutral-500 w-full cursor-not-allowed whitespace-nowrap"
                   >
                     <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
                     Download transcripts
@@ -164,7 +171,7 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
                       setShowDeleteConfirm(true);
                       setMenuOpenId(null);
                     }}
-                    className="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-gray-100 w-full"
+                    className="flex items-center px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-neutral-800 w-full"
                   >
                     <TrashIcon className="h-4 w-4 mr-2" />
                     Delete run
@@ -177,7 +184,7 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
       </div>
 
       {isExpanded && (
-        <div className="p-4 border-t">
+        <div className="p-4 border-t dark:border-neutral-800">
           {run.status === 'error' ? (
             <div className="text-orange-800 bg-orange-50 p-4 rounded-lg">
               Your simulation could not be completed. Please run a new simulation again.
@@ -187,36 +194,36 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
               {/* Workflow and timing information in a grid */}
               <div className="grid grid-cols-3 gap-4 mb-6">
                 {workflow && (
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <div className="text-sm font-medium text-gray-600 mb-1">Workflow Version</div>
-                    <div className="font-medium">{workflow.name}</div>
+                  <div className="bg-gray-50 dark:bg-neutral-800 p-4 rounded-lg">
+                    <div className="text-sm font-medium text-gray-600 dark:text-neutral-400 mb-1">Workflow Version</div>
+                    <div className="font-medium dark:text-neutral-200">{workflow.name}</div>
                   </div>
                 )}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="text-sm font-medium text-gray-600 mb-1">Completed</div>
-                  <div className="text-sm">
+                <div className="bg-gray-50 dark:bg-neutral-800 p-4 rounded-lg">
+                  <div className="text-sm font-medium text-gray-600 dark:text-neutral-400 mb-1">Completed</div>
+                  <div className="text-sm dark:text-neutral-300">
                     {run.completedAt ? formatDateTime(run.completedAt) : 'Not completed'}
                   </div>
                 </div>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="text-sm font-medium text-gray-600 mb-1">Duration</div>
-                  <div className="text-sm">{getDuration()}</div>
+                <div className="bg-gray-50 dark:bg-neutral-800 p-4 rounded-lg">
+                  <div className="text-sm font-medium text-gray-600 dark:text-neutral-400 mb-1">Duration</div>
+                  <div className="text-sm dark:text-neutral-300">{getDuration()}</div>
                 </div>
               </div>
 
               {/* Results statistics */}
               <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="p-4 rounded-lg bg-gray-50">
-                  <div className="text-sm text-gray-600">Total Scenarios</div>
-                  <div className="text-2xl font-semibold">{totalScenarios}</div>
+                <div className="p-4 rounded-lg bg-gray-50 dark:bg-neutral-800">
+                  <div className="text-sm text-gray-600 dark:text-neutral-400">Total Scenarios</div>
+                  <div className="text-2xl font-semibold dark:text-neutral-200">{totalScenarios}</div>
                 </div>
-                <div className="p-4 rounded-lg bg-green-50">
-                  <div className="text-sm text-green-600">Passed</div>
-                  <div className="text-2xl font-semibold text-green-700">{passedScenarios}</div>
+                <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/20">
+                  <div className="text-sm text-green-600 dark:text-green-400">Passed</div>
+                  <div className="text-2xl font-semibold text-green-700 dark:text-green-400">{passedScenarios}</div>
                 </div>
-                <div className="p-4 rounded-lg bg-red-50">
-                  <div className="text-sm text-red-600">Failed</div>
-                  <div className="text-2xl font-semibold text-red-700">{failedScenarios}</div>
+                <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20">
+                  <div className="text-sm text-red-600 dark:text-red-400">Failed</div>
+                  <div className="text-2xl font-semibold text-red-700 dark:text-red-400">{failedScenarios}</div>
                 </div>
               </div>
               
@@ -229,23 +236,30 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
                   return scenario && (
                     <div 
                       key={scenarioId} 
-                      className={`border rounded-lg overflow-hidden ${
-                        result?.result === 'pass' ? 'bg-green-50 border-green-200' : 
-                        result?.result === 'fail' ? 'bg-red-50 border-red-200' : 
-                        'bg-gray-50 border-gray-200'
-                      }`}
+                      className={clsx(
+                        "border dark:border-neutral-800 rounded-lg overflow-hidden",
+                        "transition-colors duration-200",
+                        result?.result === 'pass' 
+                          ? 'bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-900/50' 
+                          : result?.result === 'fail' 
+                          ? 'bg-red-50/50 dark:bg-red-900/10 border-red-200 dark:border-red-900/50' 
+                          : 'bg-gray-50/50 dark:bg-neutral-900/50 border-gray-200 dark:border-neutral-800'
+                      )}
                     >
                       <div 
-                        className="p-3 flex items-center justify-between cursor-pointer hover:bg-opacity-80"
+                        className={clsx(
+                          "p-3 flex items-center justify-between cursor-pointer",
+                          "hover:bg-white/50 dark:hover:bg-neutral-800/50"
+                        )}
                         onClick={(e) => toggleScenario(scenarioId, e)}
                       >
                         <div className="flex items-center space-x-2">
                           {isScenarioExpanded ? (
-                            <ChevronDownIcon className="h-4 w-4 text-gray-600" />
+                            <ChevronDownIcon className="h-4 w-4 text-gray-600 dark:text-neutral-400" />
                           ) : (
-                            <ChevronRightIcon className="h-4 w-4 text-gray-600" />
+                            <ChevronRightIcon className="h-4 w-4 text-gray-600 dark:text-neutral-400" />
                           )}
-                          <span className="font-medium text-gray-900">{scenario.name}</span>
+                          <span className="font-medium text-gray-900 dark:text-neutral-200">{scenario.name}</span>
                         </div>
                         {result && (
                           <span className={getStatusClass(result.result)}>
@@ -255,29 +269,29 @@ export const SimulationResultCard = ({ run, results, scenarios, workflow, onCanc
                       </div>
 
                       {isScenarioExpanded && (
-                        <div className="p-3 border-t border-opacity-50 space-y-4">
+                        <div className="p-3 border-t border-opacity-50 dark:border-neutral-800 space-y-4">
                           <div>
-                            <div className="text-sm font-medium mb-1">Description</div>
-                            <div className="text-sm text-gray-700">
+                            <div className="text-sm font-medium text-gray-600 dark:text-neutral-400 mb-1">Description</div>
+                            <div className="text-sm text-gray-700 dark:text-neutral-300">
                               {scenario.description}
                             </div>
                           </div>
                           <div>
-                            <div className="text-sm font-medium mb-1">Criteria</div>
-                            <div className="text-sm text-gray-700">
+                            <div className="text-sm font-medium text-gray-600 dark:text-neutral-400 mb-1">Criteria</div>
+                            <div className="text-sm text-gray-700 dark:text-neutral-300">
                               {scenario.criteria || 'No criteria specified'}
                             </div>
                           </div>
                           <div>
-                            <div className="text-sm font-medium mb-1">Context</div>
-                            <div className="text-sm text-gray-700">
+                            <div className="text-sm font-medium text-gray-600 dark:text-neutral-400 mb-1">Context</div>
+                            <div className="text-sm text-gray-700 dark:text-neutral-300">
                               {scenario.context || 'No context provided'}
                             </div>
                           </div>
                           {result && (
                             <div>
-                              <div className="text-sm font-medium mb-1">Result Details</div>
-                              <div className="text-sm text-gray-700">
+                              <div className="text-sm font-medium text-gray-600 dark:text-neutral-400 mb-1">Result Details</div>
+                              <div className="text-sm text-gray-700 dark:text-neutral-300">
                                 {result.details}
                               </div>
                             </div>
