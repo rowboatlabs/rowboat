@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import Quill, { Delta, Op } from 'quill';
 import { Mention, MentionBlot, MentionBlotData } from "quill-mention";
 import "quill/dist/quill.snow.css";
+import "./mentions-editor.css";
 import { CopyIcon } from 'lucide-react';
 import { CopyButton } from './copy-button';
 

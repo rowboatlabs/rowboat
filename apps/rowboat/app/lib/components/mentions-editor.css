@@ -1,0 +1,36 @@
+/* Target both edit mode and view mode mentions */
+.mention,
+.ql-editor p span[class*="bg-[#e"],  /* Matches both #e8f2fe and #e0f2fe */
+span[class*="bg-[#e"] {  /* For view mode */
+    background-color: #e8f2fe !important;
+    color: #1e40af !important;
+}
+
+/* Dark mode overrides */
+.dark .mention,
+.dark .ql-editor p span[class*="bg-[#e"],
+.dark span[class*="bg-[#e"] {
+    background-color: rgb(31 41 55) !important; /* bg-gray-800 */
+    color: rgb(243 244 246) !important; /* text-gray-100 */
+}
+
+/* Handle Next.js dark mode class if needed */
+:global(.dark) .mention,
+:global(.dark) .ql-editor p span[class*="bg-[#e"],
+:global(.dark) span[class*="bg-[#e"] {
+    background-color: rgb(31 41 55) !important;
+    color: rgb(243 244 246) !important;
+}
+
+/* Override the inline styles */
+.ql-editor p span[class*="bg-[#e0f2fe]"],
+.ql-editor p span[class*="bg-[#e8f2fe]"] {
+    background-color: rgb(31 41 55) !important; /* bg-gray-800 */
+    color: rgb(243 244 246) !important; /* text-gray-100 */
+}
+
+/* Target our custom class */
+.dark .mention-tag {
+    background-color: rgb(31 41 55) !important; /* bg-gray-800 */
+    color: rgb(243 244 246) !important; /* text-gray-100 */
+}
