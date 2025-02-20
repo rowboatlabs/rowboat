@@ -21,6 +21,7 @@ class SimulationRun(BaseModel):
     scenarioIds: List[str]
     workflowId: str
     startedAt: datetime
+    lastHeartbeat: Optional[datetime] = None
     completedAt: Optional[datetime] = None
     aggregateResults: Optional[dict] = None
 

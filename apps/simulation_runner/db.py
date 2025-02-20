@@ -1,6 +1,7 @@
 from pymongo import MongoClient
 from bson import ObjectId
 import os
+from datetime import datetime, timedelta, timezone
 from scenario_types import SimulationRun, Scenario, SimulationResult, SimulationAggregateResult
 
 MONGO_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017/rowboat").strip()
@@ -72,3 +73,33 @@ def get_scenarios_for_run(simulation_run: SimulationRun):
 def write_simulation_result(result: SimulationResult):
     collection = get_collection(SIMULATION_RESULT_COLLECTION_NAME)
     collection.insert_one(result.model_dump())
+
+def update_simulation_run_heartbeat(simulation_run_id: str):
+    """
+    Updates the 'last_heartbeat' timestamp for a SimulationRun.
+    """
+
+    collection = get_collection(SIMULATIONS_COLLECTION_NAME)
+    collection.update_one(
+        {"_id": ObjectId(simulation_run_id)},
+        {"$set": {"lastHeartbeat": datetime.now(timezone.utc)}}
+    )
+
+def mark_stale_jobs_as_failed():
+    """
+    Finds any job in 'running' status whose last_heartbeat is older than 5 minutes,
+    and sets it to 'failed'.
+    """
+
+    collection = get_collection(SIMULATIONS_COLLECTION_NAME)
+    stale_threshold = datetime.now(timezone.utc) - timedelta(minutes=20)
+    result = collection.update_many(
+        {
+            "status": "running",
+            "lastHeartbeat": {"$lt": stale_threshold}
+        },
+        {
+            "$set": {"status": "failed"}
+        }
+    )
+    return result.modified_count  # Number of jobs marked failed
