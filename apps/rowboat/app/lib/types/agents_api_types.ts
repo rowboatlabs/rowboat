@@ -72,7 +72,9 @@ export function convertWorkflowToAgenticAPI(workflow: z.infer<typeof Workflow>):
         agents: workflow.agents
             .filter(agent => !agent.disabled)
             .map(agent => {
-                const { sanitized, entities } = sanitizeTextWithMentions(agent.instructions, workflow);
+                const compiledInstructions = agent.instructions +
+                    (agent.examples ? '\n\n# Examples\n' + agent.examples : '');
+                const { sanitized, entities } = sanitizeTextWithMentions(compiledInstructions, workflow);
 
                 const agenticAgent: z.infer<typeof AgenticAPIAgent> = {
                     name: agent.name,

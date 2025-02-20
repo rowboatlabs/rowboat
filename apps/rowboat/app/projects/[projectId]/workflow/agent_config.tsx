@@ -147,6 +147,8 @@ export function AgentConfig({
                     markdown
                     label="Examples"
                     multiline
+                    mentions
+                    mentionsAtValues={atMentions}
                 />
             </div>
 
