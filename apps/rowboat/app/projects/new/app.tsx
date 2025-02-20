@@ -3,7 +3,7 @@ import { cn, Input } from "@nextui-org/react";
 import { createProject } from "../../actions/project_actions";
 import { templates } from "../../lib/project_templates";
 import { WorkflowTemplate } from "../../lib/types/workflow_types";
-import { FormStatusButton } from "../../lib/components/FormStatusButton";
+import { FormStatusButton } from "../../lib/components/form-status-button";
 import { useFormStatus } from "react-dom";
 import { z } from "zod";
 import { useState } from "react";

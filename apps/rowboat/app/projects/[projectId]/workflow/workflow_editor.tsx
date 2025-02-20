@@ -708,7 +708,7 @@ export function WorkflowEditor({
 
     return <div className="flex flex-col h-full relative">
         <div className="shrink-0 flex justify-between items-center pb-2">
-            <div className="flex items-center gap-1 border-1 border-gray-200 rounded-md px-2 text-gray-800">
+            <div className="workflow-version-selector flex items-center gap-1 px-2 text-gray-800 dark:text-gray-100">
                 <WorkflowIcon size={16} />
                 <EditableField
                     key={state.present.workflow._id}
@@ -716,6 +716,7 @@ export function WorkflowEditor({
                     onChange={handleRenameWorkflow}
                     placeholder="Name this version"
                     className="text-sm font-semibold"
+                    inline={true}
                 />
                 {state.present.publishing && <Spinner size="sm" />}
                 {isLive && <PublishedBadge />}

@@ -1,5 +1,5 @@
 "use client";
-import { PageSection } from "../../../../lib/components/PageSection";
+import { PageSection } from "../../../../lib/components/page-section";
 import { WithStringId } from "../../../../lib/types/types";
 import { DataSourceDoc } from "../../../../lib/types/datasource_types";
 import { DataSource } from "../../../../lib/types/datasource_types";
@@ -11,7 +11,7 @@ import { Spinner } from "@nextui-org/react";
 import { Pagination } from "@nextui-org/react";
 import { ExternalLinkIcon } from "lucide-react";
 import { Textarea } from "@nextui-org/react";
-import { FormStatusButton } from "../../../../lib/components/FormStatusButton";
+import { FormStatusButton } from "../../../../lib/components/form-status-button";
 import { PlusIcon } from "lucide-react";
 
 function UrlListItem({

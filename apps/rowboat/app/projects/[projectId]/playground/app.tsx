@@ -12,6 +12,7 @@ import { ActionButton, Pane } from "../workflow/pane";
 import { apiV1 } from "rowboat-shared";
 import { EllipsisVerticalIcon, MessageSquarePlusIcon, PlayIcon } from "lucide-react";
 import { getScenario } from "../../../actions/simulation_actions";
+import clsx from "clsx";
 
 function SimulateLabel() {
     return <span>Simulate<sup className="pl-1">beta</sup></span>;

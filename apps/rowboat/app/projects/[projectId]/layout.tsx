@@ -11,8 +11,8 @@ export default async function Layout({
 
     return <div className="flex h-full">
         <Nav projectId={params.projectId} useDataSources={useDataSources} />
-        <div className="grow p-2 overflow-auto bg-white rounded-tl-lg">
+        <div className="grow p-2 overflow-auto bg-background dark:bg-background rounded-tl-lg">
             {children}
         </div>
-    </div >;
+    </div>;
 }

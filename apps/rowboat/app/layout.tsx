@@ -1,4 +1,5 @@
 import "./globals.css";
+import { ThemeProvider } from "./providers/theme-provider";
 import { UserProvider } from '@auth0/nextjs-auth0/client';
 import { Inter } from "next/font/google";
 import { Providers } from "./providers";
@@ -20,11 +21,13 @@ export default function RootLayout({
 }>) {
   return <html lang="en" className="h-dvh">
     <UserProvider>
-      <body className={`${inter.className} h-full text-base [scrollbar-width:thin] bg-gray-100`}>
-        <Providers className='h-full flex flex-col'>
-          {children}
-        </Providers>
-      </body>
+      <ThemeProvider>
+        <body className={`${inter.className} h-full text-base [scrollbar-width:thin] bg-background`}>
+          <Providers className='h-full flex flex-col'>
+            {children}
+          </Providers>
+        </body>
+      </ThemeProvider>
     </UserProvider>
   </html>;
 }

@@ -15,10 +15,10 @@ import { MessageSquareIcon, EllipsisIcon, CircleCheckIcon, ChevronsDownIcon, Che
 
 function UserMessage({ content }: { content: string }) {
     return <div className="self-end ml-[30%] flex flex-col">
-        <div className="text-right text-gray-500 text-xs mr-3">
+        <div className="text-right text-gray-500 dark:text-gray-400 text-xs mr-3">
             User
         </div>
-        <div className="bg-gray-100 px-3 py-1 rounded-lg rounded-br-none text-sm">
+        <div className="bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded-lg rounded-br-none text-sm text-gray-900 dark:text-gray-100">
             <MarkdownContent content={content} />
         </div>
     </div>;
@@ -27,23 +27,22 @@ function UserMessage({ content }: { content: string }) {
 function InternalAssistantMessage({ content, sender, latency }: { content: string, sender: string | null | undefined, latency: number }) {
     const [expanded, setExpanded] = useState(false);
 
-    // show a message icon with a + symbol to expand and show the content
     return <div className="self-start mr-[30%]">
-        {!expanded && <button className="flex items-center text-gray-400 hover:text-gray-600 gap-1 group" onClick={() => setExpanded(true)}>
+        {!expanded && <button className="flex items-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 gap-1 group" onClick={() => setExpanded(true)}>
             <MessageSquareIcon size={16} />
             <EllipsisIcon size={16} />
             <span className="hidden group-hover:block text-xs">Show debug message</span>
         </button>}
         {expanded && <div className="flex flex-col">
             <div className="flex gap-2 justify-between items-center">
-                <div className="text-gray-500 text-xs pl-3">
+                <div className="text-gray-500 dark:text-gray-400 text-xs pl-3">
                     {sender ?? 'Assistant'}
                 </div>
-                <button className="flex items-center gap-1 text-gray-400 hover:text-gray-600" onClick={() => setExpanded(false)}>
+                <button className="flex items-center gap-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300" onClick={() => setExpanded(false)}>
                     <XIcon size={16} />
                 </button>
             </div>
-            <div className="border border-gray-300 border-dashed px-3 py-1 rounded-lg rounded-bl-none">
+            <div className="border border-gray-300 dark:border-gray-700 border-dashed px-3 py-1 rounded-lg rounded-bl-none text-gray-900 dark:text-gray-100">
                 <pre className="text-sm whitespace-pre-wrap">{content}</pre>
             </div>
         </div>}
@@ -53,22 +52,22 @@ function InternalAssistantMessage({ content, sender, latency }: { content: strin
 function AssistantMessage({ content, sender, latency }: { content: string, sender: string | null | undefined, latency: number }) {
     return <div className="self-start mr-[30%] flex flex-col">
         <div className="flex gap-2 justify-between items-center">
-            <div className="text-gray-500 text-xs pl-3">
+            <div className="text-gray-500 dark:text-gray-400 text-xs pl-3">
                 {sender ?? 'Assistant'}
             </div>
-            <div className="text-gray-400 text-xs pr-3">
+            <div className="text-gray-400 dark:text-gray-500 text-xs pr-3">
                 {Math.round(latency / 1000)}s
             </div>
         </div>
-        <div className="bg-gray-100 px-3 py-1 rounded-lg rounded-bl-none text-sm">
+        <div className="bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded-lg rounded-bl-none text-sm text-gray-900 dark:text-gray-100">
             <MarkdownContent content={content} />
         </div>
     </div>;
 }
 
 function AssistantMessageLoading() {
-    return <div className="self-start mr-[30%] flex flex-col text-gray-500 items-start">
-        <div className="text-gray-500 text-xs ml-3">
+    return <div className="self-start mr-[30%] flex flex-col text-gray-500 dark:text-gray-400 items-start">
+        <div className="text-gray-500 dark:text-gray-400 text-xs ml-3">
             Assistant
         </div>
         <Spinner size="sm" className="mt-2 ml-3" />
@@ -77,10 +76,10 @@ function AssistantMessageLoading() {
 
 function UserMessageLoading() {
     return <div className="self-end ml-[30%] flex flex-col">
-        <div className="text-right text-gray-500 text-sm mr-3">
+        <div className="text-right text-gray-500 dark:text-gray-400 text-sm mr-3">
             User
         </div>
-        <div className="bg-gray-100 p-3 rounded-lg rounded-br-none animate-pulse w-20 text-gray-800">
+        <div className="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg rounded-br-none animate-pulse w-20 text-gray-800 dark:text-gray-200">
             <Spinner size="sm" />
         </div>
     </div>;
@@ -567,9 +566,12 @@ function MockToolCall({
     }, [autoSubmit, response, handleSubmit, result]);
 
     return <div className="flex flex-col gap-1">
-        {sender && <div className='text-gray-500 text-xs ml-3'>{sender}</div>}
-        <div className='border border-gray-300 p-2 pt-2 rounded-lg rounded-bl-none flex flex-col gap-2 mr-[30%]'>
-            <ToolCallHeader toolCall={toolCall} result={result} />
+        {sender && <div className='text-gray-500 dark:text-gray-400 text-xs ml-3'>{sender}</div>}
+        <div className='border border-gray-300 dark:border-gray-700 p-2 pt-2 rounded-lg rounded-bl-none flex flex-col gap-2 mr-[30%] bg-white dark:bg-gray-900'>
+            <div className="flex items-center gap-2">
+                <CircleCheckIcon size={16} className="text-gray-500 dark:text-gray-400" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">Function Call: {toolCall.function.name}</span>
+            </div>
 
             <div className='flex flex-col gap-2'>
                 <ExpandableContent label='Params' content={toolCall.function.arguments} expanded={false} />
@@ -633,12 +635,12 @@ function ExpandableContent({
     }
 
     return <div className='flex flex-col gap-2'>
-        <div className='flex gap-1 items-start cursor-pointer text-gray-500' onClick={toggleExpanded}>
+        <div className='flex gap-1 items-start cursor-pointer text-gray-500 dark:text-gray-400' onClick={toggleExpanded}>
             {!isExpanded && <ChevronRightIcon size={16} />}
             {isExpanded && <ChevronDownIcon size={16} />}
             <div className='text-left break-all text-xs'>{label}</div>
         </div>
-        {isExpanded && <pre className='text-sm font-mono bg-gray-100 p-2 rounded break-all whitespace-pre-wrap overflow-x-auto'>
+        {isExpanded && <pre className='text-sm font-mono bg-gray-100 dark:bg-gray-800 p-2 rounded break-all whitespace-pre-wrap overflow-x-auto text-gray-900 dark:text-gray-100'>
             {formattedContent}
         </pre>}
     </div>;
@@ -654,10 +656,10 @@ function SystemMessage({
     locked: boolean
 }) {
     return (
-        <div className="border border-gray-300 p-2 rounded-lg flex flex-col gap-2">
+        <div className="border border-gray-300 dark:border-gray-700 p-2 rounded-lg flex flex-col gap-2 bg-white dark:bg-gray-900">
+            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">CONTEXT</div>
             <EditableField
                 light
-                label="Context"
                 value={content}
                 onChange={onChange}
                 multiline

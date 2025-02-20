@@ -10,6 +10,7 @@ import { FormSection } from '../../../../lib/components/form-section';
 import { StructuredPanel, ActionButton } from "../../../../lib/components/structured-panel";
 import clsx from "clsx";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@nextui-org/react";
+import { SectionHeader, ListItem } from "../../../../lib/components/structured-list";
 
 type ScenarioType = WithStringId<z.infer<typeof Scenario>>;
 
@@ -72,10 +73,9 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
         </ActionButton>
       ].filter(Boolean)}
     >
-      <div className="flex flex-col gap-4 p-6 w-full">
-        <FormSection>
+      <div className="flex flex-col gap-4">
+        <FormSection label="Name" showDivider>
           <EditableField
-            label="NAME"
             value={editedScenario.name}
             onChange={(value) => handleChange('name', value)}
             multiline={false}
@@ -86,9 +86,8 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
           />
         </FormSection>
         
-        <FormSection>
+        <FormSection label="Description" showDivider>
           <EditableField
-            label="DESCRIPTION"
             value={editedScenario.description}
             onChange={(value) => handleChange('description', value)}
             multiline={true}
@@ -98,9 +97,8 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
           />
         </FormSection>
         
-        <FormSection>
+        <FormSection label="Criteria" showDivider>
           <EditableField
-            label="CRITERIA"
             value={editedScenario.criteria}
             onChange={(value) => handleChange('criteria', value)}
             multiline={true}
@@ -110,9 +108,8 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
           />
         </FormSection>
         
-        <FormSection>
+        <FormSection label="Context">
           <EditableField
-            label="CONTEXT"
             value={editedScenario.context}
             onChange={(value) => handleChange('context', value)}
             multiline={true}
@@ -124,47 +121,6 @@ export function ScenarioViewer({ scenario, onSave, onClose }: ScenarioViewerProp
       </div>
     </StructuredPanel>
   );
-}
-
-function SectionHeader({ title, onAdd }: { title: string; onAdd: () => void }) {
-    return (
-        <div className="flex items-center justify-between px-2 py-1 mt-4 first:mt-0 border-b border-gray-200">
-            <div className="text-xs font-semibold text-gray-400 uppercase">{title}</div>
-            <ActionButton
-                icon={<svg className="w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
-                    <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h14m-7 7V5" />
-                </svg>}
-                onClick={onAdd}
-            >
-                Add
-            </ActionButton>
-        </div>
-    );
-}
-
-function ListItem({ 
-    name, 
-    isSelected, 
-    onClick,
-    rightElement
-}: { 
-    name: string;
-    isSelected: boolean;
-    onClick: () => void;
-    rightElement?: React.ReactNode;
-}) {
-    return (
-        <button
-            onClick={onClick}
-            className={clsx("flex items-center justify-between rounded-md px-2 py-1", {
-                "bg-gray-100": isSelected,
-                "hover:bg-gray-50": !isSelected,
-            })}
-        >
-            <div className="truncate text-sm">{name}</div>
-            {rightElement}
-        </button>
-    );
 }
 
 function ScenarioDropdown({

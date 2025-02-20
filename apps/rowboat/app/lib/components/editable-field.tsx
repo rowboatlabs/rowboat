@@ -23,6 +23,7 @@ interface EditableFieldProps {
     mentionsAtValues?: Match[];
     showSaveButton?: boolean;
     error?: string | null;
+    inline?: boolean;
 }
 
 export function EditableField({
@@ -33,13 +34,14 @@ export function EditableField({
     markdown = false,
     multiline = false,
     locked = false,
-    className = "flex flex-col gap-1",
+    className = "flex flex-col gap-1 w-full",
     validate,
     light = false,
     mentions = false,
     mentionsAtValues = [],
     showSaveButton = multiline,
     error,
+    inline = false,
 }: EditableFieldProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [localValue, setLocalValue] = useState(value);
@@ -70,7 +72,11 @@ export function EditableField({
         variant: "bordered" as const,
         labelPlacement: "outside" as const,
         placeholder: markdown ? '' : placeholder,
-        radius: "sm" as const,
+        classNames: {
+            input: "rounded-md",
+            inputWrapper: "rounded-md border-medium"
+        },
+        radius: "md" as const,
         isInvalid: !isValid,
         errorMessage: validationResult?.errorMessage,
         onKeyDown: (e: React.KeyboardEvent) => {
@@ -97,80 +103,82 @@ export function EditableField({
         },
     };
 
-    return (
-        <div ref={ref} className={clsx("flex flex-col gap-1", className)}>
-            {(label || isEditing && showSaveButton) && <div className="flex items-center gap-2 justify-between">
-                {label && <Label label={label} />}
-                {isEditing && showSaveButton && <div className="flex items-center gap-2">
-                    <Button
-                        size="sm"
-                        variant="light"
-                        onClick={() => {
-                            setLocalValue(value);
-                            setIsEditing(false);
-                        }}
-                    >
-                        Cancel
-                    </Button>
-                    <Button
-                        size="sm"
-                        color="primary"
-                        onClick={() => {
-                            if (isValid && localValue !== value) {
-                                onChange(localValue);
-                            }
-                            setIsEditing(false);
-                        }}
-                    >
-                        Save
-                    </Button>
-                </div>}
-            </div>}
-            {isEditing ? <>
-                {mentions && <MentionsEditor
-                    atValues={mentionsAtValues}
-                    value={value}
-                    placeholder={placeholder}
-                    onValueChange={setLocalValue}
-                />}
+    if (isEditing) {
+        return (
+            <div ref={ref} className={clsx("flex flex-col gap-1 w-full", className)}>
+                {mentions && (
+                    <div className="w-full rounded-md border-2 border-default-300">
+                        <MentionsEditor
+                            atValues={mentionsAtValues}
+                            value={value}
+                            placeholder={placeholder}
+                            onValueChange={setLocalValue}
+                        />
+                    </div>
+                )}
                 {multiline && !mentions && <Textarea
                     {...commonProps}
                     minRows={3}
                     maxRows={20}
+                    className="w-full"
+                    classNames={{
+                        ...commonProps.classNames,
+                        input: "rounded-md py-2",
+                        inputWrapper: "rounded-md border-medium py-1"
+                    }}
                 />}
-                {!multiline && <Input {...commonProps} />}
-            </> : (
-                <div
-                    onClick={() => !locked && setIsEditing(true)}
-                    className={clsx("text-sm px-2 py-1 rounded-md", {
-                        "bg-gray-50": (markdown && !locked) || light,
-                        "hover:bg-blue-50 cursor-pointer": light && !locked,
-                        "hover:bg-gray-100 cursor-pointer": !light && !locked,
-                        "cursor-default": locked,
-                    })}
-                >
-                    {value ? (<>
+                {!multiline && <Input 
+                    {...commonProps} 
+                    className="w-full"
+                    classNames={{
+                        ...commonProps.classNames,
+                        input: "rounded-md py-2",
+                        inputWrapper: "rounded-md border-medium py-1"
+                    }}
+                />}
+            </div>
+        );
+    }
+
+    return (
+        <div ref={ref} className={clsx("cursor-text", className)}>
+            <div
+                className={clsx(
+                    {
+                        "border border-gray-300 dark:border-gray-600 rounded px-3 py-3": !inline,
+                        "bg-transparent focus:outline-none focus:ring-0 border-0 rounded-none text-gray-900 dark:text-gray-100": inline,
+                    }
+                )}
+                style={inline ? {
+                    border: 'none',
+                    borderRadius: '0',
+                    padding: '0'
+                } : undefined}
+                onClick={() => !locked && setIsEditing(true)}
+            >
+                {value ? (
+                    <>
                         {markdown && <div className="max-h-[420px] overflow-y-auto">
                             <MarkdownContent content={value} atValues={mentionsAtValues} />
                         </div>}
                         {!markdown && <div className={`${multiline ? 'whitespace-pre-wrap max-h-[420px] overflow-y-auto' : 'flex items-center'}`}>
                             <MarkdownContent content={value} atValues={mentionsAtValues} />
                         </div>}
-                    </>) : (
-                        <>
-                            {markdown && <div className="max-h-[420px] overflow-y-auto text-gray-400">
-                                <MarkdownContent content={placeholder} atValues={mentionsAtValues} />
-                            </div>}
-                            {!markdown && <span className="text-gray-400">{placeholder}</span>}
-                        </>
-                    )}
-                </div>
-            )}
-            {error && (
-                <div className="text-xs text-red-500 mt-1">
-                    {error}
-                </div>
-            )}
+                    </>
+                ) : (
+                    <>
+                        {markdown && <div className="max-h-[420px] overflow-y-auto text-gray-400">
+                            <MarkdownContent content={placeholder} atValues={mentionsAtValues} />
+                        </div>}
+                        {!markdown && <span className="text-gray-400">{placeholder}</span>}
+                    </>
+                )}
+                {error && (
+                    <div className="text-xs text-red-500 mt-1">
+                        {error}
+                    </div>
+                )}
+            </div>
         </div>
     );
 } 

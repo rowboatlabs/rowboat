@@ -1,5 +1,5 @@
 "use client";
-import { PageSection } from "../../../../lib/components/PageSection";
+import { PageSection } from "../../../../lib/components/page-section";
 import { WithStringId } from "../../../../lib/types/types";
 import { DataSourceDoc } from "../../../../lib/types/datasource_types";
 import { DataSource } from "../../../../lib/types/datasource_types";

@@ -2,7 +2,7 @@
 import { Input, Select, SelectItem, Textarea } from "@nextui-org/react"
 import { useState } from "react";
 import { createDataSource, addDocsToDataSource } from "../../../../actions/datasource_actions";
-import { FormStatusButton } from "../../../../lib/components/FormStatusButton";
+import { FormStatusButton } from "../../../../lib/components/form-status-button";
 import { DataSourceIcon } from "../../../../lib/components/datasource-icon";
 import { PlusIcon } from "lucide-react";
 import { useRouter } from "next/navigation";

@@ -1,18 +1,22 @@
 import { Divider } from "@nextui-org/react";
+import { Label } from "./label";
 
 export function FormSection({
+    label,
     children,
-    className = "",
+    showDivider = false,
 }: {
+    label?: string;
     children: React.ReactNode;
-    className?: string;
+    showDivider?: boolean;
 }) {
     return (
         <>
-            <div className={`flex flex-col gap-4 items-start ${className}`}>
+            <div className="flex flex-col gap-2">
+                {label && <Label label={label} />}
                 {children}
             </div>
-            <Divider />
+            {showDivider && <Divider className="my-4" />}
         </>
     );
 } 

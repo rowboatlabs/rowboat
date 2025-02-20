@@ -1,5 +1,5 @@
 'use client';
-import { FormStatusButton } from "../../../../lib/components/FormStatusButton";
+import { FormStatusButton } from "../../../../lib/components/form-status-button";
 import { RefreshCwIcon } from "lucide-react";
 
 export function Recrawl({
