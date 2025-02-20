@@ -246,9 +246,6 @@ export async function getAggregateResult(
     if (!run || !run.aggregateResults) return null;
 
     return run.aggregateResults;
-<<<<<<< HEAD
-} 
-=======
 }
 
 export async function deleteRun(projectId: string, runId: string) {
@@ -271,4 +268,3 @@ export async function deleteRun(projectId: string, runId: string) {
         throw new Error('Failed to delete run');
     }
 } 
->>>>>>> 4261c70 (Add Run managemement options and pagination to simulations)
