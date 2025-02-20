@@ -87,8 +87,8 @@ export default function SimulationApp() {
   const [allRunResults, setAllRunResults] = useState<Record<string, SimulationResultType[]>>({});
   const [workflowVersions, setWorkflowVersions] = useState<Record<string, WithStringId<z.infer<typeof Workflow>>>>({});
   const [menuOpenId, setMenuOpenIdState] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(Number(searchParams.get('page')) || 1);
   const runsPerPage = 10;
+  const currentPage = Number(searchParams.get('page')) || 1;
 
   const setMenuOpenId = useCallback((id: string | null) => {
     setMenuOpenIdState(id);
@@ -374,12 +374,6 @@ export default function SimulationApp() {
       console.error('Error deleting run:', error);
     }
   };
-
-  // Add this effect to update currentPage when URL changes
-  useEffect(() => {
-    const page = Number(searchParams.get('page')) || 1;
-    setCurrentPage(page);
-  }, [searchParams]);
 
   const indexOfLastRun = currentPage * runsPerPage;
   const indexOfFirstRun = indexOfLastRun - runsPerPage;
