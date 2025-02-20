@@ -1,7 +1,7 @@
 'use server';
 
 import { ObjectId } from "mongodb";
-import { scenariosCollection, simulationRunsCollection, simulationResultsCollection, simulationAggregateResultsCollection } from "../lib/mongodb";
+import { scenariosCollection, simulationRunsCollection, simulationResultsCollection } from "../lib/mongodb";
 import { z } from 'zod';
 import { projectAuthCheck } from "./project_actions";
 import { type WithStringId } from "../lib/types/types";
@@ -220,13 +220,14 @@ export async function createAggregateResult(
 ): Promise<void> {
     await projectAuthCheck(projectId);
 
-    await simulationAggregateResultsCollection.insertOne({
-        projectId,
-        runId,
-        total,
-        pass,
-        fail,
-    });
+    await simulationRunsCollection.updateOne(
+        { _id: new ObjectId(runId), projectId },
+        {
+            $set: {
+                aggregateResults: { total, pass, fail }
+            }
+        }
+    );
 }
 
 export async function getAggregateResult(
@@ -235,19 +236,12 @@ export async function getAggregateResult(
 ): Promise<z.infer<typeof SimulationAggregateResult> | null> {
     await projectAuthCheck(projectId);
 
-    const result = await simulationAggregateResultsCollection.findOne({
+    const run = await simulationRunsCollection.findOne({
+        _id: new ObjectId(runId),
         projectId,
-        runId,
     });
 
-    if (!result) return null;
+    if (!run || !run.aggregateResults) return null;
 
-    // Only include the fields defined in the schema
-    return {
-        projectId: result.projectId,
-        runId: result.runId,
-        total: result.total,
-        pass: result.pass,
-        fail: result.fail
-    };
-}
+    return run.aggregateResults;
+} 

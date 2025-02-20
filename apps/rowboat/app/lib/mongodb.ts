@@ -24,4 +24,3 @@ export const scenariosCollection = db.collection<z.infer<typeof Scenario>>("scen
 export const apiKeysCollection = db.collection<z.infer<typeof ApiKey>>("api_keys");
 export const simulationRunsCollection = db.collection<z.infer<typeof SimulationRun>>("simulation_runs");
 export const simulationResultsCollection = db.collection<z.infer<typeof SimulationResult>>("simulation_results");
-export const simulationAggregateResultsCollection = db.collection<z.infer<typeof SimulationAggregateResult>>("simulation_aggregate_results");

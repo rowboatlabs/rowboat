@@ -20,15 +20,11 @@ interface SimulationResultCardProps {
 export const SimulationResultCard = ({ run, results, scenarios }: SimulationResultCardProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedScenarios, setExpandedScenarios] = useState<Set<string>>(new Set());
-  const [aggregateResult, setAggregateResult] = useState<z.infer<typeof SimulationAggregateResult> | null>(null);
 
-  useEffect(() => {
-    if (run.projectId && run._id) {
-      getAggregateResult(run.projectId, run._id)
-        .then(setAggregateResult)
-        .catch(console.error);
-    }
-  }, [run.projectId, run._id]);
+  // Replace the manual calculations with aggregate results from the run object
+  const totalScenarios = run.aggregateResults?.total ?? run.scenarioIds.length;
+  const passedScenarios = run.aggregateResults?.pass ?? 0;
+  const failedScenarios = run.aggregateResults?.fail ?? 0;
 
   const statusLabelClass = "px-3 py-1 rounded text-xs min-w-[60px] text-center uppercase font-semibold";
 
@@ -55,11 +51,6 @@ export const SimulationResultCard = ({ run, results, scenarios }: SimulationResu
       hour12: true
     });
   };
-
-  // Replace the manual calculations with aggregate results
-  const totalScenarios = aggregateResult?.total ?? run.scenarioIds.length;
-  const passedScenarios = aggregateResult?.pass ?? 0;
-  const failedScenarios = aggregateResult?.fail ?? 0;
 
   const getDuration = () => {
     if (!run.completedAt) return 'In Progress';

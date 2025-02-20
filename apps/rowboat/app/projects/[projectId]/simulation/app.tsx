@@ -227,12 +227,11 @@ export default function SimulationApp() {
           )
         );
 
-        // Calculate aggregate results
+        // Calculate and store aggregate results before marking as complete
         const total = scenarios.length;
         const pass = mockResults.filter(r => r.result === 'pass').length;
         const fail = mockResults.filter(r => r.result === 'fail').length;
 
-        // Store aggregate results
         await createAggregateResult(
           projectId as string,
           newRun._id,
