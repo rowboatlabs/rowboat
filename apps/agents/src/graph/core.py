@@ -4,6 +4,7 @@ from copy import deepcopy
 
 from src.swarm.types import Agent
 from src.swarm.core import Swarm
+from src.langgraph.core import run_langgraph
 
 from .guardrails import post_process_response
 from .tools import create_error_tool_call
@@ -192,21 +193,13 @@ def get_swarm_agents(agents, children_aware_of_parent):
 
     return agents
 
-def get_agents(agent_configs, tool_configs, localize_history, available_tool_mappings, agent_data, children_aware_of_parent, universal_sys_msg, engine: ExecutionEngine = ExecutionEngine.SWARM):
+def get_agents(agent_configs, tool_configs, localize_history, available_tool_mappings, agent_data, children_aware_of_parent, universal_sys_msg, engine: ExecutionEngine = ExecutionEngine.LANGGRAPH):
     """Main function that creates and sets up agents"""
-    if engine == ExecutionEngine.SWARM:
-        base_agents = get_base_agents(agent_configs, tool_configs, 
-            localize_history, available_tool_mappings, agent_data, 
-            universal_sys_msg)
-        swarm_agents = get_swarm_agents(base_agents, 
-        children_aware_of_parent)
-        return swarm_agents
-    
-    elif engine == ExecutionEngine.LANGGRAPH:
-        raise NotImplementedError("LangGraph execution engine not yet implemented")
-    
-    else:
-        raise ValueError(f"Unknown execution engine: {engine}")
+    base_agents = get_base_agents(agent_configs, tool_configs, 
+        localize_history, available_tool_mappings, agent_data, 
+        universal_sys_msg)
+    agents = get_swarm_agents(base_agents, children_aware_of_parent)
+    return agents
 
 def check_request_validity(messages, agent_configs, tool_configs, prompt_configs, max_overall_turns):
 
@@ -302,7 +295,7 @@ def handle_error(error_tool_call, error_msg, return_diff_messages, messages, tur
     else:
         raise ValueError(error_msg)
 
-def run_turn(messages, start_agent_name, agent_configs, tool_configs, available_tool_mappings={}, localize_history=True, return_diff_messages=True, prompt_configs=[], start_turn_with_start_agent=False, children_aware_of_parent=False, parent_has_child_history=True, state={}, additional_tool_configs=[], error_tool_call=True, max_messages_per_turn=10, max_messages_per_error_escalation_turn=4, escalate_errors=True, max_overall_turns=10):
+def run_turn(messages, start_agent_name, agent_configs, tool_configs, available_tool_mappings={}, localize_history=True, return_diff_messages=True, prompt_configs=[], start_turn_with_start_agent=False, children_aware_of_parent=False, parent_has_child_history=True, state={}, additional_tool_configs=[], error_tool_call=True, max_messages_per_turn=10, max_messages_per_error_escalation_turn=4, escalate_errors=True, max_overall_turns=10, engine: ExecutionEngine = ExecutionEngine.LANGGRAPH):
     
     logger.info("Running stateless turn")
     turn_messages = []
@@ -417,16 +410,36 @@ def run_turn(messages, start_agent_name, agent_configs, tool_configs, available_
     swarm_client = Swarm()
     
     if not validation_error_msg:
-        response = swarm_client.run(
-            agent=last_agent,
-            messages=messages,
-            execute_tools=True,
-            external_tools=external_tools,
-            localize_history=localize_history,
-            parent_has_child_history=parent_has_child_history,
-            max_messages_per_turn=max_messages_per_turn,
-            tokens_used=tokens_used
-        )
+        if engine == ExecutionEngine.LANGGRAPH:
+            response = swarm_client.run(
+                agent=last_agent,
+                messages=messages,
+                execute_tools=True,
+                external_tools=external_tools,
+                localize_history=localize_history,
+                parent_has_child_history=parent_has_child_history,
+                max_messages_per_turn=max_messages_per_turn,
+                tokens_used=tokens_used
+            )
+        elif engine == ExecutionEngine.LANGGRAPH:
+            response = run_langgraph(
+                messages=messages,
+                start_agent=last_agent,
+                all_agents=all_agents,
+                tokens_used=tokens_used
+            )
+            # Extract response components
+            response_messages, response_tokens_used, response_state = response
+            response = Response(
+                messages=response_messages,
+                agent=response_state.get("last_agent", last_agent),
+                context_variables={},
+                error_msg="",
+                tokens_used=response_tokens_used
+            )
+        else:
+            raise ValueError(f"Unknown execution engine: {engine}")
+        
         tokens_used = response.tokens_used
         last_agent = response.agent
         response.messages = order_messages(response.messages)
