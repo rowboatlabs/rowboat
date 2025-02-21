@@ -2,14 +2,20 @@ from typing import Dict, List, Tuple, Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, FunctionMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import JsonOutputParser
-from langchain.chat_models import ChatOpenAI
-from langgraph.graph import Graph, MessageGraph
+from langchain_openai import ChatOpenAI
+from langgraph.graph import Graph, MessageGraph, END
 from langgraph.prebuilt import ToolInvocation
+
 import json
 
 from ..graph.types import Agent, Response, ExecutionEngine
 from ..graph.helpers.state import construct_state_from_response
 from ..utils.common import common_logger as logger
+
+def router(state):
+    if state["next_agent"]:
+        return state["next_agent"].name
+    return END
 
 def create_agent_node(agent: Agent):
     """Creates a LangGraph node for an agent"""
@@ -39,6 +45,7 @@ def create_agent_node(agent: Agent):
         tools.append(agent.parent_function)
 
     def agent_node(state):
+        print("OIULKJLOIUOLOIUOI:LKJ agent node")
         # Get messages from state
         messages = state.get("messages", [])
         history = state.get("history", [])
@@ -72,40 +79,70 @@ def create_agent_node(agent: Agent):
             tool_calls = response.tool_calls
             results = []
 
+            # Collect transfer tool names
+            transfer_tool_names = [fn.__name__ for fn in agent.child_functions.values()] + ([agent.parent_function.__name__] if agent.parent_function else [])
+
             for tool_call in tool_calls:
-                # Execute tool/function
                 tool_name = tool_call.function.name
                 args = json.loads(tool_call.function.arguments)
 
-                if tool_name in agent.child_functions:
-                    # Handle child agent transfer
-                    child_agent = agent.children[tool_name]
-                    results.append({
-                        "type": "agent_transfer",
-                        "agent": child_agent,
-                        "content": args
-                    })
-                elif tool_name == agent.parent_function.__name__:
-                    # Handle parent agent transfer
-                    results.append({
-                        "type": "agent_transfer",
-                        "agent": agent.most_recent_parent,
-                        "content": args
-                    })
+                if tool_name in transfer_tool_names:
+                    if tool_name == "transfer_to_parent" and agent.most_recent_parent:
+                        results.append({
+                            "type": "agent_transfer",
+                            "agent": agent.most_recent_parent,
+                            "content": args
+                        })
+                    elif tool_name.startswith("transfer_to_"):
+                        child_name = tool_name[len("transfer_to_"):]
+                        if child_name in agent.children:
+                            child_agent = agent.children[child_name]
+                            results.append({
+                                "type": "agent_transfer",
+                                "agent": child_agent,
+                                "content": args
+                            })
+                        else:
+                            results.append({
+                                "type": "tool_result",
+                                "tool": tool_name,
+                                "content": f"Error: Child agent {child_name} not found"
+                            })
+                    else:
+                        results.append({
+                            "type": "tool_result",
+                            "tool": tool_name,
+                            "content": f"Error: Invalid transfer tool {tool_name}"
+                        })
                 else:
                     # Handle regular tool call
-                    tool = next(t for t in tools if t["name"] == tool_name)
-                    result = tool["function"](**args)
-                    results.append({
-                        "type": "tool_result",
-                        "tool": tool_name,
-                        "content": result
-                    })
+                    try:
+                        tool = next(t for t in tools if t["function"]["name"] == tool_name)
+                        result = tool["function"]["function"](**args)
+                        results.append({
+                            "type": "tool_result",
+                            "tool": tool_name,
+                            "content": result
+                        })
+                    except Exception as e:
+                        results.append({
+                            "type": "tool_result",
+                            "tool": tool_name,
+                            "content": f"Error executing tool {tool_name}: {str(e)}"
+                        })
+
+            next_agent = None
+            for result in results:
+                if result["type"] == "agent_transfer":
+                    next_agent = result["agent"]
+                    break
+            if not next_agent:
+                next_agent = agent
 
             return {
                 "messages": messages + [response] + results,
                 "current_agent": agent,
-                "next_agent": results[-1].get("agent") if results[-1]["type"] == "agent_transfer" else agent
+                "next_agent": next_agent
             }
 
         # No tool calls - conversation complete
@@ -119,6 +156,7 @@ def create_agent_node(agent: Agent):
 
 def create_graph(agents: List[Agent], start_agent: Agent) -> Graph:
     """Creates the LangGraph execution graph"""
+    print("KLJLKJLKJ:LKJ:LKJ Creating LangGraph execution graph")
 
     # Create nodes for each agent
     nodes = {
@@ -152,8 +190,11 @@ def create_graph(agents: List[Agent], start_agent: Agent) -> Graph:
             return state["next_agent"].name
         return None
 
-    workflow.add_conditional_edges(router)
-
+    for agent in agents:
+        workflow.add_conditional_edges(
+            agent.name,  # source node
+            router       # condition function
+        )
     return workflow.compile()
 
 def run_langgraph(
@@ -165,10 +206,10 @@ def run_langgraph(
 ) -> Tuple[List[Dict], Dict, Dict]:
     """Runs the LangGraph execution"""
 
-    # Create and run the graph
+    # Create the graph with all agents and the starting agent
     graph = create_graph(all_agents, start_agent)
 
-    # Prepare initial state
+    # Prepare the initial state
     state = {
         "messages": messages,
         "history": [],
@@ -176,10 +217,10 @@ def run_langgraph(
         "next_agent": start_agent
     }
 
-    # Run the graph
-    final_state = graph.run(state)
+    # Execute the graph using invoke instead of run
+    final_state = graph.invoke(state)
 
-    # Construct response
+    # Construct the response from the final state
     response = Response(
         messages=final_state["messages"],
         agent=final_state["current_agent"],
@@ -188,7 +229,8 @@ def run_langgraph(
         tokens_used=tokens_used or {}
     )
 
-    # Update state
+    # Update the state based on the response
     new_state = construct_state_from_response(response, all_agents)
 
+    # Return the messages, tokens used, and new state
     return response.messages, response.tokens_used, new_state

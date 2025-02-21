@@ -406,11 +406,10 @@ def run_turn(messages, start_agent_name, agent_configs, tool_configs, available_
     external_tools = get_external_tools(tool_configs)
     logger.info(f"Found {len(external_tools)} external tools")
     
-    logger.debug("Initializing Swarm client")
-    swarm_client = Swarm()
-    
     if not validation_error_msg:
-        if engine == ExecutionEngine.LANGGRAPH:
+        if engine == ExecutionEngine.SWARM:
+            logger.debug("Initializing Swarm client")
+            swarm_client = Swarm()
             response = swarm_client.run(
                 agent=last_agent,
                 messages=messages,
