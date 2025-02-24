@@ -110,6 +110,40 @@ html, body {
     z-index: 1000;
 }
 
+/* Base dark mode styles */
+.dark .ql-mention-list-container {
+    background-color: #1f2937;
+    border-color: #374151;
+}
+
+.dark .ql-mention-list-container * {
+    background-color: #1f2937 !important;
+    color: #f9fafb !important;
+}
+
+/* Target individual items */
+.dark .ql-mention-list-item {
+    color: #f9fafb !important;
+    background-color: #1f2937 !important;
+}
+
+/* Target hover and selected states for individual items */
+.dark .ql-mention-list-container .ql-mention-list-item.selected,
+.dark .ql-mention-list-container .ql-mention-list-item:hover {
+    background-color: #6b7280 !important;
+}
+
+/* Ensure the background color only applies to the item itself */
+.dark .ql-mention-list-item > * {
+    background-color: inherit !important;
+}
+
+/* Additional catch-all for any other possible class combinations */
+.dark [class*="mention"].selected,
+.dark [class*="mention"]:hover {
+    background-color: #6b7280 !important;
+}
+
 .ql-mention-list {
     padding: 0.5rem 0;
 }
