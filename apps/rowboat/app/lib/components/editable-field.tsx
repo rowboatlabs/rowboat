@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { Label } from "./label";
 import dynamic from "next/dynamic";
 import { Match } from "./mentions_editor";
+import { SparklesIcon } from "lucide-react";
 const MentionsEditor = dynamic(() => import('./mentions_editor'), { ssr: false });
 
 interface EditableFieldProps {
@@ -22,8 +23,13 @@ interface EditableFieldProps {
     mentions?: boolean;
     mentionsAtValues?: Match[];
     showSaveButton?: boolean;
+    showDiscardButton?: boolean;
     error?: string | null;
     inline?: boolean;
+    showGenerateButton?: {
+        show: boolean;
+        setShow: (show: boolean) => void;
+    };
 }
 
 export function EditableField({
@@ -39,9 +45,11 @@ export function EditableField({
     light = false,
     mentions = false,
     mentionsAtValues = [],
-    showSaveButton = multiline,
+    showSaveButton = false,
+    showDiscardButton = false,
     error,
     inline = false,
+    showGenerateButton,
 }: EditableFieldProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [localValue, setLocalValue] = useState(value);
@@ -104,8 +112,58 @@ export function EditableField({
     };
 
     if (isEditing) {
+        const hasChanges = localValue !== value;
+
         return (
             <div ref={ref} className={clsx("flex flex-col gap-1 w-full", className)}>
+                {label && (
+                    <div className="flex justify-between items-center">
+                        <Label label={label} />
+                        <div className="flex gap-2 items-center">
+                            {showGenerateButton && (
+                                <Button
+                                    variant="light"
+                                    size="sm"
+                                    startContent={<SparklesIcon size={16} />}
+                                    onPress={() => showGenerateButton.setShow(true)}
+                                >
+                                    Generate
+                                </Button>
+                            )}
+                            {hasChanges && (
+                                <>
+                                    {showDiscardButton && (
+                                        <Button
+                                            variant="light"
+                                            size="sm"
+                                            onPress={() => {
+                                                setLocalValue(value);
+                                                setIsEditing(false);
+                                            }}
+                                            className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                                        >
+                                            Discard
+                                        </Button>
+                                    )}
+                                    {showSaveButton && (
+                                        <Button
+                                            color="primary"
+                                            size="sm"
+                                            onPress={() => {
+                                                if (isValid && localValue !== value) {
+                                                    onChange(localValue);
+                                                }
+                                                setIsEditing(false);
+                                            }}
+                                        >
+                                            Save
+                                        </Button>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
                 {mentions && (
                     <div className="w-full rounded-md border-2 border-default-300">
                         <MentionsEditor
@@ -142,6 +200,21 @@ export function EditableField({
 
     return (
         <div ref={ref} className={clsx("cursor-text", className)}>
+            {label && (
+                <div className="flex justify-between items-center">
+                    <Label label={label} />
+                    {showGenerateButton && (
+                        <Button
+                            variant="light"
+                            size="sm"
+                            startContent={<SparklesIcon size={16} />}
+                            onPress={() => showGenerateButton.setShow(true)}
+                        >
+                            Generate
+                        </Button>
+                    )}
+                </div>
+            )}
             <div
                 className={clsx(
                     {

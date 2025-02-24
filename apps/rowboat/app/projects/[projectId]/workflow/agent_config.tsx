@@ -3,14 +3,14 @@ import { WithStringId } from "../../../lib/types/types";
 import { AgenticAPITool } from "../../../lib/types/agents_api_types";
 import { WorkflowPrompt, WorkflowAgent, Workflow } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
-import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Input, Radio, RadioGroup} from "@nextui-org/react";
+import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Input, Radio, RadioGroup, Divider } from "@nextui-org/react";
 import { z } from "zod";
 import { DataSourceIcon } from "../../../lib/components/datasource-icon";
 import { ActionButton, StructuredPanel } from "../../../lib/components/structured-panel";
 import { FormSection } from "../../../lib/components/form-section";
 import { EditableField } from "../../../lib/components/editable-field";
 import { Label } from "../../../lib/components/label";
-import { PlusIcon, SparklesIcon } from "lucide-react";
+import { PlusIcon, SparklesIcon, ChevronRight, ChevronDown } from "lucide-react";
 import { List } from "./config_list";
 import { useState, useEffect, useRef } from "react";
 import { usePreviewModal } from "./preview-modal";
@@ -19,10 +19,7 @@ import { Textarea } from "@nextui-org/react";
 import { PreviewModalProvider } from "./preview-modal";
 import { CopilotMessage } from "@/app/lib/types/copilot_types";
 import { getCopilotAgentInstructions } from "@/app/actions/copilot_actions";
-import { PlusIcon, ChevronRight, ChevronDown } from "lucide-react";
-import { List } from "./config_list";
 import { Dropdown as CustomDropdown } from "../../../lib/components/dropdown";
-import { useState } from "react";
 
 export function AgentConfig({
     projectId,
@@ -91,9 +88,10 @@ export function AgentConfig({
     ]}>
         <div className="flex flex-col gap-4">
             {!agent.locked && (
-                <FormSection label="Name" showDivider>
+                <FormSection showDivider>
                     <EditableField
                         key="name"
+                        label="Name"
                         value={agent.name}
                         onChange={(value) => {
                             handleUpdate({
@@ -118,9 +116,10 @@ export function AgentConfig({
                 </FormSection>
             )}
 
-            <FormSection label="Description" showDivider>
+            <FormSection showDivider>
                 <EditableField
                     key="description"
+                    label="Description"
                     value={agent.description || ""}
                     onChange={(value) => {
                         handleUpdate({
@@ -129,44 +128,14 @@ export function AgentConfig({
                         });
                     }}
                     placeholder="Enter a description for this agent"
+                    multiline
                 />
             </FormSection>
 
-            {/* To be refactored */}
-            <div className="flex flex-col gap-1">
-                <div className="flex justify-between items-center">
-                    <Label label="Instructions" />
-                    <Button
-                        variant="light"
-                        size="sm"
-                        startContent={<SparklesIcon size={16} />}
-                        onPress={() => setShowGenerateModal(true)}
-                    >
-                        Generate
-                    </Button>
-                </div>
-                <div className="w-full flex flex-col">
-                    <EditableField
-                        key="instructions"
-                        value={agent.instructions}
-                        onChange={(value) => {
-                            handleUpdate({
-                                ...agent,
-                                instructions: value
-                            });
-                        }}
-                        markdown
-                        multiline
-                        mentions
-                        mentionsAtValues={atMentions}
-                    />
-                </div>
-            </div>
-
-            {/* Refactored */}
-            <FormSection label="Instructions" showDivider>
+            <FormSection showDivider>
                 <EditableField
                     key="instructions"
+                    label="Instructions"
                     value={agent.instructions}
                     onChange={(value) => {
                         handleUpdate({
@@ -178,12 +147,19 @@ export function AgentConfig({
                     multiline
                     mentions
                     mentionsAtValues={atMentions}
+                    showSaveButton={true}
+                    showDiscardButton={true}
+                    showGenerateButton={{
+                        show: showGenerateModal,
+                        setShow: setShowGenerateModal
+                    }}
                 />
             </FormSection>
 
-            <FormSection label="Examples" showDivider>
+            <FormSection showDivider>
                 <EditableField
                     key="examples"
+                    label="Examples"
                     value={agent.examples || ""}
                     onChange={(value) => {
                         handleUpdate({
@@ -196,6 +172,8 @@ export function AgentConfig({
                     multiline
                     mentions
                     mentionsAtValues={atMentions}
+                    showSaveButton={true}
+                    showDiscardButton={true}
                 />
             </FormSection>
 

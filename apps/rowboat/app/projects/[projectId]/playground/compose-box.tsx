@@ -60,7 +60,7 @@ export function ComposeBox({
             isIconOnly
             disabled={disabled}
             onClick={handleInput}
-            className="bg-gray-100"
+            className="bg-default-100"
         >
             <CornerDownLeftIcon size={16} />
         </Button>}

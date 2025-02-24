@@ -91,7 +91,7 @@ export function SourcesList({
                                     <SelfUpdatingSourceStatus sourceId={source._id} projectId={projectId} initialStatus={source.status} compact={true} />
                                 </td>
                                 <td className="py-4 text-right">
-                                    <ToggleSource projectId={projectId} sourceId={source._id} active={source.active} compact={true} />
+                                    <ToggleSource projectId={projectId} sourceId={source._id} active={source.active} compact={true} className="bg-default-100" />
                                 </td>
                             </tr>;
                         })}
