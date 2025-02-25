@@ -38,7 +38,8 @@ class Client:
             workflowId=workflow_id,
             testProfileId=test_profile_id
         )
-        response = requests.post(self.base_url, headers=self.headers, data=request.model_dump_json())
+        json_data = request.model_dump()
+        response = requests.post(self.base_url, headers=self.headers, json=json_data)
 
         if not response.status_code == 200:
             raise ValueError(f"Error: {response.status_code} - {response.text}")
@@ -90,7 +91,7 @@ class Client:
     ) -> Tuple[List[ApiMessage], Optional[Dict[str, Any]]]:
         """Stateless chat method that handles a single conversation turn with multiple tool call rounds"""
         
-        current_messages = messages
+        current_messages = messages[:]
         current_state = state
         turns = 0
 

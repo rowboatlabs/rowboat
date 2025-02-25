@@ -60,6 +60,16 @@ services:
       - API_KEY=${COPILOT_API_KEY}
     restart: unless-stopped
 
+  tools_webhook:
+    build:
+      context: ./apps/tools_webhook
+      dockerfile: Dockerfile
+    ports:
+      - "3005:3005"
+    environment:
+      - SIGNING_SECRET=${SIGNING_SECRET}
+    restart: unless-stopped
+
   simulation_runner:
     build:
       context: ./apps/simulation_runner
@@ -124,17 +134,6 @@ services:
       - QDRANT_API_KEY=${QDRANT_API_KEY}
     restart: unless-stopped
 
-  tools_webhook:
-    build:
-      context: ./apps/tools_webhook
-      dockerfile: Dockerfile
-    profiles: [ "tools_webhook" ]
-    ports:
-      - "3005:3005"
-    environment:
-      - SIGNING_SECRET=${SIGNING_SECRET}
-    restart: unless-stopped
-
   chat_widget:
     build:
       context: ./apps/chat_widget
@@ -162,20 +161,14 @@ services:
     ports:
       - "8000:8000"
 
-  voice:
+  twilio_handler:
     build:
-      context: ./apps/voice
+      context: ./apps/twilio_handler
       dockerfile: Dockerfile
     ports:
       - "3009:3009"
     environment:
-      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
-      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
-      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
       - ROWBOAT_API_HOST=http://rowboat:3000
-      - ROWBOAT_PROJECT_ID=${ROWBOAT_PROJECT_ID}
-      - ROWBOAT_API_KEY=${ROWBOAT_API_KEY}
-      - REDIS_URL=redis://redis:6379
-      - BASE_URL=${BASE_URL}
+      - MONGODB_URI=${MONGODB_CONNECTION_STRING}
     restart: unless-stopped
