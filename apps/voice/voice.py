@@ -10,6 +10,7 @@ import queue
 import threading
 import time
 from deepgram.audio.microphone import Microphone
+import datetime  # Add this import for timestamp logging
 
 
 openai_client = OpenAI()
@@ -69,7 +70,9 @@ def transcription_thread_func(transcription_queue, stop_event, ignore_flag):
 
         if buffer:
             user_input = " ".join(buffer)
-            transcription_queue.put(user_input)
+            # Record timestamp when utterance ends and add it with the transcription
+            end_time = datetime.datetime.now()
+            transcription_queue.put((user_input, end_time))
             buffer.clear()
 
     def on_metadata(self, metadata, **kwargs):
@@ -179,18 +182,33 @@ def speak_to_support(rowboat_client: Client, workflow_id: str, max_iterations: i
     for i in range(max_iterations):
         try:
             # Wait for user input from the transcription queue (timeout after 30 seconds)
-            user_input = transcription_queue.get(timeout=30)
+            queue_item = transcription_queue.get(timeout=30)
+
+            # Unpack the user input and utterance end timestamp
+            user_input, utterance_end_time = queue_item
             last_user_input = user_input
+
+            # Log when we received the transcription
+            transcription_received_time = datetime.datetime.now()
+            print(f"Speech-to-text processing time: {(transcription_received_time - utterance_end_time).total_seconds():.3f} seconds")
 
             # Set ignore flag if needed
             if ignore_speech_during_processing:
                 ignore_speech.set()
 
             # Process user input through the chat system
+            api_start_time = datetime.datetime.now()
             rowboat_response = support_chat.run(user_input)
+            api_end_time = datetime.datetime.now()
             last_rowboat_response = rowboat_response
 
+            print(f"API response time: {(api_end_time - api_start_time).total_seconds():.3f} seconds")
+
             try:
+                # Log TTS start time
+                tts_start_time = datetime.datetime.now()
+                print(f"Total latency before TTS: {(tts_start_time - utterance_end_time).total_seconds():.3f} seconds")
+
                 # Convert the response to speech using ElevenLabs
                 audio = elevenlabs_client.generate(
                     text=rowboat_response,
@@ -199,8 +217,14 @@ def speak_to_support(rowboat_client: Client, workflow_id: str, max_iterations: i
                     output_format="mp3_44100_128"
                 )
 
+                tts_generated_time = datetime.datetime.now()
+                print(f"TTS generation time: {(tts_generated_time - tts_start_time).total_seconds():.3f} seconds")
+
                 # Play the generated audio
                 elevenlabs.play(audio)
+
+                # Log total end-to-end latency
+                print(f"Total end-to-end latency: {(tts_generated_time - utterance_end_time).total_seconds():.3f} seconds")
 
             except Exception as e:
                 print(f"Error with ElevenLabs TTS: {e}")
