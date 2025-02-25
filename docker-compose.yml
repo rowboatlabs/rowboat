@@ -59,7 +59,7 @@ services:
       - "3005:3005"
     environment:
       - SIGNING_SECRET=${SIGNING_SECRET}
-    restart: unless-stopped 
+    restart: unless-stopped
 
   simulation_runner:
     build:
@@ -85,20 +85,14 @@ services:
       - "6379:6379"
     restart: unless-stopped
 
-  voice:
+  twilio_handler:
     build:
-      context: ./apps/voice
+      context: ./apps/twilio_handler
       dockerfile: Dockerfile
     ports:
       - "3009:3009"
     environment:
-      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
-      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
-      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
       - ROWBOAT_API_HOST=http://rowboat:3000
-      - ROWBOAT_PROJECT_ID=${ROWBOAT_PROJECT_ID}
-      - ROWBOAT_API_KEY=${ROWBOAT_API_KEY}
-      - REDIS_URL=redis://redis:6379
-      - BASE_URL=${BASE_URL}
+      - MONGODB_URI=${MONGODB_CONNECTION_STRING}
     restart: unless-stopped

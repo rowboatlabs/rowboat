@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Button } from "@nextui-org/react";
+import { Button } from "@heroui/react";
 import { configureTwilioNumber, mockConfigureTwilioNumber, getTwilioConfigs, deleteTwilioConfig } from "../../../actions/voice_actions";
 import { FormSection } from "../../../lib/components/form-section";
 import { EditableField } from "../../../lib/components/editable-field-with-immediate-save";
