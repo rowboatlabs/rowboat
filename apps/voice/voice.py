@@ -30,7 +30,7 @@ def transcription_thread_func(transcription_queue, stop_event, ignore_flag):
     Runs in a separate thread to handle real-time transcription using Deepgram.
     Accumulates transcriptions until an utterance end is detected, then sends the
     complete transcription to the queue.
-    
+
     Args:
         transcription_queue: Queue to send transcriptions to
         stop_event: Event to signal thread termination
@@ -51,7 +51,7 @@ def transcription_thread_func(transcription_queue, stop_event, ignore_flag):
         # Skip processing if we're in ignore mode
         if ignore_flag.is_set():
             return
-            
+
         if result.is_final:
             sentence = result.channel.alternatives[0].transcript
             if len(sentence) > 0:
@@ -66,7 +66,7 @@ def transcription_thread_func(transcription_queue, stop_event, ignore_flag):
         if ignore_flag.is_set():
             buffer.clear()
             return
-            
+
         if buffer:
             user_input = " ".join(buffer)
             transcription_queue.put(user_input)
@@ -121,18 +121,18 @@ def transcription_thread_func(transcription_queue, stop_event, ignore_flag):
     microphone.finish()
     dg_connection.finish()
 
-def speak_to_support(rowboat_client: Client, workflow_id: str, max_iterations: int = 5, 
+def speak_to_support(rowboat_client: Client, workflow_id: str, max_iterations: int = 5,
                      ignore_speech_during_processing: bool = False) -> tuple[str, str, str]:
     """
     Handles a conversational support session using real-time transcription and TTS.
-    
+
     Args:
         rowboat_client (Client): The Rowboat client for chat functionality.
         workflow_id (str): The workflow ID for the chat session.
         max_iterations (int): Maximum number of conversational turns (default: 5).
-        ignore_speech_during_processing (bool): If True, ignores user speech during 
+        ignore_speech_during_processing (bool): If True, ignores user speech during
                                                AI processing and TTS playback (default: False).
-    
+
     Returns:
         tuple[str, str, str]: Last user input, last assistant response, and workflow ID.
     """
@@ -146,7 +146,7 @@ def speak_to_support(rowboat_client: Client, workflow_id: str, max_iterations: i
     transcription_queue = queue.Queue()
     stop_transcription = threading.Event()
     ignore_speech = threading.Event()  # New event to control when to ignore speech
-    
+
     transcription_thread = threading.Thread(
         target=transcription_thread_func,
         args=(transcription_queue, stop_transcription, ignore_speech)
@@ -156,17 +156,36 @@ def speak_to_support(rowboat_client: Client, workflow_id: str, max_iterations: i
     last_user_input = ""
     last_rowboat_response = ""
 
+    # Speak initial greeting
+    initial_greeting = "Hi, how can I help you today"
+    try:
+        # Convert the greeting to speech using ElevenLabs
+        audio = elevenlabs_client.generate(
+            text=initial_greeting,
+            voice="Rachel",
+            model="eleven_monolingual_v1",
+            output_format="mp3_44100_128"
+        )
+
+        # Play the generated audio
+        elevenlabs.play(audio)
+
+    except Exception as e:
+        print(f"Error with ElevenLabs TTS for greeting: {e}")
+        # Fallback to printing the greeting if audio fails
+        print(initial_greeting)
+
     # Main conversational loop
     for i in range(max_iterations):
         try:
             # Wait for user input from the transcription queue (timeout after 30 seconds)
             user_input = transcription_queue.get(timeout=30)
             last_user_input = user_input
-            
+
             # Set ignore flag if needed
             if ignore_speech_during_processing:
                 ignore_speech.set()
-                
+
             # Process user input through the chat system
             rowboat_response = support_chat.run(user_input)
             last_rowboat_response = rowboat_response
@@ -179,19 +198,19 @@ def speak_to_support(rowboat_client: Client, workflow_id: str, max_iterations: i
                     model="eleven_monolingual_v1",
                     output_format="mp3_44100_128"
                 )
-                
+
                 # Play the generated audio
                 elevenlabs.play(audio)
-                
+
             except Exception as e:
                 print(f"Error with ElevenLabs TTS: {e}")
                 # Fallback to printing the response if audio fails
                 print(rowboat_response)
-            
+
             # Clear ignore flag after processing and TTS are complete
             if ignore_speech_during_processing:
                 ignore_speech.clear()
-                
+
         except queue.Empty:
             print("No user input received within timeout")
             break
