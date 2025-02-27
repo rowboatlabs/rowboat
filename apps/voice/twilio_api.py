@@ -45,34 +45,34 @@ elevenlabs_client = elevenlabs.ElevenLabs(api_key=ELEVENLABS_API_KEY)
 def provision_phone_number(area_code: str = None, country_code: str = "US") -> Dict:
     """
     Provision a new Twilio phone number.
-    
+
     Args:
         area_code: Optional area code to filter phone numbers
         country_code: Country code (default: US)
-        
+
     Returns:
         Dict with phone number details or error
     """
     if not twilio_client:
         logger.error("Twilio client not initialized - missing credentials")
         return {"error": "Twilio credentials not configured"}
-    
+
     try:
         # Search for available phone numbers
         available_numbers = twilio_client.available_phone_numbers(country_code).local.list(
             area_code=area_code,
             limit=1
         )
-        
+
         if not available_numbers:
             logger.warning(f"No available phone numbers found for area code {area_code}")
             return {"error": f"No phone numbers available for area code {area_code}"}
-        
+
         # Purchase the first available number
         number = twilio_client.incoming_phone_numbers.create(
             phone_number=available_numbers[0].phone_number
         )
-        
+
         logger.info(f"Successfully provisioned phone number: {number.phone_number}")
         return {
             "phone_number": number.phone_number,
@@ -80,50 +80,49 @@ def provision_phone_number(area_code: str = None, country_code: str = "US") -> D
             "friendly_name": number.friendly_name,
             "date_created": str(number.date_created)
         }
-        
+
     except Exception as e:
         logger.error(f"Error provisioning phone number: {str(e)}")
         return {"error": str(e)}
 
 def make_outbound_call(
-    to_number: str, 
-    from_number: str, 
+    to_number: str,
+    from_number: str,
     workflow_id: str,
     system_prompt: str = "You are a helpful assistant. Provide concise and clear answers.",
     twiml_callback_url: Optional[str] = None
 ) -> Dict:
     """
     Make an outbound call from a Twilio number to connect with a RowBoat agent.
-    
+
     Args:
         to_number: Destination phone number (E.164 format)
         from_number: Twilio phone number to call from (E.164 format)
         workflow_id: RowBoat workflow ID for the conversation
         system_prompt: System prompt for the RowBoat agent
         twiml_callback_url: URL to TwiML for call handling
-        
+
     Returns:
         Dict with call details or error
     """
     if not twilio_client:
         logger.error("Twilio client not initialized - missing credentials")
         return {"error": "Twilio credentials not configured"}
-    
+
     try:
         # If no TwiML callback URL is provided, use the default webhook
         if not twiml_callback_url:
             twiml_callback_url = f"https://your-server.com/twiml?workflow_id={workflow_id}"
-        
+
         # Make the call
         call = twilio_client.calls.create(
             to=to_number,
             from_=from_number,
             url=twiml_callback_url,
             status_callback=f"https://your-server.com/call-status",
-            status_callback_event=['initiated', 'ringing', 'answered', 'completed'],
             status_callback_method='POST'
         )
-        
+
         logger.info(f"Initiated call SID: {call.sid} to {to_number}")
         return {
             "call_sid": call.sid,
@@ -132,7 +131,7 @@ def make_outbound_call(
             "from": from_number,
             "workflow_id": workflow_id
         }
-        
+
     except Exception as e:
         logger.error(f"Error making outbound call: {str(e)}")
         return {"error": str(e)}
@@ -140,10 +139,10 @@ def make_outbound_call(
 def transcribe_audio(audio_url: str) -> str:
     """
     Transcribe audio using Deepgram.
-    
+
     Args:
         audio_url: URL to the audio file
-        
+
     Returns:
         Transcribed text
     """
@@ -154,16 +153,16 @@ def transcribe_audio(audio_url: str) -> str:
             "punctuate": True,
             "language": "en-US",
         }
-        
+
         # Perform transcription
         response = deepgram_client.listen.prerecorded.v("1").transcribe_url(
             {"url": audio_url}, options
         )
-        
+
         # Extract transcription text
         transcript = response.results.channels[0].alternatives[0].transcript
         return transcript
-        
+
     except Exception as e:
         logger.error(f"Error transcribing audio: {str(e)}")
         return ""
@@ -171,10 +170,10 @@ def transcribe_audio(audio_url: str) -> str:
 def text_to_speech(text: str) -> bytes:
     """
     Convert text to speech using ElevenLabs.
-    
+
     Args:
         text: Text to convert to speech
-        
+
     Returns:
         Audio bytes
     """
@@ -186,24 +185,24 @@ def text_to_speech(text: str) -> bytes:
             output_format="mp3_44100_128"
         )
         return audio
-        
+
     except Exception as e:
         logger.error(f"Error with ElevenLabs TTS: {str(e)}")
         return None
 
 def process_conversation_turn(
-    user_input: str, 
-    workflow_id: str, 
+    user_input: str,
+    workflow_id: str,
     system_prompt: str = "You are a helpful assistant. Provide concise and clear answers."
 ) -> str:
     """
     Process a single conversation turn with the RowBoat agent.
-    
+
     Args:
         user_input: User's transcribed input
         workflow_id: RowBoat workflow ID
         system_prompt: System prompt for the agent
-        
+
     Returns:
         Agent's response text
     """
@@ -213,11 +212,11 @@ def process_conversation_turn(
             system_prompt=system_prompt,
             workflow_id=workflow_id
         )
-        
+
         # Process user input through the chat system
         rowboat_response = support_chat.run(user_input)
         return rowboat_response
-        
+
     except Exception as e:
         logger.error(f"Error processing conversation turn: {str(e)}")
         return "I'm sorry, I encountered an error processing your request."
