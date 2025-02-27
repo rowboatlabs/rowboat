@@ -1,0 +1,8 @@
+flask==2.3.3
+twilio==8.15.0
+deepgram-sdk==2.16.0
+elevenlabs==0.2.32
+openai==1.35.0
+requests==2.31.0
+python-dotenv==1.0.1
+gunicorn==21.2.0
