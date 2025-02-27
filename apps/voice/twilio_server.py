@@ -391,19 +391,23 @@ def handle_call(call_sid, workflow_id):
             call_state['turn_count'] = 1
             active_calls[call_sid] = call_state
 
-            # Gather user input after greeting
+            # Instead of using both Gather and Record which compete for input,
+            # just use Gather for speech recognition, and rely on its SpeechResult
+            # This is more reliable than trying to use Record and Deepgram
             gather = Gather(
                 input='speech',
                 action=f'/process_speech?call_sid={call_sid}',
                 speech_timeout='auto',
-                language='en-US'
+                language='en-US',
+                enhanced=True,  # Enable enhanced speech recognition
+                speechModel='phone_call'  # Optimize for phone calls
             )
             response.append(gather)
 
             # If no input detected, retry
             response.redirect(f'/twiml?workflow_id={workflow_id}')
 
-        logger.info(f"Returning TwiML response: {str(response)}")
+        logger.info(f"Returning response: {str(response)}")
         return str(response)
 
     except Exception as e:
@@ -425,13 +429,39 @@ def process_speech():
         logger.info(f"Processing speech: {request.values}")
 
         call_sid = request.args.get('call_sid')
-        speech_result = request.values.get('SpeechResult')
 
-        if not call_sid or not speech_result:
-            logger.warning(f"Missing call_sid or speech result: {call_sid}, {speech_result}")
+        # Log all request values for debugging
+        logger.info(f"FULL REQUEST VALUES: {dict(request.values)}")
+        logger.info(f"FULL REQUEST ARGS: {dict(request.args)}")
+
+        # Get the speech result directly from Twilio
+        # We're now relying on Twilio's enhanced speech recognition instead of Deepgram
+        speech_result = request.values.get('SpeechResult')
+        confidence = request.values.get('Confidence')
+
+        logger.info(f"Twilio SpeechResult: {speech_result}")
+        logger.info(f"Twilio Confidence: {confidence}")
+
+        if not call_sid:
+            logger.warning(f"Missing call_sid: {call_sid}")
             response = VoiceResponse()
-            response.say("I'm sorry, I didn't catch that. Could you please try again?", voice='alice')
+            response.say("I'm sorry, I couldn't process that request.", voice='alice')
             response.hangup()
+            return str(response)
+
+        if not speech_result:
+            logger.warning("No speech result after transcription attempts")
+            response = VoiceResponse()
+            response.say("I'm sorry, I didn't catch what you said. Could you please try again?", voice='alice')
+
+            # Gather user input again
+            gather = Gather(
+                input='speech',
+                action=f'/process_speech?call_sid={call_sid}',
+                speech_timeout='auto',
+                language='en-US'
+            )
+            response.append(gather)
             return str(response)
 
         if call_sid not in active_calls:
@@ -445,11 +475,36 @@ def process_speech():
         workflow_id = call_state['workflow_id']
         system_prompt = call_state['system_prompt']
 
-        # Log user input
-        logger.info(f"User input: {speech_result}")
+        # Check if we have a Deepgram transcription stored in the call state
+        if 'last_transcription' in call_state and call_state['last_transcription']:
+            deepgram_transcription = call_state['last_transcription']
+            logger.info(f"Found stored Deepgram transcription: {deepgram_transcription}")
+            logger.info(f"Comparing with Twilio transcription: {speech_result}")
+
+            # Use the Deepgram transcription instead of Twilio's
+            speech_result = deepgram_transcription
+            # Remove it so we don't use it again
+            del call_state['last_transcription']
+            logger.info(f"Using Deepgram transcription instead")
+
+        # Log final user input that will be used
+        logger.info(f"Final user input: {speech_result}")
 
         # Process with RowBoat agent
         try:
+            # Clean up the speech result if needed
+            if speech_result:
+                # Remove any common filler words or fix typical transcription issues
+                import re
+                # Convert to lowercase for easier pattern matching
+                cleaned_input = speech_result.lower()
+                # Remove filler words that might be at the beginning
+                cleaned_input = re.sub(r'^(um|uh|like|so|okay|well)\s+', '', cleaned_input)
+                # Capitalize first letter for better appearance
+                if cleaned_input:
+                    speech_result = cleaned_input[0].upper() + cleaned_input[1:]
+
+            logger.info(f"Sending to RowBoat: '{speech_result}'")
             ai_response = process_conversation_turn(
                 user_input=speech_result,
                 workflow_id=workflow_id,
@@ -515,12 +570,14 @@ def process_speech():
             # Fallback to Twilio TTS
             response.say("ERROR: ElevenLabs TTS failed", voice='alice')
 
-        # Gather next user input
+        # Gather next user input with enhanced speech recognition
         gather = Gather(
             input='speech',
             action=f'/process_speech?call_sid={call_sid}',
             speech_timeout='auto',
-            language='en-US'
+            language='en-US',
+            enhanced=True,  # Enable enhanced speech recognition
+            speechModel='phone_call'  # Optimize for phone calls
         )
         response.append(gather)
 
@@ -545,6 +602,28 @@ def process_speech():
             speech_timeout='auto'
         )
         return str(response)
+
+# Since we're now using Twilio's enhanced speech recognition instead of Deepgram,
+# we don't need these recording handlers anymore. But we'll keep simplified versions
+# for logging purposes in case they're still being called
+
+@app.route('/recording', methods=['POST'])
+def handle_recording():
+    """Log recording information (not used in the main flow anymore)"""
+    logger.info("🔷 RECORDING ENDPOINT CALLED - Not used in main flow")
+    logger.info(f"🔷 RECORDING REQUEST VALUES: {dict(request.values)}")
+
+    # Return a simple TwiML response
+    response = VoiceResponse()
+    return str(response)
+
+@app.route('/recording-status', methods=['POST'])
+def recording_status_callback():
+    """Log recording status callbacks (not used in the main flow anymore)"""
+    logger.info("🔶 RECORDING STATUS CALLBACK RECEIVED - Not used in main flow")
+    logger.info(f"🔶 FULL RECORDING STATUS REQUEST VALUES: {dict(request.values)}")
+
+    return '', 204
 
 @app.route('/audio/<filename>', methods=['GET'])
 def serve_audio(filename):

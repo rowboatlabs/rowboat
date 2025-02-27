@@ -165,8 +165,8 @@ def speak_to_support(rowboat_client: Client, workflow_id: str, max_iterations: i
         # Convert the greeting to speech using ElevenLabs
         audio = elevenlabs_client.generate(
             text=initial_greeting,
-            voice="Rachel",
-            model="eleven_monolingual_v1",
+            voice="Markus - Mature and Chill",
+            model="eleven_flash_v2_5",
             output_format="mp3_44100_128"
         )
 

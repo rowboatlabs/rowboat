@@ -147,24 +147,82 @@ def transcribe_audio(audio_url: str) -> str:
         Transcribed text
     """
     try:
+        logger.info(f"Deepgram transcribe_audio called with URL: {audio_url}")
+
+        # If the URL doesn't have proper authentication, Twilio may require authentication
+        # Let's try downloading the audio file first using requests
+        import requests
+
+        # Try to download the audio file
+        logger.info("Downloading audio file from Twilio...")
+        audio_response = requests.get(
+            audio_url,
+            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN else None
+        )
+
+        if audio_response.status_code != 200:
+            logger.error(f"Failed to download audio: HTTP {audio_response.status_code}")
+            logger.error(f"Response content: {audio_response.text[:1000]}")  # Log first 1000 chars
+            return ""
+
+        logger.info(f"Successfully downloaded audio file: {len(audio_response.content)} bytes")
+
+        # Save the audio to a temp file for debugging
+        temp_audio_path = f"/tmp/recording_{time.time()}.wav"
+        with open(temp_audio_path, "wb") as f:
+            f.write(audio_response.content)
+        logger.info(f"Saved audio to {temp_audio_path} for debugging")
+
         # Configure transcription options
         options = {
             "model": "nova-3",
             "punctuate": True,
             "language": "en-US",
+            "detect_language": True,  # Automatically detect language
+            "diarize": True,  # Identify different speakers
         }
 
-        # Perform transcription
-        response = deepgram_client.listen.prerecorded.v("1").transcribe_url(
-            {"url": audio_url}, options
-        )
+        # Perform transcription with the raw audio data
+        logger.info("Sending audio to Deepgram for transcription...")
+
+        # Try with raw audio bytes
+        try:
+            response = deepgram_client.listen.prerecorded.v("1").transcribe_file(
+                {"buffer": audio_response.content}, options
+            )
+            logger.info("Transcription with file method successful")
+        except Exception as e:
+            logger.error(f"Error transcribing with file method: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+            # Fall back to URL method
+            logger.info("Falling back to URL method...")
+            response = deepgram_client.listen.prerecorded.v("1").transcribe_url(
+                {"url": audio_url}, options
+            )
+            logger.info("Transcription with URL method successful")
+
+        # Log the full response for debugging
+        import json
+        try:
+            logger.info(f"Deepgram response: {json.dumps(response.to_dict(), indent=2)}")
+        except:
+            logger.info(f"Deepgram response (not JSON serializable): {response}")
 
         # Extract transcription text
-        transcript = response.results.channels[0].alternatives[0].transcript
-        return transcript
+        if hasattr(response, 'results') and hasattr(response.results, 'channels') and len(response.results.channels) > 0:
+            transcript = response.results.channels[0].alternatives[0].transcript
+            logger.info(f"Extracted transcript: {transcript}")
+            return transcript
+        else:
+            logger.error("Deepgram response missing expected structure")
+            return ""
 
     except Exception as e:
         logger.error(f"Error transcribing audio: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return ""
 
 def text_to_speech(text: str) -> bytes:
