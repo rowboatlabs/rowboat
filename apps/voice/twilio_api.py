@@ -1,7 +1,8 @@
 from twilio.rest import Client as TwilioClient
-from rowboat import Client, StatefulChat
+from rowboat import Client
+from rowboat.schema import UserMessage, SystemMessage
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import json
 from deepgram import DeepgramClient
 import elevenlabs
@@ -41,6 +42,9 @@ ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "b37f6f3ceaca6f8999d8e
 
 deepgram_client = DeepgramClient(api_key=DEEPGRAM_API_KEY)
 elevenlabs_client = elevenlabs.ElevenLabs(api_key=ELEVENLABS_API_KEY)
+
+Message = UserMessage | SystemMessage
+
 
 def provision_phone_number(area_code: str = None, country_code: str = "US") -> Dict:
     """
@@ -251,30 +255,56 @@ def text_to_speech(text: str) -> bytes:
 def process_conversation_turn(
     user_input: str,
     workflow_id: str,
-    system_prompt: str = "You are a helpful assistant. Provide concise and clear answers."
-) -> str:
+    system_prompt: str = "You are a helpful assistant. Provide concise and clear answers.",
+    previous_messages: List[Message] = None,
+    previous_state: Any = None
+) -> Tuple[str, List[Message], Any]:
     """
-    Process a single conversation turn with the RowBoat agent.
+    Process a single conversation turn with the RowBoat agent using the stateless API.
 
     Args:
         user_input: User's transcribed input
         workflow_id: RowBoat workflow ID
         system_prompt: System prompt for the agent
+        previous_messages: Previous messages in the conversation
+        previous_state: Previous state from RowBoat
 
     Returns:
-        Agent's response text
+        A tuple of (response_text, updated_messages, updated_state)
     """
     try:
-        support_chat = StatefulChat(
-            rowboat_client,
-            system_prompt=system_prompt,
-            workflow_id=workflow_id
+        # Initialize messages list if not provided
+        messages = [] if previous_messages is None else previous_messages.copy()
+
+        # If we're starting a new conversation, add the system message
+        if not messages or not any(msg.role == 'system' for msg in messages):
+            messages.append(SystemMessage(role='system', content=system_prompt))
+
+        # Add the user's new message
+        messages.append(UserMessage(role='user', content=user_input))
+
+        # Process the conversation using the stateless API
+        logger.info(f"Sending to RowBoat API with {len(messages)} messages")
+        response_messages, new_state = rowboat_client.chat(
+            messages=messages,
+            workflow_id=workflow_id,
+            state=previous_state
         )
 
-        # Process user input through the chat system
-        rowboat_response = support_chat.run(user_input)
-        return rowboat_response
+        # Extract the assistant's response (last message)
+        if response_messages and len(response_messages) > 0:
+            assistant_response = response_messages[-1].content
+        else:
+            assistant_response = "I'm sorry, I didn't receive a proper response."
+
+        # Update messages list with the new responses
+        messages.extend(response_messages)
+
+        logger.info(f"Got response from RowBoat API: {assistant_response[:100]}...")
+        return assistant_response, messages, new_state
 
     except Exception as e:
         logger.error(f"Error processing conversation turn: {str(e)}")
-        return "I'm sorry, I encountered an error processing your request."
+        import traceback
+        logger.error(traceback.format_exc())
+        return "I'm sorry, I encountered an error processing your request.", previous_messages, previous_state

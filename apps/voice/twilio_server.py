@@ -310,11 +310,13 @@ def handle_inbound_call():
             response.hangup()
             return str(response)
 
-        # Initialize call state
+        # Initialize call state with stateless API fields
         active_calls[call_sid] = {
             'workflow_id': workflow_id,
             'system_prompt': system_prompt,
             'conversation_history': [],
+            'messages': [],  # For stateless API
+            'state': None,   # For stateless API state
             'turn_count': 0,
             'inbound': True,
             'to_number': to_number
@@ -355,6 +357,8 @@ def handle_call(call_sid, workflow_id):
                 'workflow_id': workflow_id,
                 'system_prompt': "You are a helpful assistant. Provide concise and clear answers.",
                 'conversation_history': [],
+                'messages': [],  # For stateless API
+                'state': None,   # For stateless API state
                 'turn_count': 0
             }
 
@@ -505,11 +509,24 @@ def process_speech():
                     speech_result = cleaned_input[0].upper() + cleaned_input[1:]
 
             logger.info(f"Sending to RowBoat: '{speech_result}'")
-            ai_response = process_conversation_turn(
+
+            # Get previous messages and state from call state
+            previous_messages = call_state.get('messages', [])
+            previous_state = call_state.get('state')
+
+            # Process with stateless API
+            ai_response, updated_messages, updated_state = process_conversation_turn(
                 user_input=speech_result,
                 workflow_id=workflow_id,
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
+                previous_messages=previous_messages,
+                previous_state=previous_state
             )
+
+            # Update the messages and state in call state
+            call_state['messages'] = updated_messages
+            call_state['state'] = updated_state
+
             logger.info(f"RowBoat response: {ai_response}")
         except Exception as e:
             logger.error(f"Error processing with RowBoat: {str(e)}")
