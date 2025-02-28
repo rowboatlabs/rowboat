@@ -5,8 +5,13 @@ import logging
 import base64
 import tempfile
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
+import redis
+import orjson
+from time import time
+import copy
+from rowboat.schema import SystemMessage, UserMessage
 
 # Load environment variables
 from load_env import load_environment
@@ -21,6 +26,7 @@ from twilio_api import (
     process_conversation_turn
 )
 
+Message = SystemMessage | UserMessage
 app = Flask(__name__)
 
 # Configure logging
@@ -31,7 +37,69 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Store active calls with their state
+# Set up Redis connection for persistent state storage
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+REDIS_EXPIRY = int(os.environ.get('REDIS_EXPIRY_SECONDS', 86400))  # Default 24 hours
+REDIS_PREFIX = os.environ.get('SERVICE_NAME', 'rowboat-voice')
+
+def prepare_state_for_serialization(state_dict):
+    """Convert a state dictionary with non-serializable objects to a serializable format"""
+    # Create a deep copy to avoid modifying the original
+    serializable = copy.deepcopy(state_dict)
+
+    # Handle messages list with special RowBoat message objects
+    if 'messages' in serializable and serializable['messages']:
+        # Convert Message objects to dictionaries
+        serializable['messages'] = [
+            {
+                'role': msg.role,
+                'content': msg.content,
+                'type': msg.__class__.__name__
+            }
+            for msg in serializable['messages']
+        ]
+
+    return serializable
+
+def restore_state_from_serialized(serialized_dict):
+    """Restore proper Message objects from serialized state"""
+    # Create a copy to avoid modifying the original
+    restored = copy.deepcopy(serialized_dict)
+
+    # Restore Message objects
+    if 'messages' in restored and restored['messages']:
+        messages = []
+        for msg_dict in restored['messages']:
+            if not isinstance(msg_dict, dict):
+                # Skip if not a dict (shouldn't happen but just in case)
+                continue
+
+            msg_type = msg_dict.get('type')
+            role = msg_dict.get('role')
+            content = msg_dict.get('content')
+
+            if msg_type == 'SystemMessage':
+                messages.append(SystemMessage(role=role, content=content))
+            elif msg_type == 'UserMessage':
+                messages.append(UserMessage(role=role, content=content))
+            # Add other message types if needed
+
+        restored['messages'] = messages
+
+    return restored
+
+# Initialize Redis client
+try:
+    redis_client = redis.from_url(REDIS_URL)
+    redis_available = True
+    logger.info(f"Connected to Redis at {REDIS_URL}")
+except Exception as e:
+    redis_client = None
+    redis_available = False
+    logger.warning(f"Failed to connect to Redis: {str(e)}")
+    logger.warning("Falling back to in-memory state storage")
+
+# Store active calls with their state (in-memory fallback)
 active_calls = {}
 
 # Store phone number to workflow mappings for inbound calls
@@ -255,11 +323,19 @@ def api_make_call():
     return jsonify(result)
 
 def save_phone_mappings():
-    """Save phone number mappings to a JSON file"""
+    """Save phone number mappings to Redis and a JSON file"""
     try:
+        # Save to Redis if available
+        if redis_available:
+            redis_key = f"{REDIS_PREFIX}:phone_mappings"
+            redis_client.set(redis_key, json.dumps(phone_number_mappings))
+            redis_client.expire(redis_key, REDIS_EXPIRY)
+            logger.info(f"Saved phone mappings to Redis: {len(phone_number_mappings)} entries")
+
+        # Always save to file as backup
         with open('phone_mappings.json', 'w') as f:
             json.dump(phone_number_mappings, f, indent=2)
-        logger.info(f"Saved phone mappings: {len(phone_number_mappings)} entries")
+        logger.info(f"Saved phone mappings to file: {len(phone_number_mappings)} entries")
     except Exception as e:
         logger.error(f"Error saving phone mappings: {str(e)}")
 
@@ -267,10 +343,27 @@ def load_phone_mappings():
     """Load phone number mappings from a JSON file"""
     global phone_number_mappings
     try:
+        # First try to load from Redis if available
+        if redis_available:
+            redis_key = f"{REDIS_PREFIX}:phone_mappings"
+            mapping_data = redis_client.get(redis_key)
+            if mapping_data:
+                phone_number_mappings = json.loads(mapping_data)
+                logger.info(f"Loaded phone mappings from Redis: {len(phone_number_mappings)} entries")
+                return
+
+        # Fall back to file storage
         if os.path.exists('phone_mappings.json'):
             with open('phone_mappings.json', 'r') as f:
                 phone_number_mappings = json.load(f)
-            logger.info(f"Loaded phone mappings: {len(phone_number_mappings)} entries")
+            logger.info(f"Loaded phone mappings from file: {len(phone_number_mappings)} entries")
+
+            # If Redis is available, save to Redis as well
+            if redis_available:
+                redis_key = f"{REDIS_PREFIX}:phone_mappings"
+                redis_client.set(redis_key, json.dumps(phone_number_mappings))
+                redis_client.expire(redis_key, REDIS_EXPIRY)
+                logger.info(f"Saved phone mappings to Redis for backup")
     except Exception as e:
         logger.error(f"Error loading phone mappings: {str(e)}")
         phone_number_mappings = {}
@@ -351,19 +444,41 @@ def handle_call(call_sid, workflow_id):
     try:
         logger.info(f"handle_call: processing call {call_sid} with workflow {workflow_id}")
 
-        # Get or initialize call state
-        if call_sid not in active_calls and workflow_id:
-            active_calls[call_sid] = {
-                'workflow_id': workflow_id,
-                'system_prompt': "You are a helpful assistant. Provide concise and clear answers.",
-                'conversation_history': [],
-                'messages': [],  # For stateless API
-                'state': None,   # For stateless API state
-                'turn_count': 0
-            }
+        # Get or initialize call state, first from Redis if available
+        call_state = None
 
-        call_state = active_calls.get(call_sid, {})
-        logger.info(f"Call state: {call_state}")
+        if redis_available:
+            redis_key = f"{REDIS_PREFIX}:state:{call_sid}"
+            state_data = redis_client.get(redis_key)
+            if state_data:
+                try:
+                    # Parse the JSON and restore special objects
+                    parsed_state = orjson.loads(state_data)
+                    call_state = restore_state_from_serialized(parsed_state)
+                    logger.info(f"Loaded and restored call state from Redis for {call_sid}")
+                except Exception as e:
+                    logger.error(f"Error deserializing Redis state for {call_sid}: {str(e)}")
+                    call_state = None
+
+        # If not found in Redis or state loading failed, initialize or get from memory
+        if call_state is None:
+            if call_sid not in active_calls and workflow_id:
+                call_state = {
+                    'workflow_id': workflow_id,
+                    'system_prompt': "You are a helpful assistant. Provide concise and clear answers.",
+                    'conversation_history': [],
+                    'messages': [],  # For stateless API
+                    'state': None,   # For stateless API state
+                    'turn_count': 0,
+                    'created_at': int(time())  # Add timestamp for expiration tracking
+                }
+                active_calls[call_sid] = call_state
+                logger.info(f"Initialized new call state for {call_sid}")
+            else:
+                # Get from in-memory cache
+                call_state = active_calls.get(call_sid, {})
+
+        logger.info(f"Using call state: {call_state}")
 
         # Create TwiML response
         response = VoiceResponse()
@@ -393,7 +508,24 @@ def handle_call(call_sid, workflow_id):
 
             # Update call state
             call_state['turn_count'] = 1
+
+            # Save state to both Redis and memory
             active_calls[call_sid] = call_state
+
+            # Save to Redis if available
+            if redis_available:
+                try:
+                    redis_key = f"{REDIS_PREFIX}:state:{call_sid}"
+                    # Create a serializable copy of the state
+                    serializable_state = prepare_state_for_serialization(call_state)
+
+                    # Use faster orjson for serialization
+                    state_data = orjson.dumps(serializable_state)
+                    redis_client.set(redis_key, state_data)
+                    redis_client.expire(redis_key, REDIS_EXPIRY)
+                    logger.debug(f"Saved initial call state to Redis for {call_sid}")
+                except Exception as e:
+                    logger.error(f"Error saving initial state to Redis for {call_sid}: {str(e)}")
 
             # Instead of using both Gather and Record which compete for input,
             # just use Gather for speech recognition, and rely on its SpeechResult
@@ -550,7 +682,24 @@ def process_speech():
                 'assistant': ai_response
             })
             call_state['turn_count'] += 1
+
+            # Save state to both Redis and memory
             active_calls[call_sid] = call_state
+
+            # Save to Redis if available
+            if redis_available:
+                try:
+                    redis_key = f"{REDIS_PREFIX}:state:{call_sid}"
+                    # Create a serializable copy of the state
+                    serializable_state = prepare_state_for_serialization(call_state)
+
+                    # Use faster orjson for serialization
+                    state_data = orjson.dumps(serializable_state)
+                    redis_client.set(redis_key, state_data)
+                    redis_client.expire(redis_key, REDIS_EXPIRY)
+                    logger.debug(f"Saved call state to Redis for {call_sid}")
+                except Exception as e:
+                    logger.error(f"Error saving state to Redis for {call_sid}: {str(e)}")
 
             # Generate a unique ID to prevent caching
             unique_id = str(uuid.uuid4())
@@ -667,12 +816,30 @@ def stream_audio(call_sid, text_type, unique_id):
             # Use default greeting
             text_to_speak = "Hello! I'm your RowBoat assistant. How can I help you today?"
         elif text_type == "response":
-            # Get the text from call state
-            if call_sid not in active_calls:
-                logger.error(f"Call SID not found for streaming: {call_sid}")
-                return "Call not found", 404
+            # Get the text from call state (try Redis first, then memory)
+            call_state = None
 
-            call_state = active_calls[call_sid]
+            # Try Redis first if available
+            if redis_available:
+                redis_key = f"{REDIS_PREFIX}:state:{call_sid}"
+                state_data = redis_client.get(redis_key)
+                if state_data:
+                    try:
+                        parsed_state = orjson.loads(state_data)
+                        call_state = restore_state_from_serialized(parsed_state)
+                        logger.info(f"Loaded and restored call state from Redis for streaming: {call_sid}")
+                    except Exception as e:
+                        logger.error(f"Error loading Redis state for streaming: {str(e)}")
+                        call_state = None
+
+            # Fall back to memory if needed
+            if call_state is None:
+                if call_sid not in active_calls:
+                    logger.error(f"Call SID not found for streaming: {call_sid}")
+                    return "Call not found", 404
+
+                call_state = active_calls[call_sid]
+                logger.info(f"Using in-memory state for streaming: {call_sid}")
             if call_state.get('conversation_history') and len(call_state['conversation_history']) > 0:
                 # Get the most recent AI response
                 text_to_speak = call_state['conversation_history'][-1]['assistant']
@@ -732,17 +899,47 @@ def call_status_callback():
 
     # Clean up resources when call completes
     if call_status in ['completed', 'failed', 'busy', 'no-answer', 'canceled']:
-        if call_sid in active_calls:
+        # Get call state from Redis or memory
+        call_state = None
+
+        # Try to load from Redis first
+        if redis_available:
+            redis_key = f"{REDIS_PREFIX}:state:{call_sid}"
+            state_data = redis_client.get(redis_key)
+            if state_data:
+                try:
+                    parsed_state = orjson.loads(state_data)
+                    call_state = restore_state_from_serialized(parsed_state)
+                    logger.info(f"Loaded final state from Redis for {call_sid}")
+                except Exception as e:
+                    logger.error(f"Error loading final state from Redis: {str(e)}")
+                    call_state = None
+
+        # Fall back to memory if needed
+        if call_state is None and call_sid in active_calls:
+            call_state = active_calls[call_sid]
+            logger.info(f"Using in-memory state for final call state of {call_sid}")
+
+        if call_state:
+            # Create a serializable copy for the history file
+            serializable_state = prepare_state_for_serialization(call_state)
+
             # Save conversation history to a file for records before removing
             history_file = f"call_history_{call_sid}.json"
             with open(history_file, 'w') as f:
-                json.dump(active_calls[call_sid], f, indent=2)
+                json.dump(serializable_state, f, indent=2)
 
             logger.info(f"Saved call history to {history_file}")
 
-            # Remove from active calls
-            del active_calls[call_sid]
-            logger.info(f"Removed call {call_sid} from active calls")
+            # Remove from active calls in both memory and Redis
+            if call_sid in active_calls:
+                del active_calls[call_sid]
+                logger.info(f"Removed call {call_sid} from active calls memory")
+
+            if redis_available:
+                redis_key = f"{REDIS_PREFIX}:state:{call_sid}"
+                redis_client.delete(redis_key)
+                logger.info(f"Removed call {call_sid} from Redis")
 
             # Clean up any temporary audio files (if they exist)
             # This is mostly for backward compatibility
@@ -765,10 +962,23 @@ def call_status_callback():
 @app.route('/health', methods=['GET'])
 def health_check():
     """Simple health check endpoint"""
-    return jsonify({
+    health_data = {
         "status": "healthy",
-        "active_calls": len(active_calls)
-    })
+        "active_calls_memory": len(active_calls),
+        "redis_status": "connected" if redis_available else "disconnected"
+    }
+
+    # If Redis is available, count active calls there too
+    if redis_available:
+        try:
+            # Count keys with our prefix
+            pattern = f"{REDIS_PREFIX}:state:*"
+            redis_call_count = len(redis_client.keys(pattern))
+            health_data["active_calls_redis"] = redis_call_count
+        except Exception as e:
+            health_data["redis_error"] = str(e)
+
+    return jsonify(health_data)
 
 if __name__ == '__main__':
     # Create tmp directory if it doesn't exist
