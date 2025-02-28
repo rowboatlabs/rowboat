@@ -88,7 +88,18 @@ def api_configure_inbound():
     project_id = data.get('project_id')
     system_prompt = data.get('system_prompt')
 
+    # Log the request details
+    logger.info(f"Configuring inbound calls for {phone_number} with workflow {workflow_id}")
+
+    # Force webhook update even if already configured
     result = configure_number_for_inbound(phone_number, workflow_id, project_id, system_prompt)
+
+    # Log the result
+    if 'error' in result:
+        logger.error(f"Error configuring inbound calls: {result['error']}")
+    else:
+        logger.info(f"Successfully configured inbound calls: {result}")
+
     return jsonify(result)
 
 @app.route('/api/inbound-config', methods=['GET'])
@@ -118,6 +129,7 @@ def api_delete_inbound_config(phone_number):
 def configure_number_for_inbound(phone_number, workflow_id, project_id=None, system_prompt=None):
     """
     Configure a Twilio phone number to handle inbound calls with RowBoat.
+    Will update the webhook configuration even if the number is already configured.
 
     Args:
         phone_number: The phone number to configure (E.164 format)
@@ -160,9 +172,20 @@ def configure_number_for_inbound(phone_number, workflow_id, project_id=None, sys
 
         phone_sid = incoming_phone_numbers[0].sid
 
-        # Set the voice URL to our webhook endpoint with workflow ID
+        # Check if this number already has a webhook configured
+        current_voice_url = incoming_phone_numbers[0].voice_url
+        was_previously_configured = False
+
+        if current_voice_url:
+            logger.info(f"Number {phone_number} already has a webhook: {current_voice_url}")
+            was_previously_configured = True
+
+        # Always update the voice URL to our webhook endpoint with the new workflow ID
+        inbound_url = f"{base_url}/inbound?workflow_id={workflow_id}"
+        logger.info(f"Setting webhook for {phone_number} to {inbound_url}")
+
         twilio_client.incoming_phone_numbers(phone_sid).update(
-            voice_url=f"{base_url}/inbound?workflow_id={workflow_id}",
+            voice_url=inbound_url,
             voice_method='POST',
             status_callback=f"{base_url}/call-status",
             status_callback_method='POST'
@@ -178,11 +201,13 @@ def configure_number_for_inbound(phone_number, workflow_id, project_id=None, sys
         # Save the mappings to disk
         save_phone_mappings()
 
-        logger.info(f"Configured phone number {phone_number} for inbound calls with workflow {workflow_id}")
+        status = "reconfigured" if was_previously_configured else "configured"
+        logger.info(f"{status.capitalize()} phone number {phone_number} for inbound calls with workflow {workflow_id}")
         return {
-            "status": "configured",
+            "status": status,
             "phone_number": phone_number,
-            "workflow_id": workflow_id
+            "workflow_id": workflow_id,
+            "previous_webhook": current_voice_url if was_previously_configured else None
         }
 
     except Exception as e:
@@ -345,43 +370,18 @@ def handle_call(call_sid, workflow_id):
             greeting = "Hello! I'm your RowBoat assistant. How can I help you today?"
             logger.info(f"New call, preparing greeting: {greeting}")
 
-            # Import directly to ensure we're using the correct function
-            from twilio_api import elevenlabs_client, text_to_speech
-            logger.info("Generating speech with ElevenLabs")
-
             try:
-                # Generate speech directly with ElevenLabs client
-                logger.info("Calling ElevenLabs generate function")
-                audio_generator = elevenlabs_client.generate(
-                    text=greeting,
-                    voice=TTS_VOICE,
-                    model=TTS_MODEL,
-                    output_format="mp3_44100_128"
-                )
+                # Use streaming audio endpoint instead of generating files
+                # Include a unique ID to prevent caching
+                unique_id = str(uuid.uuid4())
+                base_url = request.host_url.rstrip('/')
+                audio_url = f"{base_url}/stream-audio/{call_sid}/greeting/{unique_id}"
+                logger.info(f"Streaming greeting from URL: {audio_url}")
 
-                # Convert generator to bytes
-                logger.info("Converting audio generator to bytes")
-                audio_bytes = b"".join(chunk for chunk in audio_generator)
-
-                if audio_bytes:
-                    logger.info(f"Got audio data: {len(audio_bytes)} bytes")
-                    # Save audio to a temporary file
-                    audio_filename = f"/tmp/greeting_{call_sid}.mp3"
-                    with open(audio_filename, 'wb') as f:
-                        f.write(audio_bytes)
-
-                    # Get full URL for the audio file
-                    base_url = request.host_url.rstrip('/')
-                    audio_url = f"{base_url}/audio/{os.path.basename(audio_filename)}"
-                    logger.info(f"Playing greeting from URL: {audio_url}")
-
-                    # Play the greeting
-                    response.play(audio_url)
-                else:
-                    logger.warning("ElevenLabs generated empty audio data")
-                    response.say(greeting, voice='alice')
+                # Play the greeting via streaming
+                response.play(audio_url)
             except Exception as e:
-                logger.error(f"Error with ElevenLabs TTS: {str(e)}")
+                logger.error(f"Error with audio streaming for greeting: {str(e)}")
                 import traceback
                 logger.error(traceback.format_exc())
                 # Fallback to Twilio TTS
@@ -515,60 +515,40 @@ def process_speech():
             logger.error(f"Error processing with RowBoat: {str(e)}")
             ai_response = "I'm sorry, I encountered an issue processing your request. Could you please try again?"
 
-        # Update conversation history
-        call_state['conversation_history'].append({
-            'user': speech_result,
-            'assistant': ai_response
-        })
-        call_state['turn_count'] += 1
-        active_calls[call_sid] = call_state
+        # Conversation history is updated in the streaming response section below
 
         # Create TwiML response
         response = VoiceResponse()
 
-        # Generate speech with ElevenLabs for response
-        logger.info("Generating ElevenLabs speech for response")
+        # Use streaming audio for the response
+        logger.info("Setting up response streaming with ElevenLabs")
 
         try:
-            # Import directly to ensure we're using the correct client
-            from twilio_api import elevenlabs_client
+            # Store the AI response in conversation history first
+            # (The stream-audio endpoint will read it from here)
 
-            # Generate the speech directly with ElevenLabs
-            logger.info("Calling ElevenLabs generate function for response")
-            audio_generator = elevenlabs_client.generate(
-                text=ai_response,
-                voice=TTS_VOICE,
-                model=TTS_MODEL,
-                output_format="mp3_44100_128"
-            )
+            # Update conversation history (do this before streaming so the endpoint can access it)
+            call_state['conversation_history'].append({
+                'user': speech_result,
+                'assistant': ai_response
+            })
+            call_state['turn_count'] += 1
+            active_calls[call_sid] = call_state
 
-            # Convert generator to bytes
-            logger.info("Converting response audio generator to bytes")
-            audio_bytes = b"".join(chunk for chunk in audio_generator)
+            # Generate a unique ID to prevent caching
+            unique_id = str(uuid.uuid4())
+            base_url = request.host_url.rstrip('/')
+            audio_url = f"{base_url}/stream-audio/{call_sid}/response/{unique_id}"
+            logger.info(f"Streaming response from URL: {audio_url}")
 
-            if audio_bytes:
-                logger.info(f"Got response audio data: {len(audio_bytes)} bytes")
-                # Save audio to a temporary file with unique name
-                audio_filename = f"/tmp/response_{call_sid}_{uuid.uuid4()}.mp3"
-                with open(audio_filename, 'wb') as f:
-                    f.write(audio_bytes)
-
-                # Get full URL for the audio file
-                base_url = request.host_url.rstrip('/')
-                audio_url = f"{base_url}/audio/{os.path.basename(audio_filename)}"
-                logger.info(f"Playing response from URL: {audio_url}")
-
-                # Play the response
-                response.play(audio_url)
-            else:
-                logger.warning("ElevenLabs generated empty audio data for response")
-                response.say("ERROR: ElevenLabs TTS failed", voice='alice')
+            # Play the response via streaming
+            response.play(audio_url)
         except Exception as e:
-            logger.error(f"Error with ElevenLabs TTS for response: {str(e)}")
+            logger.error(f"Error with audio streaming for response: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             # Fallback to Twilio TTS
-            response.say("ERROR: ElevenLabs TTS failed", voice='alice')
+            response.say(ai_response, voice='alice')
 
         # Gather next user input with enhanced speech recognition
         gather = Gather(
@@ -627,7 +607,7 @@ def recording_status_callback():
 
 @app.route('/audio/<filename>', methods=['GET'])
 def serve_audio(filename):
-    """Serve temporary audio files"""
+    """Serve temporary audio files (legacy route, kept for backward compatibility)"""
     try:
         logger.info(f"Audio file requested: {filename}")
         file_path = f"/tmp/{filename}"
@@ -657,6 +637,74 @@ def serve_audio(filename):
         logger.error(traceback.format_exc())
         return "Error serving audio file", 500
 
+@app.route('/stream-audio/<call_sid>/<text_type>/<unique_id>', methods=['GET'])
+def stream_audio(call_sid, text_type, unique_id):
+    """Stream audio directly from ElevenLabs to Twilio without saving to disk"""
+    try:
+        logger.info(f"Audio streaming requested for call {call_sid}, type {text_type}")
+
+        # Determine what text to synthesize
+        text_to_speak = ""
+
+        if text_type == "greeting":
+            # Use default greeting
+            text_to_speak = "Hello! I'm your RowBoat assistant. How can I help you today?"
+        elif text_type == "response":
+            # Get the text from call state
+            if call_sid not in active_calls:
+                logger.error(f"Call SID not found for streaming: {call_sid}")
+                return "Call not found", 404
+
+            call_state = active_calls[call_sid]
+            if call_state.get('conversation_history') and len(call_state['conversation_history']) > 0:
+                # Get the most recent AI response
+                text_to_speak = call_state['conversation_history'][-1]['assistant']
+            else:
+                logger.warning(f"No conversation history found for call {call_sid}")
+                text_to_speak = "I'm sorry, I don't have a response ready. Could you please repeat?"
+        else:
+            # Direct text may be passed as the text_type (for testing)
+            text_to_speak = text_type
+
+        if not text_to_speak:
+            logger.error("No text to synthesize")
+            return "No text to synthesize", 400
+
+        logger.info(f"Streaming audio for text: {text_to_speak[:50]}...")
+
+        # Generate and stream the audio directly
+        from twilio_api import elevenlabs_client
+
+        def generate():
+            try:
+                # Generate and stream the audio directly
+                audio_stream = elevenlabs_client.generate(
+                    text=text_to_speak,
+                    voice=TTS_VOICE,
+                    model=TTS_MODEL,
+                    output_format="mp3_44100_128"
+                )
+
+                # Stream chunks directly to the response
+                for chunk in audio_stream:
+                    yield chunk
+
+                logger.info(f"Finished streaming audio for call {call_sid}")
+            except Exception as e:
+                logger.error(f"Error in audio stream generator: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+
+        # Return a streaming response
+        response = Response(generate(), mimetype='audio/mpeg')
+        return response
+
+    except Exception as e:
+        logger.error(f"Error setting up audio stream: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return "Error streaming audio", 500
+
 @app.route('/call-status', methods=['POST'])
 def call_status_callback():
     """Handle call status callbacks from Twilio"""
@@ -673,16 +721,27 @@ def call_status_callback():
             with open(history_file, 'w') as f:
                 json.dump(active_calls[call_sid], f, indent=2)
 
+            logger.info(f"Saved call history to {history_file}")
+
             # Remove from active calls
             del active_calls[call_sid]
+            logger.info(f"Removed call {call_sid} from active calls")
 
-            # Clean up temporary audio files
+            # Clean up any temporary audio files (if they exist)
+            # This is mostly for backward compatibility
+            cleanup_count = 0
             for filename in os.listdir('/tmp'):
                 if call_sid in filename and filename.endswith('.mp3'):
                     try:
                         os.remove(os.path.join('/tmp', filename))
-                    except:
-                        pass
+                        cleanup_count += 1
+                    except Exception as e:
+                        logger.error(f"Error removing temp file {filename}: {str(e)}")
+
+            if cleanup_count > 0:
+                logger.info(f"Cleaned up {cleanup_count} temporary audio files for call {call_sid}")
+            else:
+                logger.info(f"No temporary audio files to clean up for call {call_sid} (streaming only)")
 
     return '', 204
 
