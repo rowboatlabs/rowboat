@@ -37,8 +37,8 @@ rowboat_client = Client(
 )
 
 # Initialize Deepgram and ElevenLabs clients with API keys from environment variables
-DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "99bc0dbdf0dd742c80e458ba616b727c3819b004")
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "b37f6f3ceaca6f8999d8ea3c31d5e4bd")
+DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY")
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 
 deepgram_client = DeepgramClient(api_key=DEEPGRAM_API_KEY)
 elevenlabs_client = elevenlabs.ElevenLabs(api_key=ELEVENLABS_API_KEY)
