@@ -62,11 +62,11 @@ export default function Menu({
                 selected={pathname.startsWith(`/projects/${projectId}/workflow`)}
             />
             <NavLink
-                href={`/projects/${projectId}/simulation`}
+                href={`/projects/${projectId}/test`}
                 label="Test"
                 collapsed={collapsed}
                 icon={<PlayIcon size={16} />}
-                selected={pathname.startsWith(`/projects/${projectId}/simulation`)}
+                selected={pathname.startsWith(`/projects/${projectId}/test`)}
             />
             {useDataSources && (
                 <NavLink

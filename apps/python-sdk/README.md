@@ -101,6 +101,23 @@ chat = StatefulChat(
 )
 ```
 
+#### Using a test profile
+You can specify a test profile ID to use a specific test configuration:
+
+```python
+response_messages, state = client.chat(
+    messages=messages,
+    test_profile_id="<TEST_PROFILE_ID>"
+)
+
+# or
+
+chat = StatefulChat(
+    client,
+    test_profile_id="<TEST_PROFILE_ID>"
+)
+```
+
 #### Skip tool call runs
 This will surface the tool calls to the SDK instead of running them automatically on the Rowboat server.
 

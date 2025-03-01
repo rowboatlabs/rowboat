@@ -12,6 +12,7 @@ import Link from "next/link";
 import { apiV1 } from "rowboat-shared";
 import { EditableField } from "../../../lib/components/editable-field";
 import { MessageSquareIcon, EllipsisIcon, CircleCheckIcon, ChevronsDownIcon, ChevronsRightIcon, ChevronRightIcon, ChevronDownIcon, ExternalLinkIcon, XIcon } from "lucide-react";
+import { TestProfile } from "@/app/lib/types/testing_types";
 
 function UserMessage({ content }: { content: string }) {
     return <div className="self-end ml-[30%] flex flex-col">
@@ -93,6 +94,7 @@ function ToolCalls({
     messages,
     sender,
     workflow,
+    testProfile,
 }: {
     toolCalls: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'];
     results: Record<string, z.infer<typeof apiV1.ToolMessage>>;
@@ -101,6 +103,7 @@ function ToolCalls({
     messages: z.infer<typeof apiV1.ChatMessage>[];
     sender: string | null | undefined;
     workflow: z.infer<typeof Workflow>;
+    testProfile: z.infer<typeof TestProfile>;
 }) {
     const resultsMap: Record<string, z.infer<typeof apiV1.ToolMessage>> = {};
 
@@ -123,6 +126,7 @@ function ToolCalls({
                 messages={messages}
                 sender={sender}
                 workflow={workflow}
+                testProfile={testProfile}
             />
         })}
     </div>;
@@ -136,6 +140,7 @@ function ToolCall({
     messages,
     sender,
     workflow,
+    testProfile,
 }: {
     toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
     result: z.infer<typeof apiV1.ToolMessage> | undefined;
@@ -144,6 +149,7 @@ function ToolCall({
     messages: z.infer<typeof apiV1.ChatMessage>[];
     sender: string | null | undefined;
     workflow: z.infer<typeof Workflow>;
+    testProfile: z.infer<typeof TestProfile>;
 }) {
     let matchingWorkflowTool: z.infer<typeof WorkflowTool> | undefined;
     for (const tool of workflow.tools) {
@@ -154,15 +160,6 @@ function ToolCall({
     }
 
     switch (toolCall.function.name) {
-        case 'retrieve_url_info':
-            return <RetrieveUrlInfoToolCall
-                toolCall={toolCall}
-                result={result}
-                handleResult={handleResult}
-                projectId={projectId}
-                messages={messages}
-                sender={sender}
-            />;
         case 'getArticleInfo':
             return <GetInformationToolCall
                 toolCall={toolCall}
@@ -184,7 +181,7 @@ function ToolCall({
                     sender={sender}
                 />;
             }
-            if (matchingWorkflowTool && !matchingWorkflowTool.mockInPlayground) {
+            if (matchingWorkflowTool && !testProfile.mockTools) {
                 return <ClientToolCall
                     toolCall={toolCall}
                     result={result}
@@ -202,6 +199,7 @@ function ToolCall({
                 messages={messages}
                 sender={sender}
                 autoSubmit={matchingWorkflowTool?.autoSubmitMockedResponse}
+                testProfile={testProfile}
             />;
     }
 }
@@ -305,85 +303,6 @@ function GetInformationToolCall({
                         })}
                     </ul>}
                 </div>}
-            </div>
-        </div>
-    </div>;
-}
-
-function RetrieveUrlInfoToolCall({
-    toolCall,
-    result: availableResult,
-    handleResult,
-    projectId,
-    messages,
-    sender,
-}: {
-    toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
-    result: z.infer<typeof apiV1.ToolMessage> | undefined;
-    handleResult: (result: z.infer<typeof apiV1.ToolMessage>) => void;
-    projectId: string;
-    messages: z.infer<typeof apiV1.ChatMessage>[];
-    sender: string | null | undefined;
-}) {
-    const [result, setResult] = useState<z.infer<typeof apiV1.ToolMessage> | undefined>(availableResult);
-    const args = JSON.parse(toolCall.function.arguments) as { url: string };
-    let typedResult: z.infer<typeof WebpageCrawlResponse> | undefined;
-    if (result) {
-        typedResult = JSON.parse(result.content) as z.infer<typeof WebpageCrawlResponse>;
-    }
-
-    useEffect(() => {
-        if (result) {
-            return;
-        }
-        let ignore = false;
-
-        function process() {
-            // parse args
-
-            scrapeWebpage(args.url)
-                .then(page => {
-                    if (ignore) {
-                        return;
-                    }
-                    const result: z.infer<typeof apiV1.ToolMessage> = {
-                        role: 'tool',
-                        tool_call_id: toolCall.id,
-                        tool_name: toolCall.function.name,
-                        content: JSON.stringify(page),
-                    };
-                    setResult(result);
-                    handleResult(result);
-                });
-        }
-        process();
-
-        return () => {
-            ignore = true;
-        };
-    }, [result, toolCall.id, toolCall.function.name, projectId, args.url, handleResult]);
-
-    return <div className="flex flex-col gap-1">
-        {sender && <div className='text-gray-500 text-sm ml-3'>{sender}</div>}
-        <div className='border border-gray-300 p-2 rounded-lg rounded-bl-none flex flex-col gap-2 mr-[30%]'>
-            <ToolCallHeader toolCall={toolCall} result={result} />
-
-            <div className='mt-1 flex flex-col gap-2'>
-                <div className="flex gap-1">
-                    URL: <a className="inline-flex items-center gap-1" target="_blank" href={args.url}>
-                        <span className='underline'>
-                            {args.url}
-                        </span>
-                        <ExternalLinkIcon size={16} />
-                    </a>
-                </div>
-                {result && (
-                    <ExpandableContent
-                        label='Content'
-                        content={typedResult}
-                        expanded={false}
-                    />
-                )}
             </div>
         </div>
     </div>;
@@ -495,6 +414,7 @@ function MockToolCall({
     messages,
     sender,
     autoSubmit = false,
+    testProfile,
 }: {
     toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
     result: z.infer<typeof apiV1.ToolMessage> | undefined;
@@ -503,6 +423,7 @@ function MockToolCall({
     messages: z.infer<typeof apiV1.ChatMessage>[];
     sender: string | null | undefined;
     autoSubmit?: boolean;
+    testProfile: z.infer<typeof TestProfile>;
 }) {
     const [result, setResult] = useState<z.infer<typeof apiV1.ToolMessage> | undefined>(availableResult);
     const [response, setResponse] = useState('');
@@ -538,7 +459,7 @@ function MockToolCall({
         async function process() {
             setGeneratingResponse(true);
 
-            const response = await suggestToolResponse(toolCall.id, projectId, messages);
+            const response = await suggestToolResponse(toolCall.id, projectId, messages, testProfile);
             if (ignore) {
                 return;
             }
@@ -550,7 +471,7 @@ function MockToolCall({
         return () => {
             ignore = true;
         };
-    }, [result, response, toolCall.id, projectId, messages]);
+    }, [result, response, toolCall.id, projectId, messages, testProfile]);
 
     // auto submit if autoSubmitMockedResponse is true
     useEffect(() => {
@@ -682,6 +603,7 @@ export function Messages({
     loadingAssistantResponse,
     loadingUserResponse,
     workflow,
+    testProfile,
     onSystemMessageChange,
 }: {
     projectId: string;
@@ -692,12 +614,11 @@ export function Messages({
     loadingAssistantResponse: boolean;
     loadingUserResponse: boolean;
     workflow: z.infer<typeof Workflow>;
+    testProfile: z.infer<typeof TestProfile>;
     onSystemMessageChange: (message: string) => void;
 }) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     let lastUserMessageTimestamp = 0;
-
-    const systemMessageLocked = messages.length > 0;
 
     // scroll to bottom on new messages
     useEffect(() => {
@@ -707,9 +628,9 @@ export function Messages({
     return <div className="grow pt-4 overflow-auto">
         <div className="max-w-[768px] mx-auto flex flex-col gap-8">
             <SystemMessage
-                content={systemMessage || ''}
+                content={testProfile.context}
                 onChange={onSystemMessageChange}
-                locked={systemMessageLocked}
+                locked={true}
             />
             {messages.map((message, index) => {
                 if (message.role === 'assistant') {
@@ -723,6 +644,7 @@ export function Messages({
                             messages={messages}
                             sender={message.agenticSender}
                             workflow={workflow}
+                            testProfile={testProfile}
                         />;
                     } else {
                         // the assistant message createdAt is an ISO string timestamp

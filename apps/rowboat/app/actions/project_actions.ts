@@ -1,7 +1,7 @@
 'use server';
 import { redirect } from "next/navigation";
 import { ObjectId } from "mongodb";
-import { dataSourcesCollection, embeddingsCollection, projectsCollection, agentWorkflowsCollection, scenariosCollection, projectMembersCollection, apiKeysCollection, dataSourceDocsCollection } from "../lib/mongodb";
+import { dataSourcesCollection, embeddingsCollection, projectsCollection, agentWorkflowsCollection, testScenariosCollection, projectMembersCollection, apiKeysCollection, dataSourceDocsCollection, testProfilesCollection } from "../lib/mongodb";
 import { z } from 'zod';
 import crypto from 'crypto';
 import { revalidatePath } from "next/cache";
@@ -41,6 +41,7 @@ export async function createProject(formData: FormData) {
     const projectId = crypto.randomUUID();
     const chatClientId = crypto.randomBytes(16).toString('base64url');
     const secret = crypto.randomBytes(32).toString('hex');
+    const defaultTestProfileId = new ObjectId();
 
     // create project
     await projectsCollection.insertOne({
@@ -52,12 +53,13 @@ export async function createProject(formData: FormData) {
         chatClientId,
         secret,
         nextWorkflowNumber: 1,
+        testRunCounter: 0,
+        defaultTestProfileId: defaultTestProfileId.toString(),
     });
 
     // add first workflow version
     const { agents, prompts, tools, startAgent } = templates[templateKey];
     await agentWorkflowsCollection.insertOne({
-        _id: new ObjectId(),
         projectId,
         agents,
         prompts,
@@ -66,6 +68,17 @@ export async function createProject(formData: FormData) {
         createdAt: (new Date()).toISOString(),
         lastUpdatedAt: (new Date()).toISOString(),
         name: `Version 1`,
+    });
+
+    // add default test profile
+    await testProfilesCollection.insertOne({
+        _id: defaultTestProfileId,
+        projectId,
+        name: "Default",
+        context: "",
+        mockTools: false,
+        createdAt: (new Date()).toISOString(),
+        lastUpdatedAt: (new Date()).toISOString(),
     });
 
     // add user to project
@@ -198,7 +211,7 @@ export async function deleteProject(projectId: string) {
     });
 
     // delete scenarios
-    await scenariosCollection.deleteMany({
+    await testScenariosCollection.deleteMany({
         projectId,
     });
 

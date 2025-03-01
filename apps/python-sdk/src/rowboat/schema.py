@@ -51,6 +51,7 @@ class ApiRequest(BaseModel):
     skipToolCalls: Optional[bool] = None
     maxTurns: Optional[int] = None
     workflowId: Optional[str] = None
+    testProfileId: Optional[str] = None
 
 class ApiResponse(BaseModel):
     messages: List[ApiMessage]

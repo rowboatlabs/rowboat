@@ -1,7 +1,6 @@
 import { CoreMessage, ToolCallPart } from "ai";
 import { z } from "zod";
 import { apiV1 } from "rowboat-shared";
-import { SimulationData } from "./testing_types";
 
 export const PlaygroundChat = z.object({
     createdAt: z.string().datetime(),
@@ -9,7 +8,7 @@ export const PlaygroundChat = z.object({
     title: z.string().optional(),
     messages: z.array(apiV1.ChatMessage),
     simulated: z.boolean().default(false).optional(),
-    simulationData: SimulationData.optional(),
+    simulationScenario: z.string().optional(),
     simulationComplete: z.boolean().default(false).optional(),
     agenticState: z.unknown().optional(),
     systemMessage: z.string().optional(),
@@ -110,6 +109,7 @@ export const ApiRequest = z.object({
     skipToolCalls: z.boolean().nullable().optional(),
     maxTurns: z.number().nullable().optional(),
     workflowId: z.string().nullable().optional(),
+    testProfileId: z.string().nullable().optional(),
 });
 
 export const ApiResponse = z.object({

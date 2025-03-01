@@ -29,6 +29,7 @@ import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/i
 import { CopyIcon, Layers2Icon, RadioIcon, RedoIcon, Sparkles, UndoIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
 import { CopilotMessage } from "../../../lib/types/copilot_types";
+import { TestProfile } from "@/app/lib/types/testing_types";
 
 enablePatches();
 
@@ -533,12 +534,14 @@ export function WorkflowEditor({
     publishedWorkflowId,
     handleShowSelector,
     handleCloneVersion,
+    initialTestProfile,
 }: {
     dataSources: WithStringId<z.infer<typeof DataSource>>[];
     workflow: WithStringId<z.infer<typeof Workflow>>;
     publishedWorkflowId: string | null;
     handleShowSelector: () => void;
     handleCloneVersion: (workflowId: string) => void;
+    initialTestProfile: z.infer<typeof TestProfile>;
 }) {
     const [state, dispatch] = useReducer<Reducer<State, Action>>(reducer, {
         patches: [],
@@ -859,6 +862,7 @@ export function WorkflowEditor({
                     projectId={state.present.workflow.projectId}
                     workflow={state.present.workflow}
                     messageSubscriber={updateChatMessages}
+                    initialTestProfile={initialTestProfile}
                 />
                 {state.present.selection?.type === "agent" && <AgentConfig
                     key={state.present.selection.name}

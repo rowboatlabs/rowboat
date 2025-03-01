@@ -6,7 +6,6 @@ import { EmbeddingRecord } from "../lib/types/datasource_types";
 import { WebpageCrawlResponse } from "../lib/types/tool_types";
 import { GetInformationToolResult } from "../lib/types/tool_types";
 import { EmbeddingDoc } from "../lib/types/datasource_types";
-import { SimulationData } from "../lib/types/testing_types";
 import { generateObject, generateText, embed } from "ai";
 import { dataSourceDocsCollection, dataSourcesCollection, embeddingsCollection, webpagesCollection } from "../lib/mongodb";
 import { z } from 'zod';
@@ -21,6 +20,7 @@ import { QueryLimitError } from "../lib/client_utils";
 import { projectAuthCheck } from "./project_actions";
 import { qdrantClient } from "../lib/qdrant";
 import { ObjectId } from "mongodb";
+import { TestProfile } from "../lib/types/testing_types";
 
 const crawler = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY || '' });
 
@@ -99,13 +99,13 @@ export async function getAssistantResponse(
     };
 }
 
-export async function suggestToolResponse(toolId: string, projectId: string, messages: z.infer<typeof apiV1.ChatMessage>[]): Promise<string> {
+export async function suggestToolResponse(toolId: string, projectId: string, messages: z.infer<typeof apiV1.ChatMessage>[], testProfile: z.infer<typeof TestProfile>): Promise<string> {
     await projectAuthCheck(projectId);
     if (!await check_query_limit(projectId)) {
         throw new QueryLimitError();
     }
 
-    return await mockToolResponse(toolId, messages);
+    return await mockToolResponse(toolId, messages, testProfile);
 }
 
 export async function getInformationTool(
@@ -123,38 +123,12 @@ export async function getInformationTool(
 export async function simulateUserResponse(
     projectId: string,
     messages: z.infer<typeof apiV1.ChatMessage>[],
-    simulationData: z.infer<typeof SimulationData>
+    scenario: string,
 ): Promise<string> {
     await projectAuthCheck(projectId);
     if (!await check_query_limit(projectId)) {
         throw new QueryLimitError();
     }
-
-    const articlePrompt = `
-# Your Specific Task:
-
-## Context:
-
-Here is a help article:
-
-Content:
-<START_ARTICLE_CONTENT>
-Title: {{title}}
-{{content}}
-<END_ARTICLE_CONTENT> 
-
-## Task definition:
-
-Pretend to be a user reaching out to customer support. Chat with the
-customer support assistant, assuming your issue or query is from this article.
-Ask follow-up questions and make it real-world like. Don't do dummy
-conversations. Your conversation should be a maximum of 5 user turns.
-
-As output, simply provide your (user) turn of conversation.
-
-After you are done with the chat, keep replying with a single word EXIT
-in all capitals.
-`;
 
     const scenarioPrompt = `
 # Your Specific Task:
@@ -181,30 +155,6 @@ After you are done with the chat, keep replying with a single word EXIT
 in all capitals.
 `;
 
-    const previousChatPrompt = `
-# Your Specific Task:
-
-## Context:
-
-Here is a chat between a user and a customer support assistant:
-
-Chat:
-<PREVIOUS_CHAT>
-{{messages}}
-<END_PREVIOUS_CHAT> 
-
-## Task definition:
-
-Pretend to be a user reaching out to customer support. Chat with the
-customer support assistant, assuming your issue based on this previous chat.
-Ask follow-up questions and make it real-world like. Don't do dummy
-conversations. Your conversation should be a maximum of 5 user turns.
-
-As output, simply provide your (user) turn of conversation.
-
-After you are done with the chat, keep replying with a single word EXIT
-in all capitals.
-`;
     await projectAuthCheck(projectId);
 
     // flip message assistant / user message
@@ -219,19 +169,9 @@ in all capitals.
 
     // simulate user call
     let prompt;
-    if ('articleUrl' in simulationData) {
-        prompt = articlePrompt
-            .replace('{{title}}', simulationData.articleTitle || '')
-            .replace('{{content}}', simulationData.articleContent || '');
-    }
-    if ('scenario' in simulationData) {
-        prompt = scenarioPrompt
-            .replace('{{scenario}}', simulationData.scenario);
-    }
-    if ('chatMessages' in simulationData) {
-        prompt = previousChatPrompt
-            .replace('{{messages}}', simulationData.chatMessages);
-    }
+    prompt = scenarioPrompt
+        .replace('{{scenario}}', scenario);
+
     const { text } = await generateText({
         model: openai("gpt-4o"),
         system: prompt || '',

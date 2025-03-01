@@ -9,24 +9,28 @@ import { convertWorkflowToAgenticAPI } from "../../../lib/types/agents_api_types
 import { AgenticAPIChatRequest } from "../../../lib/types/agents_api_types";
 import { Workflow } from "../../../lib/types/workflow_types";
 import { ComposeBox } from "./compose-box";
-import { Button, Spinner } from "@nextui-org/react";
+import { Button, Spinner, Tooltip } from "@nextui-org/react";
 import { apiV1 } from "rowboat-shared";
 import { CopyAsJsonButton } from "./copy-as-json-button";
+import { TestProfile } from "@/app/lib/types/testing_types";
+import { ProfileSelector } from "@/app/lib/components/selectors/profile-selector";
+import { WithStringId } from "@/app/lib/types/types";
 
 export function Chat({
     chat,
-    initialChatId = null,
     projectId,
     workflow,
     messageSubscriber,
+    testProfile,
+    onTestProfileChange,
 }: {
     chat: z.infer<typeof PlaygroundChat>;
-    initialChatId?: string | null;
     projectId: string;
     workflow: z.infer<typeof Workflow>;
     messageSubscriber?: (messages: z.infer<typeof apiV1.ChatMessage>[]) => void;
+    testProfile: z.infer<typeof TestProfile>;
+    onTestProfileChange: (profile: WithStringId<z.infer<typeof TestProfile>>) => void;
 }) {
-    const [chatId, setChatId] = useState<string | null>(initialChatId);
     const [messages, setMessages] = useState<z.infer<typeof apiV1.ChatMessage>[]>(chat.messages);
     const [loadingAssistantResponse, setLoadingAssistantResponse] = useState<boolean>(false);
     const [loadingUserResponse, setLoadingUserResponse] = useState<boolean>(false);
@@ -34,11 +38,11 @@ export function Chat({
     const [agenticState, setAgenticState] = useState<unknown>(chat.agenticState || {
         last_agent_name: workflow.startAgent,
     });
-    const [showCopySuccess, setShowCopySuccess] = useState(false);
     const [fetchResponseError, setFetchResponseError] = useState<string | null>(null);
     const [lastAgenticRequest, setLastAgenticRequest] = useState<unknown | null>(null);
     const [lastAgenticResponse, setLastAgenticResponse] = useState<unknown | null>(null);
-    const [systemMessage, setSystemMessage] = useState<string | undefined>(chat.systemMessage);
+    const [systemMessage, setSystemMessage] = useState<string | undefined>(testProfile.context);
+    const [isProfileSelectorOpen, setIsProfileSelectorOpen] = useState(false);
 
     // collect published tool call results
     const toolCallResults: Record<string, z.infer<typeof apiV1.ToolMessage>> = {};
@@ -53,7 +57,7 @@ export function Chat({
             role: 'user',
             content: prompt,
             version: 'v1',
-            chatId: chatId ?? '',
+            chatId: '',
             createdAt: new Date().toISOString(),
         }];
         setMessages(updatedMessages);
@@ -64,7 +68,7 @@ export function Chat({
         setMessages([...messages, ...results.map((result) => ({
             ...result,
             version: 'v1' as const,
-            chatId: chatId ?? '',
+            chatId: '',
             createdAt: new Date().toISOString(),
         }))]);
     }
@@ -97,7 +101,7 @@ export function Chat({
                     role: 'system',
                     content: systemMessage || '',
                     version: 'v1' as const,
-                    chatId: chatId ?? '',
+                    chatId: '',
                     createdAt: new Date().toISOString(),
                 }, ...messages]),
                 state: agenticState,
@@ -122,7 +126,7 @@ export function Chat({
                 setMessages([...messages, ...response.messages.map((message) => ({
                     ...message,
                     version: 'v1' as const,
-                    chatId: chatId ?? '',
+                    chatId: '',
                     createdAt: new Date().toISOString(),
                 }))]);
                 setAgenticState(response.state);
@@ -157,14 +161,14 @@ export function Chat({
         return () => {
             ignore = true;
         };
-    }, [chatId, chat.simulated, messages, projectId, agenticState, workflow, fetchResponseError, systemMessage, simulationComplete]);
+    }, [chat.simulated, messages, projectId, agenticState, workflow, fetchResponseError, systemMessage, simulationComplete]);
 
     // simulate user turn
     useEffect(() => {
         let ignore = false;
 
         async function process() {
-            if (chat.simulationData === undefined) {
+            if (chat.simulationScenario === undefined) {
                 return;
             }
 
@@ -172,7 +176,7 @@ export function Chat({
             setLoadingUserResponse(true);
             try {
 
-                const response = await simulateUserResponse(projectId, messages, chat.simulationData)
+                const response = await simulateUserResponse(projectId, messages, chat.simulationScenario)
                 if (ignore) {
                     return;
                 }
@@ -187,7 +191,7 @@ export function Chat({
                     role: 'user',
                     content: response,
                     version: 'v1' as const,
-                    chatId: chatId ?? '',
+                    chatId: '',
                     createdAt: new Date().toISOString(),
                 }]);
                 setFetchResponseError(null);
@@ -226,7 +230,7 @@ export function Chat({
         return () => {
             ignore = true;
         };
-    }, [chatId, chat.simulated, messages, projectId, simulationComplete, chat.simulationData]);
+    }, [chat.simulated, messages, projectId, simulationComplete, chat.simulationScenario]);
 
     // save chat on every assistant message
     // useEffect(() => {
@@ -275,6 +279,22 @@ export function Chat({
 
     return <div className="relative h-full flex flex-col gap-8 pt-8 overflow-auto">
         <CopyAsJsonButton onCopy={handleCopyChat} />
+        <div className="absolute top-0 left-0">
+            <Tooltip content={"Change profile"} placement="right">
+                <button
+                    className="border border-gray-200 dark:border-gray-800 p-2 rounded-lg text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
+                    onClick={() => setIsProfileSelectorOpen(true)}
+                >
+                    {`Test profile: ${testProfile.name}`}
+                </button>
+            </Tooltip>
+        </div>
+        <ProfileSelector
+            projectId={projectId}
+            isOpen={isProfileSelectorOpen}
+            onOpenChange={setIsProfileSelectorOpen}
+            onSelect={onTestProfileChange}
+        />
         <Messages
             projectId={projectId}
             messages={messages}
@@ -284,6 +304,7 @@ export function Chat({
             loadingAssistantResponse={loadingAssistantResponse}
             loadingUserResponse={loadingUserResponse}
             workflow={workflow}
+            testProfile={testProfile}
             onSystemMessageChange={handleSystemMessageChange}
         />
         <div className="shrink-0">

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { agentWorkflowsCollection, db, projectsCollection } from "../../../../lib/mongodb";
+import { agentWorkflowsCollection, db, projectsCollection, testProfilesCollection } from "../../../../lib/mongodb";
 import { z } from "zod";
 import { ObjectId } from "mongodb";
 import { authCheck } from "../../utils";
@@ -9,6 +9,7 @@ import { getAgenticApiResponse, callClientToolWebhook, runRAGToolCall, mockToolR
 import { check_query_limit } from "../../../../lib/rate_limiting";
 import { apiV1 } from "rowboat-shared";
 import { PrefixLogger } from "../../../../lib/utils";
+import { TestProfile } from "@/app/lib/types/testing_types";
 
 // get next turn / agent response
 export async function POST(
@@ -68,9 +69,43 @@ export async function POST(
             logger.log(`Workflow ${workflowId} not found for project ${projectId}`);
             return Response.json({ error: "Workflow not found" }, { status: 404 });
         }
+        
+        // if test profile is provided in the request, use it
+        let profile: z.infer<typeof TestProfile> = {
+            projectId: projectId,
+            name: 'Default',
+            createdAt: new Date().toISOString(),
+            lastUpdatedAt: new Date().toISOString(),
+            context: '',
+            mockTools: false,
+            mockPrompt: '',
+        };
+        if (result.data.testProfileId) {
+            const testProfile = await testProfilesCollection.findOne({
+                projectId: projectId,
+                _id: new ObjectId(result.data.testProfileId),
+            });
+            if (!testProfile) {
+                logger.log(`Test profile ${result.data.testProfileId} not found for project ${projectId}`);
+                return Response.json({ error: "Test profile not found" }, { status: 404 });
+            }
+            profile = testProfile;
+        }
+
+        // if profile has a context available, overwrite the system message in the request (if there is one)
+        let currentMessages = reqMessages;
+        if (profile.context) {
+            // if there is a system message, overwrite it
+            const systemMessageIndex = reqMessages.findIndex(m => m.role === "system");
+            if (systemMessageIndex !== -1) {
+                currentMessages[systemMessageIndex].content = profile.context;
+            } else {
+                // if there is no system message, add one
+                currentMessages.unshift({ role: "system", content: profile.context });
+            }
+        }
 
         const MAX_TURNS = result.data.maxTurns ?? 3;
-        let currentMessages = reqMessages;
         let currentState: unknown = reqState ?? { last_agent_name: workflow.agents[0].name };
         let turns = 0;
         let hasToolCalls = false;
@@ -140,9 +175,9 @@ export async function POST(
                         try {
                             // if tool is supposed to be mocked, mock it
                             const workflowTool = workflow.tools.find(t => t.name === toolCall.function.name);
-                            if (workflowTool?.mockInPlayground) {
+                            if (profile.mockTools) {
                                 logger.log(`Mocking tool call ${toolCall.function.name}`);
-                                result = await mockToolResponse(toolCall.id, currentMessages);
+                                result = await mockToolResponse(toolCall.id, currentMessages, profile);
                             } else {
                                 // else run the tool call by calling the client tool webhook
                                 logger.log(`Running client tool webhook for tool ${toolCall.function.name}`);

@@ -2,15 +2,25 @@ from pymongo import MongoClient
 from bson import ObjectId
 import os
 from datetime import datetime, timedelta, timezone
-from scenario_types import SimulationRun, Scenario, SimulationResult, SimulationAggregateResult
+from typing import Optional
+from scenario_types import (
+    TestRun,
+    TestScenario,
+    TestProfile,
+    TestSimulation,
+    TestResult,
+    AggregateResults
+)
 
 MONGO_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017/rowboat").strip()
 
-SCENARIOS_COLLECTION_NAME = "scenarios"
-API_KEYS_COLLECTION = "api_keys"
-SIMULATIONS_COLLECTION_NAME = "simulation_runs"
-SIMULATION_RESULT_COLLECTION_NAME = "simulation_result"
-SIMULATION_AGGREGATE_RESULT_COLLECTION_NAME = "simulation_aggregate_result"
+# New collection names
+TEST_SCENARIOS_COLLECTION = "test_scenarios"
+TEST_PROFILES_COLLECTION = "test_profiles"
+TEST_SIMULATIONS_COLLECTION = "test_simulations"
+TEST_RUNS_COLLECTION = "test_runs"
+TEST_RESULTS_COLLECTION = "test_results"
+API_KEYS_COLLECTION = "api_keys"  # If still needed
 
 def get_db():
     client = MongoClient(MONGO_URI)
@@ -21,6 +31,9 @@ def get_collection(collection_name: str):
     return db[collection_name]
 
 def get_api_key(project_id: str):
+    """
+    If you still use an API key pattern, adapt as needed.
+    """
     collection = get_collection(API_KEYS_COLLECTION)
     doc = collection.find_one({"projectId": project_id})
     if doc:
@@ -28,71 +41,68 @@ def get_api_key(project_id: str):
     else:
         return None
 
-def get_pending_simulation_run():
-    collection = get_collection(SIMULATIONS_COLLECTION_NAME)
+#
+# TestRun helpers
+#
+
+def get_pending_run() -> Optional[TestRun]:
+    """
+    Finds a run with 'pending' status, marks it 'running', and returns it.
+    """
+    collection = get_collection(TEST_RUNS_COLLECTION)
     doc = collection.find_one_and_update(
         {"status": "pending"},
         {"$set": {"status": "running"}},
         return_document=True
     )
     if doc:
-        return SimulationRun(
+        return TestRun(
             id=str(doc["_id"]),
             projectId=doc["projectId"],
-            status="running",
-            scenarioIds=doc["scenarioIds"],
+            name=doc["name"],
+            simulationIds=doc["simulationIds"],
             workflowId=doc["workflowId"],
+            status="running",
             startedAt=doc["startedAt"],
-            completedAt=doc.get("completedAt")
+            completedAt=doc.get("completedAt"),
+            aggregateResults=doc.get("aggregateResults"),
+            lastHeartbeat=doc.get("lastHeartbeat")
         )
     return None
 
-def set_simulation_run_to_completed(simulation_run: SimulationRun, aggregate_result: SimulationAggregateResult):
-    collection = get_collection(SIMULATIONS_COLLECTION_NAME)
-    collection.update_one({"_id": ObjectId(simulation_run.id)}, {"$set": {"status": "completed", "aggregateResults": aggregate_result.model_dump(by_alias=True)}})
-
-def get_scenarios_for_run(simulation_run: SimulationRun):
-    if simulation_run is None:
-        return []
-    collection = get_collection(SCENARIOS_COLLECTION_NAME)
-    scenarios = []
-    for doc in collection.find():
-        if doc["_id"] in [ObjectId(sid) for sid in simulation_run.scenarioIds]:
-            scenarios.append(Scenario(
-                id=str(doc["_id"]),
-                projectId=doc["projectId"],
-                name=doc["name"],
-                description=doc["description"],
-                criteria=doc["criteria"],
-                context=doc["context"],
-                createdAt=doc["createdAt"],
-                lastUpdatedAt=doc["lastUpdatedAt"]
-            ))
-    return scenarios
-
-def write_simulation_result(result: SimulationResult):
-    collection = get_collection(SIMULATION_RESULT_COLLECTION_NAME)
-    collection.insert_one(result.model_dump())
-
-def update_simulation_run_heartbeat(simulation_run_id: str):
+def set_run_to_completed(test_run: TestRun, aggregate: AggregateResults):
     """
-    Updates the 'last_heartbeat' timestamp for a SimulationRun.
+    Marks a test run 'completed' and sets the aggregate results.
     """
-
-    collection = get_collection(SIMULATIONS_COLLECTION_NAME)
+    collection = get_collection(TEST_RUNS_COLLECTION)
     collection.update_one(
-        {"_id": ObjectId(simulation_run_id)},
+        {"_id": ObjectId(test_run.id)},
+        {
+            "$set": {
+                "status": "completed",
+                "aggregateResults": aggregate.model_dump(by_alias=True),
+                "completedAt": datetime.now(timezone.utc)
+            }
+        }
+    )
+
+def update_run_heartbeat(run_id: str):
+    """
+    Updates the 'lastHeartbeat' timestamp for a TestRun.
+    """
+    collection = get_collection(TEST_RUNS_COLLECTION)
+    collection.update_one(
+        {"_id": ObjectId(run_id)},
         {"$set": {"lastHeartbeat": datetime.now(timezone.utc)}}
     )
 
-def mark_stale_jobs_as_failed():
+def mark_stale_jobs_as_failed(threshold_minutes: int = 20) -> int:
     """
-    Finds any job in 'running' status whose last_heartbeat is older than 5 minutes,
-    and sets it to 'failed'.
+    Finds any run in 'running' status whose lastHeartbeat is older than
+    `threshold_minutes`, and sets it to 'failed'. Returns the count.
     """
-
-    collection = get_collection(SIMULATIONS_COLLECTION_NAME)
-    stale_threshold = datetime.now(timezone.utc) - timedelta(minutes=20)
+    collection = get_collection(TEST_RUNS_COLLECTION)
+    stale_threshold = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
     result = collection.update_many(
         {
             "status": "running",
@@ -102,4 +112,46 @@ def mark_stale_jobs_as_failed():
             "$set": {"status": "failed"}
         }
     )
-    return result.modified_count  # Number of jobs marked failed
+    return result.modified_count
+
+#
+# TestSimulation helpers
+#
+
+def get_simulations_for_run(test_run: TestRun) -> list[TestSimulation]:
+    """
+    Returns all simulations specified by a particular run.
+    """
+    if test_run is None:
+        return []
+    collection = get_collection(TEST_SIMULATIONS_COLLECTION)
+    simulation_docs = collection.find({
+        "_id": {"$in": [ObjectId(sim_id) for sim_id in test_run.simulationIds]}
+    })
+
+    simulations = []
+    for doc in simulation_docs:
+        simulations.append(
+            TestSimulation(
+                id=str(doc["_id"]),
+                projectId=doc["projectId"],
+                name=doc["name"],
+                scenarioId=doc["scenarioId"],
+                profileId=doc["profileId"],
+                passCriteria=doc["passCriteria"],
+                createdAt=doc["createdAt"],
+                lastUpdatedAt=doc["lastUpdatedAt"]
+            )
+        )
+    return simulations
+
+#
+# TestResult helpers
+#
+
+def write_test_result(result: TestResult):
+    """
+    Writes a test result into the `test_results` collection.
+    """
+    collection = get_collection(TEST_RESULTS_COLLECTION)
+    collection.insert_one(result.model_dump())

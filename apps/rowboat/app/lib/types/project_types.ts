@@ -10,6 +10,8 @@ export const Project = z.object({
     webhookUrl: z.string().optional(),
     publishedWorkflowId: z.string().optional(),
     nextWorkflowNumber: z.number().optional(),
+    testRunCounter: z.number().default(0),
+    defaultTestProfileId: z.string().optional(),
 });export const ProjectMember = z.object({
     userId: z.string(),
     projectId: z.string(),
