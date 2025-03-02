@@ -35,6 +35,7 @@ services:
       - CHAT_WIDGET_SESSION_JWT_SECRET=${CHAT_WIDGET_SESSION_JWT_SECRET}
       - MAX_QUERIES_PER_MINUTE=${MAX_QUERIES_PER_MINUTE}
       - MAX_PROJECTS_PER_USER=${MAX_PROJECTS_PER_USER}
+      - VOICE_API_URL=${VOICE_API_URL}
     restart: unless-stopped
 
   agents:
@@ -160,4 +161,21 @@ services:
     profiles: [ "docs" ]
     ports:
       - "8000:8000"
+
+  voice:
+    build:
+      context: ./apps/voice
+      dockerfile: Dockerfile
+    ports:
+      - "3009:3009"
+    environment:
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ROWBOAT_API_HOST=http://rowboat:3000
+      - ROWBOAT_PROJECT_ID=${ROWBOAT_PROJECT_ID}
+      - ROWBOAT_API_KEY=${ROWBOAT_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - BASE_URL=${BASE_URL}
     restart: unless-stopped
