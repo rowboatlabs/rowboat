@@ -1,0 +1,21 @@
+[project]
+name = "llm_router"
+version = "0.1.0"
+description = "A router between OpenAI and Groq LLM providers"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [
+    "openai>=1.0.0",
+    "groq>=0.1.0"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/llm_router"
+"Repository" = "https://github.com/yourusername/llm_router"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
