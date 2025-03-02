@@ -30,6 +30,8 @@ interface EditableFieldProps {
         show: boolean;
         setShow: (show: boolean) => void;
     };
+    disabled?: boolean;
+    type?: string;
 }
 
 export function EditableField({
@@ -50,6 +52,8 @@ export function EditableField({
     error,
     inline = false,
     showGenerateButton,
+    disabled = false,
+    type = "text",
 }: EditableFieldProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [localValue, setLocalValue] = useState(value);
@@ -176,6 +180,7 @@ export function EditableField({
                 )}
                 {multiline && !mentions && <Textarea
                     {...commonProps}
+                    disabled={disabled}
                     minRows={3}
                     maxRows={20}
                     className="w-full"
@@ -186,7 +191,8 @@ export function EditableField({
                     }}
                 />}
                 {!multiline && <Input 
-                    {...commonProps} 
+                    {...commonProps}
+                    disabled={disabled}
                     className="w-full"
                     classNames={{
                         ...commonProps.classNames,
@@ -199,7 +205,13 @@ export function EditableField({
     }
 
     return (
-        <div ref={ref} className={clsx("cursor-text", className)}>
+        <div 
+            ref={ref} 
+            className={clsx("cursor-text", className, {
+                "opacity-50 cursor-not-allowed": disabled
+            })}
+            onClick={() => !locked && !disabled && setIsEditing(true)}
+        >
             {label && (
                 <div className="flex justify-between items-center">
                     <Label label={label} />
@@ -227,7 +239,6 @@ export function EditableField({
                     borderRadius: '0',
                     padding: '0'
                 } : undefined}
-                onClick={() => !locked && setIsEditing(true)}
             >
                 {value ? (
                     <>
