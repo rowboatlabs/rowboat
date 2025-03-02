@@ -26,6 +26,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - MAX_QUERIES_PER_MINUTE=${MAX_QUERIES_PER_MINUTE}
       - MAX_PROJECTS_PER_USER=${MAX_PROJECTS_PER_USER}
+      - VOICE_API_URL=${VOICE_API_URL}
     restart: unless-stopped
 
   agents:
@@ -82,4 +83,22 @@ services:
     image: redis:latest
     ports:
       - "6379:6379"
+    restart: unless-stopped
+
+  voice:
+    build:
+      context: ./apps/voice
+      dockerfile: Dockerfile
+    ports:
+      - "3009:3009"
+    environment:
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ROWBOAT_API_HOST=http://rowboat:3000
+      - ROWBOAT_PROJECT_ID=${ROWBOAT_PROJECT_ID}
+      - ROWBOAT_API_KEY=${ROWBOAT_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - BASE_URL=${BASE_URL}
     restart: unless-stopped
