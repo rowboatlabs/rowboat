@@ -1,7 +1,7 @@
 flask==2.3.3
-twilio==8.15.0
-deepgram-sdk==2.16.0
-elevenlabs==0.2.32
+twilio==9.4.6
+deepgram-sdk==3.10.0
+elevenlabs==1.52.0
 openai==1.35.0
 requests==2.31.0
 python-dotenv==1.0.1
@@ -11,3 +11,4 @@ websockets==12.0
 pydub==0.25.1
 redis==5.0.0
 orjson==3.9.15
+rowboat==1.0.6

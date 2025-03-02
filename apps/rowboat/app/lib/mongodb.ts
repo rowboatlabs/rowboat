@@ -8,6 +8,7 @@ import { EmbeddingDoc } from "./types/datasource_types";
 import { DataSourceDoc } from "./types/datasource_types";
 import { DataSource } from "./types/datasource_types";
 import { Scenario, SimulationResult, SimulationRun, SimulationAggregateResult } from "./types/testing_types";
+import { TwilioConfig } from "./types/voice_types";
 import { z } from 'zod';
 
 const client = new MongoClient(process.env["MONGODB_CONNECTION_STRING"] || "mongodb://localhost:27017");
@@ -24,3 +25,15 @@ export const scenariosCollection = db.collection<z.infer<typeof Scenario>>("scen
 export const apiKeysCollection = db.collection<z.infer<typeof ApiKey>>("api_keys");
 export const simulationRunsCollection = db.collection<z.infer<typeof SimulationRun>>("simulation_runs");
 export const simulationResultsCollection = db.collection<z.infer<typeof SimulationResult>>("simulation_results");
+export const twilioConfigsCollection = db.collection<z.infer<typeof TwilioConfig>>("twilio_configs");
+
+// Create indexes
+twilioConfigsCollection.createIndexes([
+    {
+        key: { workflow_id: 1, status: 1 },
+        name: "workflow_status_idx",
+        // This ensures only one active config per workflow
+        unique: true,
+        partialFilterExpression: { status: "active" }
+    }
+]);

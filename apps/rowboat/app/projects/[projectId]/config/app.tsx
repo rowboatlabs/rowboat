@@ -6,7 +6,7 @@ import { ReactNode, useEffect, useState, useCallback } from "react";
 import { getProjectConfig, updateProjectName, updateWebhookUrl, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret } from "../../../actions/project_actions";
 import { CopyButton } from "../../../lib/components/copy-button";
 import { EditableField } from "../../../lib/components/editable-field";
-import { EyeIcon, EyeOffIcon, CopyIcon, MoreVerticalIcon, PlusIcon, EllipsisVerticalIcon } from "lucide-react";
+import { EyeIcon, EyeOffIcon, CopyIcon, MoreVerticalIcon, PlusIcon, EllipsisVerticalIcon, CheckCircleIcon, XCircleIcon } from "lucide-react";
 import { WithStringId } from "../../../lib/types/types";
 import { ApiKey } from "../../../lib/types/project_types";
 import { z } from "zod";
@@ -20,6 +20,7 @@ import {
     ResizablePanel,
     ResizablePanelGroup,
 } from "../../../../components/ui/resizable"
+import { VoiceSection } from './voice';
 
 export const metadata: Metadata = {
     title: "Project config",
@@ -581,217 +582,7 @@ function NavigationMenu({
     );
 }
 
-export function VoiceSection({
-    projectId,
-}: {
-    projectId: string;
-}) {
-    const [selectedProvider, setSelectedProvider] = useState<'twilio' | 'vonage'>('twilio');
-    
-    // Twilio states
-    const [twilioPhone, setTwilioPhone] = useState('');
-    const [accountSid, setAccountSid] = useState('');
-    const [authToken, setAuthToken] = useState('');
-    const [twilioLabel, setTwilioLabel] = useState('');
-    
-    // Vonage states
-    const [vonagePhone, setVonagePhone] = useState('');
-    const [apiKey, setApiKey] = useState('');
-    const [apiSecret, setApiSecret] = useState('');
-    const [vonageLabel, setVonageLabel] = useState('');
-    
-    const [error, setError] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
-
-    const handleTwilioImport = async () => {
-        if (!twilioPhone || !accountSid || !authToken || !twilioLabel) {
-            setError('Please fill in all fields');
-            return;
-        }
-        
-        setError(null);
-        setLoading(true);
-        
-        try {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            console.log('Importing Twilio:', { twilioPhone, accountSid, authToken, twilioLabel });
-            
-            setTwilioPhone('');
-            setAccountSid('');
-            setAuthToken('');
-            setTwilioLabel('');
-            
-        } catch (err) {
-            setError('Failed to import from Twilio. Please try again.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleVonageImport = async () => {
-        if (!vonagePhone || !apiKey || !apiSecret || !vonageLabel) {
-            setError('Please fill in all fields');
-            return;
-        }
-        
-        setError(null);
-        setLoading(true);
-        
-        try {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            console.log('Importing Vonage:', { vonagePhone, apiKey, apiSecret, vonageLabel });
-            
-            setVonagePhone('');
-            setApiKey('');
-            setApiSecret('');
-            setVonageLabel('');
-            
-        } catch (err) {
-            setError('Failed to import from Vonage. Please try again.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="flex flex-col gap-4">
-            <Section title="Phone Number">
-                <div className="flex flex-col gap-4">
-                    <div className="flex gap-2">
-                        <Button
-                            variant={selectedProvider === 'twilio' ? 'solid' : 'light'}
-                            onClick={() => setSelectedProvider('twilio')}
-                        >
-                            Import Twilio
-                        </Button>
-                        <Button
-                            variant={selectedProvider === 'vonage' ? 'solid' : 'light'}
-                            onClick={() => setSelectedProvider('vonage')}
-                        >
-                            Import Vonage
-                        </Button>
-                    </div>
-
-                    {selectedProvider === 'twilio' && (
-                        <div className="flex flex-col gap-4">
-                            <FormSection label="Twilio Phone Number">
-                                <EditableField
-                                    value={twilioPhone}
-                                    onChange={setTwilioPhone}
-                                    placeholder="+14156021922"
-                                />
-                            </FormSection>
-
-                            <FormSection label="Twilio Account SID">
-                                <EditableField
-                                    value={accountSid}
-                                    onChange={setAccountSid}
-                                    placeholder="Twilio Account SID"
-                                />
-                            </FormSection>
-
-                            <FormSection label="Twilio Auth Token">
-                                <EditableField
-                                    value={authToken}
-                                    onChange={setAuthToken}
-                                    placeholder="Twilio Auth Token"
-                                />
-                            </FormSection>
-
-                            <FormSection label="Label">
-                                <EditableField
-                                    value={twilioLabel}
-                                    onChange={setTwilioLabel}
-                                    placeholder="Label for Phone Number"
-                                />
-                            </FormSection>
-
-                            {error && (
-                                <div className="text-red-500 text-sm">{error}</div>
-                            )}
-
-                            <div className="flex gap-2 mt-4">
-                                <Button 
-                                    color="primary"
-                                    onClick={handleTwilioImport}
-                                    isLoading={loading}
-                                >
-                                    Import from Twilio
-                                </Button>
-                                <Button 
-                                    variant="light" 
-                                    isDisabled={loading}
-                                >
-                                    Cancel
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-
-                    {selectedProvider === 'vonage' && (
-                        <div className="flex flex-col gap-4">
-                            <FormSection label="Vonage Phone Number">
-                                <EditableField
-                                    value={vonagePhone}
-                                    onChange={setVonagePhone}
-                                    placeholder="+14156021922"
-                                />
-                            </FormSection>
-
-                            <FormSection label="API Key">
-                                <EditableField
-                                    value={apiKey}
-                                    onChange={setApiKey}
-                                    placeholder="Enter API Key"
-                                />
-                            </FormSection>
-
-                            <FormSection label="API Secret">
-                                <EditableField
-                                    value={apiSecret}
-                                    onChange={setApiSecret}
-                                    placeholder="Enter API Secret"
-                                />
-                            </FormSection>
-
-                            <FormSection label="Label">
-                                <EditableField
-                                    value={vonageLabel}
-                                    onChange={setVonageLabel}
-                                    placeholder="Label for Phone Number"
-                                />
-                            </FormSection>
-
-                            {error && (
-                                <div className="text-red-500 text-sm">{error}</div>
-                            )}
-
-                            <div className="flex gap-2 mt-4">
-                                <Button 
-                                    color="primary"
-                                    onClick={handleVonageImport}
-                                    isLoading={loading}
-                                >
-                                    Import from Vonage
-                                </Button>
-                                <Button 
-                                    variant="light" 
-                                    isDisabled={loading}
-                                >
-                                    Cancel
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </Section>
-
-            {/* You can add more voice-related sections here */}
-        </div>
-    );
-}
-
-export default function App({
+export function ConfigApp({
     projectId,
 }: {
     projectId: string;
@@ -841,3 +632,6 @@ export default function App({
         </ResizablePanelGroup>
     );
 }
+
+// Add default export
+export default ConfigApp;
