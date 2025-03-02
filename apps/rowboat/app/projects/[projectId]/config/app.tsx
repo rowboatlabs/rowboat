@@ -12,6 +12,14 @@ import { ApiKey } from "../../../lib/types/project_types";
 import { z } from "zod";
 import { RelativeTime } from "@primer/react";
 import { Label } from "../../../lib/components/label";
+import { ListItem } from "../../../lib/components/structured-list";
+import { FormSection } from "../../../lib/components/form-section";
+import { StructuredPanel } from "../../../lib/components/structured-panel";
+import {
+    ResizableHandle,
+    ResizablePanel,
+    ResizablePanelGroup,
+} from "../../../../components/ui/resizable"
 
 export const metadata: Metadata = {
     title: "Project config",
@@ -78,38 +86,29 @@ export function BasicSettingsSection({
     }
 
     return <Section title="Basic settings">
-
-        <SectionRow>
-            <LeftLabel label="Project name" />
-            <RightContent>
-                <div className="flex flex-row gap-2 items-center">
-                    {loading && <Spinner size="sm" />}
-                    {!loading && <EditableField
-                        value={projectName || ''}
-                        onChange={updateName}
-                        className="w-full"
-                    />}
-                </div>
-            </RightContent>
-        </SectionRow>
+        <FormSection label="Project name">
+            {loading && <Spinner size="sm" />}
+            {!loading && <EditableField
+                value={projectName || ''}
+                onChange={updateName}
+                className="w-full"
+            />}
+        </FormSection>
 
         <Divider />
 
-        <SectionRow>
-            <LeftLabel label="Project ID" />
-            <RightContent>
-                <div className="flex flex-row gap-2 items-center">
-                    <div className="text-gray-600 text-sm font-mono">{projectId}</div>
-                    <CopyButton
-                        onCopy={() => {
-                            navigator.clipboard.writeText(projectId);
-                        }}
-                        label="Copy"
-                        successLabel="Copied"
-                    />
-                </div>
-            </RightContent>
-        </SectionRow>
+        <FormSection label="Project ID">
+            <div className="flex flex-row gap-2 items-center">
+                <div className="text-gray-600 text-sm font-mono">{projectId}</div>
+                <CopyButton
+                    onCopy={() => {
+                        navigator.clipboard.writeText(projectId);
+                    }}
+                    label="Copy"
+                    successLabel="Copied"
+                />
+            </div>
+        </FormSection>
     </Section>;
 }
 
@@ -407,20 +406,15 @@ export function WebhookUrlSection({
             In workflow editor, tool calls will be posted to this URL, unless they are mocked.
         </p>
         <Divider />
-        <SectionRow>
-            <LeftLabel label="Webhook URL" />
-            <RightContent>
-                <div className="flex flex-row gap-2 items-center">
-                    {loading && <Spinner size="sm" />}
-                    {!loading && <EditableField
-                        value={webhookUrl || ''}
-                        onChange={update}
-                        validate={validate}
-                        className="w-full"
-                    />}
-                </div>
-            </RightContent>
-        </SectionRow>
+        <FormSection label="Webhook URL">
+            {loading && <Spinner size="sm" />}
+            {!loading && <EditableField
+                value={webhookUrl || ''}
+                onChange={update}
+                validate={validate}
+                className="w-full"
+            />}
+        </FormSection>
     </Section>;
 }
 
@@ -564,26 +558,147 @@ export function DeleteProjectSection({
     );
 }
 
+function NavigationMenu({ 
+    selected, 
+    onSelect 
+}: { 
+    selected: string;
+    onSelect: (page: string) => void;
+}) {
+    const items = ['Project', 'Tools', 'Voice'];
+    
+    return (
+        <StructuredPanel title="SETTINGS">
+            {items.map((item) => (
+                <ListItem
+                    key={item}
+                    name={item}
+                    isSelected={selected === item}
+                    onClick={() => onSelect(item)}
+                />
+            ))}
+        </StructuredPanel>
+    );
+}
+
+export function VoiceSection({
+    projectId,
+}: {
+    projectId: string;
+}) {
+    const [phoneNumber, setPhoneNumber] = useState('');
+    const [accountSid, setAccountSid] = useState('');
+    const [authToken, setAuthToken] = useState('');
+    const [label, setLabel] = useState('');
+    const [error, setError] = useState<string | null>(null);
+
+    const handleImport = () => {
+        if (!phoneNumber || !accountSid || !authToken || !label) {
+            setError('Please fill in all fields');
+            return;
+        }
+        setError(null);
+        // Handle import logic here
+    };
+
+    return <Section title="Import from Twilio">
+        <div className="flex flex-col gap-4">
+            <FormSection label="Twilio Phone Number">
+                <EditableField
+                    value={phoneNumber}
+                    onChange={setPhoneNumber}
+                    placeholder="+14156021922"
+                />
+            </FormSection>
+
+            <FormSection label="Twilio Account SID">
+                <EditableField
+                    value={accountSid}
+                    onChange={setAccountSid}
+                    placeholder="Twilio Account SID"
+                />
+            </FormSection>
+
+            <FormSection label="Twilio Auth Token">
+                <EditableField
+                    value={authToken}
+                    onChange={setAuthToken}
+                    placeholder="Twilio Auth Token"
+                />
+            </FormSection>
+
+            <FormSection label="Label">
+                <EditableField
+                    value={label}
+                    onChange={setLabel}
+                    placeholder="Label for Phone Number"
+                />
+            </FormSection>
+
+            {error && (
+                <div className="text-red-500 text-sm">{error}</div>
+            )}
+
+            <div className="flex gap-2 mt-4">
+                <Button 
+                    color="primary"
+                    onClick={handleImport}
+                >
+                    Import from Twilio
+                </Button>
+                <Button variant="light">Cancel</Button>
+            </div>
+        </div>
+    </Section>;
+}
+
 export default function App({
     projectId,
 }: {
     projectId: string;
 }) {
-    return <div className="flex flex-col h-full">
-        <div className="shrink-0 flex justify-between items-center pb-4 border-b border-border">
-            <div className="flex flex-col">
-                <h1 className="text-lg">Project config</h1>
-            </div>
-        </div>
-        <div className="grow overflow-auto py-4">
-            <div className="max-w-[768px] mx-auto flex flex-col gap-4">
-                <BasicSettingsSection projectId={projectId} />
-                <SecretSection projectId={projectId} />
-                <ApiKeysSection projectId={projectId} />
-                <WebhookUrlSection projectId={projectId} />
-                {/* <ChatWidgetSection projectId={projectId} /> */}
-                <DeleteProjectSection projectId={projectId} />
-            </div>
-        </div>
-    </div>;
+    const [selectedPage, setSelectedPage] = useState('Project');
+
+    const renderContent = () => {
+        switch (selectedPage) {
+            case 'Project':
+                return (
+                    <div className="h-full overflow-auto p-6 space-y-6">
+                        <BasicSettingsSection projectId={projectId} />
+                        <SecretSection projectId={projectId} />
+                        <ApiKeysSection projectId={projectId} />
+                        <DeleteProjectSection projectId={projectId} />
+                    </div>
+                );
+            case 'Tools':
+                return (
+                    <div className="h-full overflow-auto p-6">
+                        <WebhookUrlSection projectId={projectId} />
+                    </div>
+                );
+            case 'Voice':
+                return (
+                    <div className="h-full overflow-auto p-6">
+                        <VoiceSection projectId={projectId} />
+                    </div>
+                );
+            default:
+                return null;
+        }
+    };
+
+    return (
+        <ResizablePanelGroup direction="horizontal" className="h-screen gap-1">
+            <ResizablePanel minSize={10} defaultSize={15}>
+                <NavigationMenu 
+                    selected={selectedPage}
+                    onSelect={setSelectedPage}
+                />
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel minSize={20} defaultSize={85}>
+                {renderContent()}
+            </ResizablePanel>
+        </ResizablePanelGroup>
+    );
 }
