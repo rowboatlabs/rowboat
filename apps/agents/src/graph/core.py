@@ -16,7 +16,9 @@ from .helpers.control import get_latest_assistant_msg, get_latest_non_assistant_
 
 from src.utils.common import common_logger
 logger = common_logger
-
+#new_model = "llama-3.3-70b-versatile"
+#new_model = "claude-3-7-sonnet-20250219"
+new_model = "gpt-4o"
 def order_messages(messages):
     # Arrange keys in specified order
     ordered_messages = []
@@ -113,7 +115,7 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
                 external_tools=external_tools,
                 candidate_parent_functions=candidate_parent_functions,
                 child_functions=child_functions,
-                model=agent_config["model"],
+                model=new_model, #agent_config["model"],
                 respond_to_user=agent_config.get("respond_to_user", False),
                 history=history,
                 children_names=agent_config.get("connectedAgents", []),
@@ -419,7 +421,7 @@ def run_turn(messages, start_agent_name, agent_configs, tool_configs, available_
         logger.info(f"Error raised in turn: {response.error_msg}")
         response_sender_agent_name = response.agent.name
         if escalate_errors and response_sender_agent_name != error_escalation_agent.name:
-            response = client.run(
+            response = swarm_client.run(
                 agent=error_escalation_agent,
                 messages=[],
                 execute_tools=True,
@@ -465,7 +467,7 @@ def run_turn(messages, start_agent_name, agent_configs, tool_configs, available_
             post_process_instructions=post_processing_agent_config.get("instructions", ""),
             style_prompt=get_prompt_by_type(prompt_configs, PromptType.STYLE.value),
             context='',
-            model=post_processing_agent_config.get("model", "gpt-4o"),
+            model=new_model, #post_processing_agent_config.get("model", "gpt-4o"),
             tokens_used=tokens_used,
             last_agent=last_agent
         )

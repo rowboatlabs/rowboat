@@ -1,9 +1,31 @@
 import openai
 import groq
 from anthropic import Anthropic
+from pydantic import BaseModel
 from typing import List, Dict, Any, Optional, Iterator
 import json
 import os
+
+# Pydantic models for object-based response with serialization
+class Usage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    input_tokens: int
+    output_tokens: int
+
+class Message(BaseModel):
+    role: str
+    content: Optional[str]
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+    sender: Optional[str] = None
+
+class Choice(BaseModel):
+    message: Message
+
+class Completion(BaseModel):
+    choices: List[Choice]
+    usage: Usage
 
 class ChatCompletions:
     def __init__(self, llm_client):
@@ -18,7 +40,7 @@ class ChatCompletions:
                tools: Optional[List[Dict[str, Any]]] = None,
                tool_choice: Optional[str] = "auto",
                stream: bool = False,
-               parallel_tool_calls: bool = True) -> Dict[str, Any] | Iterator[Dict[str, Any]]:
+               parallel_tool_calls: bool = True) -> Completion | Iterator[Dict[str, Any]]:
         return self.llm_client.chat_completion(
             model=model,
             messages=messages,
@@ -40,7 +62,7 @@ class BaseLLMClient:
         self.api_key = api_key
         self.default_model = default_model
         self.provider_client = None  # To be set by subclasses
-        self.chat = Chat(self)  # Sets up chat.completions structure
+        self.chat = Chat(self)
     
     def chat_completion(self,
                         model: str,
@@ -51,7 +73,7 @@ class BaseLLMClient:
                         tools: Optional[List[Dict[str, Any]]] = None,
                         tool_choice: Optional[str] = "auto",
                         stream: bool = False,
-                        parallel_tool_calls: bool = True) -> Dict[str, Any] | Iterator[Dict[str, Any]]:
+                        parallel_tool_calls: bool = True) -> Completion | Iterator[Dict[str, Any]]:
         raise NotImplementedError("Subclasses must implement chat_completion")
 
 class OpenAI(BaseLLMClient):
@@ -70,7 +92,7 @@ class OpenAI(BaseLLMClient):
                         tools: Optional[List[Dict[str, Any]]] = None,
                         tool_choice: Optional[str] = "auto",
                         stream: bool = False,
-                        parallel_tool_calls: bool = True) -> Dict[str, Any] | Iterator[Dict[str, Any]]:
+                        parallel_tool_calls: bool = True) -> Completion | Iterator[Dict[str, Any]]:
         try:
             kwargs = {
                 "model": model or self.default_model,
@@ -115,24 +137,10 @@ class OpenAI(BaseLLMClient):
                         yield result
                 return stream_generator()
             
-            result = {
-                "choices": [{
-                    "message": {
-                        "role": response.choices[0].message.role,
-                        "content": response.choices[0].message.content
-                    }
-                }],
-                "usage": {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
-                    "input_tokens": response.usage.prompt_tokens,      # Added input_tokens
-                    "output_tokens": response.usage.completion_tokens  # Added output_tokens
-                }
-            }
-            
+            # Construct Pydantic-based response
+            tool_calls = None
             if hasattr(response.choices[0].message, "tool_calls") and response.choices[0].message.tool_calls:
-                result["choices"][0]["message"]["tool_calls"] = [
+                tool_calls = [
                     {
                         "id": tool_call.id,
                         "type": "function",
@@ -143,8 +151,21 @@ class OpenAI(BaseLLMClient):
                     }
                     for tool_call in response.choices[0].message.tool_calls
                 ]
-            
-            return result
+            message = Message(
+                role=response.choices[0].message.role,
+                content=response.choices[0].message.content,
+                tool_calls=tool_calls
+            )
+            choice = Choice(message=message)
+            usage = Usage(
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                total_tokens=response.usage.total_tokens,
+                input_tokens=response.usage.prompt_tokens,
+                output_tokens=response.usage.completion_tokens
+            )
+            return Completion(choices=[choice], usage=usage)
+        
         except Exception as e:
             raise Exception(f"OpenAI API error: {str(e)}")
 
@@ -164,7 +185,7 @@ class Groq(BaseLLMClient):
                         tools: Optional[List[Dict[str, Any]]] = None,
                         tool_choice: Optional[str] = "auto",
                         stream: bool = False,
-                        parallel_tool_calls: bool = True) -> Dict[str, Any] | Iterator[Dict[str, Any]]:
+                        parallel_tool_calls: bool = True) -> Completion | Iterator[Dict[str, Any]]:
         try:
             kwargs = {
                 "model": model or self.default_model,
@@ -207,24 +228,10 @@ class Groq(BaseLLMClient):
                         yield result
                 return stream_generator()
             
-            result = {
-                "choices": [{
-                    "message": {
-                        "role": response.choices[0].message.role,
-                        "content": response.choices[0].message.content
-                    }
-                }],
-                "usage": {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
-                    "input_tokens": response.usage.prompt_tokens,      # Added input_tokens
-                    "output_tokens": response.usage.completion_tokens  # Added output_tokens
-                }
-            }
-            
+            # Construct Pydantic-based response
+            tool_calls = None
             if hasattr(response.choices[0].message, "tool_calls") and response.choices[0].message.tool_calls:
-                result["choices"][0]["message"]["tool_calls"] = [
+                tool_calls = [
                     {
                         "id": tool_call.id,
                         "type": "function",
@@ -235,15 +242,21 @@ class Groq(BaseLLMClient):
                     }
                     for tool_call in response.choices[0].message.tool_calls
                 ]
-            
-            if response_format and response_format.get("type") == "json_object":
-                content = result["choices"][0]["message"]["content"]
-                try:
-                    json.loads(content)
-                except json.JSONDecodeError:
-                    raise ValueError("Response is not a valid JSON object as requested")
-            
-            return result
+            message = Message(
+                role=response.choices[0].message.role,
+                content=response.choices[0].message.content,
+                tool_calls=tool_calls
+            )
+            choice = Choice(message=message)
+            usage = Usage(
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                total_tokens=response.usage.total_tokens,
+                input_tokens=response.usage.prompt_tokens,
+                output_tokens=response.usage.completion_tokens
+            )
+            return Completion(choices=[choice], usage=usage)
+        
         except Exception as e:
             raise Exception(f"Groq API error: {str(e)}")
 
@@ -263,21 +276,21 @@ class Claude(BaseLLMClient):
                         tools: Optional[List[Dict[str, Any]]] = None,
                         tool_choice: Optional[str] = "auto",
                         stream: bool = False,
-                        parallel_tool_calls: bool = True) -> Dict[str, Any]:
+                        parallel_tool_calls: bool = True) -> Completion:
         if stream:
             raise NotImplementedError("Streaming is not supported by Claude's API in this implementation")
         
         try:
-            system_prompt = next((m["content"] for m in messages if m["role"] == "system"), None)
-            user_messages = [m for m in messages if m["role"] != "system"]
+            system_prompt = next((m.get("content") for m in messages if m.get("role") == "system"), None)
+            user_messages = [m for m in messages if m.get("role") != "system"]
             
             claude_messages = []
             for msg in user_messages:
-                if msg["role"] == "user":
-                    claude_messages.append({"role": "user", "content": msg["content"]})
-                elif msg["role"] == "assistant":
-                    claude_messages.append({"role": "assistant", "content": msg["content"]})
-
+                role = msg.get("role")
+                content = msg.get("content")
+                if role in ["user", "assistant"] and content is not None:
+                    claude_messages.append({"role": role, "content": content})
+            
             kwargs = {
                 "model": model or self.default_model,
                 "max_tokens": max_tokens,
@@ -306,52 +319,37 @@ class Claude(BaseLLMClient):
                 kwargs["tools"] = claude_tools
                 if tool_choice != "auto":
                     kwargs["tool_choice"] = {"type": tool_choice}
-                # parallel_tool_calls is ignored by Claude
             
             response = self.provider_client.messages.create(**kwargs)
             
-            result = {
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": None
-                    }
-                }],
-                "usage": {
-                    "prompt_tokens": response.usage.input_tokens,
-                    "completion_tokens": response.usage.output_tokens,
-                    "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
-                    "input_tokens": response.usage.input_tokens,      # Added input_tokens
-                    "output_tokens": response.usage.output_tokens     # Added output_tokens
-                }
-            }
-            
             content_blocks = [block.text for block in response.content if block.type == "text"]
-            if content_blocks:
-                result["choices"][0]["message"]["content"] = "".join(content_blocks)
-            
-            tool_calls = [block for block in response.content if block.type == "tool_use"]
-            if tool_calls:
-                result["choices"][0]["message"]["tool_calls"] = [
-                    {
-                        "id": tool_call.id,
-                        "type": "function",
-                        "function": {
-                            "name": tool_call.name,
-                            "arguments": json.dumps(tool_call.input)
-                        }
+            content = "".join(content_blocks) if content_blocks else None
+            tool_calls = [
+                {
+                    "id": block.id,
+                    "type": "function",
+                    "function": {
+                        "name": block.name,
+                        "arguments": json.dumps(block.input)
                     }
-                    for tool_call in tool_calls
-                ]
-            
-            if response_format and response_format.get("type") == "json_object" and not tool_calls:
-                content = result["choices"][0]["message"]["content"]
-                try:
-                    json.loads(content)
-                except json.JSONDecodeError:
-                    raise ValueError("Response is not a valid JSON object as requested")
-            
-            return result
+                }
+                for block in response.content if block.type == "tool_use"
+            ]
+            message = Message(
+                role="assistant",
+                content=content,
+                tool_calls=tool_calls if tool_calls else None
+            )
+            choice = Choice(message=message)
+            usage = Usage(
+                prompt_tokens=response.usage.input_tokens,
+                completion_tokens=response.usage.output_tokens,
+                total_tokens=response.usage.input_tokens + response.usage.output_tokens,
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens
+            )
+            return Completion(choices=[choice], usage=usage)
+        
         except Exception as e:
             raise Exception(f"Claude API error: {str(e)}")
 
@@ -377,9 +375,8 @@ if __name__ == "__main__":
         anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
         groq_api_key = os.getenv("GROQ_API_KEY")
 
-        # OpenAI example
+        # OpenAI example with tools
         openai_client = OpenAI(api_key=openai_api_key)
-        # Non-streaming tool call with parallel_tool_calls
         response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": "What's the weather in New York and San Francisco?. Return a JSON object with field 'weather'."}],
@@ -389,24 +386,26 @@ if __name__ == "__main__":
             response_format={"type": "json_object"},
             parallel_tool_calls=True
         )
-        print("OpenAI non-streaming response:", response)
-        print("OpenAI input tokens:", response["usage"]["input_tokens"])
-        print("OpenAI output tokens:", response["usage"]["output_tokens"])
-        # Streaming example
+        print("OpenAI non-streaming response:", response.choices[0].message.content)
+        if response.choices[0].message.tool_calls:
+            print("OpenAI tool calls:", response.choices[0].message.tool_calls)
+        print("OpenAI input tokens:", response.usage.input_tokens)
+        print("OpenAI output tokens:", response.usage.output_tokens)
+
+        # OpenAI streaming example
         stream_response = openai_client.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "user", "content": "Tell me a story"}],
+            messages=[{"role": "user", "content": "Tell me a story in 5 sentences"}],
             temperature=0.0,
             stream=True
         )
-        #print("OpenAI streaming response:")
-        #for chunk in stream_response:
-        #    print(chunk["choices"][0]["delta"]["content"], end="", flush=True)
-        #print("\n")
+        print("OpenAI streaming response:")
+        for chunk in stream_response:
+            print(chunk["choices"][0]["delta"]["content"], end="", flush=True)
+        print("\n")
 
-        # Groq example
+        # Groq example with tools
         groq_client = Groq(api_key=groq_api_key)
-        # Non-streaming tool call with parallel_tool_calls
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": "What's the weather in New York and San Francisco?"}],
@@ -415,24 +414,14 @@ if __name__ == "__main__":
             tool_choice="auto",
             parallel_tool_calls=True
         )
-        print("Groq non-streaming response:", response)
-        print("Groq input tokens:", response["usage"]["input_tokens"])
-        print("Groq output tokens:", response["usage"]["output_tokens"])
-        # Streaming example
-        stream_response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": "Tell me a story"}],
-            temperature=0.0,
-            stream=True
-        )
-        print("Groq streaming response:")
-        for chunk in stream_response:
-            print(chunk["choices"][0]["delta"]["content"], end="", flush=True)
-        print("\n")
+        print("Groq non-streaming response:", response.choices[0].message.content)
+        if response.choices[0].message.tool_calls:
+            print("Groq tool calls:", response.choices[0].message.tool_calls)
+        print("Groq input tokens:", response.usage.input_tokens)
+        print("Groq output tokens:", response.usage.output_tokens)
 
-        # Claude example
+        # Claude example with tools
         claude_client = Claude(api_key=anthropic_api_key)
-        # Non-streaming tool call (parallel_tool_calls ignored)
         response = claude_client.chat.completions.create(
             model="claude-3-7-sonnet-20250219",
             messages=[{"role": "user", "content": "What's the weather in New York and San Francisco?"}],
@@ -441,9 +430,11 @@ if __name__ == "__main__":
             tool_choice="auto",
             parallel_tool_calls=True  # Ignored by Claude
         )
-        print("Claude non-streaming response:", response)
-        print("Claude input tokens:", response["usage"]["input_tokens"])
-        print("Claude output tokens:", response["usage"]["output_tokens"])
+        print("Claude non-streaming response:", response.choices[0].message.content)
+        if response.choices[0].message.tool_calls:
+            print("Claude tool calls:", response.choices[0].message.tool_calls)
+        print("Claude input tokens:", response.usage.input_tokens)
+        print("Claude output tokens:", response.usage.output_tokens)
 
     except Exception as e:
         print(f"Error: {e}")
