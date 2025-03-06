@@ -75,6 +75,11 @@ You are an helpful customer support assistant
                 type: "style_prompt",
                 prompt: "You should be empathetic and helpful.",
             },
+            {
+                name: "Greeting",
+                type: "greeting",
+                prompt: "Hello! How can I help you?"
+            }
         ],
         tools: [],
     },
@@ -131,6 +136,11 @@ You are an helpful customer support assistant
                 "name": "Style prompt",
                 "type": "style_prompt",
                 "prompt": "You should be empathetic and helpful."
+            },
+            {
+                "name": "Greeting",
+                "type": "greeting",
+                "prompt": "Hello! How can I help you?"
             }
         ],
         "tools": [
@@ -258,6 +268,11 @@ You are an helpful customer support assistant
                 "name": "Style prompt",
                 "type": "style_prompt",
                 "prompt": "---\n\nmake this more friendly. Keep it to 5-7 sentences. Use these as example references:\n\n---"
+            },
+            {
+                "name": "Greeting",
+                "type": "greeting",
+                "prompt": "Hello! How can I help you?"
             },
             {
                 "name": "structured_output",
