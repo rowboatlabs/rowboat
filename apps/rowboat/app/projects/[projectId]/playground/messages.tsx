@@ -94,7 +94,7 @@ function ToolCalls({
     messages,
     sender,
     workflow,
-    testProfile=null,
+    testProfile = null,
     systemMessage,
 }: {
     toolCalls: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'];
@@ -143,7 +143,7 @@ function ToolCall({
     messages,
     sender,
     workflow,
-    testProfile=null,
+    testProfile = null,
     systemMessage,
 }: {
     toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
@@ -186,8 +186,8 @@ function ToolCall({
                     sender={sender}
                 />;
             }
-            if (!matchingWorkflowTool || 
-                matchingWorkflowTool.mockTool || 
+            if (!matchingWorkflowTool ||
+                matchingWorkflowTool.mockTool ||
                 (testProfile && testProfile.mockTools)) {
                 return <MockToolCall
                     toolCall={toolCall}
@@ -421,7 +421,7 @@ function MockToolCall({
     projectId,
     messages,
     sender,
-    testProfile=null,
+    testProfile = null,
     workflowTool,
     systemMessage,
 }: {
@@ -594,42 +594,40 @@ function ExpandableContent({
 function SystemMessage({
     content,
     onChange,
-    locked
+    locked = false,
 }: {
     content: string,
     onChange: (content: string) => void,
-    locked: boolean
+    locked?: boolean,
 }) {
-    return (
-        <div className="border border-gray-300 dark:border-gray-700 p-2 rounded-lg flex flex-col gap-2 bg-white dark:bg-gray-900">
-            <div className="text-sm text-gray-500 dark:text-gray-400 font-medium">CONTEXT</div>
-            <EditableField
-                light
-                value={content}
-                onChange={onChange}
-                multiline
-                markdown
-                locked={locked}
-                placeholder={`Provide context about the user (e.g. user ID, user name) to the assistant at the start of chat, for testing purposes.`}
-            />
-        </div>
-    );
+    return <div className="text-sm">
+        <EditableField
+            label="Context"
+            value={content}
+            onChange={onChange}
+            locked={locked}
+            multiline
+            markdown
+            placeholder={`Provide context about the user (e.g. user ID, user name) to the assistant at the start of chat, for testing purposes.`}
+            showSaveButton={true}
+            showDiscardButton={true}
+        />
+    </div>;
 }
 
 export function Messages({
     projectId,
-    systemMessage,
     messages,
     toolCallResults,
     handleToolCallResults,
     loadingAssistantResponse,
     loadingUserResponse,
     workflow,
-    testProfile=null,
+    testProfile = null,
+    systemMessage,
     onSystemMessageChange,
 }: {
     projectId: string;
-    systemMessage: string | undefined;
     messages: z.infer<typeof apiV1.ChatMessage>[];
     toolCallResults: Record<string, z.infer<typeof apiV1.ToolMessage>>;
     handleToolCallResults: (results: z.infer<typeof apiV1.ToolMessage>[]) => void;
@@ -637,6 +635,7 @@ export function Messages({
     loadingUserResponse: boolean;
     workflow: z.infer<typeof Workflow>;
     testProfile: z.infer<typeof TestProfile> | null;
+    systemMessage: string | undefined;
     onSystemMessageChange: (message: string) => void;
 }) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -652,7 +651,7 @@ export function Messages({
             <SystemMessage
                 content={testProfile?.context || systemMessage || ''}
                 onChange={onSystemMessageChange}
-                locked={testProfile !== null || messages.length > 0}
+                locked={testProfile !== null}
             />
             {messages.map((message, index) => {
                 if (message.role === 'assistant') {
