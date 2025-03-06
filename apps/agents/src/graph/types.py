@@ -11,8 +11,8 @@ class ControlType(Enum):
 
 class PromptType(Enum):
     STYLE = "style_prompt"
+    GREETING = "greeting"
 
 class ErrorType(Enum):
     FATAL = "fatal"
     ESCALATE = "escalate"
-
