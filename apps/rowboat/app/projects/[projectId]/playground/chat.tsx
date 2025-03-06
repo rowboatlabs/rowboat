@@ -142,18 +142,17 @@ export function Chat({
             }
         }
 
-        // if no messages, return
-        if (messages.length === 0) {
-            return;
-        }
-
         // if last message is not from role user
         // or tool, return
-        const last = messages[messages.length - 1];
-        if (fetchResponseError) {
-            return;
+        if (messages.length > 0) {
+            const last = messages[messages.length - 1];
+            if (last.role !== 'user' && last.role !== 'tool') {
+                return;
+            }
         }
-        if (last.role !== 'user' && last.role !== 'tool') {
+
+        // if there is an error, return
+        if (fetchResponseError) {
             return;
         }
 
