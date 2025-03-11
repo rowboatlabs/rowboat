@@ -354,7 +354,7 @@ function RunList({
             <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
         </div>}
         {!loading && !error && <>
-            {runs.length === 0 && <div className="text-gray-600 text-center">No test runs found</div>}
+            {runs.length === 0 && <div className="text-gray-600 dark:text-neutral-400 text-center">No test runs found</div>}
             {runs.length > 0 && <div className="space-y-4">
                 {runs.map((run) => (
                     <div key={run._id} className="border dark:border-neutral-800 rounded-lg shadow-sm">
@@ -362,7 +362,7 @@ function RunList({
                             <div className="flex items-center space-x-4">
                                 <Link
                                     href={`/projects/${projectId}/test/runs/${run._id}`}
-                                    className="text-blue-600 hover:underline"
+                                    className="text-blue-600 dark:text-blue-400 hover:underline"
                                 >
                                     {run.name}
                                 </Link>
@@ -417,16 +417,16 @@ function getStatusClass(status: string) {
     const baseClass = "px-2 py-1 rounded text-xs uppercase font-medium";
     switch (status) {
         case 'completed':
-            return `${baseClass} bg-green-100 text-green-800`;
+            return `${baseClass} bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-400`;
         case 'failed':
         case 'error':
-            return `${baseClass} bg-red-100 text-red-800`;
+            return `${baseClass} bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-400`;
         case 'cancelled':
-            return `${baseClass} bg-gray-100 text-gray-800`;
+            return `${baseClass} bg-gray-100 dark:bg-neutral-800 text-gray-800 dark:text-neutral-400`;
         case 'running':
         case 'pending':
         default:
-            return `${baseClass} bg-yellow-100 text-yellow-800`;
+            return `${baseClass} bg-yellow-100 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-400`;
     }
 }
 

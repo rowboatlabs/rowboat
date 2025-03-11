@@ -60,12 +60,12 @@ function EditProfile({
     }
 
     return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">Edit Profile</h1>
-        {loading && <div className="flex gap-2 items-center">
+        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">Edit Profile</h1>
+        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
             <Spinner size="sm" />
             Loading...
         </div>}
-        {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
+        {error && <div className="bg-red-100 dark:bg-red-900/20 p-2 rounded-md text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
             {error}
             <Button size="sm" color="danger" onPress={() => formRef.current?.requestSubmit()}>Retry</Button>
         </div>}
@@ -157,7 +157,7 @@ function ViewProfile({
     }
 
     return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">View Profile</h1>
+        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">View Profile</h1>
         <Button
             size="sm"
             className="self-start"
@@ -167,39 +167,39 @@ function ViewProfile({
         >
             All Profiles
         </Button>
-        {loading && <div className="flex gap-2 items-center">
+        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
             <Spinner size="sm" />
             Loading...
         </div>}
-        {!loading && !profile && <div className="text-gray-600 text-center">Profile not found</div>}
+        {!loading && !profile && <div className="text-gray-600 dark:text-neutral-400 text-center">Profile not found</div>}
         {!loading && profile && (
             <>
                 <div className="flex flex-col gap-1 text-sm">
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Name</div>
-                        <div className="flex-[2]">
-                            <div className="flex-[2] whitespace-pre-wrap">{profile.name}</div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Name</div>
+                        <div className="flex-[2] dark:text-neutral-200">{profile.name}</div>
+                    </div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Context</div>
+                        <div className="flex-[2] whitespace-pre-wrap dark:text-neutral-200">{profile.context}</div>
+                    </div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Mock Tools</div>
+                        <div className="flex-[2] dark:text-neutral-200">{profile.mockTools ? "Yes" : "No"}</div>
+                    </div>
+                    {profile.mockPrompt && (
+                        <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                            <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Mock Prompt</div>
+                            <div className="flex-[2] whitespace-pre-wrap dark:text-neutral-200">{profile.mockPrompt}</div>
                         </div>
+                    )}
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Created</div>
+                        <div className="flex-[2] dark:text-neutral-300"><RelativeTime date={new Date(profile.createdAt)} /></div>
                     </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Context</div>
-                        <div className="flex-[2] whitespace-pre-wrap">{profile.context}</div>
-                    </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Mock Tools</div>
-                        <div className="flex-[2]">{profile.mockTools ? "Yes" : "No"}</div>
-                    </div>
-                    {profile.mockPrompt && <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Mock Prompt</div>
-                        <div className="flex-[2] whitespace-pre-wrap">{profile.mockPrompt}</div>
-                    </div>}
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Created</div>
-                        <div className="flex-[2]"><RelativeTime date={new Date(profile.createdAt)} /></div>
-                    </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Last Updated</div>
-                        <div className="flex-[2]"><RelativeTime date={new Date(profile.lastUpdatedAt)} /></div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Last Updated</div>
+                        <div className="flex-[2] dark:text-neutral-300"><RelativeTime date={new Date(profile.lastUpdatedAt)} /></div>
                     </div>
                 </div>
                 <div className="flex gap-2 mt-4">
@@ -413,7 +413,7 @@ function ProfileList({
     }, [page, pageSize, error, projectId]);
 
     return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">Profiles</h1>
+        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">Profiles</h1>
         <Button
             size="sm"
             onPress={() => router.push(`/projects/${projectId}/test/profiles/new`)}
@@ -422,43 +422,43 @@ function ProfileList({
         >
             New Profile
         </Button>
-        {loading && <div className="flex gap-2 items-center">
+        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
             <Spinner size="sm" />
             Loading...
         </div>}
-        {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
+        {error && <div className="bg-red-100 dark:bg-red-900/20 p-2 rounded-md text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
             {error}
             <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
         </div>}
         {!loading && !error && <>
-            {profiles.length === 0 && <div className="text-gray-600 text-center">No profiles found</div>}
+            {profiles.length === 0 && <div className="text-gray-600 dark:text-neutral-400 text-center">No profiles found</div>}
             {profiles.length > 0 && <div className="flex flex-col w-full">
                 {/* Header */}
-                <div className="grid grid-cols-8 py-2 bg-gray-100 font-semibold text-sm">
-                    <div className="col-span-2 px-4">Name</div>
-                    <div className="col-span-3 px-4">Context</div>
-                    <div className="col-span-1 px-4">Mock Tools</div>
-                    <div className="col-span-1 px-4">Created</div>
-                    <div className="col-span-1 px-4">Updated</div>
+                <div className="grid grid-cols-8 py-2 bg-gray-100 dark:bg-neutral-800 font-semibold text-sm">
+                    <div className="col-span-2 px-4 dark:text-neutral-300">Name</div>
+                    <div className="col-span-3 px-4 dark:text-neutral-300">Context</div>
+                    <div className="col-span-1 px-4 dark:text-neutral-300">Mock Tools</div>
+                    <div className="col-span-1 px-4 dark:text-neutral-300">Created</div>
+                    <div className="col-span-1 px-4 dark:text-neutral-300">Updated</div>
                 </div>
 
                 {/* Rows */}
                 {profiles.map((profile) => (
-                    <div key={profile._id} className="grid grid-cols-8 py-2 border-b hover:bg-gray-50 text-sm">
+                    <div key={profile._id} className="grid grid-cols-8 py-2 border-b border-gray-200 dark:border-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-800 text-sm">
                         <div className="col-span-2 px-4 truncate">
                             <Link
                                 href={`/projects/${projectId}/test/profiles/${profile._id}`}
-                                className="text-blue-600 hover:underline"
+                                className="text-blue-600 dark:text-blue-400 hover:underline"
                             >
                                 {profile.name}
                             </Link>
                         </div>
-                        <div className="col-span-3 px-4 truncate">{profile.context}</div>
-                        <div className="col-span-1 px-4">{profile.mockTools ? "Yes" : "No"}</div>
-                        <div className="col-span-1 px-4 text-gray-600 truncate">
+                        <div className="col-span-3 px-4 truncate dark:text-neutral-300">{profile.context}</div>
+                        <div className="col-span-1 px-4 dark:text-neutral-300">{profile.mockTools ? "Yes" : "No"}</div>
+                        <div className="col-span-1 px-4 text-gray-600 dark:text-neutral-400 truncate">
                             <RelativeTime date={new Date(profile.createdAt)} />
                         </div>
-                        <div className="col-span-1 px-4 text-gray-600 truncate">
+                        <div className="col-span-1 px-4 text-gray-600 dark:text-neutral-400 truncate">
                             <RelativeTime date={new Date(profile.lastUpdatedAt)} />
                         </div>
                     </div>

@@ -48,13 +48,17 @@ export function App({
                 {menuItems.map((item) => (
                     <li key={item.label}>
                         <Link
-                            className={`block p-2 rounded-md text-sm ${pathname.startsWith(item.href) ? "bg-gray-100" : "hover:bg-gray-100"}`}
+                            className={`block p-2 rounded-md text-sm ${
+                                pathname.startsWith(item.href) 
+                                    ? "bg-gray-100 dark:bg-neutral-800" 
+                                    : "hover:bg-gray-100 dark:hover:bg-neutral-800"
+                            }`}
                             href={item.href}>{item.label}</Link>
                     </li>
                 ))}
             </ul>
         </div>
-        <div className="grow border-l border-gray-200 p-2">
+        <div className="grow border-l border-gray-200 dark:border-neutral-800 p-2">
             {selection === "scenarios" && <ScenariosApp projectId={projectId} slug={innerSlug} />}
             {selection === "profiles" && <ProfilesApp projectId={projectId} slug={innerSlug} />}
             {selection === "simulations" && <SimulationsApp projectId={projectId} slug={innerSlug} />}

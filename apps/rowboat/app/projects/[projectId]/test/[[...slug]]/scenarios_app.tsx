@@ -51,22 +51,14 @@ function EditScenario({
     }
 
     return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">Edit Scenario</h1>
-        {loading && <div className="flex gap-2 items-center">
+        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">Edit Scenario</h1>
+        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
             <Spinner size="sm" />
             Loading...
         </div>}
-        {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
+        {error && <div className="bg-red-100 dark:bg-red-900/20 p-2 rounded-md text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
             {error}
-            <Button
-                size="sm"
-                color="danger"
-                onPress={() => {
-                    formRef.current?.requestSubmit();
-                }}
-            >
-                Retry
-            </Button>
+            <Button size="sm" color="danger" onPress={() => formRef.current?.requestSubmit()}>Retry</Button>
         </div>}
         {!loading && scenario && (
             <form ref={formRef} action={handleSubmit} className="flex flex-col gap-2">
@@ -140,7 +132,7 @@ function ViewScenario({
     }
 
     return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">View Scenario</h1>
+        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">View Scenario</h1>
         <Button
             size="sm"
             className="self-start"
@@ -150,29 +142,29 @@ function ViewScenario({
         >
             All Scenarios
         </Button>
-        {loading && <div className="flex gap-2 items-center">
+        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
             <Spinner size="sm" />
             Loading...
         </div>}
-        {!loading && !scenario && <div className="text-gray-600 text-center">Scenario not found</div>}
+        {!loading && !scenario && <div className="text-gray-600 dark:text-neutral-400 text-center">Scenario not found</div>}
         {!loading && scenario && (
             <>
                 <div className="flex flex-col gap-1 text-sm">
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Name</div>
-                        <div className="flex-[2]">{scenario.name}</div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Name</div>
+                        <div className="flex-[2] dark:text-neutral-200">{scenario.name}</div>
                     </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Description</div>
-                        <div className="flex-[2]">{scenario.description}</div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Description</div>
+                        <div className="flex-[2] dark:text-neutral-200">{scenario.description}</div>
                     </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Created</div>
-                        <div className="flex-[2]"><RelativeTime date={new Date(scenario.createdAt)} /></div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Created</div>
+                        <div className="flex-[2] dark:text-neutral-300"><RelativeTime date={new Date(scenario.createdAt)} /></div>
                     </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Last Updated</div>
-                        <div className="flex-[2]"><RelativeTime date={new Date(scenario.lastUpdatedAt)} /></div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Last Updated</div>
+                        <div className="flex-[2] dark:text-neutral-300"><RelativeTime date={new Date(scenario.lastUpdatedAt)} /></div>
                     </div>
                 </div>
                 <div className="flex gap-2 mt-4">
@@ -372,7 +364,7 @@ function ScenarioList({
     }, [page, pageSize, error, projectId]);
 
     return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">Scenarios</h1>
+        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">Scenarios</h1>
         <Button
             size="sm"
             onPress={() => router.push(`/projects/${projectId}/test/scenarios/new`)}
@@ -381,41 +373,41 @@ function ScenarioList({
         >
             New Scenario
         </Button>
-        {loading && <div className="flex gap-2 items-center">
+        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
             <Spinner size="sm" />
             Loading...
         </div>}
-        {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
+        {error && <div className="bg-red-100 dark:bg-red-900/20 p-2 rounded-md text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
             {error}
             <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
         </div>}
         {!loading && !error && <>
-            {scenarios.length === 0 && <div className="text-gray-600 text-center">No scenarios found</div>}
+            {scenarios.length === 0 && <div className="text-gray-600 dark:text-neutral-400 text-center">No scenarios found</div>}
             {scenarios.length > 0 && <div className="flex flex-col w-full">
                 {/* Header */}
-                <div className="grid grid-cols-7 py-2 bg-gray-100 font-semibold text-sm">
-                    <div className="col-span-2 px-4">Name</div>
-                    <div className="col-span-3 px-4">Description</div>
-                    <div className="col-span-1 px-4">Created</div>
-                    <div className="col-span-1 px-4">Updated</div>
+                <div className="grid grid-cols-7 py-2 bg-gray-100 dark:bg-neutral-800 font-semibold text-sm">
+                    <div className="col-span-2 px-4 dark:text-neutral-300">Name</div>
+                    <div className="col-span-3 px-4 dark:text-neutral-300">Description</div>
+                    <div className="col-span-1 px-4 dark:text-neutral-300">Created</div>
+                    <div className="col-span-1 px-4 dark:text-neutral-300">Updated</div>
                 </div>
 
                 {/* Rows */}
                 {scenarios.map((scenario) => (
-                    <div key={scenario._id} className="grid grid-cols-7 py-2 border-b hover:bg-gray-50 text-sm">
+                    <div key={scenario._id} className="grid grid-cols-7 py-2 border-b border-gray-200 dark:border-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-800 text-sm">
                         <div className="col-span-2 px-4 truncate">
                             <Link
                                 href={`/projects/${projectId}/test/scenarios/${scenario._id}`}
-                                className="text-blue-600 hover:underline"
+                                className="text-blue-600 dark:text-blue-400 hover:underline"
                             >
                                 {scenario.name}
                             </Link>
                         </div>
-                        <div className="col-span-3 px-4 truncate">{scenario.description}</div>
-                        <div className="col-span-1 px-4 text-gray-600 truncate">
+                        <div className="col-span-3 px-4 truncate dark:text-neutral-300">{scenario.description}</div>
+                        <div className="col-span-1 px-4 text-gray-600 dark:text-neutral-400 truncate">
                             <RelativeTime date={new Date(scenario.createdAt)} />
                         </div>
-                        <div className="col-span-1 px-4 text-gray-600 truncate">
+                        <div className="col-span-1 px-4 text-gray-600 dark:text-neutral-400 truncate">
                             <RelativeTime date={new Date(scenario.lastUpdatedAt)} />
                         </div>
                     </div>

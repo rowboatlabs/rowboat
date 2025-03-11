@@ -79,12 +79,12 @@ function EditSimulation({
     }
 
     return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">Edit Simulation</h1>
-        {loading && <div className="flex gap-2 items-center">
+        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">Edit Simulation</h1>
+        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
             <Spinner size="sm" />
             Loading...
         </div>}
-        {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
+        {error && <div className="bg-red-100 dark:bg-red-900/20 p-2 rounded-md text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
             {error}
             <Button size="sm" color="danger" onPress={() => formRef.current?.requestSubmit()}>Retry</Button>
         </div>}
@@ -107,12 +107,12 @@ function EditSimulation({
                     required
                 />
                 <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Scenario</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">Scenario</label>
                     <div className="flex items-center gap-2">
                         {scenario ? (
-                            <div className="text-sm text-blue-600">{scenario.name}</div>
+                            <div className="text-sm text-blue-600 dark:text-blue-400">{scenario.name}</div>
                         ) : (
-                            <div className="text-sm text-gray-500">No scenario selected</div>
+                            <div className="text-sm text-gray-500 dark:text-neutral-500">No scenario selected</div>
                         )}
                         <Button
                             size="sm"
@@ -124,12 +124,12 @@ function EditSimulation({
                     </div>
                 </div>
                 <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Profile (optional)</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">Profile (optional)</label>
                     <div className="flex items-center gap-2">
                         {profile ? (
-                            <div className="text-sm text-blue-600">{profile.name}</div>
+                            <div className="text-sm text-blue-600 dark:text-blue-400">{profile.name}</div>
                         ) : (
-                            <div className="text-sm text-gray-500">No profile selected</div>
+                            <div className="text-sm text-gray-500 dark:text-neutral-500">No profile selected</div>
                         )}
                         {profile && <Button size="sm" variant="bordered" onClick={() => setProfile(null)}>Remove</Button>}
                         <Button
@@ -220,7 +220,7 @@ function ViewSimulation({
     }
 
     return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">View Simulation</h1>
+        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">View Simulation</h1>
         <Button
             size="sm"
             className="self-start"
@@ -230,53 +230,37 @@ function ViewSimulation({
         >
             All Simulations
         </Button>
-        {loading && <div className="flex gap-2 items-center">
+        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
             <Spinner size="sm" />
             Loading...
         </div>}
-        {!loading && !simulation && <div className="text-gray-600 text-center">Simulation not found</div>}
+        {!loading && !simulation && <div className="text-gray-600 dark:text-neutral-400 text-center">Simulation not found</div>}
         {!loading && simulation && (
             <>
                 <div className="flex flex-col gap-1 text-sm">
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Name</div>
-                        <div className="flex-[2]">{simulation.name}</div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Name</div>
+                        <div className="flex-[2] dark:text-neutral-200">{simulation.name}</div>
                     </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Scenario</div>
-                        <div className="flex-[2]">
-                            {scenario ? (
-                                <Link href={`/projects/${projectId}/test/scenarios/${scenario._id}`} className="text-blue-600 hover:underline">
-                                    {scenario.name}
-                                </Link>
-                            ) : (
-                                <div className="text-sm text-gray-500">No scenario selected</div>
-                            )}
-                        </div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Scenario</div>
+                        <div className="flex-[2] dark:text-neutral-200">{scenario?.name || 'Loading...'}</div>
                     </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Profile</div>
-                        <div className="flex-[2]">
-                            {profile ? (
-                                <Link href={`/projects/${projectId}/test/profiles/${profile._id}`} className="text-blue-600 hover:underline">
-                                    {profile.name}
-                                </Link>
-                            ) : (
-                                <div className="text-sm text-gray-500">No profile selected</div>
-                            )}
-                        </div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Profile</div>
+                        <div className="flex-[2] dark:text-neutral-200">{profile?.name || 'None'}</div>
                     </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Pass Criteria</div>
-                        <div className="flex-[2]">{simulation.passCriteria}</div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Pass Criteria</div>
+                        <div className="flex-[2] dark:text-neutral-200">{simulation.passCriteria}</div>
                     </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Created</div>
-                        <div className="flex-[2]"><RelativeTime date={new Date(simulation.createdAt)} /></div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Created</div>
+                        <div className="flex-[2] dark:text-neutral-300"><RelativeTime date={new Date(simulation.createdAt)} /></div>
                     </div>
-                    <div className="flex border-b py-2">
-                        <div className="flex-[1] font-medium text-gray-600">Last Updated</div>
-                        <div className="flex-[2]"><RelativeTime date={new Date(simulation.lastUpdatedAt)} /></div>
+                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
+                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Last Updated</div>
+                        <div className="flex-[2] dark:text-neutral-300"><RelativeTime date={new Date(simulation.lastUpdatedAt)} /></div>
                     </div>
                 </div>
                 <div className="flex gap-2 mt-4">
@@ -584,7 +568,7 @@ function SimulationList({
     }, [simulationList, error, projectId]);
 
     return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">Simulations</h1>
+        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">Simulations</h1>
         <Button
             size="sm"
             onPress={() => router.push(`/projects/${projectId}/test/simulations/new`)}
@@ -593,59 +577,59 @@ function SimulationList({
         >
             New Simulation
         </Button>
-        {loading && <div className="flex gap-2 items-center">
+        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
             <Spinner size="sm" />
             Loading...
         </div>}
-        {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
+        {error && <div className="bg-red-100 dark:bg-red-900/20 p-2 rounded-md text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
             {error}
             <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
         </div>}
         {!loading && !error && <>
-            {simulationList.length === 0 && <div className="text-gray-600 text-center">No simulation found</div>}
+            {simulationList.length === 0 && <div className="text-gray-600 dark:text-neutral-400 text-center">No simulations found</div>}
             {simulationList.length > 0 && <div className="flex flex-col w-full">
                 {/* Header */}
-                <div className="grid grid-cols-9 py-2 bg-gray-100 font-semibold text-sm">
-                    <div className="col-span-2 px-4">Name</div>
-                    <div className="col-span-3 px-4">Scenario</div>
-                    <div className="col-span-1 px-4">Profile</div>
-                    <div className="col-span-1 px-4">Criteria</div>
-                    <div className="col-span-1 px-4">Created</div>
-                    <div className="col-span-1 px-4">Updated</div>
+                <div className="grid grid-cols-9 py-2 bg-gray-100 dark:bg-neutral-800 font-semibold text-sm">
+                    <div className="col-span-2 px-4 dark:text-neutral-300">Name</div>
+                    <div className="col-span-3 px-4 dark:text-neutral-300">Scenario</div>
+                    <div className="col-span-1 px-4 dark:text-neutral-300">Profile</div>
+                    <div className="col-span-1 px-4 dark:text-neutral-300">Criteria</div>
+                    <div className="col-span-1 px-4 dark:text-neutral-300">Created</div>
+                    <div className="col-span-1 px-4 dark:text-neutral-300">Updated</div>
                 </div>
 
                 {/* Rows */}
                 {simulationList.map((simulation) => (
-                    <div key={simulation._id} className="grid grid-cols-9 py-2 border-b hover:bg-gray-50 text-sm">
+                    <div key={simulation._id} className="grid grid-cols-9 py-2 border-b border-gray-200 dark:border-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-800 text-sm">
                         <div className="col-span-2 px-4 truncate">
                             <Link
                                 href={`/projects/${projectId}/test/simulations/${simulation._id}`}
-                                className="text-blue-600 hover:underline"
+                                className="text-blue-600 dark:text-blue-400 hover:underline"
                             >
                                 {simulation.name}
                             </Link>
                         </div>
-                        <div className="col-span-3 px-4 truncate">
+                        <div className="col-span-3 px-4 truncate dark:text-neutral-300">
                             {scenarioMap[simulation.scenarioId]?.name || (
-                                <span className="text-gray-500 font-mono text-xs">{simulation.scenarioId}</span>
+                                <span className="text-gray-500 dark:text-neutral-500 font-mono text-xs">{simulation.scenarioId}</span>
                             )}
                         </div>
-                        <div className="col-span-1 px-4 truncate">
+                        <div className="col-span-1 px-4 truncate dark:text-neutral-300">
                             {simulation.profileId ? (
                                 profileMap[simulation.profileId]?.name || (
-                                    <span className="text-gray-500 font-mono text-xs">{simulation.profileId}</span>
+                                    <span className="text-gray-500 dark:text-neutral-500 font-mono text-xs">{simulation.profileId}</span>
                                 )
                             ) : (
-                                <span className="text-gray-500 font-mono text-xs">None</span>
+                                <span className="text-gray-500 dark:text-neutral-500 font-mono text-xs">None</span>
                             )}
                         </div>
-                        <div className="col-span-1 px-4 truncate">
+                        <div className="col-span-1 px-4 truncate dark:text-neutral-300">
                             {simulation.passCriteria}
                         </div>
-                        <div className="col-span-1 px-4 text-gray-600 truncate">
+                        <div className="col-span-1 px-4 text-gray-600 dark:text-neutral-400 truncate">
                             <RelativeTime date={new Date(simulation.createdAt)} />
                         </div>
-                        <div className="col-span-1 px-4 text-gray-600 truncate">
+                        <div className="col-span-1 px-4 text-gray-600 dark:text-neutral-400 truncate">
                             <RelativeTime date={new Date(simulation.lastUpdatedAt)} />
                         </div>
                     </div>
