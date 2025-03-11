@@ -170,6 +170,7 @@ export async function createSimulation(
     projectId: string,
     data: {
         name: string;
+        description?: string;
         scenarioId: string;
         profileId: string | null;
         passCriteria: string;
@@ -195,6 +196,7 @@ export async function updateSimulation(
     simulationId: string,
     updates: {
         name?: string;
+        description?: string;
         scenarioId?: string;
         profileId?: string | null;
         passCriteria?: string;
@@ -268,7 +270,6 @@ export async function deleteProfile(projectId: string, profileId: string): Promi
     await testProfilesCollection.deleteOne({
         _id: new ObjectId(profileId),
         projectId,
-        default: false,
     });
 }
 
@@ -449,6 +450,15 @@ export async function updateRun(
     );
 }
 
+export async function cancelRun(projectId: string, runId: string): Promise<void> {
+    await projectAuthCheck(projectId);
+
+    await testRunsCollection.updateOne(
+        { _id: new ObjectId(runId), projectId },
+        { $set: { status: 'cancelled' } }
+    );
+}
+
 export async function listResults(
     projectId: string,
     runId: string,
@@ -510,6 +520,7 @@ export async function createResult(
         simulationId: string;
         result: 'pass' | 'fail';
         details: string;
+        transcript: string;
     }
 ): Promise<WithStringId<z.infer<typeof TestResult>>> {
     await projectAuthCheck(projectId);
@@ -544,4 +555,56 @@ export async function updateResult(
             $set: updates,
         }
     );
+}
+
+export async function getSimulationResult(
+    projectId: string,
+    runId: string,
+    simulationId: string
+): Promise<WithStringId<z.infer<typeof TestResult>> | null> {
+    await projectAuthCheck(projectId);
+    
+    const result = await testResultsCollection.findOne({
+        projectId,
+        runId,
+        simulationId
+    });
+
+    if (!result) {
+        return null;
+    }
+
+    const { _id, ...rest } = result;
+    return {
+        ...rest,
+        _id: _id.toString(),
+    };
+}
+
+export async function listRunSimulations(
+    projectId: string,
+    simulationIds: string[]
+): Promise<WithStringId<z.infer<typeof TestSimulation>>[]> {
+    await projectAuthCheck(projectId);
+    
+    const simulations = await testSimulationsCollection
+        .find({ 
+            _id: { $in: simulationIds.map(id => new ObjectId(id)) },
+            projectId 
+        })
+        .toArray();
+
+    // Fetch associated scenario and profile names
+    const enrichedSimulations = await Promise.all(simulations.map(async (simulation) => {
+        const scenario = simulation.scenarioId ? await testScenariosCollection.findOne({ _id: new ObjectId(simulation.scenarioId) }) : null;
+        const profile = simulation.profileId ? await testProfilesCollection.findOne({ _id: new ObjectId(simulation.profileId) }) : null;
+        return {
+            ...simulation,
+            _id: simulation._id.toString(),
+            scenarioName: scenario?.name || 'Unknown',
+            profileName: profile?.name || 'None',
+        };
+    }));
+
+    return enrichedSimulations;
 }

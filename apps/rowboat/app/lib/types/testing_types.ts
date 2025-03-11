@@ -20,12 +20,13 @@ export const TestProfile = z.object({
 
 export const TestSimulation = z.object({
     projectId: z.string(),
-    name: z.string().min(1, "Name cannot be empty"),
+    name: z.string(),
+    description: z.string().optional().nullable(),
+    createdAt: z.string().datetime(),
+    lastUpdatedAt: z.string().datetime(),
     scenarioId: z.string(),
     profileId: z.string().nullable(),
     passCriteria: z.string(),
-    createdAt: z.string().datetime(),
-    lastUpdatedAt: z.string().datetime(),
 });
 
 export const TestRun = z.object({
@@ -48,5 +49,6 @@ export const TestResult = z.object({
     runId: z.string(),
     simulationId: z.string(),
     result: z.union([z.literal('pass'), z.literal('fail')]),
-    details: z.string()
+    details: z.string(),
+    transcript: z.string()
 });

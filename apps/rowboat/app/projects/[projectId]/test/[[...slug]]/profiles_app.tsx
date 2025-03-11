@@ -1,15 +1,19 @@
+"use client";
+
 import Link from "next/link";
 import { WithStringId } from "@/app/lib/types/types";
 import { TestProfile } from "@/app/lib/types/testing_types";
 import { useEffect, useState, useRef } from "react";
 import { createProfile, getProfile, listProfiles, updateProfile, deleteProfile } from "@/app/actions/testing_actions";
-import { Button, Input, Pagination, Spinner, Switch, Textarea, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Tooltip } from "@heroui/react";
+import { Button, Spinner, Selection } from "@heroui/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { z } from "zod";
-import { PlusIcon, ArrowLeftIcon, StarIcon } from "lucide-react";
-import { FormStatusButton } from "@/app/lib/components/form-status-button";
+import { PlusIcon } from "lucide-react";
 import { RelativeTime } from "@primer/react"
-import { getProjectConfig } from "@/app/actions/project_actions";
+import { StructuredPanel, ActionButton } from "@/app/lib/components/structured-panel";
+import { DataTable } from "./components/table";
+import { isValidDate } from './utils/date';
+import { ProfileForm } from "./components/profile-form";
 
 function EditProfile({
     projectId,
@@ -46,324 +50,96 @@ function EditProfile({
         try {
             const name = formData.get("name") as string;
             const context = formData.get("context") as string;
+            const mockTools = formData.get("mockTools") === "on";
             const mockPrompt = formData.get("mockPrompt") as string;
-            await updateProfile(projectId, profileId, {
-                name,
-                context,
+
+            await updateProfile(projectId, profileId, { 
+                name, 
+                context, 
                 mockTools,
-                mockPrompt: mockPrompt || undefined
+                mockPrompt: mockTools && mockPrompt ? mockPrompt : undefined
             });
-            router.push(`/projects/${projectId}/test/profiles/${profileId}`);
+            router.push(`/projects/${projectId}/test/profiles`);
         } catch (error) {
             setError(`Unable to update profile: ${error}`);
         }
     }
 
-    return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">Edit Profile</h1>
-        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
-            <Spinner size="sm" />
-            Loading...
-        </div>}
-        {error && <div className="bg-red-100 dark:bg-red-900/20 p-2 rounded-md text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
-            {error}
-            <Button size="sm" color="danger" onPress={() => formRef.current?.requestSubmit()}>Retry</Button>
-        </div>}
-        {!loading && profile && (
-            <form ref={formRef} action={handleSubmit} className="flex flex-col gap-2">
-                <Input
-                    type="text"
-                    name="name"
-                    label="Name"
-                    placeholder="Enter a name for the profile"
-                    defaultValue={profile.name}
-                    required
-                />
-                <Textarea
-                    name="context"
-                    label="Context"
-                    placeholder="Enter the context for this profile"
-                    defaultValue={profile.context}
-                    required
-                />
-                <Switch
-                    name="mockTools"
-                    isSelected={mockTools}
-                    onValueChange={(value) => {
-                        setMockTools(value);
+    return <StructuredPanel 
+        title="EDIT PROFILE"
+        tooltip="Edit an existing test profile"
+    >
+        <div className="flex flex-col gap-6 max-w-2xl">
+            {loading && (
+                <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
+                    <Spinner size="sm" />
+                    Loading profile...
+                </div>
+            )}
+            
+            {error && (
+                <div className="bg-red-100 dark:bg-red-900/20 p-4 rounded-lg text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
+                    {error}
+                    <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
+                </div>
+            )}
+
+            {!loading && profile && (
+                <ProfileForm
+                    formRef={formRef}
+                    handleSubmit={handleSubmit}
+                    onCancel={() => router.push(`/projects/${projectId}/test/profiles`)}
+                    submitButtonText="Update Profile"
+                    defaultValues={{
+                        name: profile.name,
+                        context: profile.context,
+                        mockTools: Boolean(profile.mockTools),
+                        mockPrompt: profile.mockPrompt || ""
                     }}
-                    className="self-start"
-                >
-                    Mock Tools
-                </Switch>
-                {mockTools && <Textarea
-                    name="mockPrompt"
-                    label="Mock Prompt (Optional)"
-                    placeholder="Enter a mock prompt"
-                    defaultValue={profile.mockPrompt}
-                />}
-                <div className="flex gap-2 items-center">
-                    <FormStatusButton
-                        props={{
-                            className: "self-start",
-                            children: "Update",
-                            size: "sm",
-                            type: "submit",
-                        }}
-                    />
-                    <Button
-                        size="sm"
-                        variant="flat"
-                        as={Link}
-                        href={`/projects/${projectId}/test/profiles/${profileId}`}
-                    >
-                        Cancel
-                    </Button>
-                </div>
-            </form>
-        )}
-    </div>;
+                />
+            )}
+        </div>
+    </StructuredPanel>;
 }
 
-function ViewProfile({
-    projectId,
-    profileId,
-}: {
-    projectId: string,
-    profileId: string,
-}) {
-    const router = useRouter();
-    const [profile, setProfile] = useState<WithStringId<z.infer<typeof TestProfile>> | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-    const [deleteError, setDeleteError] = useState<string | null>(null);
-
-    useEffect(() => {
-        async function fetchProfile() {
-            const profile = await getProfile(projectId, profileId);
-            setProfile(profile);
-            setLoading(false);
-        }
-        fetchProfile();
-    }, [projectId, profileId]);
-
-    async function handleDelete() {
-        try {
-            await deleteProfile(projectId, profileId);
-            router.push(`/projects/${projectId}/test/profiles`);
-        } catch (error) {
-            setDeleteError(`Failed to delete profile: ${error}`);
-        }
-    }
-
-    return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">View Profile</h1>
-        <Button
-            size="sm"
-            className="self-start"
-            as={Link}
-            href={`/projects/${projectId}/test/profiles`}
-            startContent={<ArrowLeftIcon className="w-4 h-4" />}
-        >
-            All Profiles
-        </Button>
-        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
-            <Spinner size="sm" />
-            Loading...
-        </div>}
-        {!loading && !profile && <div className="text-gray-600 dark:text-neutral-400 text-center">Profile not found</div>}
-        {!loading && profile && (
-            <>
-                <div className="flex flex-col gap-1 text-sm">
-                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
-                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Name</div>
-                        <div className="flex-[2] dark:text-neutral-200">{profile.name}</div>
-                    </div>
-                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
-                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Context</div>
-                        <div className="flex-[2] whitespace-pre-wrap dark:text-neutral-200">{profile.context}</div>
-                    </div>
-                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
-                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Mock Tools</div>
-                        <div className="flex-[2] dark:text-neutral-200">{profile.mockTools ? "Yes" : "No"}</div>
-                    </div>
-                    {profile.mockPrompt && (
-                        <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
-                            <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Mock Prompt</div>
-                            <div className="flex-[2] whitespace-pre-wrap dark:text-neutral-200">{profile.mockPrompt}</div>
-                        </div>
-                    )}
-                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
-                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Created</div>
-                        <div className="flex-[2] dark:text-neutral-300"><RelativeTime date={new Date(profile.createdAt)} /></div>
-                    </div>
-                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
-                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Last Updated</div>
-                        <div className="flex-[2] dark:text-neutral-300"><RelativeTime date={new Date(profile.lastUpdatedAt)} /></div>
-                    </div>
-                </div>
-                <div className="flex gap-2 mt-4">
-                    <Button
-                        size="sm"
-                        as={Link}
-                        href={`/projects/${projectId}/test/profiles/${profileId}/edit`}
-                    >
-                        Edit
-                    </Button>
-                    <Button
-                        size="sm"
-                        color="danger"
-                        variant="flat"
-                        onPress={() => setIsDeleteModalOpen(true)}
-                    >
-                        Delete
-                    </Button>
-                </div>
-
-                <Modal
-                    isOpen={isDeleteModalOpen}
-                    onOpenChange={setIsDeleteModalOpen}
-                    size="sm"
-                >
-                    <ModalContent>
-                        {(onClose) => (
-                            <>
-                                <ModalHeader>Confirm Deletion</ModalHeader>
-                                <ModalBody>
-                                    Are you sure you want to delete this profile?
-                                </ModalBody>
-                                <ModalFooter>
-                                    <Button size="sm" variant="flat" onPress={onClose}>
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        size="sm"
-                                        color="danger"
-                                        onPress={() => {
-                                            handleDelete();
-                                            onClose();
-                                        }}
-                                    >
-                                        Delete
-                                    </Button>
-                                </ModalFooter>
-                            </>
-                        )}
-                    </ModalContent>
-                </Modal>
-
-                <Modal
-                    isOpen={deleteError !== null}
-                    onOpenChange={() => setDeleteError(null)}
-                    size="sm"
-                >
-                    <ModalContent>
-                        {(onClose) => (
-                            <>
-                                <ModalHeader>Error</ModalHeader>
-                                <ModalBody>
-                                    {deleteError}
-                                </ModalBody>
-                                <ModalFooter>
-                                    <Button
-                                        size="sm"
-                                        color="primary"
-                                        onPress={onClose}
-                                    >
-                                        Close
-                                    </Button>
-                                </ModalFooter>
-                            </>
-                        )}
-                    </ModalContent>
-                </Modal>
-            </>
-        )}
-    </div>;
-}
-
-function NewProfile({
-    projectId,
-}: {
-    projectId: string,
-}) {
+function NewProfile({ projectId }: { projectId: string }) {
+    const formRef = useRef<HTMLFormElement>(null);
     const router = useRouter();
     const [error, setError] = useState<string | null>(null);
-    const [mockTools, setMockTools] = useState(false);
-    const formRef = useRef<HTMLFormElement>(null);
 
     async function handleSubmit(formData: FormData) {
         setError(null);
         try {
             const name = formData.get("name") as string;
             const context = formData.get("context") as string;
-            const mockPrompt = formData.get("mockPrompt") as string;
-            const profile = await createProfile(projectId, {
-                name,
-                context,
+            const mockTools = formData.get("mockTools") === "on";
+            const mockPrompt = mockTools ? (formData.get("mockPrompt") as string) : undefined;
+            
+            await createProfile(projectId, { 
+                name, 
+                context, 
                 mockTools,
-                mockPrompt: mockPrompt || undefined
+                mockPrompt // This will be undefined if mockTools is false
             });
-            router.push(`/projects/${projectId}/test/profiles/${profile._id}`);
+            router.push(`/projects/${projectId}/test/profiles`);
         } catch (error) {
             setError(`Unable to create profile: ${error}`);
         }
     }
 
-    return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">New Profile</h1>
-        <Button
-            size="sm"
-            className="self-start"
-            as={Link}
-            href={`/projects/${projectId}/test/profiles`}
-            startContent={<ArrowLeftIcon className="w-4 h-4" />}
-        >
-            All Profiles
-        </Button>
-        {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
-            {error}
-            <Button size="sm" color="danger" onPress={() => formRef.current?.requestSubmit()}>Retry</Button>
-        </div>}
-        <form ref={formRef} action={handleSubmit} className="flex flex-col gap-2">
-            <Input
-                type="text"
-                name="name"
-                label="Name"
-                placeholder="Enter a name for the profile"
-                required
+    return <StructuredPanel 
+        title="NEW PROFILE"
+        tooltip="Create a new test profile"
+    >
+        <div className="flex flex-col gap-6 max-w-2xl">
+            <ProfileForm
+                formRef={formRef}
+                handleSubmit={handleSubmit}
+                onCancel={() => router.push(`/projects/${projectId}/test/profiles`)}
+                submitButtonText="Create Profile"
             />
-            <Textarea
-                name="context"
-                label="Context"
-                placeholder="Enter the context for this profile"
-                required
-            />
-            <Switch
-                name="mockTools"
-                isSelected={mockTools}
-                onValueChange={(value) => {
-                    setMockTools(value);
-                }}
-                className="self-start"
-            >
-                Mock Tools
-            </Switch>
-            {mockTools && <Textarea
-                name="mockPrompt"
-                label="Mock Prompt (Optional)"
-                placeholder="Enter a mock prompt"
-            />}
-            <FormStatusButton
-                props={{
-                    className: "self-start",
-                    children: "Create",
-                    size: "sm",
-                    type: "submit",
-                }}
-            />
-        </form>
-    </div>;
+        </div>
+    </StructuredPanel>;
 }
 
 function ProfileList({
@@ -379,6 +155,8 @@ function ProfileList({
     const [error, setError] = useState<string | null>(null);
     const [profiles, setProfiles] = useState<WithStringId<z.infer<typeof TestProfile>>[]>([]);
     const [total, setTotal] = useState(0);
+    const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set<string>());
+    const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
 
     useEffect(() => {
         let ignore = false;
@@ -412,95 +190,154 @@ function ProfileList({
         };
     }, [page, pageSize, error, projectId]);
 
-    return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">Profiles</h1>
-        <Button
-            size="sm"
-            onPress={() => router.push(`/projects/${projectId}/test/profiles/new`)}
-            className="self-end"
-            startContent={<PlusIcon className="w-4 h-4" />}
-        >
-            New Profile
-        </Button>
-        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
-            <Spinner size="sm" />
-            Loading...
-        </div>}
-        {error && <div className="bg-red-100 dark:bg-red-900/20 p-2 rounded-md text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
-            {error}
-            <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
-        </div>}
-        {!loading && !error && <>
-            {profiles.length === 0 && <div className="text-gray-600 dark:text-neutral-400 text-center">No profiles found</div>}
-            {profiles.length > 0 && <div className="flex flex-col w-full">
-                {/* Header */}
-                <div className="grid grid-cols-8 py-2 bg-gray-100 dark:bg-neutral-800 font-semibold text-sm">
-                    <div className="col-span-2 px-4 dark:text-neutral-300">Name</div>
-                    <div className="col-span-3 px-4 dark:text-neutral-300">Context</div>
-                    <div className="col-span-1 px-4 dark:text-neutral-300">Mock Tools</div>
-                    <div className="col-span-1 px-4 dark:text-neutral-300">Created</div>
-                    <div className="col-span-1 px-4 dark:text-neutral-300">Updated</div>
-                </div>
+    const handleSelectionChange = (selection: Selection) => {
+        if (selection === "all" && 
+            selectedKeys !== "all" && 
+            (selectedKeys as Set<string>).size > 0) {
+            setSelectedKeys(new Set());
+            setSelectedProfiles([]);
+        } else {
+            setSelectedKeys(selection);
+            if (selection === "all") {
+                setSelectedProfiles(profiles.map(profile => profile._id));
+            } else {
+                setSelectedProfiles(Array.from(selection as Set<string>));
+            }
+        }
+    };
 
-                {/* Rows */}
-                {profiles.map((profile) => (
-                    <div key={profile._id} className="grid grid-cols-8 py-2 border-b border-gray-200 dark:border-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-800 text-sm">
-                        <div className="col-span-2 px-4 truncate">
-                            <Link
-                                href={`/projects/${projectId}/test/profiles/${profile._id}`}
-                                className="text-blue-600 dark:text-blue-400 hover:underline"
-                            >
-                                {profile.name}
-                            </Link>
-                        </div>
-                        <div className="col-span-3 px-4 truncate dark:text-neutral-300">{profile.context}</div>
-                        <div className="col-span-1 px-4 dark:text-neutral-300">{profile.mockTools ? "Yes" : "No"}</div>
-                        <div className="col-span-1 px-4 text-gray-600 dark:text-neutral-400 truncate">
-                            <RelativeTime date={new Date(profile.createdAt)} />
-                        </div>
-                        <div className="col-span-1 px-4 text-gray-600 dark:text-neutral-400 truncate">
-                            <RelativeTime date={new Date(profile.lastUpdatedAt)} />
-                        </div>
-                    </div>
-                ))}
-            </div>}
-            {total > 1 && <Pagination
-                total={total}
-                page={page}
-                onChange={(page) => {
-                    router.push(`/projects/${projectId}/test/profiles?page=${page}`);
-                }}
-                className="self-center"
-            />}
-        </>}
-    </div>;
+    const handleDelete = async (profileId: string) => {
+        try {
+            await deleteProfile(projectId, profileId);
+            // Refresh the profiles list after deletion
+            const result = await listProfiles(projectId, page, pageSize);
+            setProfiles(result.profiles);
+            setTotal(result.total);
+        } catch (err) {
+            setError(`Failed to delete profile: ${err}`);
+        }
+    };
+
+    const columns = [
+        {
+            key: 'name',
+            label: 'NAME',
+            render: (profile: any) => profile.name
+        },
+        {
+            key: 'context',
+            label: 'CONTEXT'
+        },
+        {
+            key: 'mockTools',
+            label: 'MOCK TOOLS',
+            render: (profile: any) => profile.mockTools ? "Yes" : "No"
+        },
+        {
+            key: 'createdAt',
+            label: 'CREATED',
+            render: (profile: any) => profile?.createdAt && isValidDate(profile.createdAt) ? 
+                <RelativeTime date={new Date(profile.createdAt)} /> : 
+                'Invalid date'
+        },
+        {
+            key: 'lastUpdatedAt',
+            label: 'LAST UPDATED',
+            render: (profile: any) => profile?.lastUpdatedAt && isValidDate(profile.lastUpdatedAt) ? 
+                <RelativeTime date={new Date(profile.lastUpdatedAt)} /> : 
+                'Invalid date'
+        }
+    ];
+
+    return <StructuredPanel 
+        title="PROFILES"
+        tooltip="View and manage your test profiles"
+    >
+        <div className="flex flex-col gap-6 max-w-4xl">
+            {/* Header Section */}
+            <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-1">
+                    <h1 className="text-lg font-semibold text-gray-900 dark:text-white">Profiles</h1>
+                    <p className="text-sm text-gray-600 dark:text-neutral-400">
+                        Create and manage test profiles for your simulations
+                    </p>
+                </div>
+                <Button
+                    size="sm"
+                    color="primary"
+                    startContent={<PlusIcon size={16} />}
+                    onPress={() => router.push(`/projects/${projectId}/test/profiles/new`)}
+                >
+                    New Profile
+                </Button>
+            </div>
+
+            {/* Error Display */}
+            {error && (
+                <div className="bg-red-100 dark:bg-red-900/20 p-4 rounded-lg text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
+                    {error}
+                    <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
+                </div>
+            )}
+
+            {/* Profiles Table */}
+            {loading ? (
+                <div className="flex gap-2 items-center justify-center p-8 text-gray-600 dark:text-neutral-400">
+                    <Spinner size="sm" />
+                    Loading profiles...
+                </div>
+            ) : profiles.length === 0 ? (
+                <div className="text-center p-8 bg-gray-50 dark:bg-neutral-900 rounded-lg border border-dashed border-gray-200 dark:border-neutral-800">
+                    <p className="text-gray-600 dark:text-neutral-400 mb-4">No profiles created yet</p>
+                    <Button
+                        size="sm"
+                        color="primary"
+                        startContent={<PlusIcon size={16} />}
+                        onPress={() => router.push(`/projects/${projectId}/test/profiles/new`)}
+                    >
+                        Create Your First Profile
+                    </Button>
+                </div>
+            ) : (
+                <DataTable
+                    items={profiles}
+                    columns={columns}
+                    selectedKeys={selectedKeys}
+                    onSelectionChange={handleSelectionChange}
+                    onDelete={handleDelete}
+                    onEdit={(id) => router.push(`/projects/${projectId}/test/profiles/${id}/edit`)}
+                    projectId={projectId}
+                />
+            )}
+        </div>
+    </StructuredPanel>;
 }
 
-export function ProfilesApp({
-    projectId,
-    slug
-}: {
-    projectId: string,
-    slug: string[]
-}) {
-    let selection: "list" | "view" | "new" | "edit" = "list";
-    let profileId: string | null = null;
-    if (slug.length > 0) {
+export function ProfilesApp({ projectId, slug }: { projectId: string; slug?: string[] }) {
+    let selection: "list" | "new" | "edit" = "list";
+    let profileId: string | undefined;
+
+    if (slug && slug.length > 0) {
         if (slug[0] === "new") {
             selection = "new";
-        } else if (slug[slug.length - 1] === "edit") {
+        } else if (slug[1] === "edit") {
             selection = "edit";
             profileId = slug[0];
         } else {
-            selection = "view";
+            selection = "list";
             profileId = slug[0];
         }
     }
 
-    return <>
-        {selection === "list" && <ProfileList projectId={projectId} />}
-        {selection === "new" && <NewProfile projectId={projectId} />}
-        {selection === "view" && profileId && <ViewProfile projectId={projectId} profileId={profileId} />}
-        {selection === "edit" && profileId && <EditProfile projectId={projectId} profileId={profileId} />}
-    </>;
+    return (
+        <div className="h-full">
+            {selection === "list" && <ProfileList projectId={projectId} />}
+            {selection === "new" && <NewProfile projectId={projectId} />}
+            {selection === "edit" && profileId && (
+                <EditProfile projectId={projectId} profileId={profileId} />
+            )}
+        </div>
+    );
 }
+
+export { NewProfile, EditProfile };

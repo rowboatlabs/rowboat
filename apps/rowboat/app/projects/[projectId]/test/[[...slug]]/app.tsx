@@ -6,6 +6,8 @@ import { ProfilesApp } from "./profiles_app";
 import { SimulationsApp } from "./simulations_app";
 import { usePathname } from "next/navigation";
 import { RunsApp } from "./runs_app";
+import { StructuredPanel } from "../../../../lib/components/structured-panel";
+import { ListItem } from "../../../../lib/components/structured-list";
 
 export function App({
     projectId,
@@ -43,21 +45,18 @@ export function App({
     ];
 
     return <div className="flex h-full">
-        <div className="w-40 shrink-0 p-2">
-            <ul>
+        <StructuredPanel title="TEST" tooltip="Browse and manage your test scenarios and runs">
+            <div className="overflow-auto flex flex-col gap-1 justify-start">
                 {menuItems.map((item) => (
-                    <li key={item.label}>
-                        <Link
-                            className={`block p-2 rounded-md text-sm ${
-                                pathname.startsWith(item.href) 
-                                    ? "bg-gray-100 dark:bg-neutral-800" 
-                                    : "hover:bg-gray-100 dark:hover:bg-neutral-800"
-                            }`}
-                            href={item.href}>{item.label}</Link>
-                    </li>
+                    <ListItem
+                        key={item.label}
+                        name={item.label}
+                        isSelected={pathname.startsWith(item.href)}
+                        onClick={() => router.push(item.href)}
+                    />
                 ))}
-            </ul>
-        </div>
+            </div>
+        </StructuredPanel>
         <div className="grow border-l border-gray-200 dark:border-neutral-800 p-2">
             {selection === "scenarios" && <ScenariosApp projectId={projectId} slug={innerSlug} />}
             {selection === "profiles" && <ProfilesApp projectId={projectId} slug={innerSlug} />}

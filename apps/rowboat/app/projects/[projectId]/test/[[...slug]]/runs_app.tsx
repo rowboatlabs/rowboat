@@ -1,149 +1,20 @@
+"use client";
+
 import Link from "next/link";
 import { WithStringId } from "@/app/lib/types/types";
 import { TestSimulation, TestRun } from "@/app/lib/types/testing_types";
-import { useEffect, useState, useRef } from "react";
-import { createRun, getRun, getSimulation, listRuns } from "@/app/actions/testing_actions";
-import { Button, Input, Pagination, Spinner, Chip } from "@heroui/react";
+import { useEffect, useState } from "react";
+import { getRun, getSimulation, listRuns, cancelRun, deleteRun, getSimulationResult, listRunSimulations } from "@/app/actions/testing_actions";
+import { Button, Spinner, Selection } from "@heroui/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { z } from "zod";
-import { ArrowLeftIcon, PlusIcon, WorkflowIcon } from "lucide-react";
-import { FormStatusButton } from "@/app/lib/components/form-status-button";
+import { ArrowLeftIcon, PlusIcon, DownloadIcon } from "lucide-react";
 import { RelativeTime } from "@primer/react"
-import { SimulationSelector } from "@/app/lib/components/selectors/simulation-selector";
-import { WorkflowSelector } from "@/app/lib/components/selectors/workflow-selector";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { fetchWorkflow } from "@/app/actions/workflow_actions";
-
-function NewRun({
-    projectId,
-}: {
-    projectId: string,
-}) {
-    const router = useRouter();
-    const [error, setError] = useState<string | null>(null);
-    const formRef = useRef<HTMLFormElement>(null);
-    const [selectedSimulations, setSelectedSimulations] = useState<WithStringId<z.infer<typeof TestSimulation>>[]>([]);
-    const [isSimulationSelectorOpen, setIsSimulationSelectorOpen] = useState(false);
-    const [selectedWorkflow, setSelectedWorkflow] = useState<WithStringId<z.infer<typeof Workflow>> | null>(null);
-    const [isWorkflowSelectorOpen, setIsWorkflowSelectorOpen] = useState(false);
-
-    async function handleSubmit(formData: FormData) {
-        setError(null);
-        const simulationIds = selectedSimulations.map(sim => sim._id);
-
-        if (!selectedWorkflow) {
-            setError("Please select a workflow");
-            return;
-        }
-
-        if (simulationIds.length === 0) {
-            setError("Please select at least one simulation");
-            return;
-        }
-
-        try {
-            const run = await createRun(projectId, {
-                workflowId: selectedWorkflow._id,
-                simulationIds
-            });
-            router.push(`/projects/${projectId}/test/runs/${run._id}`);
-        } catch (error) {
-            setError(`Unable to create run: ${error}`);
-        }
-    }
-
-    return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">New Run</h1>
-        <Button
-            size="sm"
-            className="self-start"
-            as={Link}
-            href={`/projects/${projectId}/test/runs`}
-            startContent={<ArrowLeftIcon className="w-4 h-4" />}
-        >
-            All Runs
-        </Button>
-        {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
-            {error}
-            <Button
-                size="sm"
-                color="danger"
-                onPress={() => {
-                    formRef.current?.requestSubmit();
-                }}
-            >
-                Retry
-            </Button>
-        </div>}
-        <form ref={formRef} action={handleSubmit} className="flex flex-col gap-2">
-            <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">Workflow</label>
-                <div className="flex items-center gap-2">
-                    {selectedWorkflow ? (
-                        <div className="text-sm text-blue-600">{selectedWorkflow.name}</div>
-                    ) : (
-                        <div className="text-sm text-gray-500">No workflow selected</div>
-                    )}
-                    <Button
-                        size="sm"
-                        onPress={() => setIsWorkflowSelectorOpen(true)}
-                        type="button"
-                    >
-                        {selectedWorkflow ? "Change" : "Select"} Workflow
-                    </Button>
-                </div>
-            </div>
-            <div className="flex flex-col gap-2">
-                <Button
-                    size="sm"
-                    onPress={() => setIsSimulationSelectorOpen(true)}
-                    type="button"
-                    className="self-start"
-                >
-                    Select Simulations
-                </Button>
-                {selectedSimulations.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                        {selectedSimulations.map((sim) => (
-                            <Chip
-                                key={sim._id}
-                                onClose={() => setSelectedSimulations(prev => prev.filter(s => s._id !== sim._id))}
-                                variant="flat"
-                                className="py-1"
-                            >
-                                {sim.name}
-                            </Chip>
-                        ))}
-                    </div>
-                )}
-            </div>
-            <FormStatusButton
-                props={{
-                    className: "self-start",
-                    children: "Create Run",
-                    size: "sm",
-                    type: "submit",
-                    isDisabled: !selectedWorkflow || selectedSimulations.length === 0,
-                }}
-            />
-        </form>
-
-        <SimulationSelector
-            projectId={projectId}
-            isOpen={isSimulationSelectorOpen}
-            onOpenChange={setIsSimulationSelectorOpen}
-            onSelect={setSelectedSimulations}
-            initialSelected={selectedSimulations}
-        />
-
-        <WorkflowSelector
-            projectId={projectId}
-            isOpen={isWorkflowSelectorOpen}
-            onOpenChange={setIsWorkflowSelectorOpen}
-            onSelect={setSelectedWorkflow}
-        />
-    </div>;
-}
+import { StructuredPanel, ActionButton } from "@/app/lib/components/structured-panel"
+import { DataTable } from "./components/table"
+import { isValidDate } from './utils/date';
 
 function ViewRun({
     projectId,
@@ -152,49 +23,124 @@ function ViewRun({
     projectId: string,
     runId: string,
 }) {
+    const router = useRouter();
     const [run, setRun] = useState<WithStringId<z.infer<typeof TestRun>> | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [workflow, setWorkflow] = useState<WithStringId<z.infer<typeof Workflow>> | null>(null);
     const [simulations, setSimulations] = useState<WithStringId<z.infer<typeof TestSimulation>>[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [workflow, setWorkflow] = useState<WithStringId<z.infer<typeof Workflow>> | null>(null);
 
     useEffect(() => {
-        async function fetchRun() {
-            const run = await getRun(projectId, runId);
-            setRun(run);
-            if (run) {
+        async function fetchData() {
+            try {
+                const run = await getRun(projectId, runId);
+                if (!run) {
+                    setError("Run not found");
+                    return;
+                }
+                setRun(run);
+
+                const enrichedSimulations = await listRunSimulations(projectId, run.simulationIds);
+                setSimulations(enrichedSimulations);
+
                 // Fetch workflow and simulations in parallel
                 const [workflowResult, simulationsResult] = await Promise.all([
                     fetchWorkflow(projectId, run.workflowId),
                     Promise.all(run.simulationIds.map(id => getSimulation(projectId, id)))
                 ]);
                 setWorkflow(workflowResult);
-                setSimulations(simulationsResult.filter(s => s !== null));
+            } catch (error) {
+                setError(`Error fetching run: ${error}`);
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         }
-        fetchRun();
-    }, [runId, projectId]);
+        fetchData();
+    }, [projectId, runId]);
 
-    return <div className="h-full flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-            <Button
-                size="sm"
-                className="self-start"
-                as={Link}
-                href={`/projects/${projectId}/test/runs`}
-                startContent={<ArrowLeftIcon className="w-4 h-4" />}
+    const columns = [
+        {
+            key: 'name',
+            label: 'SIMULATION',
+            render: (simulation: any) => simulation.name
+        },
+        {
+            key: 'scenarioId',
+            label: 'SCENARIO',
+            render: (simulation: any) => simulation.scenarioName
+        },
+        {
+            key: 'profileId',
+            label: 'PROFILE',
+            render: (simulation: any) => simulation.profileName
+        }
+    ];
+
+    const handleDownload = async (simulationId: string) => {
+        try {
+            const result = await getSimulationResult(projectId, runId, simulationId);
+            if (!result) {
+                console.error("No result found for simulation");
+                return;
+            }
+
+            // Get simulation name from simulations array
+            const simulation = simulations.find(s => s._id === simulationId);
+            if (!simulation) {
+                console.error("Simulation not found");
+                return;
+            }
+
+            // Create a safe filename
+            const safeName = `${run?.name}_${simulation.name}`
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, ''); // Remove leading/trailing underscores
+
+            // Create the JSON content
+            const content = {
+                run: run?.name,
+                simulation: simulation.name,
+                result: result.result,
+                details: result.details,
+                transcript: result.transcript
+            };
+
+            // Create and trigger download
+            const blob = new Blob([JSON.stringify(content, null, 2)], { type: 'application/json' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${safeName}.json`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error("Failed to download result:", error);
+        }
+    };
+
+    return <StructuredPanel 
+        title="VIEW RUN"
+        tooltip="View details of this test run"
+        actions={[
+            <ActionButton
+                key="back"
+                icon={<ArrowLeftIcon size={16} />}
+                onClick={() => router.push(`/projects/${projectId}/test/runs`)}
             >
                 All Runs
-            </Button>
-        </div>
-
+            </ActionButton>
+        ]}
+    >
         {loading && <div className="flex gap-2 items-center">
             <Spinner size="sm" />
             Loading...
         </div>}
         {!loading && !run && <div className="text-gray-600 text-center">Run not found</div>}
         {!loading && run && (
-            <>
+            <div className="flex flex-col gap-6 max-w-4xl">
                 {/* Workflow and timing information in a grid */}
                 <div className="grid grid-cols-3 gap-4">
                     {workflow && (
@@ -236,31 +182,22 @@ function ViewRun({
                 </div>
 
                 {/* Simulations List */}
-                <div className="mt-4">
+                <div>
                     <h2 className="text-sm font-medium text-gray-600 dark:text-neutral-400 mb-2">Simulations</h2>
-                    <div className="space-y-2">
-                        {simulations.map(sim => (
-                            <div key={sim._id} className="border dark:border-neutral-800 rounded-lg p-3">
-                                <Link
-                                    href={`/projects/${projectId}/test/simulations/${sim._id}`}
-                                    className="text-blue-600 hover:underline"
-                                >
-                                    {sim.name}
-                                </Link>
-                            </div>
-                        ))}
-                    </div>
+                    <DataTable
+                        items={simulations}
+                        columns={columns}
+                        projectId={projectId}
+                        onDownload={handleDownload}
+                        selectionMode="none"
+                    />
                 </div>
-            </>
+            </div>
         )}
-    </div>;
+    </StructuredPanel>
 }
 
-function RunList({
-    projectId,
-}: {
-    projectId: string,
-}) {
+function RunsList({ projectId }: { projectId: string }) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const page = parseInt(searchParams.get("page") || "1");
@@ -270,6 +207,54 @@ function RunList({
     const [runs, setRuns] = useState<WithStringId<z.infer<typeof TestRun>>[]>([]);
     const [workflowMap, setWorkflowMap] = useState<Record<string, WithStringId<z.infer<typeof Workflow>>>>({});
     const [total, setTotal] = useState(0);
+    const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set<string>());
+    const [selectedRuns, setSelectedRuns] = useState<string[]>([]);
+
+    const handleSelectionChange = (selection: Selection) => {
+        if (selection === "all" && 
+            selectedKeys !== "all" && 
+            (selectedKeys as Set<string>).size > 0) {
+            setSelectedKeys(new Set());
+            setSelectedRuns([]);
+        } else {
+            setSelectedKeys(selection);
+            if (selection === "all") {
+                setSelectedRuns(runs.map(run => run._id));
+            } else {
+                setSelectedRuns(Array.from(selection as Set<string>));
+            }
+        }
+    };
+
+    const handleCancel = async (runId: string) => {
+        try {
+            await cancelRun(projectId, runId);
+            // Update the run status locally after successful cancellation
+            setRuns(runs.map(run => {
+                if (run._id === runId) {
+                    return {
+                        ...run,
+                        status: 'cancelled'
+                    };
+                }
+                return run;
+            }));
+        } catch (err) {
+            setError(`Failed to cancel run: ${err}`);
+        }
+    };
+
+    const handleDelete = async (runId: string) => {
+        try {
+            await deleteRun(projectId, runId);
+            // Refresh the runs list after deletion
+            const updatedRuns = await listRuns(projectId, page, pageSize);
+            setRuns(updatedRuns.runs);
+            setTotal(updatedRuns.total);
+        } catch (err) {
+            setError(`Failed to delete run: ${err}`);
+        }
+    };
 
     useEffect(() => {
         let ignore = false;
@@ -333,101 +318,130 @@ function RunList({
         };
     }, [runs, error, projectId]);
 
-    return <div className="h-full flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-800 dark:text-neutral-200">Test Runs</h1>
-            <Button
-                size="sm"
-                onPress={() => router.push(`/projects/${projectId}/test/runs/new`)}
-                startContent={<PlusIcon className="w-4 h-4" />}
-            >
-                New Run
-            </Button>
-        </div>
+    const columns = [
+        {
+            key: 'name',
+            label: 'NAME',
+            render: (run: any) => run.name
+        },
+        {
+            key: 'status',
+            label: 'STATUS',
+            render: (run: any) => (
+                <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${getStatusStyles(run.status)}`}>
+                    <div className={`w-1.5 h-1.5 rounded-full ${getStatusDotStyles(run.status)}`} />
+                    {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
+                </div>
+            )
+        },
+        {
+            key: 'results',
+            label: 'RESULTS',
+            render: (run: any) => (
+                <div className="flex items-center gap-2">
+                    <span className="text-green-600 dark:text-green-400">{run.passCount || 0} passed</span>
+                    <span className="text-red-600 dark:text-red-400">{run.failCount || 0} failed</span>
+                </div>
+            )
+        },
+        {
+            key: 'createdAt',
+            label: 'STARTED',
+            render: (run: any) => isValidDate(run.startedAt) ? 
+                <RelativeTime date={new Date(run.startedAt)} /> : 
+                'Invalid date'
+        }
+    ];
 
-        {loading && <div className="flex gap-2 items-center">
-            <Spinner size="sm" />
-            Loading...
-        </div>}
-        {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
-            {error}
-            <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
-        </div>}
-        {!loading && !error && <>
-            {runs.length === 0 && <div className="text-gray-600 dark:text-neutral-400 text-center">No test runs found</div>}
-            {runs.length > 0 && <div className="space-y-4">
-                {runs.map((run) => (
-                    <div key={run._id} className="border dark:border-neutral-800 rounded-lg shadow-sm">
-                        <div className="p-4 flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800">
-                            <div className="flex items-center space-x-4">
-                                <Link
-                                    href={`/projects/${projectId}/test/runs/${run._id}`}
-                                    className="text-blue-600 dark:text-blue-400 hover:underline"
-                                >
-                                    {run.name}
-                                </Link>
-                                {workflowMap[run.workflowId] && (
-                                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-neutral-400">
-                                        <WorkflowIcon className="w-4 h-4 shrink-0" />
-                                        {workflowMap[run.workflowId].name}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <span className={getStatusClass(run.status)}>
-                                    {run.status}
-                                </span>
-                                <div className="text-sm text-gray-600 dark:text-neutral-400">
-                                    <RelativeTime date={new Date(run.startedAt)} />
-                                </div>
-                            </div>
-                        </div>
-                        {run.aggregateResults && (
-                            <div className="border-t dark:border-neutral-800 px-4 py-2 bg-gray-50 dark:bg-neutral-900/50">
-                                <div className="grid grid-cols-3 gap-4 text-sm">
-                                    <div className="text-gray-600 dark:text-neutral-400">
-                                        Total: {run.aggregateResults.total}
-                                    </div>
-                                    <div className="text-green-600 dark:text-green-400">
-                                        Passed: {run.aggregateResults.passCount}
-                                    </div>
-                                    <div className="text-red-600 dark:text-red-400">
-                                        Failed: {run.aggregateResults.failCount}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+    return (
+        <StructuredPanel 
+            title="TEST RUNS"
+            tooltip="View and manage your test runs"
+        >
+            <div className="flex flex-col gap-6 max-w-4xl">
+                {/* Header Section */}
+                <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-1">
+                        <h1 className="text-lg font-semibold text-gray-900 dark:text-white">Test Runs</h1>
+                        <p className="text-sm text-gray-600 dark:text-neutral-400">
+                            View and monitor your workflow test runs
+                        </p>
                     </div>
-                ))}
-            </div>}
-            {total > 1 && <Pagination
-                total={total}
-                page={page}
-                onChange={(page) => {
-                    router.push(`/projects/${projectId}/test/runs?page=${page}`);
-                }}
-                className="self-center"
-            />}
-        </>}
-    </div>;
+                    <Button
+                        size="sm"
+                        color="primary"
+                        startContent={<PlusIcon size={16} />}
+                        onPress={() => router.push(`/projects/${projectId}/test/simulations`)}
+                    >
+                        New Run
+                    </Button>
+                </div>
+
+                {/* Error Display */}
+                {error && (
+                    <div className="bg-red-100 dark:bg-red-900/20 p-4 rounded-lg text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
+                        {error}
+                        <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
+                    </div>
+                )}
+
+                {/* Runs Table */}
+                {loading ? (
+                    <div className="flex gap-2 items-center justify-center p-8 text-gray-600 dark:text-neutral-400">
+                        <Spinner size="sm" />
+                        Loading test runs...
+                    </div>
+                ) : runs.length === 0 ? (
+                    <div className="text-center p-8 bg-gray-50 dark:bg-neutral-900 rounded-lg border border-dashed border-gray-200 dark:border-neutral-800">
+                        <p className="text-gray-600 dark:text-neutral-400 mb-4">No test runs created yet</p>
+                        <Button
+                            size="sm"
+                            color="primary"
+                            startContent={<PlusIcon size={16} />}
+                            onPress={() => router.push(`/projects/${projectId}/test/simulations`)}
+                        >
+                            Create Your First Test Run
+                        </Button>
+                    </div>
+                ) : (
+                    <DataTable
+                        items={runs}
+                        columns={columns}
+                        selectedKeys={selectedKeys}
+                        onSelectionChange={handleSelectionChange}
+                        onDelete={handleDelete}
+                        onView={(id) => router.push(`/projects/${projectId}/test/runs/${id}`)}
+                        projectId={projectId}
+                    />
+                )}
+            </div>
+        </StructuredPanel>
+    );
 }
 
-// Helper function for status styling
-function getStatusClass(status: string) {
-    const baseClass = "px-2 py-1 rounded text-xs uppercase font-medium";
-    switch (status) {
-        case 'completed':
-            return `${baseClass} bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-400`;
-        case 'failed':
-        case 'error':
-            return `${baseClass} bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-400`;
-        case 'cancelled':
-            return `${baseClass} bg-gray-100 dark:bg-neutral-800 text-gray-800 dark:text-neutral-400`;
-        case 'running':
-        case 'pending':
-        default:
-            return `${baseClass} bg-yellow-100 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-400`;
-    }
+// Helper functions for status styling
+function getStatusStyles(status: string): string {
+    const styles = {
+        pending: "bg-gray-100 text-gray-700 dark:bg-neutral-800 dark:text-neutral-300",
+        running: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+        completed: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
+        cancelled: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300",
+        failed: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+        error: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+    };
+    return styles[status as keyof typeof styles] || styles.pending;
+}
+
+function getStatusDotStyles(status: string): string {
+    const styles = {
+        pending: "bg-gray-500 dark:bg-neutral-400",
+        running: "bg-blue-500 dark:bg-blue-400",
+        completed: "bg-green-500 dark:bg-green-400",
+        cancelled: "bg-yellow-500 dark:bg-yellow-400",
+        failed: "bg-red-500 dark:bg-red-400",
+        error: "bg-red-500 dark:bg-red-400"
+    };
+    return styles[status as keyof typeof styles] || styles.pending;
 }
 
 export function RunsApp({
@@ -437,20 +451,15 @@ export function RunsApp({
     projectId: string,
     slug: string[]
 }) {
-    let selection: "list" | "view" | "new" = "list";
+    let selection: "list" | "view" = "list";
     let runId: string | null = null;
     if (slug.length > 0) {
-        if (slug[0] === "new") {
-            selection = "new";
-        } else {
-            selection = "view";
-            runId = slug[0];
-        }
+        selection = "view";
+        runId = slug[0];
     }
 
     return <>
-        {selection === "list" && <RunList projectId={projectId} />}
-        {selection === "new" && <NewRun projectId={projectId} />}
+        {selection === "list" && <RunsList projectId={projectId} />}
         {selection === "view" && runId && <ViewRun projectId={projectId} runId={runId} />}
     </>;
 }

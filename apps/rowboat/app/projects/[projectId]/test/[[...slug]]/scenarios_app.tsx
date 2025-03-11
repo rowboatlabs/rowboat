@@ -1,14 +1,20 @@
+"use client";
+
 import Link from "next/link";
 import { WithStringId } from "@/app/lib/types/types";
 import { TestScenario } from "@/app/lib/types/testing_types";
 import { useEffect, useState, useRef } from "react";
 import { createScenario, getScenario, listScenarios, updateScenario, deleteScenario } from "@/app/actions/testing_actions";
-import { Button, Input, Pagination, Spinner, Textarea, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/react";
+import { Button, Spinner, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Selection } from "@heroui/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { z } from "zod";
-import { ArrowLeftIcon, PlusIcon } from "lucide-react";
-import { FormStatusButton } from "@/app/lib/components/form-status-button";
+import { ArrowLeftIcon, PlusIcon, } from "lucide-react";
 import { RelativeTime } from "@primer/react"
+import { StructuredPanel, ActionButton } from "@/app/lib/components/structured-panel";
+import { DataTable } from "./components/table";
+import { isValidDate } from './utils/date';
+import { ItemView } from "./components/item-view"
+import { ScenarioForm } from "./components/scenario-form";
 
 function EditScenario({
     projectId,
@@ -44,60 +50,45 @@ function EditScenario({
             const name = formData.get("name") as string;
             const description = formData.get("description") as string;
             await updateScenario(projectId, scenarioId, { name, description });
-            router.push(`/projects/${projectId}/test/scenarios/${scenarioId}`);
+            router.push(`/projects/${projectId}/test/scenarios`);
         } catch (error) {
             setError(`Unable to update scenario: ${error}`);
         }
     }
 
-    return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">Edit Scenario</h1>
-        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
-            <Spinner size="sm" />
-            Loading...
-        </div>}
-        {error && <div className="bg-red-100 dark:bg-red-900/20 p-2 rounded-md text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
-            {error}
-            <Button size="sm" color="danger" onPress={() => formRef.current?.requestSubmit()}>Retry</Button>
-        </div>}
-        {!loading && scenario && (
-            <form ref={formRef} action={handleSubmit} className="flex flex-col gap-2">
-                <Input
-                    type="text"
-                    name="name"
-                    label="Name"
-                    placeholder="Enter a name for the scenario"
-                    defaultValue={scenario.name}
-                    required
-                />
-                <Textarea
-                    name="description"
-                    label="Description"
-                    placeholder="Enter a description for the scenario"
-                    defaultValue={scenario.description}
-                    required
-                />
-                <div className="flex gap-2 items-center">
-                    <FormStatusButton
-                        props={{
-                            className: "self-start",
-                            children: "Update",
-                            size: "sm",
-                            type: "submit",
-                        }}
-                    />
-                    <Button
-                        size="sm"
-                        variant="flat"
-                        as={Link}
-                        href={`/projects/${projectId}/test/scenarios/${scenarioId}`}
-                    >
-                        Cancel
-                    </Button>
+    return <StructuredPanel 
+        title="EDIT SCENARIO"
+        tooltip="Edit an existing test scenario"
+    >
+        <div className="flex flex-col gap-6 max-w-2xl">
+            {loading && (
+                <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
+                    <Spinner size="sm" />
+                    Loading scenario...
                 </div>
-            </form>
-        )}
-    </div>;
+            )}
+
+            {error && (
+                <div className="bg-red-100 dark:bg-red-900/20 p-4 rounded-lg text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
+                    {error}
+                    <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
+                </div>
+            )}
+
+            {!loading && scenario && (
+                <ScenarioForm
+                    formRef={formRef}
+                    handleSubmit={handleSubmit}
+                    onCancel={() => router.push(`/projects/${projectId}/test/scenarios`)}
+                    submitButtonText="Update Scenario"
+                    defaultValues={{
+                        name: scenario.name,
+                        description: scenario.description
+                    }}
+                />
+            )}
+        </div>
+    </StructuredPanel>;
 }
 
 function ViewScenario({
@@ -131,120 +122,98 @@ function ViewScenario({
         }
     }
 
-    return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">View Scenario</h1>
-        <Button
-            size="sm"
-            className="self-start"
-            as={Link}
-            href={`/projects/${projectId}/test/scenarios`}
-            startContent={<ArrowLeftIcon className="w-4 h-4" />}
+    return (
+        <StructuredPanel 
+            title="VIEW SCENARIO"
+            tooltip="View scenario details"
+            actions={[
+                <ActionButton
+                    key="back"
+                    icon={<ArrowLeftIcon size={16} />}
+                    onClick={() => router.push(`/projects/${projectId}/test/scenarios`)}
+                >
+                    All Scenarios
+                </ActionButton>
+            ]}
         >
-            All Scenarios
-        </Button>
-        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
-            <Spinner size="sm" />
-            Loading...
-        </div>}
-        {!loading && !scenario && <div className="text-gray-600 dark:text-neutral-400 text-center">Scenario not found</div>}
-        {!loading && scenario && (
-            <>
-                <div className="flex flex-col gap-1 text-sm">
-                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
-                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Name</div>
-                        <div className="flex-[2] dark:text-neutral-200">{scenario.name}</div>
-                    </div>
-                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
-                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Description</div>
-                        <div className="flex-[2] dark:text-neutral-200">{scenario.description}</div>
-                    </div>
-                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
-                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Created</div>
-                        <div className="flex-[2] dark:text-neutral-300"><RelativeTime date={new Date(scenario.createdAt)} /></div>
-                    </div>
-                    <div className="flex border-b border-gray-200 dark:border-neutral-800 py-2">
-                        <div className="flex-[1] font-medium text-gray-600 dark:text-neutral-400">Last Updated</div>
-                        <div className="flex-[2] dark:text-neutral-300"><RelativeTime date={new Date(scenario.lastUpdatedAt)} /></div>
-                    </div>
-                </div>
-                <div className="flex gap-2 mt-4">
-                    <Button
-                        size="sm"
-                        as={Link}
-                        href={`/projects/${projectId}/test/scenarios/${scenarioId}/edit`}
-                    >
-                        Edit
-                    </Button>
-                    <Button
-                        size="sm"
-                        color="danger"
-                        variant="flat"
-                        onPress={() => setIsDeleteModalOpen(true)}
-                    >
-                        Delete
-                    </Button>
-                </div>
-
-                <Modal
-                    isOpen={isDeleteModalOpen}
-                    onOpenChange={setIsDeleteModalOpen}
-                    size="sm"
-                >
-                    <ModalContent>
-                        {(onClose) => (
-                            <>
-                                <ModalHeader>Confirm Deletion</ModalHeader>
-                                <ModalBody>
-                                    Are you sure you want to delete this scenario?
-                                </ModalBody>
-                                <ModalFooter>
-                                    <Button size="sm" variant="flat" onPress={onClose}>
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        size="sm"
-                                        color="danger"
-                                        onPress={() => {
-                                            handleDelete();
-                                            onClose();
-                                        }}
-                                    >
-                                        Delete
-                                    </Button>
-                                </ModalFooter>
-                            </>
-                        )}
-                    </ModalContent>
-                </Modal>
-
-                <Modal
-                    isOpen={deleteError !== null}
-                    onOpenChange={() => setDeleteError(null)}
-                    size="sm"
-                >
-                    <ModalContent>
-                        {(onClose) => (
-                            <>
-                                <ModalHeader>Error</ModalHeader>
-                                <ModalBody>
-                                    {deleteError}
-                                </ModalBody>
-                                <ModalFooter>
-                                    <Button
-                                        size="sm"
-                                        color="primary"
-                                        onPress={onClose}
-                                    >
-                                        Close
-                                    </Button>
-                                </ModalFooter>
-                            </>
-                        )}
-                    </ModalContent>
-                </Modal>
-            </>
-        )}
-    </div>;
+            <ItemView
+                items={[
+                    { label: "Name", value: scenario?.name },
+                    { label: "Description", value: scenario?.description },
+                    {
+                        label: "Created",
+                        value: scenario?.createdAt && isValidDate(scenario.createdAt)
+                            ? <RelativeTime date={new Date(scenario.createdAt)} />
+                            : 'Invalid date'
+                    },
+                    {
+                        label: "Last Updated",
+                        value: scenario?.lastUpdatedAt && isValidDate(scenario.lastUpdatedAt)
+                            ? <RelativeTime date={new Date(scenario.lastUpdatedAt)} />
+                            : 'Invalid date'
+                    }
+                ]}
+                actions={
+                    <>
+                        <Button size="sm" variant="flat" onPress={() => router.push(`/projects/${projectId}/test/scenarios/${scenarioId}/edit`)}>Edit</Button>
+                        <Button size="sm" color="danger" variant="flat" onPress={() => setIsDeleteModalOpen(true)}>Delete</Button>
+                    </>
+                }
+            />
+            <Modal
+                isOpen={isDeleteModalOpen}
+                onOpenChange={setIsDeleteModalOpen}
+                size="sm"
+            >
+                <ModalContent>
+                    {(onClose) => (
+                        <>
+                            <ModalHeader>Confirm Deletion</ModalHeader>
+                            <ModalBody>
+                                Are you sure you want to delete this scenario?
+                            </ModalBody>
+                            <ModalFooter>
+                                <Button size="sm" variant="flat" onPress={onClose}>
+                                    Cancel
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    color="danger"
+                                    onPress={() => {
+                                        handleDelete();
+                                        onClose();
+                                    }}
+                                >
+                                    Delete
+                                </Button>
+                            </ModalFooter>
+                        </>
+                    )}
+                </ModalContent>
+            </Modal>
+            <Modal
+                isOpen={deleteError !== null}
+                onOpenChange={() => setDeleteError(null)}
+                size="sm"
+            >
+                <ModalContent>
+                    {(onClose) => (
+                        <>
+                            <ModalHeader>Error</ModalHeader>
+                            <ModalBody>
+                                {deleteError}
+                            </ModalBody>
+                            <ModalFooter>
+                                <Button size="sm" onPress={onClose}>
+                                    Close
+                                </Button>
+                            </ModalFooter>
+                        </>
+                    )}
+                </ModalContent>
+            </Modal>
+        </StructuredPanel>
+    );
 }
 
 function NewScenario({
@@ -258,63 +227,36 @@ function NewScenario({
 
     async function handleSubmit(formData: FormData) {
         setError(null);
-        const name = formData.get("name") as string;
-        const description = formData.get("description") as string;
         try {
-            const scenario = await createScenario(projectId, { name, description });
-            router.push(`/projects/${projectId}/test/scenarios/${scenario._id}`);
+            const name = formData.get("name") as string;
+            const description = formData.get("description") as string;
+            await createScenario(projectId, { name, description });
+            router.push(`/projects/${projectId}/test/scenarios`);
         } catch (error) {
             setError(`Unable to create scenario: ${error}`);
         }
     }
 
-    return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 pb-2 border-b border-gray-200">New Scenario</h1>
-        <Button
-            size="sm"
-            className="self-start"
-            as={Link}
-            href={`/projects/${projectId}/test/scenarios`}
-            startContent={<ArrowLeftIcon className="w-4 h-4" />}
-        >
-            All Scenarios
-        </Button>
-        {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
-            {error}
-            <Button
-                size="sm"
-                color="danger"
-                onPress={() => {
-                    formRef.current?.requestSubmit();
-                }}
-            >
-                Retry
-            </Button>
-        </div>}
-        <form ref={formRef} action={handleSubmit} className="flex flex-col gap-2">
-            <Input
-                type="text"
-                name="name"
-                label="Name"
-                placeholder="Enter a name for the scenario"
-                required
+    return <StructuredPanel 
+        title="NEW SCENARIO"
+        tooltip="Create a new test scenario"
+    >
+        <div className="flex flex-col gap-6 max-w-2xl">
+            {error && (
+                <div className="bg-red-100 dark:bg-red-900/20 p-4 rounded-lg text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
+                    {error}
+                    <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
+                </div>
+            )}
+            
+            <ScenarioForm
+                formRef={formRef}
+                handleSubmit={handleSubmit}
+                onCancel={() => router.push(`/projects/${projectId}/test/scenarios`)}
+                submitButtonText="Create Scenario"
             />
-            <Textarea
-                name="description"
-                label="Description"
-                placeholder="Enter a description for the scenario"
-                required
-            />
-            <FormStatusButton
-                props={{
-                    className: "self-start",
-                    children: "Create",
-                    size: "sm",
-                    type: "submit",
-                }}
-            />
-        </form>
-    </div>;
+        </div>
+    </StructuredPanel>;
 }
 
 function ScenarioList({
@@ -330,6 +272,8 @@ function ScenarioList({
     const [error, setError] = useState<string | null>(null);
     const [scenarios, setScenarios] = useState<WithStringId<z.infer<typeof TestScenario>>[]>([]);
     const [total, setTotal] = useState(0);
+    const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set<string>());
+    const [selectedScenarios, setSelectedScenarios] = useState<string[]>([]);
 
     useEffect(() => {
         let ignore = false;
@@ -363,93 +307,140 @@ function ScenarioList({
         };
     }, [page, pageSize, error, projectId]);
 
-    return <div className="h-full flex flex-col gap-2">
-        <h1 className="text-medium font-bold text-gray-800 dark:text-neutral-200 pb-2 border-b border-gray-200 dark:border-neutral-800">Scenarios</h1>
-        <Button
-            size="sm"
-            onPress={() => router.push(`/projects/${projectId}/test/scenarios/new`)}
-            className="self-end"
-            startContent={<PlusIcon className="w-4 h-4" />}
-        >
-            New Scenario
-        </Button>
-        {loading && <div className="flex gap-2 items-center text-gray-600 dark:text-neutral-400">
-            <Spinner size="sm" />
-            Loading...
-        </div>}
-        {error && <div className="bg-red-100 dark:bg-red-900/20 p-2 rounded-md text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
-            {error}
-            <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
-        </div>}
-        {!loading && !error && <>
-            {scenarios.length === 0 && <div className="text-gray-600 dark:text-neutral-400 text-center">No scenarios found</div>}
-            {scenarios.length > 0 && <div className="flex flex-col w-full">
-                {/* Header */}
-                <div className="grid grid-cols-7 py-2 bg-gray-100 dark:bg-neutral-800 font-semibold text-sm">
-                    <div className="col-span-2 px-4 dark:text-neutral-300">Name</div>
-                    <div className="col-span-3 px-4 dark:text-neutral-300">Description</div>
-                    <div className="col-span-1 px-4 dark:text-neutral-300">Created</div>
-                    <div className="col-span-1 px-4 dark:text-neutral-300">Updated</div>
-                </div>
+    const handleSelectionChange = (selection: Selection) => {
+        if (selection === "all" && 
+            selectedKeys !== "all" && 
+            (selectedKeys as Set<string>).size > 0) {
+            setSelectedKeys(new Set());
+            setSelectedScenarios([]);
+        } else {
+            setSelectedKeys(selection);
+            if (selection === "all") {
+                setSelectedScenarios(scenarios.map(scenario => scenario._id));
+            } else {
+                setSelectedScenarios(Array.from(selection as Set<string>));
+            }
+        }
+    };
 
-                {/* Rows */}
-                {scenarios.map((scenario) => (
-                    <div key={scenario._id} className="grid grid-cols-7 py-2 border-b border-gray-200 dark:border-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-800 text-sm">
-                        <div className="col-span-2 px-4 truncate">
-                            <Link
-                                href={`/projects/${projectId}/test/scenarios/${scenario._id}`}
-                                className="text-blue-600 dark:text-blue-400 hover:underline"
-                            >
-                                {scenario.name}
-                            </Link>
-                        </div>
-                        <div className="col-span-3 px-4 truncate dark:text-neutral-300">{scenario.description}</div>
-                        <div className="col-span-1 px-4 text-gray-600 dark:text-neutral-400 truncate">
-                            <RelativeTime date={new Date(scenario.createdAt)} />
-                        </div>
-                        <div className="col-span-1 px-4 text-gray-600 dark:text-neutral-400 truncate">
-                            <RelativeTime date={new Date(scenario.lastUpdatedAt)} />
-                        </div>
-                    </div>
-                ))}
-            </div>}
-            {total > 1 && <Pagination
-                total={total}
-                page={page}
-                onChange={(page) => {
-                    router.push(`/projects/${projectId}/test/scenarios?page=${page}`);
-                }}
-                className="self-center"
-            />}
-        </>}
-    </div>;
+    const handleDelete = async (scenarioId: string) => {
+        try {
+            await deleteScenario(projectId, scenarioId);
+            // Refresh the scenarios list after deletion
+            const result = await listScenarios(projectId, page, pageSize);
+            setScenarios(result.scenarios);
+            setTotal(result.total);
+        } catch (err) {
+            setError(`Failed to delete scenario: ${err}`);
+        }
+    };
+
+    const columns = [
+        {
+            key: 'name',
+            label: 'NAME',
+            render: (scenario: any) => scenario.name
+        },
+        {
+            key: 'description',
+            label: 'DESCRIPTION'
+        },
+        {
+            key: 'createdAt',
+            label: 'CREATED',
+            render: (scenario: any) => isValidDate(scenario.createdAt) ? 
+                <RelativeTime date={new Date(scenario.createdAt)} /> : 
+                'Invalid date'
+        }
+    ];
+
+    return <StructuredPanel 
+        title="SCENARIOS"
+        tooltip="View and manage your test scenarios"
+    >
+        <div className="flex flex-col gap-6 max-w-4xl">
+            {/* Header Section */}
+            <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-1">
+                    <h1 className="text-lg font-semibold text-gray-900 dark:text-white">Scenarios</h1>
+                    <p className="text-sm text-gray-600 dark:text-neutral-400">
+                        Create and manage test scenarios for your simulations
+                    </p>
+                </div>
+                <Button
+                    size="sm"
+                    color="primary"
+                    startContent={<PlusIcon size={16} />}
+                    onPress={() => router.push(`/projects/${projectId}/test/scenarios/new`)}
+                >
+                    New Scenario
+                </Button>
+            </div>
+
+            {/* Error Display */}
+            {error && (
+                <div className="bg-red-100 dark:bg-red-900/20 p-4 rounded-lg text-red-800 dark:text-red-400 flex items-center gap-2 text-sm">
+                    {error}
+                    <Button size="sm" color="danger" onPress={() => setError(null)}>Retry</Button>
+                </div>
+            )}
+
+            {/* Scenarios Table */}
+            {loading ? (
+                <div className="flex gap-2 items-center justify-center p-8 text-gray-600 dark:text-neutral-400">
+                    <Spinner size="sm" />
+                    Loading scenarios...
+                </div>
+            ) : scenarios.length === 0 ? (
+                <div className="text-center p-8 bg-gray-50 dark:bg-neutral-900 rounded-lg border border-dashed border-gray-200 dark:border-neutral-800">
+                    <p className="text-gray-600 dark:text-neutral-400 mb-4">No scenarios created yet</p>
+                    <Button
+                        size="sm"
+                        color="primary"
+                        startContent={<PlusIcon size={16} />}
+                        onPress={() => router.push(`/projects/${projectId}/test/scenarios/new`)}
+                    >
+                        Create Your First Scenario
+                    </Button>
+                </div>
+            ) : (
+                <DataTable
+                    items={scenarios}
+                    columns={columns}
+                    selectedKeys={selectedKeys}
+                    onSelectionChange={setSelectedKeys}
+                    onDelete={handleDelete}
+                    onEdit={(id) => router.push(`/projects/${projectId}/test/scenarios/${id}/edit`)}
+                    projectId={projectId}
+                />
+            )}
+        </div>
+    </StructuredPanel>;
 }
 
-export function ScenariosApp({
-    projectId,
-    slug
-}: {
-    projectId: string,
-    slug: string[]
-}) {
-    let selection: "list" | "view" | "new" | "edit" = "list";
-    let scenarioId: string | null = null;
-    if (slug.length > 0) {
+export function ScenariosApp({ projectId, slug }: { projectId: string; slug?: string[] }) {
+    let selection: "list" | "new" | "edit" = "list";
+    let scenarioId: string | undefined;
+
+    if (slug && slug.length > 0) {
         if (slug[0] === "new") {
             selection = "new";
-        } else if (slug[slug.length - 1] === "edit") {
+        } else if (slug[1] === "edit") {
             selection = "edit";
             scenarioId = slug[0];
         } else {
-            selection = "view";
+            selection = "list";
             scenarioId = slug[0];
         }
     }
 
-    return <>
-        {selection === "list" && <ScenarioList projectId={projectId} />}
-        {selection === "new" && <NewScenario projectId={projectId} />}
-        {selection === "view" && scenarioId && <ViewScenario projectId={projectId} scenarioId={scenarioId} />}
-        {selection === "edit" && scenarioId && <EditScenario projectId={projectId} scenarioId={scenarioId} />}
-    </>;
+    return (
+        <div className="h-full">
+            {selection === "list" && <ScenarioList projectId={projectId} />}
+            {selection === "new" && <NewScenario projectId={projectId} />}
+            {selection === "edit" && scenarioId && (
+                <EditScenario projectId={projectId} scenarioId={scenarioId} />
+            )}
+        </div>
+    );
 }
