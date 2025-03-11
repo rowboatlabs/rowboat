@@ -34,7 +34,8 @@ async def simulate_simulation(
     # Todo: add profile_id
     support_chat = StatefulChat(
         rowboat_client,
-        workflow_id=workflow_id
+        workflow_id=workflow_id,
+        test_profile_id=profile_id
     )
 
     messages = [
