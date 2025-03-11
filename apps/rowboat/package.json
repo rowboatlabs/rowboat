@@ -19,6 +19,7 @@
     "@aws-sdk/s3-request-presigner": "^3.743.0",
     "@google/generative-ai": "^0.21.0",
     "@heroicons/react": "^2.2.0",
+    "@heroui/react": "^2.7.4",
     "@langchain/core": "^0.3.7",
     "@langchain/textsplitters": "^0.1.0",
     "@mendable/firecrawl-js": "^1.0.3",
@@ -56,6 +57,7 @@
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "tiktoken": "^1.0.17",
+    "twilio": "^5.4.5",
     "typewriter-effect": "^2.21.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.23.5"

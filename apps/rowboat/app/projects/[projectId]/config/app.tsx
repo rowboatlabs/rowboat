@@ -6,12 +6,21 @@ import { ReactNode, useEffect, useState, useCallback } from "react";
 import { getProjectConfig, updateProjectName, updateWebhookUrl, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret } from "../../../actions/project_actions";
 import { CopyButton } from "../../../lib/components/copy-button";
 import { EditableField } from "../../../lib/components/editable-field";
-import { EyeIcon, EyeOffIcon, CopyIcon, MoreVerticalIcon, PlusIcon, EllipsisVerticalIcon } from "lucide-react";
+import { EyeIcon, EyeOffIcon, CopyIcon, MoreVerticalIcon, PlusIcon, EllipsisVerticalIcon, CheckCircleIcon, XCircleIcon } from "lucide-react";
 import { WithStringId } from "../../../lib/types/types";
 import { ApiKey } from "../../../lib/types/project_types";
 import { z } from "zod";
 import { RelativeTime } from "@primer/react";
 import { Label } from "../../../lib/components/label";
+import { ListItem } from "../../../lib/components/structured-list";
+import { FormSection } from "../../../lib/components/form-section";
+import { StructuredPanel } from "../../../lib/components/structured-panel";
+import {
+    ResizableHandle,
+    ResizablePanel,
+    ResizablePanelGroup,
+} from "../../../../components/ui/resizable"
+import { VoiceSection } from './voice';
 
 export const metadata: Metadata = {
     title: "Project config",
@@ -78,38 +87,29 @@ export function BasicSettingsSection({
     }
 
     return <Section title="Basic settings">
-
-        <SectionRow>
-            <LeftLabel label="Project name" />
-            <RightContent>
-                <div className="flex flex-row gap-2 items-center">
-                    {loading && <Spinner size="sm" />}
-                    {!loading && <EditableField
-                        value={projectName || ''}
-                        onChange={updateName}
-                        className="w-full"
-                    />}
-                </div>
-            </RightContent>
-        </SectionRow>
+        <FormSection label="Project name">
+            {loading && <Spinner size="sm" />}
+            {!loading && <EditableField
+                value={projectName || ''}
+                onChange={updateName}
+                className="w-full"
+            />}
+        </FormSection>
 
         <Divider />
 
-        <SectionRow>
-            <LeftLabel label="Project ID" />
-            <RightContent>
-                <div className="flex flex-row gap-2 items-center">
-                    <div className="text-gray-600 text-sm font-mono">{projectId}</div>
-                    <CopyButton
-                        onCopy={() => {
-                            navigator.clipboard.writeText(projectId);
-                        }}
-                        label="Copy"
-                        successLabel="Copied"
-                    />
-                </div>
-            </RightContent>
-        </SectionRow>
+        <FormSection label="Project ID">
+            <div className="flex flex-row gap-2 items-center">
+                <div className="text-gray-600 text-sm font-mono">{projectId}</div>
+                <CopyButton
+                    onCopy={() => {
+                        navigator.clipboard.writeText(projectId);
+                    }}
+                    label="Copy"
+                    successLabel="Copied"
+                />
+            </div>
+        </FormSection>
     </Section>;
 }
 
@@ -408,20 +408,15 @@ export function WebhookUrlSection({
             In workflow editor, tool calls will be posted to this URL, unless they are mocked.
         </p>
         <Divider />
-        <SectionRow>
-            <LeftLabel label="Webhook URL" />
-            <RightContent>
-                <div className="flex flex-row gap-2 items-center">
-                    {loading && <Spinner size="sm" />}
-                    {!loading && <EditableField
-                        value={webhookUrl || ''}
-                        onChange={update}
-                        validate={validate}
-                        className="w-full"
-                    />}
-                </div>
-            </RightContent>
-        </SectionRow>
+        <FormSection label="Webhook URL">
+            {loading && <Spinner size="sm" />}
+            {!loading && <EditableField
+                value={webhookUrl || ''}
+                onChange={update}
+                validate={validate}
+                className="w-full"
+            />}
+        </FormSection>
     </Section>;
 }
 
@@ -567,7 +562,30 @@ export function DeleteProjectSection({
     );
 }
 
-export default function App({
+function NavigationMenu({ 
+    selected, 
+    onSelect 
+}: { 
+    selected: string;
+    onSelect: (page: string) => void;
+}) {
+    const items = ['Project', 'Tools', 'Voice'];
+    
+    return (
+        <StructuredPanel title="SETTINGS">
+            {items.map((item) => (
+                <ListItem
+                    key={item}
+                    name={item}
+                    isSelected={selected === item}
+                    onClick={() => onSelect(item)}
+                />
+            ))}
+        </StructuredPanel>
+    );
+}
+
+export function ConfigApp({
     projectId,
     useChatWidget,
     chatWidgetHost,
@@ -576,21 +594,52 @@ export default function App({
     useChatWidget: boolean;
     chatWidgetHost: string;
 }) {
-    return <div className="flex flex-col h-full">
-        <div className="shrink-0 flex justify-between items-center pb-4 border-b border-border">
-            <div className="flex flex-col">
-                <h1 className="text-lg">Project config</h1>
-            </div>
-        </div>
-        <div className="grow overflow-auto py-4">
-            <div className="max-w-[768px] mx-auto flex flex-col gap-4">
-                <BasicSettingsSection projectId={projectId} />
-                <SecretSection projectId={projectId} />
-                <ApiKeysSection projectId={projectId} />
-                <WebhookUrlSection projectId={projectId} />
-                {useChatWidget && <ChatWidgetSection projectId={projectId} chatWidgetHost={chatWidgetHost} />}
-                <DeleteProjectSection projectId={projectId} />
-            </div>
-        </div>
-    </div>;
+    const [selectedPage, setSelectedPage] = useState('Project');
+
+    const renderContent = () => {
+        switch (selectedPage) {
+            case 'Project':
+                return (
+                    <div className="h-full overflow-auto p-6 space-y-6">
+                        <BasicSettingsSection projectId={projectId} />
+                        <SecretSection projectId={projectId} />
+                        <ApiKeysSection projectId={projectId} />
+                        {useChatWidget && <ChatWidgetSection projectId={projectId} chatWidgetHost={chatWidgetHost} />}
+                        <DeleteProjectSection projectId={projectId} />
+                    </div>
+                );
+            case 'Tools':
+                return (
+                    <div className="h-full overflow-auto p-6">
+                        <WebhookUrlSection projectId={projectId} />
+                    </div>
+                );
+            case 'Voice':
+                return (
+                    <div className="h-full overflow-auto p-6">
+                        <VoiceSection projectId={projectId} />
+                    </div>
+                );
+            default:
+                return null;
+        }
+    };
+
+    return (
+        <ResizablePanelGroup direction="horizontal" className="h-screen gap-1">
+            <ResizablePanel minSize={10} defaultSize={15}>
+                <NavigationMenu 
+                    selected={selectedPage}
+                    onSelect={setSelectedPage}
+                />
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel minSize={20} defaultSize={85}>
+                {renderContent()}
+            </ResizablePanel>
+        </ResizablePanelGroup>
+    );
 }
+
+// Add default export
+export default ConfigApp;
