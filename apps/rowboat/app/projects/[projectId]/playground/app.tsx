@@ -25,6 +25,7 @@ export function App({
 }) {
     const [counter, setCounter] = useState<number>(0);
     const [testProfile, setTestProfile] = useState<z.infer<typeof TestProfile> | null>(null);
+    const [systemMessage, setSystemMessage] = useState<string>(defaultSystemMessage);
     const [chat, setChat] = useState<z.infer<typeof PlaygroundChat>>({
         projectId,
         createdAt: new Date().toISOString(),
@@ -32,6 +33,11 @@ export function App({
         simulated: false,
         systemMessage: defaultSystemMessage,
     });
+
+    function handleSystemMessageChange(message: string) {
+        setSystemMessage(message);
+        setCounter(counter + 1);
+    }
 
     function handleTestProfileChange(profile: WithStringId<z.infer<typeof TestProfile>> | null) {
         setTestProfile(profile);
@@ -105,6 +111,8 @@ export function App({
                     testProfile={testProfile}
                     messageSubscriber={messageSubscriber}
                     onTestProfileChange={handleTestProfileChange}
+                    systemMessage={systemMessage}
+                    onSystemMessageChange={handleSystemMessageChange}
                 />
             </div>
         </Pane>

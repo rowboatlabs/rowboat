@@ -24,6 +24,8 @@ export function Chat({
     messageSubscriber,
     testProfile=null,
     onTestProfileChange,
+    systemMessage,
+    onSystemMessageChange,
 }: {
     chat: z.infer<typeof PlaygroundChat>;
     projectId: string;
@@ -31,6 +33,8 @@ export function Chat({
     messageSubscriber?: (messages: z.infer<typeof apiV1.ChatMessage>[]) => void;
     testProfile?: z.infer<typeof TestProfile> | null;
     onTestProfileChange: (profile: WithStringId<z.infer<typeof TestProfile>> | null) => void;
+    systemMessage: string;
+    onSystemMessageChange: (message: string) => void;
 }) {
     const [messages, setMessages] = useState<z.infer<typeof apiV1.ChatMessage>[]>(chat.messages);
     const [loadingAssistantResponse, setLoadingAssistantResponse] = useState<boolean>(false);
@@ -42,7 +46,6 @@ export function Chat({
     const [fetchResponseError, setFetchResponseError] = useState<string | null>(null);
     const [lastAgenticRequest, setLastAgenticRequest] = useState<unknown | null>(null);
     const [lastAgenticResponse, setLastAgenticResponse] = useState<unknown | null>(null);
-    const [systemMessage, setSystemMessage] = useState<string | undefined>(testProfile?.context);
     const [isProfileSelectorOpen, setIsProfileSelectorOpen] = useState(false);
 
     // collect published tool call results
@@ -142,18 +145,17 @@ export function Chat({
             }
         }
 
-        // if no messages, return
-        if (messages.length === 0) {
-            return;
-        }
-
         // if last message is not from role user
         // or tool, return
-        const last = messages[messages.length - 1];
-        if (fetchResponseError) {
-            return;
+        if (messages.length > 0) {
+            const last = messages[messages.length - 1];
+            if (last.role !== 'user' && last.role !== 'tool') {
+                return;
+            }
         }
-        if (last.role !== 'user' && last.role !== 'tool') {
+
+        // if there is an error, return
+        if (fetchResponseError) {
             return;
         }
 
@@ -274,10 +276,6 @@ export function Chat({
         navigator.clipboard.writeText(jsonString);
     }
 
-    function handleSystemMessageChange(message: string) {
-        setSystemMessage(message);
-    }
-
     return <div className="relative h-full flex flex-col gap-8 pt-8 overflow-auto">
         <CopyAsJsonButton onCopy={handleCopyChat} />
         <div className="absolute top-0 left-0 flex items-center gap-1">
@@ -304,14 +302,14 @@ export function Chat({
         <Messages
             projectId={projectId}
             messages={messages}
-            systemMessage={systemMessage}
             toolCallResults={toolCallResults}
             handleToolCallResults={handleToolCallResults}
             loadingAssistantResponse={loadingAssistantResponse}
             loadingUserResponse={loadingUserResponse}
             workflow={workflow}
             testProfile={testProfile}
-            onSystemMessageChange={handleSystemMessageChange}
+            systemMessage={systemMessage}
+            onSystemMessageChange={onSystemMessageChange}
         />
         <div className="shrink-0">
             {fetchResponseError && (

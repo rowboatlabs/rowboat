@@ -27,6 +27,7 @@ export const WorkflowPrompt = z.object({
     type: z.union([
         z.literal('base_prompt'),
         z.literal('style_prompt'),
+        z.literal('greeting'),
     ]),
     prompt: z.string(),
 });
