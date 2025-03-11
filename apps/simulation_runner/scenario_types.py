@@ -14,16 +14,6 @@ class TestScenario(BaseModel):
     createdAt: datetime
     lastUpdatedAt: datetime
 
-class TestProfile(BaseModel):
-    id: str
-    projectId: str
-    name: str
-    context: str
-    createdAt: datetime
-    lastUpdatedAt: datetime
-    mockTools: bool
-    mockPrompt: Optional[str] = None
-
 class TestSimulation(BaseModel):
     id: str
     projectId: str
@@ -48,11 +38,7 @@ class TestRun(BaseModel):
     status: RunStatus
     startedAt: datetime
     completedAt: Optional[datetime] = None
-    # By default, store aggregate results as a dict or the typed AggregateResults
     aggregateResults: Optional[AggregateResults] = None
-
-    # The new schema does not mention lastHeartbeat, 
-    # but you can keep it if you still want to track stale runs
     lastHeartbeat: Optional[datetime] = None
 
 class TestResult(BaseModel):
@@ -61,3 +47,4 @@ class TestResult(BaseModel):
     simulationId: str
     result: Literal["pass", "fail"]
     details: str
+    transcript: str

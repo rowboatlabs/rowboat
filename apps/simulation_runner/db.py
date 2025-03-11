@@ -6,7 +6,6 @@ from typing import Optional
 from scenario_types import (
     TestRun,
     TestScenario,
-    TestProfile,
     TestSimulation,
     TestResult,
     AggregateResults
@@ -14,13 +13,11 @@ from scenario_types import (
 
 MONGO_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017/rowboat").strip()
 
-# New collection names
 TEST_SCENARIOS_COLLECTION = "test_scenarios"
-TEST_PROFILES_COLLECTION = "test_profiles"
 TEST_SIMULATIONS_COLLECTION = "test_simulations"
 TEST_RUNS_COLLECTION = "test_runs"
 TEST_RESULTS_COLLECTION = "test_results"
-API_KEYS_COLLECTION = "api_keys"  # If still needed
+API_KEYS_COLLECTION = "api_keys"
 
 def get_db():
     client = MongoClient(MONGO_URI)
@@ -144,6 +141,23 @@ def get_simulations_for_run(test_run: TestRun) -> list[TestSimulation]:
             )
         )
     return simulations
+
+def get_scenario_by_id(scenario_id: str) -> TestScenario:
+    """
+    Returns a TestScenario by its ID.
+    """
+    collection = get_collection(TEST_SCENARIOS_COLLECTION)
+    doc = collection.find_one({"_id": ObjectId(scenario_id)})
+    if doc:
+        return TestScenario(
+            id=str(doc["_id"]),
+            projectId=doc["projectId"],
+            name=doc["name"],
+            description=doc["description"],
+            createdAt=doc["createdAt"],
+            lastUpdatedAt=doc["lastUpdatedAt"]
+        )
+    return None
 
 #
 # TestResult helpers
