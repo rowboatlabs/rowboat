@@ -13,7 +13,7 @@ import { Button, Spinner, Tooltip } from "@heroui/react";
 import { apiV1 } from "rowboat-shared";
 import { CopyAsJsonButton } from "./copy-as-json-button";
 import { TestProfile } from "@/app/lib/types/testing_types";
-import { ProfileSelector } from "@/app/lib/components/selectors/profile-selector";
+import { ProfileSelector } from "@/app/projects/[projectId]/test/[[...slug]]/components/selectors/profile-selector";
 import { WithStringId } from "@/app/lib/types/types";
 import { XCircleIcon, XIcon } from "lucide-react";
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { listProfiles } from "@/app/actions/testing_actions";
 import { Button, Pagination, Spinner, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/react";
 import { z } from "zod";
+import { useRouter } from "next/navigation";
 
 interface ProfileSelectorProps {
     projectId: string;
@@ -19,6 +20,7 @@ export function ProfileSelector({ projectId, isOpen, onOpenChange, onSelect }: P
     const [profiles, setProfiles] = useState<WithStringId<z.infer<typeof TestProfile>>[]>([]);
     const [totalPages, setTotalPages] = useState(0);
     const pageSize = 10;
+    const router = useRouter();
 
     const fetchProfiles = useCallback(async (page: number) => {
         setLoading(true);
@@ -58,10 +60,10 @@ export function ProfileSelector({ projectId, isOpen, onOpenChange, onSelect }: P
                             {!loading && !error && <>
                                 {profiles.length === 0 && <div className="text-gray-600 text-center">No profiles found</div>}
                                 {profiles.length > 0 && <div className="flex flex-col w-full">
-                                    <div className="grid grid-cols-6 py-2 bg-gray-100 font-semibold text-sm">
-                                        <div className="col-span-2 px-4">Name</div>
-                                        <div className="col-span-3 px-4">Context</div>
-                                        <div className="col-span-1 px-4">Mock Tools</div>
+                                    <div className="grid grid-cols-6 py-2 bg-gray-100 dark:bg-gray-800 font-semibold text-sm">
+                                        <div className="col-span-2 px-4 text-gray-900 dark:text-gray-100">Name</div>
+                                        <div className="col-span-3 px-4 text-gray-900 dark:text-gray-100">Context</div>
+                                        <div className="col-span-1 px-4 text-gray-900 dark:text-gray-100">Mock Tools</div>
                                     </div>
 
                                     {profiles.map((p) => (
@@ -88,9 +90,18 @@ export function ProfileSelector({ projectId, isOpen, onOpenChange, onSelect }: P
                             </>}
                         </ModalBody>
                         <ModalFooter>
-                            <Button size="sm" variant="flat" onPress={onClose}>
-                                Cancel
-                            </Button>
+                            <div className="flex gap-2">
+                                <Button 
+                                    size="sm" 
+                                    color="primary"
+                                    onPress={() => router.push(`/projects/${projectId}/test/profiles`)}
+                                >
+                                    Manage Profiles
+                                </Button>
+                                <Button size="sm" variant="flat" onPress={onClose}>
+                                    Cancel
+                                </Button>
+                            </div>
                         </ModalFooter>
                     </>
                 )}

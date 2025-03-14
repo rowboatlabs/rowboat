@@ -393,15 +393,7 @@ function RunsList({ projectId }: { projectId: string }) {
                     </div>
                 ) : runs.length === 0 ? (
                     <div className="text-center p-8 bg-gray-50 dark:bg-neutral-900 rounded-lg border border-dashed border-gray-200 dark:border-neutral-800">
-                        <p className="text-gray-600 dark:text-neutral-400 mb-4">No test runs created yet</p>
-                        <Button
-                            size="sm"
-                            color="primary"
-                            startContent={<PlusIcon size={16} />}
-                            onPress={() => router.push(`/projects/${projectId}/test/simulations`)}
-                        >
-                            Create Your First Test Run
-                        </Button>
+                        <p className="text-gray-600 dark:text-neutral-400">No test runs created yet</p>
                     </div>
                 ) : (
                     <DataTable

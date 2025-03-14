@@ -11,10 +11,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { z } from "zod";
 import { PlusIcon, ArrowLeftIcon, AlertTriangleIcon } from "lucide-react";
 import { RelativeTime } from "@primer/react"
-import { ScenarioSelector } from "@/app/lib/components/selectors/scenario-selector";
-import { ProfileSelector } from "@/app/lib/components/selectors/profile-selector";
+import { ScenarioSelector } from "@/app/projects/[projectId]/test/[[...slug]]/components/selectors/scenario-selector";
+import { ProfileSelector } from "@/app/projects/[projectId]/test/[[...slug]]/components/selectors/profile-selector";
 import { StructuredPanel, ActionButton } from "@/app/lib/components/structured-panel";
-import { WorkflowSelector } from "@/app/lib/components/selectors/workflow-selector";
+import { WorkflowSelector } from "@/app/projects/[projectId]/test/[[...slug]]/components/selectors/workflow-selector";
 import { DataTable } from "./components/table"
 import { isValidDate } from './utils/date';
 import { SimulationForm } from "./components/simulation-form";
@@ -542,15 +542,7 @@ function SimulationList({ projectId }: { projectId: string }) {
                     </div>
                 ) : simulations.length === 0 ? (
                     <div className="text-center p-8 bg-gray-50 dark:bg-neutral-900 rounded-lg border border-dashed border-gray-200 dark:border-neutral-800">
-                        <p className="text-gray-600 dark:text-neutral-400 mb-4">No simulations created yet</p>
-                        <Button
-                            size="sm"
-                            color="primary"
-                            startContent={<PlusIcon size={16} />}
-                            onPress={() => router.push(`/projects/${projectId}/test/simulations/new`)}
-                        >
-                            Create Your First Simulation
-                        </Button>
+                        <p className="text-gray-600 dark:text-neutral-400">No simulations created yet</p>
                     </div>
                 ) : (
                     <DataTable

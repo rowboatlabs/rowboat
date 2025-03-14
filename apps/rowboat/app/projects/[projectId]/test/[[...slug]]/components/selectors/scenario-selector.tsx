@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { listScenarios } from "@/app/actions/testing_actions";
 import { Button, Pagination, Spinner, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/react";
 import { z } from "zod";
+import { useRouter } from "next/navigation";
 
 interface ScenarioSelectorProps {
     projectId: string;
@@ -13,6 +14,7 @@ interface ScenarioSelectorProps {
 }
 
 export function ScenarioSelector({ projectId, isOpen, onOpenChange, onSelect }: ScenarioSelectorProps) {
+    const router = useRouter();
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -58,9 +60,9 @@ export function ScenarioSelector({ projectId, isOpen, onOpenChange, onSelect }: 
                             {!loading && !error && <>
                                 {scenarios.length === 0 && <div className="text-gray-600 text-center">No scenarios found</div>}
                                 {scenarios.length > 0 && <div className="flex flex-col w-full">
-                                    <div className="grid grid-cols-5 py-2 bg-gray-100 font-semibold text-sm">
-                                        <div className="col-span-2 px-4">Name</div>
-                                        <div className="col-span-3 px-4">Description</div>
+                                    <div className="grid grid-cols-5 py-2 bg-gray-100 dark:bg-gray-800 font-semibold text-sm">
+                                        <div className="col-span-2 px-4 text-gray-900 dark:text-gray-100">Name</div>
+                                        <div className="col-span-3 px-4 text-gray-900 dark:text-gray-100">Description</div>
                                     </div>
 
                                     {scenarios.map((s) => (
@@ -86,9 +88,18 @@ export function ScenarioSelector({ projectId, isOpen, onOpenChange, onSelect }: 
                             </>}
                         </ModalBody>
                         <ModalFooter>
-                            <Button size="sm" variant="flat" onPress={onClose}>
-                                Cancel
-                            </Button>
+                            <div className="flex gap-2">
+                                <Button 
+                                    size="sm" 
+                                    color="primary"
+                                    onPress={() => router.push(`/projects/${projectId}/test/scenarios`)}
+                                >
+                                    Manage Scenarios
+                                </Button>
+                                <Button size="sm" variant="flat" onPress={onClose}>
+                                    Cancel
+                                </Button>
+                            </div>
                         </ModalFooter>
                     </>
                 )}

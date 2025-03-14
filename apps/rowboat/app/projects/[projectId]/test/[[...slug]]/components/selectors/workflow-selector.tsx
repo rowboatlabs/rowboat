@@ -5,7 +5,7 @@ import { listWorkflows } from "@/app/actions/workflow_actions";
 import { Button, Pagination, Spinner, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/react";
 import { z } from "zod";
 import { RelativeTime } from "@primer/react";
-import { WorkflowIcon } from "../icons";
+import { WorkflowIcon } from "../../../../../../lib/components/icons";
 import { PublishedBadge } from "@/app/projects/[projectId]/workflow/published_badge";
 
 interface WorkflowSelectorProps {

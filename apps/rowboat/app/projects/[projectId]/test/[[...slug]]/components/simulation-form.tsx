@@ -2,8 +2,8 @@ import { FormStatusButton } from "@/app/lib/components/form-status-button";
 import { Button, Input, Textarea } from "@heroui/react";
 import { TestProfile, TestScenario } from "@/app/lib/types/testing_types";
 import { WithStringId } from "@/app/lib/types/types";
-import { ScenarioSelector } from "@/app/lib/components/selectors/scenario-selector";
-import { ProfileSelector } from "@/app/lib/components/selectors/profile-selector";
+import { ScenarioSelector } from "@/app/projects/[projectId]/test/[[...slug]]/components/selectors/scenario-selector";
+import { ProfileSelector } from "@/app/projects/[projectId]/test/[[...slug]]/components/selectors/profile-selector";
 import { z } from "zod";
 
 interface SimulationFormProps {
