@@ -16,6 +16,7 @@ import { Action as WorkflowDispatch } from "./workflow_editor";
 import MarkdownContent from "../../../lib/components/markdown-content";
 import { CopyAsJsonButton } from "../playground/copy-as-json-button";
 import { CornerDownLeftIcon, SendIcon } from "lucide-react";
+import { useSearchParams } from 'next/navigation';
 
 
 const CopilotContext = createContext<{
@@ -528,6 +529,24 @@ export function Copilot({
     responseError: string | null;
     setResponseError: (error: string | null) => void;
 }) {
+    const searchParams = useSearchParams();
+    
+    // Check for initial prompt in URL and send it
+    useEffect(() => {
+        const prompt = searchParams.get('prompt');
+        if (prompt && messages.length === 0) {
+            setMessages([{
+                role: 'user',
+                content: prompt
+            }]);
+            
+            // Clean up the URL
+            const url = new URL(window.location.href);
+            url.searchParams.delete('prompt');
+            window.history.replaceState({}, '', url);
+        }
+    }, [searchParams, messages.length, setMessages]);
+
     return (
         <StructuredPanel 
             fancy 

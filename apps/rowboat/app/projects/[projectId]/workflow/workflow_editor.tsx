@@ -30,6 +30,7 @@ import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Spa
 import { EntityList } from "./entity_list";
 import { CopilotMessage } from "../../../lib/types/copilot_types";
 import { McpImportTools } from "./mcp_imports";
+import { useSearchParams } from 'next/navigation';
 
 enablePatches();
 
@@ -598,9 +599,24 @@ export function WorkflowEditor({
     const [loadingResponse, setLoadingResponse] = useState(false);
     const [loadingMessage, setLoadingMessage] = useState("Thinking...");
     const [responseError, setResponseError] = useState<string | null>(null);
+    const searchParams = useSearchParams();
     const [isMcpImportModalOpen, setIsMcpImportModalOpen] = useState(false);
 
     console.log(`workflow editor chat key: ${state.present.chatKey}`);
+
+    // Auto-show copilot and increment key when prompt is present
+    useEffect(() => {
+        const prompt = searchParams.get('prompt');
+        if (prompt) {
+            setShowCopilot(true);
+            setCopilotKey(prev => prev + 1); // Force copilot to reset
+            
+            // Clean up the URL
+            const url = new URL(window.location.href);
+            url.searchParams.delete('prompt');
+            window.history.replaceState({}, '', url);
+        }
+    }, [searchParams]);
 
     function handleSelectAgent(name: string) {
         dispatch({ type: "select_agent", name });

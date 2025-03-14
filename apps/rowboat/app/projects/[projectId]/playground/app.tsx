@@ -44,35 +44,6 @@ export function App({
         setCounter(counter + 1);
     }
 
-    // const beginSimulation = useCallback((scenario: string) => {
-    //     setExistingChatId(null);
-    //     setLoadingChat(true);
-    //     setCounter(counter + 1);
-    //     setChat({
-    //         projectId,
-    //         createdAt: new Date().toISOString(),
-    //         messages: [],
-    //         simulated: true,
-    //         simulationScenario: scenario,
-    //         systemMessage: '',
-    //     });
-    // }, [counter, projectId]);
-
-    // useEffect(() => {
-    //     const scenarioId = localStorage.getItem('pendingScenarioId');
-    //     if (scenarioId && projectId) {
-    //         console.log('Scenario Effect triggered:', { scenarioId, projectId });
-    //         getScenario(projectId, scenarioId).then((scenario) => {
-    //             console.log('Scenario data received:', scenario);
-    //             beginSimulation(scenario.description);
-    //             localStorage.removeItem('pendingScenarioId');
-    //         }).catch(error => {
-    //             console.error('Error fetching scenario:', error);
-    //             localStorage.removeItem('pendingScenarioId');
-    //         });
-    //     }
-    // }, [projectId, beginSimulation]);
-
     if (hidden) {
         return <></>;
     }
