@@ -26,10 +26,10 @@ import { apiV1 } from "rowboat-shared";
 import { publishWorkflow, renameWorkflow, saveWorkflow } from "../../../actions/workflow_actions";
 import { PublishedBadge } from "./published_badge";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
-import { CopyIcon, Layers2Icon, RadioIcon, RedoIcon, Sparkles, UndoIcon } from "lucide-react";
+import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
 import { CopilotMessage } from "../../../lib/types/copilot_types";
-import { TestProfile } from "@/app/lib/types/testing_types";
+import { McpImportTools } from "./mcp_imports";
 
 enablePatches();
 
@@ -132,6 +132,9 @@ export type Action = {
 } | {
     type: "restore_state";
     state: StateItem;
+} | {
+    type: "import_mcp_tools";
+    tools: z.infer<typeof WorkflowTool>[];
 };
 
 function reducer(state: State, action: Action): State {
@@ -509,6 +512,26 @@ function reducer(state: State, action: Action): State {
                             draft.workflow.startAgent = action.name;
                             draft.chatKey++;
                             break;
+                        case "import_mcp_tools":
+                            if (isLive) {
+                                break;
+                            }
+                            // Process each tool one by one
+                            action.tools.forEach(newTool => {
+                                const existingToolIndex = draft.workflow.tools.findIndex(
+                                    tool => tool.name === newTool.name
+                                );
+                                
+                                if (existingToolIndex !== -1) {
+                                    // Replace existing tool
+                                    draft.workflow.tools[existingToolIndex] = newTool;
+                                } else {
+                                    // Add new tool
+                                    draft.workflow.tools.push(newTool);
+                                }
+                            });
+                            draft.chatKey++;
+                            break;
                     }
                 }
             );
@@ -575,6 +598,7 @@ export function WorkflowEditor({
     const [loadingResponse, setLoadingResponse] = useState(false);
     const [loadingMessage, setLoadingMessage] = useState("Thinking...");
     const [responseError, setResponseError] = useState<string | null>(null);
+    const [isMcpImportModalOpen, setIsMcpImportModalOpen] = useState(false);
 
     console.log(`workflow editor chat key: ${state.present.chatKey}`);
 
@@ -697,6 +721,10 @@ export function WorkflowEditor({
         }
     }, [isLive]);
 
+    function handleImportMcpTools(tools: z.infer<typeof WorkflowTool>[]) {
+        dispatch({ type: "import_mcp_tools", tools });
+    }
+
     useEffect(() => {
         if (state.present.pendingChanges && state.present.workflow) {
             saveQueue.current.push(state.present.workflow);
@@ -732,7 +760,7 @@ export function WorkflowEditor({
                     <DropdownMenu
                         disabledKeys={[
                             ...(state.present.pendingChanges ? ['switch', 'clone'] : []),
-                            ...(isLive ? ['publish'] : []),
+                            ...(isLive ? ['publish', 'mcp'] : []),
                         ]}
                         onAction={(key) => {
                             if (key === 'switch') {
@@ -746,6 +774,9 @@ export function WorkflowEditor({
                             }
                             if (key === 'clipboard') {
                                 handleCopyJSON();
+                            }
+                            if (key === 'mcp') {
+                                setIsMcpImportModalOpen(true);
                             }
                         }}
                     >
@@ -773,6 +804,12 @@ export function WorkflowEditor({
                             startContent={<CopyIcon size={16} />}
                         >
                             Copy as JSON
+                        </DropdownItem>
+                        <DropdownItem
+                            key="mcp"
+                            startContent={<ImportIcon className="w-4 h-4 text-blue-700" />}
+                        >
+                            MCP: Import tools
                         </DropdownItem>
                     </DropdownMenu>
                 </Dropdown>
@@ -935,5 +972,11 @@ export function WorkflowEditor({
                 </ResizablePanel>
             </>}
         </ResizablePanelGroup>
+        <McpImportTools
+            projectId={state.present.workflow.projectId}
+            isOpen={isMcpImportModalOpen}
+            onOpenChange={setIsMcpImportModalOpen}
+            onImport={handleImportMcpTools}
+        />
     </div>;
 }

@@ -5,7 +5,7 @@ import { ObjectId } from "mongodb";
 import { authCheck } from "../../utils";
 import { ApiRequest, ApiResponse } from "../../../../lib/types/types";
 import { AgenticAPIChatRequest, AgenticAPIChatMessage, convertFromAgenticApiToApiMessages, convertFromApiToAgenticApiMessages, convertWorkflowToAgenticAPI } from "../../../../lib/types/agents_api_types";
-import { getAgenticApiResponse, callClientToolWebhook, runRAGToolCall, mockToolResponse } from "../../../../lib/utils";
+import { getAgenticApiResponse, callClientToolWebhook, runRAGToolCall, mockToolResponse, callMcpTool } from "../../../../lib/utils";
 import { check_query_limit } from "../../../../lib/rate_limiting";
 import { apiV1 } from "rowboat-shared";
 import { PrefixLogger } from "../../../../lib/utils";
@@ -162,7 +162,7 @@ export async function POST(
                             return Response.json({ error: "Error running RAG tool call" }, { status: 500 });
                         }
                     } else {
-                        logger.log(`Running client tool webhook for tool ${toolCall.function.name}`);
+                        logger.log(`Processing tool call ${toolCall.function.name}`);
 
                         try {
                             // if tool is supposed to be mocked, mock it
@@ -170,6 +170,10 @@ export async function POST(
                             if (testProfile?.mockTools || workflowTool?.mockTool) {
                                 logger.log(`Mocking tool call ${toolCall.function.name}`);
                                 result = await mockToolResponse(toolCall.id, currentMessages, testProfile?.mockPrompt || workflowTool?.mockInstructions || '');
+                            } else if (workflowTool?.isMcp) {
+                                // else run the tool call by calling the MCP tool
+                                logger.log(`Calling MCP tool: ${toolCall.function.name}`);
+                                result = await callMcpTool(projectId, workflowTool.mcpServerName ?? 'default', toolCall.function.name, JSON.parse(toolCall.function.arguments));
                             } else {
                                 // else run the tool call by calling the client tool webhook
                                 logger.log(`Running client tool webhook for tool ${toolCall.function.name}`);

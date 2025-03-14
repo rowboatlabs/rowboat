@@ -23,7 +23,8 @@ export function ListItem({
     onClick, 
     disabled,
     rightElement,
-    selectedRef 
+    selectedRef,
+    icon
 }: { 
     name: string;
     isSelected: boolean;
@@ -31,6 +32,7 @@ export function ListItem({
     disabled?: boolean;
     rightElement?: React.ReactNode;
     selectedRef?: React.RefObject<HTMLButtonElement>;
+    icon?: React.ReactNode;
 }) {
     return (
         <button
@@ -41,9 +43,12 @@ export function ListItem({
                 "hover:bg-gray-50 dark:hover:bg-gray-800": !isSelected,
             })}
         >
-            <div className={clsx("truncate text-sm dark:text-gray-200", {
-                "text-gray-400 dark:text-gray-500": disabled,
-            })}>{name}</div>
+            <div className="flex items-center gap-1">
+                {icon && <div className="w-4 shrink-0">{icon}</div>}
+                <div className={clsx("truncate text-sm dark:text-gray-200", {
+                    "text-gray-400 dark:text-gray-500": disabled,
+                })}>{name}</div>
+            </div>
             {rightElement}
         </button>
     );

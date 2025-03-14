@@ -6,7 +6,7 @@ import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/r
 import { useRef, useEffect } from "react";
 import { ActionButton, StructuredPanel } from "../../../lib/components/structured-panel";
 import clsx from "clsx";
-import { EllipsisVerticalIcon } from "lucide-react";
+import { EllipsisVerticalIcon, ImportIcon } from "lucide-react";
 import { SectionHeader, ListItem } from "../../../lib/components/structured-list";
 
 interface EntityListProps {
@@ -100,6 +100,7 @@ export function EntityList({
                         onClick={() => onSelectTool(tool.name)}
                         selectedRef={selectedEntity?.type === "tool" && selectedEntity.name === tool.name ? selectedRef : undefined}
                         rightElement={<EntityDropdown name={tool.name} onDelete={onDeleteTool} />}
+                        icon={tool.isMcp ? <ImportIcon className="w-4 h-4 text-blue-700" /> : <></>}
                     />
                 ))}
 

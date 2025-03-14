@@ -8,7 +8,7 @@ import { convertFromAgenticAPIChatMessages } from "../../../../../../lib/types/a
 import { convertToAgenticAPIChatMessages } from "../../../../../../lib/types/agents_api_types";
 import { convertWorkflowToAgenticAPI } from "../../../../../../lib/types/agents_api_types";
 import { AgenticAPIChatRequest } from "../../../../../../lib/types/agents_api_types";
-import { callClientToolWebhook, getAgenticApiResponse, runRAGToolCall, mockToolResponse } from "../../../../../../lib/utils";
+import { callClientToolWebhook, getAgenticApiResponse, runRAGToolCall, mockToolResponse, callMcpTool } from "../../../../../../lib/utils";
 import { check_query_limit } from "../../../../../../lib/rate_limiting";
 import { PrefixLogger } from "../../../../../../lib/utils";
 
@@ -158,14 +158,22 @@ export async function POST(
                                 [...messages, ...unsavedMessages],
                                 workflowTool.mockInstructions || ''
                             );
+                        } else if (workflowTool?.isMcp) {
+                            logger.log(`Calling MCP tool: ${toolCall.function.name}`);
+                            return await callMcpTool(
+                                session.projectId,
+                                workflowTool.mcpServerName ?? 'default',
+                                toolCall.function.name,
+                                JSON.parse(toolCall.function.arguments)
+                            );
+                        } else {
+                            logger.log(`Calling webhook for tool: ${toolCall.function.name}`);
+                            return await callClientToolWebhook(
+                                toolCall,
+                                [...messages, ...unsavedMessages],
+                                session.projectId,
+                            );
                         }
-
-                        logger.log(`Calling webhook for tool: ${toolCall.function.name}`);
-                        return await callClientToolWebhook(
-                            toolCall,
-                            [...messages, ...unsavedMessages],
-                            session.projectId,
-                        );
                     } catch (error) {
                         logger.log(`Error executing tool call ${toolCall.id}: ${error}`);
                         return { error: "Tool execution failed" };

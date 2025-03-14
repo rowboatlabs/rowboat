@@ -18,7 +18,54 @@ import { qdrantClient } from "./qdrant";
 import { EmbeddingRecord } from "./types/datasource_types";
 import { ApiMessage } from "./types/types";
 import { openai } from "@ai-sdk/openai";
-import { TestProfile } from "./types/testing_types";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+
+export async function callMcpTool(
+    projectId: string,
+    mcpServerName: string,
+    toolName: string,
+    parameters: Record<string, unknown>,
+): Promise<unknown> {
+    const project = await projectsCollection.findOne({
+        "_id": projectId,
+    });
+    if (!project) {
+        throw new Error('Project not found');
+    }
+
+    const mcpServer = project.mcpServers?.find(s => s.name === mcpServerName);
+    if (!mcpServer) {
+        throw new Error('MCP server not found');
+    }
+
+    const transport = new SSEClientTransport(new URL(mcpServer.url));
+
+    const client = new Client(
+        {
+            name: "rowboat-client",
+            version: "1.0.0"    
+        },
+        {
+            capabilities: {
+                prompts: {},
+                resources: {},
+                tools: {}   
+            }
+        }
+    );
+
+    await client.connect(transport);
+
+    const result = await client.callTool({
+        name: toolName,
+        arguments: parameters,
+    });
+
+    await client.close();
+
+    return result;  
+}
 
 export async function callClientToolWebhook(
     toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number],

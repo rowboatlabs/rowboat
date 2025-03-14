@@ -2,8 +2,9 @@
 
 import { Metadata } from "next";
 import { Spinner, Textarea, Button, Dropdown, DropdownMenu, DropdownItem, DropdownTrigger, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure, Divider } from "@heroui/react";
-import { ReactNode, useEffect, useState, useCallback } from "react";
+import { ReactNode, useEffect, useState, useCallback, useMemo } from "react";
 import { getProjectConfig, updateProjectName, updateWebhookUrl, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret } from "../../../actions/project_actions";
+import { updateMcpServers } from "../../../actions/mcp_actions";
 import { CopyButton } from "../../../lib/components/copy-button";
 import { EditableField } from "../../../lib/components/editable-field";
 import { EyeIcon, EyeOffIcon, CopyIcon, MoreVerticalIcon, PlusIcon, EllipsisVerticalIcon } from "lucide-react";
@@ -110,6 +111,227 @@ export function BasicSettingsSection({
                 </div>
             </RightContent>
         </SectionRow>
+    </Section>;
+}
+
+function McpServersSection({
+    projectId,
+}: {
+    projectId: string;
+}) {
+    const [servers, setServers] = useState<Array<{ name: string; url: string }>>([]);
+    const [originalServers, setOriginalServers] = useState<Array<{ name: string; url: string }>>([]);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+    const { isOpen, onOpen, onClose } = useDisclosure();
+    const [newServer, setNewServer] = useState({ name: '', url: '' });
+    const [validationErrors, setValidationErrors] = useState<{
+        name?: string;
+        url?: string;
+    }>({});
+
+    // Load initial servers
+    useEffect(() => {
+        setLoading(true);
+        getProjectConfig(projectId).then((project) => {
+            const initialServers = project.mcpServers || [];
+            setServers(JSON.parse(JSON.stringify(initialServers))); // Deep copy
+            setOriginalServers(JSON.parse(JSON.stringify(initialServers))); // Deep copy
+            setLoading(false);
+        });
+    }, [projectId]);
+
+    // Check if there are unsaved changes by comparing the arrays
+    const hasChanges = useMemo(() => {
+        if (servers.length !== originalServers.length) return true;
+        return servers.some((server, index) => {
+            return server.name !== originalServers[index]?.name || 
+                   server.url !== originalServers[index]?.url;
+        });
+    }, [servers, originalServers]);
+
+    const handleAddServer = () => {
+        setNewServer({ name: '', url: '' });
+        setValidationErrors({});
+        onOpen();
+    };
+
+    const handleRemoveServer = (index: number) => {
+        setServers(servers.filter((_, i) => i !== index));
+    };
+
+    const handleCreateServer = () => {
+        // Clear previous validation errors
+        setValidationErrors({});
+        
+        const errors: typeof validationErrors = {};
+
+        // Validate name uniqueness
+        if (!newServer.name.trim()) {
+            errors.name = 'Server name is required';
+        } else if (servers.some(s => s.name === newServer.name)) {
+            errors.name = 'Server name must be unique';
+        }
+
+        // Validate URL
+        if (!newServer.url.trim()) {
+            errors.url = 'Server URL is required';
+        } else {
+            try {
+                new URL(newServer.url);
+            } catch {
+                errors.url = 'Invalid URL format';
+            }
+        }
+
+        if (Object.keys(errors).length > 0) {
+            setValidationErrors(errors);
+            return;
+        }
+
+        setServers([...servers, newServer]);
+        onClose();
+    };
+
+    const handleSave = async () => {
+        setSaving(true);
+        try {
+            await updateMcpServers(projectId, servers);
+            setOriginalServers(JSON.parse(JSON.stringify(servers))); // Update original servers after successful save
+            setMessage({ type: 'success', text: 'Servers updated successfully' });
+            setTimeout(() => setMessage(null), 3000);
+        } catch (error) {
+            setMessage({ type: 'error', text: 'Failed to update servers' });
+        }
+        setSaving(false);
+    };
+
+    return <Section title="MCP servers">
+        <div className="space-y-4">
+            <div className="flex justify-between items-center">
+                <p className="text-sm text-muted-foreground">
+                    MCP servers are used to execute MCP tools.
+                </p>
+                <Button
+                    size="sm"
+                    variant="flat"
+                    startContent={<PlusIcon className="w-4 h-4" />}
+                    onPress={handleAddServer}
+                >
+                    Add Server
+                </Button>
+            </div>
+
+            {loading ? (
+                <Spinner size="sm" />
+            ) : (
+                <>
+                    <div className="space-y-3">
+                        {servers.map((server, index) => (
+                            <div key={index} className="flex gap-3 items-center p-3 border border-border rounded-md">
+                                <div className="flex-1">
+                                    <div className="font-medium">{server.name}</div>
+                                    <div className="text-sm text-muted-foreground">{server.url}</div>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    color="danger"
+                                    variant="light"
+                                    onPress={() => handleRemoveServer(index)}
+                                >
+                                    Remove
+                                </Button>
+                            </div>
+                        ))}
+                        {servers.length === 0 && (
+                            <div className="text-center text-muted-foreground p-4">
+                                No servers configured
+                            </div>
+                        )}
+                    </div>
+
+                    {hasChanges && (
+                        <div className="flex justify-end">
+                            <Button
+                                size="sm"
+                                color="primary"
+                                onPress={handleSave}
+                                isLoading={saving}
+                            >
+                                Save Changes
+                            </Button>
+                        </div>
+                    )}
+
+                    {message && (
+                        <div className={`text-sm p-2 rounded-md ${
+                            message.type === 'success' ? 'bg-green-50 text-green-500' : 'bg-red-50 text-red-500'
+                        }`}>
+                            {message.text}
+                        </div>
+                    )}
+                </>
+            )}
+
+            <Modal isOpen={isOpen} onClose={onClose}>
+                <ModalContent>
+                    <ModalHeader>Add MCP Server</ModalHeader>
+                    <ModalBody>
+                        <div className="flex flex-col gap-4">
+                            <Input
+                                label="Server Name"
+                                placeholder="Enter server name"
+                                value={newServer.name}
+                                onChange={(e) => {
+                                    setNewServer({ ...newServer, name: e.target.value });
+                                    // Clear name error when user types
+                                    if (validationErrors.name) {
+                                        setValidationErrors(prev => ({
+                                            ...prev,
+                                            name: undefined
+                                        }));
+                                    }
+                                }}
+                                errorMessage={validationErrors.name}
+                                isInvalid={!!validationErrors.name}
+                                isRequired
+                            />
+                            <Input
+                                label="SSE URL"
+                                placeholder="https://localhost:8000/sse"
+                                value={newServer.url}
+                                onChange={(e) => {
+                                    setNewServer({ ...newServer, url: e.target.value });
+                                    // Clear URL error when user types
+                                    if (validationErrors.url) {
+                                        setValidationErrors(prev => ({
+                                            ...prev,
+                                            url: undefined
+                                        }));
+                                    }
+                                }}
+                                errorMessage={validationErrors.url}
+                                isInvalid={!!validationErrors.url}
+                                isRequired
+                            />
+                        </div>
+                    </ModalBody>
+                    <ModalFooter>
+                        <Button variant="light" onPress={onClose}>
+                            Cancel
+                        </Button>
+                        <Button
+                            color="primary"
+                            onPress={handleCreateServer}
+                            isDisabled={!newServer.name || !newServer.url}
+                        >
+                            Add Server
+                        </Button>
+                    </ModalFooter>
+                </ModalContent>
+            </Modal>
+        </div>
     </Section>;
 }
 
@@ -587,6 +809,7 @@ export default function App({
                 <BasicSettingsSection projectId={projectId} />
                 <SecretSection projectId={projectId} />
                 <ApiKeysSection projectId={projectId} />
+                <McpServersSection projectId={projectId} />
                 <WebhookUrlSection projectId={projectId} />
                 {useChatWidget && <ChatWidgetSection projectId={projectId} chatWidgetHost={chatWidgetHost} />}
                 <DeleteProjectSection projectId={projectId} />

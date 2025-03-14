@@ -4,15 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import z from "zod";
 import { Workflow } from "../../../lib/types/workflow_types";
 import { WorkflowTool } from "../../../lib/types/workflow_types";
-import { WebpageCrawlResponse } from "../../../lib/types/tool_types";
 import { GetInformationToolResult } from "../../../lib/types/tool_types";
-import { executeClientTool, getInformationTool, scrapeWebpage, suggestToolResponse } from "../../../actions/actions";
+import { executeClientTool, getInformationTool, suggestToolResponse } from "../../../actions/actions";
 import MarkdownContent from "../../../lib/components/markdown-content";
-import Link from "next/link";
 import { apiV1 } from "rowboat-shared";
 import { EditableField } from "../../../lib/components/editable-field";
-import { MessageSquareIcon, EllipsisIcon, CircleCheckIcon, ChevronsDownIcon, ChevronsRightIcon, ChevronRightIcon, ChevronDownIcon, ExternalLinkIcon, XIcon } from "lucide-react";
+import { MessageSquareIcon, EllipsisIcon, CircleCheckIcon, ChevronRightIcon, ChevronDownIcon, XIcon } from "lucide-react";
 import { TestProfile } from "@/app/lib/types/testing_types";
+import { executeMcpTool } from "@/app/actions/mcp_actions";
 
 function UserMessage({ content }: { content: string }) {
     return <div className="self-end ml-[30%] flex flex-col">
@@ -201,6 +200,17 @@ function ToolCall({
                     systemMessage={systemMessage}
                 />;
             }
+            if (matchingWorkflowTool?.isMcp) {
+                return <McpToolCall
+                    toolCall={toolCall}
+                    workflowTool={matchingWorkflowTool}
+                    result={result}
+                    handleResult={handleResult}
+                    projectId={projectId}
+                    messages={messages}
+                    sender={sender}
+                />;
+            }
             return <ClientToolCall
                 toolCall={toolCall}
                 result={result}
@@ -345,6 +355,78 @@ function TransferToAgentToolCall({
     </div>;
 }
 
+function McpToolCall({
+    toolCall,
+    result: availableResult,
+    handleResult,
+    projectId,
+    messages,
+    sender,
+    workflowTool,
+}: {
+    toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
+    result: z.infer<typeof apiV1.ToolMessage> | undefined;
+    handleResult: (result: z.infer<typeof apiV1.ToolMessage>) => void;
+    projectId: string;
+    messages: z.infer<typeof apiV1.ChatMessage>[];
+    sender: string | null | undefined;
+    workflowTool: z.infer<typeof WorkflowTool>;
+}) {
+    const [result, setResult] = useState<z.infer<typeof apiV1.ToolMessage> | undefined>(availableResult);
+
+    useEffect(() => {
+        if (result) {
+            return;
+        }
+        let ignore = false;
+
+        async function process() {
+            let response;
+            try {
+                response = await executeMcpTool(
+                    projectId,
+                    workflowTool.mcpServerName || '',
+                    workflowTool.name,
+                    JSON.parse(toolCall.function.arguments),
+                );
+            } catch (e) {
+                response = {
+                    error: (e as Error).message,
+                };
+            }
+            if (ignore) {
+                return;
+            }
+
+            const result: z.infer<typeof apiV1.ToolMessage> = {
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                tool_name: toolCall.function.name,
+                content: JSON.stringify(response),
+            };
+            setResult(result);
+            handleResult(result);
+        }
+        process();
+
+        return () => {
+            ignore = true;
+        };
+    }, [result, toolCall, projectId, messages, handleResult, workflowTool.mcpServerName, workflowTool.name]);
+
+    return <div className="flex flex-col gap-1">
+        {sender && <div className='text-gray-500 text-sm ml-3'>{sender}</div>}
+        <div className='border border-gray-300 p-2 pt-2 rounded-lg rounded-bl-none flex flex-col gap-2 mr-[30%]'>
+            <ToolCallHeader toolCall={toolCall} result={result} />
+
+            <div className='flex flex-col gap-2'>
+                <ExpandableContent label='Params' content={toolCall.function.arguments} expanded={false} />
+                {result && <ExpandableContent label='Result' content={result.content} expanded={false} />}
+            </div>
+        </div>
+    </div>;
+}
+
 function ClientToolCall({
     toolCall,
     result: availableResult,
@@ -407,8 +489,8 @@ function ClientToolCall({
             <ToolCallHeader toolCall={toolCall} result={result} />
 
             <div className='flex flex-col gap-2'>
-                <ExpandableContent label='Params' content={toolCall.function.arguments} expanded={Boolean(!result)} />
-                {result && <ExpandableContent label='Result' content={result.content} expanded={true} />}
+                <ExpandableContent label='Params' content={toolCall.function.arguments} expanded={false} />
+                {result && <ExpandableContent label='Result' content={result.content} expanded={false} />}
             </div>
         </div>
     </div>;

@@ -6,16 +6,15 @@ import { ActionButton, StructuredPanel } from "../../../lib/components/structure
 import { EditableField } from "../../../lib/components/editable-field";
 import { Divider } from "@heroui/react";
 import { Label } from "../../../lib/components/label";
-import { TrashIcon, XIcon } from "lucide-react";
+import { ImportIcon, XIcon } from "lucide-react";
 import { useState } from "react";
-import { Link as NextUILink } from "@heroui/react";
-import Link from "next/link";
 
 export function ParameterConfig({
     param,
     handleUpdate,
     handleDelete,
-    handleRename
+    handleRename,
+    readOnly
 }: {
     param: {
         name: string,
@@ -29,11 +28,12 @@ export function ParameterConfig({
         required: boolean
     }) => void,
     handleDelete: (name: string) => void,
-    handleRename: (oldName: string, newName: string) => void
+    handleRename: (oldName: string, newName: string) => void,
+    readOnly?: boolean
 }) {
     return <StructuredPanel
         title={param.name}
-        actions={[
+        actions={!readOnly ? [
             <ActionButton
                 key="delete"
                 onClick={() => handleDelete(param.name)}
@@ -41,7 +41,7 @@ export function ParameterConfig({
             >
                 Remove
             </ActionButton>
-        ]}
+        ] : []}
     >
         <div className="flex flex-col gap-2">
             <EditableField
@@ -52,6 +52,7 @@ export function ParameterConfig({
                         handleRename(param.name, newName);
                     }
                 }}
+                locked={readOnly}
             />
 
             <Divider />
@@ -69,6 +70,7 @@ export function ParameterConfig({
                             type: Array.from(keys)[0] as string
                         });
                     }}
+                    isDisabled={readOnly}
                 >
                     {['string', 'number', 'boolean', 'array', 'object'].map(type => (
                         <SelectItem key={type}>
@@ -89,6 +91,7 @@ export function ParameterConfig({
                         description: desc
                     });
                 }}
+                locked={readOnly}
             />
 
             <Divider />
@@ -102,6 +105,7 @@ export function ParameterConfig({
                         required: !param.required
                     });
                 }}
+                isDisabled={readOnly}
             >
                 Required
             </Checkbox>
@@ -121,6 +125,7 @@ export function ToolConfig({
     handleClose: () => void
 }) {
     const [selectedParams, setSelectedParams] = useState(new Set([]));
+    const isReadOnly = tool.isMcp;
 
     function handleParamRename(oldName: string, newName: string) {
         const newProperties = { ...tool.parameters!.properties };
@@ -193,6 +198,13 @@ export function ToolConfig({
             </ActionButton>
         ]}>
             <div className="flex flex-col gap-4">
+                {tool.isMcp && <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 text-sm font-normal bg-gray-100 px-2 py-1 rounded-md text-gray-700">
+                        <ImportIcon className="w-4 h-4 text-blue-700" />
+                        <div className="text-sm font-normal">Imported from MCP server: <span className="font-bold">{tool.mcpServerName}</span></div>
+                    </div>
+                </div>}
+
                 <EditableField
                     label="Name"
                     value={tool.name}
@@ -209,6 +221,7 @@ export function ToolConfig({
                         }
                         return { valid: true };
                     }}
+                    locked={isReadOnly}
                 />
 
                 <Divider />
@@ -221,89 +234,92 @@ export function ToolConfig({
                         description: value
                     })}
                     placeholder="Describe what this tool does..."
+                    locked={isReadOnly}
                 />
 
                 <Divider />
 
-                <Label label="TOOL RESPONSES" />
+                {!isReadOnly && <>
+                    <Label label="TOOL RESPONSES" />
 
-                <div className="ml-4 flex flex-col gap-2">
-                    <RadioGroup
-                        defaultValue="mock"
-                        value={tool.mockTool ? "mock" : "api"}
-                        onValueChange={(value) => handleUpdate({
-                            ...tool,
-                            mockTool: value === "mock",
-                            autoSubmitMockedResponse: value === "mock" ? true : undefined
-                        })}
-                        orientation="horizontal"
-                        classNames={{
-                            wrapper: "gap-8",
-                            label: "text-sm"
-                        }}
-                    >
-                        <Radio 
-                            value="mock" 
-                            size="sm"
+                    <div className="ml-4 flex flex-col gap-2">
+                        <RadioGroup
+                            defaultValue="mock"
+                            value={tool.mockTool ? "mock" : "api"}
+                            onValueChange={(value) => handleUpdate({
+                                ...tool,
+                                mockTool: value === "mock",
+                                autoSubmitMockedResponse: value === "mock" ? true : undefined
+                            })}
+                            orientation="horizontal"
                             classNames={{
-                                base: "max-w-[50%]",
-                                label: "text-sm font-normal"
+                                wrapper: "gap-8",
+                                label: "text-sm"
                             }}
                         >
-                            Mock tool responses
-                        </Radio>
-                        <Radio 
-                            value="api"
-                            size="sm"
-                            classNames={{
-                                base: "max-w-[50%]",
-                                label: "text-sm font-normal"
-                            }}
-                        >
-                            Connect tool to your API
-                        </Radio>
-                    </RadioGroup>
-
-                    {tool.mockTool && <>
-                        <div className="ml-0">
-                            <Checkbox
-                                key="autoSubmitMockedResponse"
+                            <Radio 
+                                value="mock" 
                                 size="sm"
                                 classNames={{
-                                    label: "text-xs font-normal"
+                                    base: "max-w-[50%]",
+                                    label: "text-sm font-normal"
                                 }}
-                                isSelected={tool.autoSubmitMockedResponse ?? true}
-                                onValueChange={(value) => handleUpdate({
-                                    ...tool,
-                                    autoSubmitMockedResponse: value
-                                })}
                             >
-                                Auto-submit mocked response in playground
-                            </Checkbox>
-                        </div>
+                                Mock tool responses
+                            </Radio>
+                            <Radio 
+                                value="api"
+                                size="sm"
+                                classNames={{
+                                    base: "max-w-[50%]",
+                                    label: "text-sm font-normal"
+                                }}
+                            >
+                                Connect tool to your API
+                            </Radio>
+                        </RadioGroup>
 
-                        <Divider />
+                        {tool.mockTool && <>
+                            <div className="ml-0">
+                                <Checkbox
+                                    key="autoSubmitMockedResponse"
+                                    size="sm"
+                                    classNames={{
+                                        label: "text-xs font-normal"
+                                    }}
+                                    isSelected={tool.autoSubmitMockedResponse ?? true}
+                                    onValueChange={(value) => handleUpdate({
+                                        ...tool,
+                                        autoSubmitMockedResponse: value
+                                    })}
+                                >
+                                    Auto-submit mocked response in playground
+                                </Checkbox>
+                            </div>
 
-                        <EditableField
-                            label="Mock instructions"
-                            value={tool.mockInstructions || ''}
-                            onChange={(value) => handleUpdate({
-                                ...tool,
-                                mockInstructions: value
-                            })}
-                            placeholder="Enter mock instructions..."
-                            multiline
-                        />
-                    </>}
+                            <Divider />
 
-                    {!tool.mockTool && (
-                        <div className="ml-0 text-danger text-xs">
-                            Please configure your webhook in the <strong>Integrate</strong> page if you haven&apos;t already.
-                        </div>
-                    )}
-                </div>
+                            <EditableField
+                                label="Mock instructions"
+                                value={tool.mockInstructions || ''}
+                                onChange={(value) => handleUpdate({
+                                    ...tool,
+                                    mockInstructions: value
+                                })}
+                                placeholder="Enter mock instructions..."
+                                multiline
+                            />
+                        </>}
 
-                <Divider />
+                        {!tool.mockTool && (
+                            <div className="ml-0 text-danger text-xs">
+                                Please configure your webhook in the <strong>Integrate</strong> page if you haven&apos;t already.
+                            </div>
+                        )}
+                    </div>
+
+                    <Divider />
+                </>}
 
                 <Label label="Parameters" />
 
@@ -320,11 +336,12 @@ export function ToolConfig({
                             handleUpdate={handleParamUpdate}
                             handleDelete={handleParamDelete}
                             handleRename={handleParamRename}
+                            readOnly={isReadOnly}
                         />
                     ))}
                 </div>
 
-                <Button
+                {!isReadOnly && <Button
                     className="self-start shrink-0"
                     variant="light"
                     size="sm"
@@ -352,7 +369,7 @@ export function ToolConfig({
                     }}
                 >
                     Add Parameter
-                </Button>
+                </Button>}
             </div>
         </StructuredPanel>
     );
