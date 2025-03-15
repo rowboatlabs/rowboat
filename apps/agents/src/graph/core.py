@@ -3,8 +3,6 @@ import sys
 from copy import deepcopy
 from datetime import datetime
 
-from src.swarm.types import Agent, Response
-from src.swarm.core import Swarm
 from src.utils.common import common_logger
 from .guardrails import post_process_response
 from .tools import create_error_tool_call
@@ -22,6 +20,7 @@ from .helpers.instructions import (
     add_error_escalation_instructions, get_universal_system_message, add_universal_system_message_to_agent
 )
 from .helpers.control import get_latest_assistant_msg, get_latest_non_assistant_messages, get_last_agent_name
+from .swarm_wrapper import run as swarm_run, Agent, Response, create_response
 
 logger = common_logger
 
@@ -489,7 +488,7 @@ def run_turn(
         greeting_msg_external["sender"] += " >> External"
 
         turn_messages.extend([greeting_msg_internal, greeting_msg_external])
-        response = Response(
+        response = create_response(
             messages=turn_messages,
             tokens_used={},
             agent=get_agent_by_name(start_agent_name, all_agents),
@@ -541,9 +540,8 @@ def run_turn(
     logger.info(f"Found {len(external_tools)} external tools")
 
     # If no validation error yet, proceed with the main run
-    swarm_client = Swarm()
     if not validation_error_msg:
-        response = swarm_client.run(
+        response = swarm_run(
             agent=last_agent,
             messages=messages,
             execute_tools=True,
@@ -565,7 +563,7 @@ def run_turn(
 
         # Escalate if needed and the sender isn't already the escalation agent
         if escalate_errors and last_agent.name != error_escalation_agent.name:
-            escalation_response = swarm_client.run(
+            escalation_response = swarm_run(
                 agent=error_escalation_agent,
                 messages=[],
                 execute_tools=True,
@@ -627,7 +625,7 @@ def run_turn(
             duplicate_msg = deepcopy(turn_messages[-1])
             duplicate_msg["response_type"] = "external"
             duplicate_msg["sender"] += " >> External"
-            response = Response(
+            response = create_response(
                 messages=[duplicate_msg],
                 tokens_used=tokens_used,
                 agent=last_agent,
