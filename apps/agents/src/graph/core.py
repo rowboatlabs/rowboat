@@ -1,28 +1,26 @@
-import os
-import sys
 from copy import deepcopy
 from datetime import datetime
 
-from src.utils.common import common_logger
+import logging
 from .guardrails import post_process_response
 from .tools import create_error_tool_call
 from .types import AgentRole, PromptType, ErrorType
 from .helpers.access import (
-    get_agent_data_by_name, get_agent_by_name, get_agent_config_by_name, get_tool_config_by_name,
-    get_tool_config_by_type, get_external_tools, get_prompt_by_type, pop_agent_config_by_type, get_agent_by_type
+    get_agent_by_name, get_agent_config_by_name,
+    get_external_tools, get_prompt_by_type, pop_agent_config_by_type, get_agent_by_type
 )
-from .helpers.transfer import create_transfer_function_to_agent, create_transfer_function_to_parent_agent
 from .helpers.state import (
     add_recent_messages_to_history, construct_state_from_response, reset_current_turn, reset_current_turn_agent_history
 )
 from .helpers.instructions import (
-    add_transfer_instructions_to_child_agents, add_transfer_instructions_to_parent_agents, add_rag_instructions_to_agent,
-    add_error_escalation_instructions, get_universal_system_message, add_universal_system_message_to_agent
+    add_error_escalation_instructions, get_universal_system_message
 )
 from .helpers.control import get_latest_assistant_msg, get_latest_non_assistant_messages, get_last_agent_name
-from .swarm_wrapper import run as swarm_run, Agent, Response, create_response, get_agents
+from .swarm_wrapper import run as swarm_run, create_response, get_agents
 
-logger = common_logger
+# Create a dedicated logger for swarm wrapper
+logger = logging.getLogger("graph")
+logger.setLevel(logging.INFO)
 
 
 def order_messages(messages):

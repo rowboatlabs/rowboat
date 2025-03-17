@@ -13,6 +13,7 @@ from .helpers.instructions import (
     add_rag_instructions_to_agent, add_universal_system_message_to_agent
 )
 
+from agents import Agent as NewAgent
 # Create a dedicated logger for swarm wrapper
 logger = logging.getLogger("swarm_wrapper")
 logger.setLevel(logging.INFO)
@@ -92,6 +93,16 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
                 children_names=agent_config.get("connectedAgents", []),
                 most_recent_parent=None
             )
+            new_agent = NewAgent(
+                name=agent_config["name"],
+                instructions=agent_config["instructions"],
+                handoff_description=agent_config["description"],
+                tools=internal_tools + external_tools,
+                model=agent_config["model"],
+                handoffs=agent_config.get("connectedAgents", [])
+            )
+            print("KLKLKLKL new_agent")
+            print(new_agent)
             agents.append(agent)
             logger.debug(f"Successfully created agent: {agent_config['name']}")
         except Exception as e:
