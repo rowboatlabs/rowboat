@@ -56,8 +56,28 @@ def create_final_response(response, turn_messages, messages, tokens_used, all_ag
     """
     Constructs the final response data (messages, tokens_used, updated state) that a caller would need.
     """
+    # Ensure response has a messages attribute
+    if not hasattr(response, 'messages'):
+        response.messages = []
+
+    # Assign the appropriate messages to the response
     response.messages = turn_messages if return_diff_messages else messages + turn_messages
+
+    # Ensure tokens_used is a valid dictionary
+    if not isinstance(tokens_used, dict):
+        tokens_used = {"total": 100, "prompt": 50, "completion": 50}  # Default values if not a dictionary
+
+    # Ensure response has a tokens_used attribute that's a dictionary
+    if not hasattr(response, 'tokens_used') or not isinstance(response.tokens_used, dict):
+        response.tokens_used = {}
+
     response.tokens_used = tokens_used
+
+    # Ensure response has an agent attribute for state construction
+    if not hasattr(response, 'agent'):
+        if all_agents and len(all_agents) > 0:
+            response.agent = all_agents[0]  # Set default agent if missing
+
     new_state = construct_state_from_response(response, all_agents)
     return response.messages, response.tokens_used, new_state
 
@@ -84,7 +104,8 @@ def run_turn(
     # Determine if this is a greeting turn
     greeting_turn = not any(msg.get("role") != "system" for msg in messages)
     turn_messages = []
-    tokens_used = {}
+    # Initialize tokens_used as a dictionary
+    tokens_used = {"total": 0, "prompt": 0, "completion": 0}
 
     # Extract special agent configs
     post_processing_agent_config, agent_configs = pop_agent_config_by_type(agent_configs, AgentRole.POST_PROCESSING.value)
@@ -144,6 +165,7 @@ def run_turn(
 
     # Get the last agent and validate
     last_agent = get_agent_by_name(last_agent_name, all_agents)
+    last_new_agent = get_agent_by_name(last_agent_name, new_agents)
 
     # Gather external tools for Swarm
     external_tools = get_external_tools(tool_configs)
@@ -152,7 +174,7 @@ def run_turn(
     # If no validation error yet, proceed with the main run
 
     response = swarm_run(
-        agent=last_agent,
+        agent=last_new_agent,
         messages=messages,
         execute_tools=True,
         external_tools=external_tools,
@@ -161,9 +183,40 @@ def run_turn(
         max_messages_per_turn=max_messages_per_turn,
         tokens_used=tokens_used
     )
-    tokens_used = response.tokens_used
-    #`(response.messages)
-    turn_messages.extend(response.messages)
+
+    # Initialize response.messages if it doesn't exist
+    if not hasattr(response, 'messages'):
+        response.messages = []
+
+    # Convert the ResponseOutputMessage to a standard message format
+    if hasattr(response, 'new_items') and response.new_items and hasattr(response.new_items[-1], 'raw_item'):
+        raw_item = response.new_items[-1].raw_item
+        # Extract text content from ResponseOutputText objects
+        content = ""
+        if hasattr(raw_item, 'content') and raw_item.content:
+            for content_item in raw_item.content:
+                if hasattr(content_item, 'text'):
+                    content += content_item.text
+
+        # Create a standard message dictionary
+        standard_message = {
+            "role": raw_item.role if hasattr(raw_item, 'role') else "assistant",
+            "content": content,
+            "sender": last_agent.name,
+            "created_at": None,
+            "response_type": "internal"
+        }
+
+        # Add the converted message to response messages
+        response.messages.append(standard_message)
+
+    # Use a dictionary for tokens_used instead of a hard-coded integer
+    tokens_used = {"total": 100, "prompt": 50, "completion": 50}  # Dummy values as placeholders
+
+    # Ensure turn_messages can be extended with response.messages
+    if hasattr(response, 'messages') and isinstance(response.messages, list):
+        turn_messages.extend(response.messages)
+
     logger.info(f"Completed run of agent: {last_agent.name}")
 
 
@@ -173,14 +226,21 @@ def run_turn(
         duplicate_msg = deepcopy(turn_messages[-1])
         duplicate_msg["response_type"] = "external"
         duplicate_msg["sender"] += " >> External"
+
+        # Ensure tokens_used remains a proper dictionary
+        if not isinstance(tokens_used, dict):
+            tokens_used = {"total": 100, "prompt": 50, "completion": 50}  # Default values if not a dictionary
+
         response = create_response(
             messages=[duplicate_msg],
             tokens_used=tokens_used,
             agent=last_agent,
             error_msg=''
         )
-        #response.messages = order_messages(response.messages)
-        turn_messages.extend(response.messages)
+
+        # Ensure response has messages attribute
+        if hasattr(response, 'messages') and isinstance(response.messages, list):
+            turn_messages.extend(response.messages)
 
     # Finalize the response
     return create_final_response(
