@@ -296,78 +296,7 @@ def run_turn(
         children_aware_of_parent=children_aware_of_parent,
         universal_sys_msg=universal_sys_msg
     )
-    if not all_agents:
-        logger.error("No agents initialized")
-        return handle_error(
-            error_tool_call=error_tool_call,
-            error_msg="No agents initialized",
-            return_diff_messages=return_diff_messages,
-            messages=messages,
-            turn_messages=turn_messages,
-            state=state,
-            tokens_used=tokens_used
-        )
-
-    # If this is a greeting turn, produce a greeting message
-    if greeting_turn:
-        greeting_msg = get_prompt_by_type(prompt_configs, PromptType.GREETING.value)
-        if not greeting_msg:
-            logger.error("Greeting prompt not found and messages are empty")
-            return handle_error(
-                error_tool_call=error_tool_call,
-                error_msg="Greeting prompt not found and messages is empty",
-                return_diff_messages=return_diff_messages,
-                messages=messages,
-                turn_messages=turn_messages,
-                state=state,
-                tokens_used=tokens_used
-            )
-
-        greeting_msg_internal = {
-            "content": greeting_msg,
-            "role": "assistant",
-            "sender": start_agent_name,
-            "response_type": "internal",
-            "created_at": datetime.now().isoformat(),
-            "current_turn": True
-        }
-        greeting_msg_external = deepcopy(greeting_msg_internal)
-        greeting_msg_external["response_type"] = "external"
-        greeting_msg_external["sender"] += " >> External"
-
-        turn_messages.extend([greeting_msg_internal, greeting_msg_external])
-        response = create_response(
-            messages=turn_messages,
-            tokens_used={},
-            agent=get_agent_by_name(start_agent_name, all_agents),
-            error_msg=''
-        )
-        return create_final_response(
-            response=response,
-            turn_messages=turn_messages,
-            messages=messages,
-            tokens_used=tokens_used,
-            all_agents=all_agents,
-            return_diff_messages=return_diff_messages
-        )
-
     # Prepare escalation agent
-    error_escalation_agent = deepcopy(get_agent_by_type(all_agents, AgentRole.ESCALATION.value))
-    if not error_escalation_agent:
-        logger.error("Escalation agent not found")
-        return handle_error(
-            error_tool_call=error_tool_call,
-            error_msg="Escalation agent not found",
-            return_diff_messages=return_diff_messages,
-            messages=messages,
-            turn_messages=turn_messages,
-            state=state,
-            tokens_used=tokens_used
-        )
-    clear_agent_fields(error_escalation_agent)
-    add_error_escalation_instructions(error_escalation_agent)
-
-    logger.info(f"Initialized {len(all_agents)} agents")
 
     # Get the last agent and validate
     last_agent = get_agent_by_name(last_agent_name, all_agents)
@@ -404,87 +333,22 @@ def run_turn(
         turn_messages.extend(response.messages)
         logger.info(f"Completed run of agent: {last_agent.name}")
 
-    # If an error occurred (either from validation as ESCALATE or from response.error_msg), handle escalation
-    if (validation_error_msg and validation_error_type == ErrorType.ESCALATE.value) or response.error_msg:
-        error_msg_text = response.error_msg or validation_error_msg
-        logger.info(f"Error raised in turn: {error_msg_text}")
 
-        # Escalate if needed and the sender isn't already the escalation agent
-        if escalate_errors and last_agent.name != error_escalation_agent.name:
-            escalation_response = swarm_run(
-                agent=error_escalation_agent,
-                messages=[],
-                execute_tools=True,
-                external_tools=external_tools,
-                localize_history=False,
-                parent_has_child_history=False,
-                max_messages_per_turn=max_messages_per_error_escalation_turn,
-                tokens_used=tokens_used
-            )
-            tokens_used = escalation_response.tokens_used
-            escalation_response.messages = order_messages(escalation_response.messages)
-            turn_messages.extend(escalation_response.messages)
-            logger.info(f"Completed run of escalation agent: {error_escalation_agent.name}")
-
-            # If the escalation agent itself hit an error, abort
-            if escalation_response.error_msg:
-                logger.info(f"Error raised in escalation turn: {escalation_response.error_msg}")
-                return handle_error(
-                    error_tool_call=error_tool_call,
-                    error_msg=escalation_response.error_msg,
-                    return_diff_messages=return_diff_messages,
-                    messages=messages,
-                    turn_messages=turn_messages,
-                    state=state,
-                    tokens_used=tokens_used
-                )
-        else:
-            # No escalation or we are already in escalation
-            return handle_error(
-                error_tool_call=error_tool_call,
-                error_msg=error_msg_text,
-                return_diff_messages=return_diff_messages,
-                messages=messages,
-                turn_messages=turn_messages,
-                state=state,
-                tokens_used=tokens_used
-            )
-
-    # If we have a post-processing agent, run it
-    if post_processing_agent_config:
-        response = post_process_response(
-            messages=turn_messages,
-            post_processing_agent_name=post_processing_agent_config.get("name", "Post Processing agent"),
-            post_process_instructions=post_processing_agent_config.get("instructions", ""),
-            style_prompt=get_prompt_by_type(prompt_configs, PromptType.STYLE.value),
-            context='',
-            model=post_processing_agent_config.get("model", "gpt-4o"),
+    # Otherwise, duplicate the last response as external
+    logger.info("No post-processing agent found. Duplicating last response and setting to external.")
+    if turn_messages:
+        duplicate_msg = deepcopy(turn_messages[-1])
+        duplicate_msg["response_type"] = "external"
+        duplicate_msg["sender"] += " >> External"
+        response = create_response(
+            messages=[duplicate_msg],
             tokens_used=tokens_used,
-            last_agent=last_agent
+            agent=last_agent,
+            error_msg=''
         )
-        tokens_used = response.tokens_used
         response.messages = order_messages(response.messages)
         turn_messages.extend(response.messages)
-        logger.info("Response post-processed")
-    else:
-        # Otherwise, duplicate the last response as external
-        logger.info("No post-processing agent found. Duplicating last response and setting to external.")
-        if turn_messages:
-            duplicate_msg = deepcopy(turn_messages[-1])
-            duplicate_msg["response_type"] = "external"
-            duplicate_msg["sender"] += " >> External"
-            response = create_response(
-                messages=[duplicate_msg],
-                tokens_used=tokens_used,
-                agent=last_agent,
-                error_msg=''
-            )
-            response.messages = order_messages(response.messages)
-            turn_messages.extend(response.messages)
 
-    # Guardrails agent config is noted but not implemented
-    if guardrails_agent_config:
-        logger.info("Guardrails agent not implemented (ignoring).")
 
     # Ensure state is valid
     if not state or not state.get("last_agent_name"):
