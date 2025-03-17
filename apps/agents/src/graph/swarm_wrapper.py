@@ -13,7 +13,7 @@ from .helpers.instructions import (
     add_rag_instructions_to_agent, add_universal_system_message_to_agent
 )
 
-from agents import Agent as NewAgent
+from agents import Agent as NewAgent, Runner, FunctionTool
 # Create a dedicated logger for swarm wrapper
 logger = logging.getLogger("swarm_wrapper")
 logger.setLevel(logging.INFO)
@@ -37,6 +37,8 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
 
     agents = []
     new_agents = []
+    new_agent_to_children = {}
+    new_agent_name_to_index = {}
     # Create Agent objects from config
     for agent_config in agent_configs:
         logger.debug(f"Processing config for agent: {agent_config['name']}")
@@ -54,6 +56,7 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
 
         logger.debug(f"Agent {agent_config['name']} has {len(agent_config['tools'])} configured tools")
 
+        new_tools = []
         for tool_name in agent_config["tools"]:
             tool_config = get_tool_config_by_name(tool_configs, tool_name)
             if tool_config:
@@ -61,6 +64,28 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
                     "type": "function",
                     "function": tool_config
                 })
+
+                # Create a dummy function to mock the tool execution
+                # Use a closure to capture the tool_name variable properly
+                def create_mock_tool_function(tool_name):
+                    def mock_tool_execution(params):
+                        """Mock function that simulates tool execution"""
+                        logger.info(f"Executing tool {tool_name} with params: {params}")
+                        # Return a mock response based on the tool name
+                        return {
+                            "status": "success",
+                            "tool": tool_name,
+                            "result": f"Simulated result for {tool_name}",
+                            "params_received": params
+                        }
+                    return mock_tool_execution
+
+                new_tools.append(FunctionTool(
+                    name=tool_name,
+                    description=tool_config.get("description", ""),
+                    params_json_schema=tool_config.get("parameters", {}),
+                    on_invoke_tool=create_mock_tool_function(tool_name)
+                ))
                 logger.debug(f"Added tool {tool_name} to agent {agent_config['name']}")
             else:
                 logger.warning(f"Tool {tool_name} not found in tool_configs")
@@ -93,10 +118,11 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
                 name=agent_config["name"],
                 instructions=agent_config["instructions"],
                 handoff_description=agent_config["description"],
-                tools= external_tools,
-                model=agent_config["model"],
-                handoffs=agent_config.get("connectedAgents", [])
+                tools=new_tools,
+                model=agent_config["model"]
             )
+            new_agent_to_children[agent_config["name"]] = agent_config.get("connectedAgents", [])
+            new_agent_name_to_index[agent_config["name"]] = len(new_agents)
             new_agents.append(new_agent)
             agents.append(agent)
             logger.debug(f"Successfully created agent: {agent_config['name']}")
@@ -145,6 +171,13 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
     # Finally add a universal system message to all agents
     for agent in agents:
         add_universal_system_message_to_agent(agent, universal_sys_msg)
+
+    for new_agent in new_agents:
+        # Initialize the handoffs attribute if it doesn't exist
+        if not hasattr(new_agent, 'handoffs'):
+            new_agent.handoffs = []
+        # Look up the agent's children from the old agent and create a list called handoffs in new_agent with pointers to the children in new_agents
+        new_agent.handoffs = [new_agents[new_agent_name_to_index[child]] for child in new_agent_to_children[new_agent.name]]
 
     return agents, new_agents
 
@@ -209,20 +242,26 @@ def run(
     if tokens_used is None:
         tokens_used = {}
 
-    # Initialize the Swarm client
-    swarm_client = Swarm()
+    # Format messages to ensure they're compatible with the OpenAI API
+    formatted_messages = []
+    for msg in messages:
+        # Check if the message has the expected format
+        if isinstance(msg, dict) and "content" in msg:
+            # Make sure the message has the required fields for OpenAI API
+            formatted_msg = {
+                "role": msg.get("role", "user"),
+                "content": msg["content"]
+            }
+            formatted_messages.append(formatted_msg)
+        else:
+            # If the message is just a string, assume it's a user message
+            formatted_messages.append({
+                "role": "user",
+                "content": str(msg)
+            })
 
-    # Run the agent
-    response = swarm_client.run(
-        agent=agent,
-        messages=messages,
-        execute_tools=execute_tools,
-        external_tools=external_tools,
-        localize_history=localize_history,
-        parent_has_child_history=parent_has_child_history,
-        max_messages_per_turn=max_messages_per_turn,
-        tokens_used=tokens_used
-    )
+    # Run the agent with the formatted messages
+    response2 = Runner.run_sync(agent, formatted_messages)
 
     logger.info(f"Completed Swarm run for agent: {agent.name}")
-    return response
+    return response2
