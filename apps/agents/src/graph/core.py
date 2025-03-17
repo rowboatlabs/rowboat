@@ -1,11 +1,10 @@
 from copy import deepcopy
 
 import logging
-from .tools import create_error_tool_call
-from .types import AgentRole, PromptType, ErrorType
+from .types import AgentRole
 from .helpers.access import (
-    get_agent_by_name, get_agent_config_by_name,
-    get_external_tools, pop_agent_config_by_type, get_agent_by_type
+    get_agent_by_name,
+    get_external_tools, pop_agent_config_by_type
 )
 from .helpers.state import (
     add_recent_messages_to_history, construct_state_from_response, reset_current_turn, reset_current_turn_agent_history
@@ -77,7 +76,7 @@ def run_turn(
     logger.info("Running stateless turn")
 
     # Sort messages by the specified ordering
-    messages = order_messages(messages)
+    #messages = order_messages(messages)
 
     # Merge any additional tool configs
     tool_configs = tool_configs + additional_tool_configs
@@ -115,7 +114,7 @@ def run_turn(
         if msg_type == "user":
             messages = reset_current_turn(messages)
             agent_data = reset_current_turn_agent_history(agent_data, [last_agent_name])
-        agent_data = clean_up_history(agent_data)
+        #agent_data = clean_up_history(agent_data)
         agent_data = add_recent_messages_to_history(
             recent_messages=latest_non_assistant_msgs,
             last_agent_name=last_agent_name,
@@ -131,7 +130,7 @@ def run_turn(
 
     # Initialize all agents
     logger.info("Initializing agents")
-    all_agents = get_agents(
+    all_agents, new_agents = get_agents(
         agent_configs=agent_configs,
         tool_configs=tool_configs,
         available_tool_mappings=available_tool_mappings,
@@ -163,7 +162,7 @@ def run_turn(
         tokens_used=tokens_used
     )
     tokens_used = response.tokens_used
-    response.messages = order_messages(response.messages)
+    #`(response.messages)
     turn_messages.extend(response.messages)
     logger.info(f"Completed run of agent: {last_agent.name}")
 
@@ -180,7 +179,7 @@ def run_turn(
             agent=last_agent,
             error_msg=''
         )
-        response.messages = order_messages(response.messages)
+        #response.messages = order_messages(response.messages)
         turn_messages.extend(response.messages)
 
     # Finalize the response

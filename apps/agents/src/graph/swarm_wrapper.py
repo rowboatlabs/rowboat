@@ -36,7 +36,7 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
         raise ValueError("Tools config is not a list in get_agents")
 
     agents = []
-
+    new_agents = []
     # Create Agent objects from config
     for agent_config in agent_configs:
         logger.debug(f"Processing config for agent: {agent_config['name']}")
@@ -49,7 +49,6 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
 
         # Prepare tool lists for this agent
         external_tools = []
-        internal_tools = []
         candidate_parent_functions = {}
         child_functions = {}
 
@@ -58,13 +57,10 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
         for tool_name in agent_config["tools"]:
             tool_config = get_tool_config_by_name(tool_configs, tool_name)
             if tool_config:
-                if tool_name in available_tool_mappings:
-                    internal_tools.append(available_tool_mappings[tool_name])
-                else:
-                    external_tools.append({
-                        "type": "function",
-                        "function": tool_config
-                    })
+                external_tools.append({
+                    "type": "function",
+                    "function": tool_config
+                })
                 logger.debug(f"Added tool {tool_name} to agent {agent_config['name']}")
             else:
                 logger.warning(f"Tool {tool_name} not found in tool_configs")
@@ -83,7 +79,7 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
                 type=agent_config.get("type", "default"),
                 instructions=agent_config["instructions"],
                 description=agent_config.get("description", ""),
-                internal_tools=internal_tools,
+                internal_tools=[],
                 external_tools=external_tools,
                 candidate_parent_functions=candidate_parent_functions,
                 child_functions=child_functions,
@@ -97,12 +93,11 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
                 name=agent_config["name"],
                 instructions=agent_config["instructions"],
                 handoff_description=agent_config["description"],
-                tools=internal_tools + external_tools,
+                tools= external_tools,
                 model=agent_config["model"],
                 handoffs=agent_config.get("connectedAgents", [])
             )
-            print("KLKLKLKL new_agent")
-            print(new_agent)
+            new_agents.append(new_agent)
             agents.append(agent)
             logger.debug(f"Successfully created agent: {agent_config['name']}")
         except Exception as e:
@@ -147,40 +142,11 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
         if agent.children:
             add_transfer_instructions_to_parent_agents(agent, agent.children, transfer_functions)
 
-    # Generate and attach transfer functions for children to call parents
-    logger.info("Generating duplicate transfer functions for children to transfer to parent agents")
-    for agent in agents:
-        for child in agent.children.values():
-            func_to_parent = create_transfer_function_to_parent_agent(
-                parent_agent=agent,
-                children_aware_of_parent=children_aware_of_parent,
-                transfer_functions=transfer_functions
-            )
-            child.candidate_parent_functions[agent.name] = func_to_parent
-
-    # Inject instructions for child agents who have candidate parent functions
-    for agent in agents:
-        if agent.candidate_parent_functions and agent.type != "escalation":
-            add_transfer_instructions_to_child_agents(
-                child=agent,
-                children_aware_of_parent=children_aware_of_parent
-            )
-
-    # Now set the parent function to the correct (most recent) parent
-    for agent in agents:
-        if agent.most_recent_parent:
-            parent_name = agent.most_recent_parent.name
-            assert parent_name in agent.candidate_parent_functions, (
-                f"Most recent parent {parent_name} not found in candidate "
-                f"parent functions for agent {agent.name}"
-            )
-            agent.parent_function = agent.candidate_parent_functions[parent_name]
-
     # Finally add a universal system message to all agents
     for agent in agents:
         add_universal_system_message_to_agent(agent, universal_sys_msg)
 
-    return agents
+    return agents, new_agents
 
 
 def create_response(messages=None, tokens_used=None, agent=None, error_msg=''):
