@@ -348,3 +348,11 @@ You are an helpful customer support assistant
         ],
     }
 }
+
+export const starting_copilot_prompts: { [key: string]: string } = {
+    "Credit Card Assistant": "Create a credit card assistant that helps users with credit card related queries like card recommendations, benefits, rewards, application process, and general credit card advice. Provide accurate and helpful information while maintaining a professional and friendly tone.",
+    
+    "Scheduling Assistant": "Create an appointment scheduling assistant that helps users schedule, modify, and manage their appointments efficiently. Help with finding available time slots, sending reminders, rescheduling appointments, and answering questions about scheduling policies and procedures. Maintain a professional and organized approach.",
+    
+    "Banking Assistant": "Create a banking assistant focused on helping customers with their banking needs. Help with account inquiries, banking products and services, transaction information, and general banking guidance. Prioritize accuracy and security while providing clear and helpful responses to banking-related questions."
+}
