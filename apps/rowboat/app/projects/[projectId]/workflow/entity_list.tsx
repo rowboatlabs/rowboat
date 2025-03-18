@@ -6,7 +6,7 @@ import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/r
 import { useRef, useEffect } from "react";
 import { ActionButton, StructuredPanel } from "../../../lib/components/structured-panel";
 import clsx from "clsx";
-import { EllipsisVerticalIcon, ImportIcon } from "lucide-react";
+import { EllipsisVerticalIcon, ImportIcon, PlusIcon } from "lucide-react";
 import { SectionHeader, ListItem } from "../../../lib/components/structured-list";
 
 interface EntityListProps {
@@ -29,6 +29,7 @@ interface EntityListProps {
     onDeleteAgent: (name: string) => void;
     onDeleteTool: (name: string) => void;
     onDeletePrompt: (name: string) => void;
+    triggerMcpImport: () => void;
 }
 
 export function EntityList({
@@ -48,6 +49,7 @@ export function EntityList({
     onDeleteAgent,
     onDeleteTool,
     onDeletePrompt,
+    triggerMcpImport,
 }: EntityListProps) {
     const selectedRef = useRef<HTMLButtonElement | null>(null);
 
@@ -58,13 +60,20 @@ export function EntityList({
     }, [selectedEntity]);
 
     return (
-        <StructuredPanel 
-            title="WORKFLOW" 
+        <StructuredPanel
+            title="WORKFLOW"
             tooltip="Browse and manage your agents, tools, and prompts in this sidebar"
         >
             <div className="overflow-auto flex flex-col gap-1 justify-start">
                 {/* Agents Section */}
-                <SectionHeader title="Agents" onAdd={() => onAddAgent({})} />
+                <SectionHeader title="Agents">
+                    <ActionButton
+                        icon={<PlusIcon className="w-4 h-4" />}
+                        onClick={() => onAddAgent({})}
+                    >
+                        Add
+                    </ActionButton>
+                </SectionHeader>
                 {agents.map((agent, index) => (
                     <ListItem
                         key={`agent-${index}`}
@@ -91,7 +100,21 @@ export function EntityList({
                 ))}
 
                 {/* Tools Section */}
-                <SectionHeader title="Tools" onAdd={() => onAddTool({})} />
+                <SectionHeader title="Tools">
+                    <ActionButton
+                        icon={<PlusIcon className="w-4 h-4" />}
+                        onClick={() => onAddTool({})}
+                    >
+                        Add
+                    </ActionButton>
+                    <ActionButton
+                        icon={<ImportIcon className="w-4 h-4" />}
+                        onClick={triggerMcpImport}
+                    >
+                        MCP
+                    </ActionButton>
+                </SectionHeader>
+
                 {tools.map((tool, index) => (
                     <ListItem
                         key={`tool-${index}`}
@@ -100,12 +123,19 @@ export function EntityList({
                         onClick={() => onSelectTool(tool.name)}
                         selectedRef={selectedEntity?.type === "tool" && selectedEntity.name === tool.name ? selectedRef : undefined}
                         rightElement={<EntityDropdown name={tool.name} onDelete={onDeleteTool} />}
-                        icon={tool.isMcp ? <ImportIcon className="w-4 h-4 text-blue-700" /> : <></>}
+                        icon={tool.isMcp ? <ImportIcon className="w-4 h-4 text-blue-700" /> : undefined}
                     />
                 ))}
 
                 {/* Prompts Section */}
-                <SectionHeader title="Prompts" onAdd={() => onAddPrompt({})} />
+                <SectionHeader title="Prompts">
+                    <ActionButton
+                        icon={<PlusIcon className="w-4 h-4" />}
+                        onClick={() => onAddPrompt({})}
+                    >
+                        Add
+                    </ActionButton>
+                </SectionHeader>
                 {prompts.map((prompt, index) => (
                     <ListItem
                         key={`prompt-${index}`}

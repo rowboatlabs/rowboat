@@ -714,6 +714,10 @@ export function WorkflowEditor({
         }, 1500);
     }
 
+    function triggerMcpImport() {
+        setIsMcpImportModalOpen(true);
+    }
+
     const processQueue = useCallback(async (state: State, dispatch: React.Dispatch<Action>) => {
         if (saving.current || saveQueue.current.length === 0) return;
 
@@ -791,9 +795,6 @@ export function WorkflowEditor({
                             if (key === 'clipboard') {
                                 handleCopyJSON();
                             }
-                            if (key === 'mcp') {
-                                setIsMcpImportModalOpen(true);
-                            }
                         }}
                     >
                         <DropdownItem
@@ -820,12 +821,6 @@ export function WorkflowEditor({
                             startContent={<CopyIcon size={16} />}
                         >
                             Copy as JSON
-                        </DropdownItem>
-                        <DropdownItem
-                            key="mcp"
-                            startContent={<ImportIcon className="w-4 h-4 text-blue-700" />}
-                        >
-                            MCP: Import tools
                         </DropdownItem>
                     </DropdownMenu>
                 </Dropdown>
@@ -901,6 +896,7 @@ export function WorkflowEditor({
                     onDeleteAgent={handleDeleteAgent}
                     onDeleteTool={handleDeleteTool}
                     onDeletePrompt={handleDeletePrompt}
+                    triggerMcpImport={triggerMcpImport}
                 />
             </ResizablePanel>
             <ResizableHandle />
