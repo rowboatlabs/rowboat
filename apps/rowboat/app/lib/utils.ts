@@ -140,7 +140,7 @@ export async function getAgenticApiResponse(
     rawAPIResponse: unknown,
 }> {
     // call agentic api
-    console.log(`agentic request`, JSON.stringify(request, null, 2));
+    console.log(`sending agentic api request`, JSON.stringify(request));
     const response = await fetch(process.env.AGENTS_API_URL + '/chat', {
         method: 'POST',
         body: JSON.stringify(request),
@@ -154,6 +154,7 @@ export async function getAgenticApiResponse(
         throw new Error(`Failed to call agentic api: ${response.statusText}`);
     }
     const responseJson = await response.json();
+    console.log(`received agentic api response`, JSON.stringify(responseJson));
     const result: z.infer<typeof AgenticAPIChatResponse> = responseJson;
     return {
         messages: result.messages,

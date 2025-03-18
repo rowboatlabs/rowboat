@@ -51,6 +51,7 @@ def health():
 def chat():
     try:
         request_data = ApiRequest(**request.json)
+        print(f"received /chat request: {request_data}")
         validate_request(request_data)
 
         response = get_response(
@@ -61,7 +62,7 @@ def chat():
             copilot_instructions=copilot_instructions
         )
         api_response = ApiResponse(response=response).model_dump()
-
+        print(f"sending /chat response: {api_response}")
         return jsonify(api_response)
 
     except ValidationError as ve:
@@ -88,6 +89,7 @@ def chat():
 def edit_agent_instructions():
     try:
         request_data = ApiRequest(**request.json)
+        print(f"received /edit_agent_instructions request: {request_data}")
         validate_request(request_data)
 
         response = get_response(
@@ -99,6 +101,7 @@ def edit_agent_instructions():
         )
 
         api_response = ApiResponse(response=response).model_dump()
+        print(f"sending /edit_agent_instructions response: {api_response}")
         return jsonify(api_response)
 
     except ValidationError as ve:

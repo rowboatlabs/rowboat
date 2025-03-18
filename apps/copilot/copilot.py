@@ -540,7 +540,6 @@ User: {last_message.content}
     updated_msgs = [{"role": "system", "content": sys_prompt}] + [
         message.model_dump() for message in messages
     ]
-    print(json.dumps(updated_msgs, indent=2))
 
     response = openai_client.chat.completions.create(
         model=MODEL_NAME,

@@ -36,7 +36,7 @@ export async function getCopilotResponse(
         current_workflow_config: JSON.stringify(convertToCopilotWorkflow(current_workflow_config)),
         context: context ? convertToCopilotApiChatContext(context) : null,
     };
-    console.log(`copilot request`, JSON.stringify(request, null, 2));
+    console.log(`sending copilot request`, JSON.stringify(request));
 
     // call copilot api
     const response = await fetch(process.env.COPILOT_API_URL + '/chat', {
@@ -54,7 +54,7 @@ export async function getCopilotResponse(
 
     // parse and return response
     const json: z.infer<typeof CopilotAPIResponse> = await response.json();
-    console.log(`copilot response`, JSON.stringify(json, null, 2));
+    console.log(`received copilot response`, JSON.stringify(json));
     if ('error' in json) {
         throw new Error(`Failed to call copilot api: ${json.error}`);
     }
@@ -182,7 +182,7 @@ export async function getCopilotAgentInstructions(
             agentName: agentName,
         }
     };
-    console.log(`copilot request`, JSON.stringify(request, null, 2));
+    console.log(`sending copilot agent instructions request`, JSON.stringify(request));
 
     // call copilot api
     const response = await fetch(process.env.COPILOT_API_URL + '/edit_agent_instructions', {
@@ -201,7 +201,7 @@ export async function getCopilotAgentInstructions(
     // parse and return response
     const json = await response.json();
 
-    console.log(`copilot response`, JSON.stringify(json, null, 2));
+    console.log(`received copilot agent instructions response`, JSON.stringify(json));
     let copilotResponse: z.infer<typeof CopilotAPIResponse>;
     let agent_instructions: string;
     try {
