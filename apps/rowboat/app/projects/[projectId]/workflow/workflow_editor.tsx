@@ -277,10 +277,10 @@ function reducer(state: State, action: Action): State {
                             if (isLive) {
                                 break;
                             }
-                            let newToolName = "New tool";
+                            let newToolName = "new_tool";
                             if (draft.workflow?.tools.some((tool) => tool.name === newToolName)) {
-                                newToolName = `New tool ${draft.workflow.tools.filter((tool) =>
-                                    tool.name.startsWith("New tool")).length + 1}`;
+                                newToolName = `new_tool_${draft.workflow.tools.filter((tool) =>
+                                    tool.name.startsWith("new_tool")).length + 1}`;
                             }
                             draft.workflow?.tools.push({
                                 name: newToolName,
