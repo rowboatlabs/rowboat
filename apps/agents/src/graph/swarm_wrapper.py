@@ -1,6 +1,7 @@
 from src.swarm.core import Swarm
 from src.swarm.types import Agent as SwarmAgent, Response as SwarmResponse
 import logging
+import json
 
 # Import helper functions needed for get_agents
 from .helpers.access import (
@@ -14,6 +15,9 @@ from .helpers.instructions import (
 )
 
 from agents import Agent as NewAgent, Runner, FunctionTool
+# Add import for OpenAI functionality
+from src.utils.common import generate_openai_output
+
 # Create a dedicated logger for swarm wrapper
 logger = logging.getLogger("swarm_wrapper")
 logger.setLevel(logging.INFO)
@@ -68,16 +72,30 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
                 # Create a dummy function to mock the tool execution
                 # Use a closure to capture the tool_name variable properly
                 def create_mock_tool_function(tool_name):
-                    def mock_tool_execution(params):
-                        """Mock function that simulates tool execution"""
-                        logger.info(f"Executing tool {tool_name} with params: {params}")
-                        # Return a mock response based on the tool name
-                        return {
-                            "status": "success",
-                            "tool": tool_name,
-                            "result": f"Simulated result for {tool_name}",
-                            "params_received": params
-                        }
+                    def mock_tool_execution(**kwargs):
+                        # Docstring will be set after function definition
+                        logger.info(f"Executing tool {tool_name} with params: {kwargs}")
+
+                        # Create a prompt for OpenAI to generate a realistic response
+                        messages = [
+                            {"role": "system", "content": f"You are simulating the execution of a tool called '{tool_name}'. The tool has this description: {tool_config.get('description', 'No description available')}. Generate a realistic response as if the tool was actually executed with the given parameters."},
+                            {"role": "user", "content": f"Generate a realistic response for the tool '{tool_name}' with these parameters: {json.dumps(kwargs)}. The response should be concise and focused on what the tool would actually return."}
+                        ]
+
+                        try:
+                            # Call OpenAI to generate a realistic response
+                            response_content = generate_openai_output(messages, output_type='text', model="gpt-4o")
+
+                            # Return a structured response with the OpenAI-generated content
+                            return response_content
+                        except Exception as e:
+                            logger.error(f"Error generating mock response for {tool_name}: {str(e)}")
+                            # Fall back to a simple mock response if OpenAI call fails
+                            return f"Simulated result for {tool_name}"
+
+
+                    # Set the docstring to use the tool's description
+                    mock_tool_execution.__doc__ = tool_config.get("description", "Mock function that simulates tool execution")
                     return mock_tool_execution
 
                 new_tools.append(FunctionTool(
