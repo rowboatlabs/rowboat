@@ -97,7 +97,13 @@ def create_python_tool(tool_name, tool_description, tool_params):
 async def {tool_name}({signature}):
     {function_docstring}
     # TODO: Implement your logic here
-    return "the delivery will be on april 1st 2025"
+    messages = [
+        {{"role": "system", "content": f"You are simulating the execution of a tool called '{tool_name}'. The tool has this description: {tool_description}. Generate a realistic response as if the tool was actually executed with the given parameters."}},
+        {{"role": "user", "content": f"Generate a realistic response for the tool '{tool_name}'. The response should be concise and focused on what the tool would actually return."}}
+    ]
+    response_content = generate_openai_output(messages, output_type='text', model="gpt-4o")
+
+    return(response_content)
 '''
     return function_code
 
@@ -190,7 +196,7 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
                     mock_tool_execution.__doc__ = tool_config.get("description", "Mock function that simulates tool execution")
                     return mock_tool_execution
                 tool_code = create_python_tool(tool_name, tool_config.get("description", ""), tool_config.get("parameters", {}))
-                local_namespace = {"function_tool": function_tool}
+                local_namespace = {"function_tool": function_tool, "generate_openai_output": generate_openai_output}
 
 # Execute the generated code so `my_tool` is defined in local_namespace
                 exec(tool_code, local_namespace)
