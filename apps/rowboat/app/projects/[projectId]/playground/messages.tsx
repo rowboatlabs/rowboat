@@ -1,17 +1,14 @@
 'use client';
-import { Button, Spinner, Textarea } from "@heroui/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Spinner } from "@heroui/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import z from "zod";
 import { Workflow } from "../../../lib/types/workflow_types";
 import { WorkflowTool } from "../../../lib/types/workflow_types";
-import { GetInformationToolResult } from "../../../lib/types/tool_types";
-import { executeClientTool, getInformationTool, suggestToolResponse } from "../../../actions/actions";
 import MarkdownContent from "../../../lib/components/markdown-content";
 import { apiV1 } from "rowboat-shared";
 import { EditableField } from "../../../lib/components/editable-field";
 import { MessageSquareIcon, EllipsisIcon, CircleCheckIcon, ChevronRightIcon, ChevronDownIcon, XIcon } from "lucide-react";
 import { TestProfile } from "@/app/lib/types/testing_types";
-import { executeMcpTool } from "@/app/actions/mcp_actions";
 
 function UserMessage({ content }: { content: string }) {
     return <div className="self-end ml-[30%] flex flex-col">
@@ -88,7 +85,6 @@ function UserMessageLoading() {
 function ToolCalls({
     toolCalls,
     results,
-    handleResults,
     projectId,
     messages,
     sender,
@@ -98,7 +94,6 @@ function ToolCalls({
 }: {
     toolCalls: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'];
     results: Record<string, z.infer<typeof apiV1.ToolMessage>>;
-    handleResults: (results: z.infer<typeof apiV1.ToolMessage>[]) => void;
     projectId: string;
     messages: z.infer<typeof apiV1.ChatMessage>[];
     sender: string | null | undefined;
@@ -108,21 +103,12 @@ function ToolCalls({
 }) {
     const resultsMap: Record<string, z.infer<typeof apiV1.ToolMessage>> = {};
 
-    function handleToolCallResult(result: z.infer<typeof apiV1.ToolMessage>) {
-        resultsMap[result.tool_call_id] = result;
-        if (Object.keys(resultsMap).length === toolCalls.length) {
-            const results = Object.values(resultsMap);
-            handleResults(results);
-        }
-    }
-
     return <div className="flex flex-col gap-4">
         {toolCalls.map(toolCall => {
             return <ToolCall
                 key={toolCall.id}
                 toolCall={toolCall}
                 result={results[toolCall.id]}
-                handleResult={handleToolCallResult}
                 projectId={projectId}
                 messages={messages}
                 sender={sender}
@@ -137,7 +123,6 @@ function ToolCalls({
 function ToolCall({
     toolCall,
     result,
-    handleResult,
     projectId,
     messages,
     sender,
@@ -147,7 +132,6 @@ function ToolCall({
 }: {
     toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
     result: z.infer<typeof apiV1.ToolMessage> | undefined;
-    handleResult: (result: z.infer<typeof apiV1.ToolMessage>) => void;
     projectId: string;
     messages: z.infer<typeof apiV1.ChatMessage>[];
     sender: string | null | undefined;
@@ -163,63 +147,17 @@ function ToolCall({
         }
     }
 
-    switch (toolCall.function.name) {
-        case 'getArticleInfo':
-            return <GetInformationToolCall
-                toolCall={toolCall}
-                result={result}
-                handleResult={handleResult}
-                projectId={projectId}
-                messages={messages}
-                sender={sender}
-                workflow={workflow}
-            />;
-        default:
-            if (toolCall.function.name.startsWith('transfer_to_')) {
-                return <TransferToAgentToolCall
-                    toolCall={toolCall}
-                    result={result}
-                    handleResult={handleResult}
-                    projectId={projectId}
-                    messages={messages}
-                    sender={sender}
-                />;
-            }
-            if (!matchingWorkflowTool ||
-                matchingWorkflowTool.mockTool ||
-                (testProfile && testProfile.mockTools)) {
-                return <MockToolCall
-                    toolCall={toolCall}
-                    result={result}
-                    handleResult={handleResult}
-                    projectId={projectId}
-                    messages={messages}
-                    sender={sender}
-                    testProfile={testProfile}
-                    workflowTool={matchingWorkflowTool}
-                    systemMessage={systemMessage}
-                />;
-            }
-            if (matchingWorkflowTool?.isMcp) {
-                return <McpToolCall
-                    toolCall={toolCall}
-                    workflowTool={matchingWorkflowTool}
-                    result={result}
-                    handleResult={handleResult}
-                    projectId={projectId}
-                    messages={messages}
-                    sender={sender}
-                />;
-            }
-            return <ClientToolCall
-                toolCall={toolCall}
-                result={result}
-                handleResult={handleResult}
-                projectId={projectId}
-                messages={messages}
-                sender={sender}
-            />;
+    if (toolCall.function.name.startsWith('transfer_to_')) {
+        return <TransferToAgentToolCall
+            result={result}
+            sender={sender}
+        />;
     }
+    return <ClientToolCall
+        toolCall={toolCall}
+        result={result}
+        sender={sender}
+    />;
 }
 
 function ToolCallHeader({
@@ -240,105 +178,11 @@ function ToolCallHeader({
     </div>;
 }
 
-function GetInformationToolCall({
-    toolCall,
-    result: availableResult,
-    handleResult,
-    projectId,
-    messages,
-    sender,
-    workflow,
-}: {
-    toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
-    result: z.infer<typeof apiV1.ToolMessage> | undefined;
-    handleResult: (result: z.infer<typeof apiV1.ToolMessage>) => void;
-    projectId: string;
-    messages: z.infer<typeof apiV1.ChatMessage>[];
-    sender: string | null | undefined;
-    workflow: z.infer<typeof Workflow>;
-}) {
-    const [result, setResult] = useState<z.infer<typeof apiV1.ToolMessage> | undefined>(availableResult);
-    const args = JSON.parse(toolCall.function.arguments) as { question: string };
-    let typedResult: z.infer<typeof GetInformationToolResult> | undefined;
-    if (result) {
-        typedResult = JSON.parse(result.content) as z.infer<typeof GetInformationToolResult>;
-    }
-
-    useEffect(() => {
-        if (result) {
-            return;
-        }
-        let ignore = false;
-
-        async function process() {
-            const result: z.infer<typeof apiV1.ToolMessage> = {
-                role: 'tool',
-                tool_call_id: toolCall.id,
-                tool_name: toolCall.function.name,
-                content: '',
-            };
-            // find target agent
-            const agent = workflow.agents.find(agent => agent.name == sender);
-            if (!agent || !agent.ragDataSources) {
-                result.content = JSON.stringify({
-                    results: [],
-                });
-            } else {
-                const matches = await getInformationTool(projectId, args.question, agent.ragDataSources, agent.ragReturnType, agent.ragK);
-                if (ignore) {
-                    return;
-                }
-                result.content = JSON.stringify(matches);
-            }
-            setResult(result);
-            handleResult(result);
-        }
-        process();
-
-        return () => {
-            ignore = true;
-        };
-    }, [result, toolCall.id, toolCall.function.name, projectId, args.question, workflow.agents, sender, handleResult]);
-
-    return <div className="flex flex-col gap-1">
-        {sender && <div className='text-gray-500 text-sm ml-3'>{sender}</div>}
-        <div className='border border-gray-300 p-2 rounded-lg rounded-bl-none flex flex-col gap-2 mr-[30%]'>
-            <ToolCallHeader toolCall={toolCall} result={result} />
-
-            <div className='mt-1'>
-                {result ? 'Fetched' : 'Fetch'} information for question: <span className='font-mono font-semibold'>{args['question']}</span>
-                {result && <div className='flex flex-col gap-2 mt-2 pt-2 border-t border-t-gray-200'>
-                    {typedResult && typedResult.results.length === 0 && <div>No matches found.</div>}
-                    {typedResult && typedResult.results.length > 0 && <ul className="list-disc ml-6">
-                        {typedResult.results.map((result, index) => {
-                            return <li key={'' + index} className="mb-2">
-                                <ExpandableContent
-                                    label={result.title || result.name}
-                                    content={result.content}
-                                    expanded={false}
-                                />
-                            </li>
-                        })}
-                    </ul>}
-                </div>}
-            </div>
-        </div>
-    </div>;
-}
-
 function TransferToAgentToolCall({
-    toolCall,
     result: availableResult,
-    handleResult,
-    projectId,
-    messages,
     sender,
 }: {
-    toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
     result: z.infer<typeof apiV1.ToolMessage> | undefined;
-    handleResult: (result: z.infer<typeof apiV1.ToolMessage>) => void;
-    projectId: string;
-    messages: z.infer<typeof apiV1.ChatMessage>[];
     sender: string | null | undefined;
 }) {
     const typedResult = availableResult ? JSON.parse(availableResult.content) as { assistant: string } : undefined;
@@ -355,278 +199,24 @@ function TransferToAgentToolCall({
     </div>;
 }
 
-function McpToolCall({
-    toolCall,
-    result: availableResult,
-    handleResult,
-    projectId,
-    messages,
-    sender,
-    workflowTool,
-}: {
-    toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
-    result: z.infer<typeof apiV1.ToolMessage> | undefined;
-    handleResult: (result: z.infer<typeof apiV1.ToolMessage>) => void;
-    projectId: string;
-    messages: z.infer<typeof apiV1.ChatMessage>[];
-    sender: string | null | undefined;
-    workflowTool: z.infer<typeof WorkflowTool>;
-}) {
-    const [result, setResult] = useState<z.infer<typeof apiV1.ToolMessage> | undefined>(availableResult);
-
-    useEffect(() => {
-        if (result) {
-            return;
-        }
-        let ignore = false;
-
-        async function process() {
-            let response;
-            try {
-                response = await executeMcpTool(
-                    projectId,
-                    workflowTool.mcpServerName || '',
-                    workflowTool.name,
-                    JSON.parse(toolCall.function.arguments),
-                );
-            } catch (e) {
-                response = {
-                    error: (e as Error).message,
-                };
-            }
-            if (ignore) {
-                return;
-            }
-
-            const result: z.infer<typeof apiV1.ToolMessage> = {
-                role: 'tool',
-                tool_call_id: toolCall.id,
-                tool_name: toolCall.function.name,
-                content: JSON.stringify(response),
-            };
-            setResult(result);
-            handleResult(result);
-        }
-        process();
-
-        return () => {
-            ignore = true;
-        };
-    }, [result, toolCall, projectId, messages, handleResult, workflowTool.mcpServerName, workflowTool.name]);
-
-    return <div className="flex flex-col gap-1">
-        {sender && <div className='text-gray-500 text-sm ml-3'>{sender}</div>}
-        <div className='border border-gray-300 p-2 pt-2 rounded-lg rounded-bl-none flex flex-col gap-2 mr-[30%]'>
-            <ToolCallHeader toolCall={toolCall} result={result} />
-
-            <div className='flex flex-col gap-2'>
-                <ExpandableContent label='Params' content={toolCall.function.arguments} expanded={false} />
-                {result && <ExpandableContent label='Result' content={result.content} expanded={false} />}
-            </div>
-        </div>
-    </div>;
-}
-
 function ClientToolCall({
     toolCall,
     result: availableResult,
-    handleResult,
-    projectId,
-    messages,
     sender,
 }: {
     toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
     result: z.infer<typeof apiV1.ToolMessage> | undefined;
-    handleResult: (result: z.infer<typeof apiV1.ToolMessage>) => void;
-    projectId: string;
-    messages: z.infer<typeof apiV1.ChatMessage>[];
     sender: string | null | undefined;
 }) {
-    const [result, setResult] = useState<z.infer<typeof apiV1.ToolMessage> | undefined>(availableResult);
-
-    useEffect(() => {
-        if (result) {
-            return;
-        }
-        let ignore = false;
-
-        async function process() {
-            let response;
-            try {
-                response = await executeClientTool(
-                    toolCall,
-                    messages,
-                    projectId,
-                );
-            } catch (e) {
-                response = {
-                    error: (e as Error).message,
-                };
-            }
-            if (ignore) {
-                return;
-            }
-
-            const result: z.infer<typeof apiV1.ToolMessage> = {
-                role: 'tool',
-                tool_call_id: toolCall.id,
-                tool_name: toolCall.function.name,
-                content: JSON.stringify(response),
-            };
-            setResult(result);
-            handleResult(result);
-        }
-        process();
-
-        return () => {
-            ignore = true;
-        };
-    }, [result, toolCall, projectId, messages, handleResult]);
-
     return <div className="flex flex-col gap-1">
         {sender && <div className='text-gray-500 text-sm ml-3'>{sender}</div>}
         <div className='border border-gray-300 p-2 pt-2 rounded-lg rounded-bl-none flex flex-col gap-2 mr-[30%]'>
-            <ToolCallHeader toolCall={toolCall} result={result} />
+            <ToolCallHeader toolCall={toolCall} result={availableResult} />
 
             <div className='flex flex-col gap-2'>
                 <ExpandableContent label='Params' content={toolCall.function.arguments} expanded={false} />
-                {result && <ExpandableContent label='Result' content={result.content} expanded={false} />}
+                {availableResult && <ExpandableContent label='Result' content={availableResult.content} expanded={false} />}
             </div>
-        </div>
-    </div>;
-}
-
-function MockToolCall({
-    toolCall,
-    result: availableResult,
-    handleResult,
-    projectId,
-    messages,
-    sender,
-    testProfile = null,
-    workflowTool,
-    systemMessage,
-}: {
-    toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
-    result: z.infer<typeof apiV1.ToolMessage> | undefined;
-    handleResult: (result: z.infer<typeof apiV1.ToolMessage>) => void;
-    projectId: string;
-    messages: z.infer<typeof apiV1.ChatMessage>[];
-    sender: string | null | undefined;
-    testProfile: z.infer<typeof TestProfile> | null;
-    workflowTool: z.infer<typeof WorkflowTool> | undefined;
-    systemMessage: string | undefined;
-}) {
-    const [result, setResult] = useState<z.infer<typeof apiV1.ToolMessage> | undefined>(availableResult);
-    const [response, setResponse] = useState('');
-    const [generatingResponse, setGeneratingResponse] = useState(false);
-
-    const handleSubmit = useCallback(() => {
-        let parsed;
-        try {
-            parsed = JSON.parse(response);
-        } catch (e) {
-            alert('Invalid JSON');
-            return;
-        }
-        const result: z.infer<typeof apiV1.ToolMessage> = {
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            tool_name: toolCall.function.name,
-            content: JSON.stringify(parsed),
-        };
-        setResult(result);
-        handleResult(result);
-    }, [toolCall.id, toolCall.function.name, handleResult, response]);
-
-    useEffect(() => {
-        if (result) {
-            return;
-        }
-        if (response) {
-            return;
-        }
-        let ignore = false;
-
-        async function process() {
-            setGeneratingResponse(true);
-
-            const response = await suggestToolResponse(
-                toolCall.id,
-                projectId,
-                [{
-                    role: 'system',
-                    content: systemMessage || '',
-                    createdAt: new Date().toISOString(),
-                    version: 'v1',
-                    chatId: '',
-                }, ...messages],
-                testProfile?.mockPrompt || workflowTool?.mockInstructions || '',
-            );
-            if (ignore) {
-                return;
-            }
-            setResponse(response);
-            setGeneratingResponse(false);
-        }
-        process();
-
-        return () => {
-            ignore = true;
-        };
-    }, [result, response, toolCall.id, projectId, messages, testProfile, systemMessage, workflowTool?.mockInstructions]);
-
-    // auto submit if autoSubmitMockedResponse is true
-    useEffect(() => {
-        if (!workflowTool?.autoSubmitMockedResponse) {
-            return;
-        }
-        if (result) {
-            return;
-        }
-        if (response) {
-            handleSubmit();
-        }
-    }, [workflowTool?.autoSubmitMockedResponse, response, handleSubmit, result]);
-
-    return <div className="flex flex-col gap-1">
-        {sender && <div className='text-gray-500 dark:text-gray-400 text-xs ml-3'>{sender}</div>}
-        <div className='border border-gray-300 dark:border-gray-700 p-2 pt-2 rounded-lg rounded-bl-none flex flex-col gap-2 mr-[30%] bg-white dark:bg-gray-900'>
-            <div className="flex items-center gap-2">
-                {!result && <Spinner size="sm" />}
-                {result && <CircleCheckIcon size={16} className="text-gray-500 dark:text-gray-400" />}
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                    Function Call: <code className='bg-gray-100 dark:bg-neutral-800 px-2 py-0.5 rounded font-mono'>{toolCall.function.name}</code>
-                </span>
-            </div>
-
-            <div className='flex flex-col gap-2'>
-                <ExpandableContent label='Params' content={toolCall.function.arguments} expanded={false} />
-                {result && <ExpandableContent label='Result' content={result.content} expanded={false} />}
-            </div>
-
-            {!result && !workflowTool?.autoSubmitMockedResponse && <div className='flex flex-col gap-2 mt-2'>
-                <div>Response:</div>
-                <Textarea
-                    maxRows={10}
-                    placeholder='{}'
-                    variant="bordered"
-                    value={response}
-                    disabled={generatingResponse}
-                    onValueChange={(value) => setResponse(value)}
-                    className='font-mono'
-                    size="sm"
-                >
-                </Textarea>
-                <Button
-                    onPress={handleSubmit}
-                    disabled={generatingResponse}
-                    isLoading={generatingResponse}
-                    size="sm"
-                >
-                    Submit result
-                </Button>
-            </div>}
         </div>
     </div>;
 }
@@ -701,7 +291,6 @@ export function Messages({
     projectId,
     messages,
     toolCallResults,
-    handleToolCallResults,
     loadingAssistantResponse,
     loadingUserResponse,
     workflow,
@@ -712,7 +301,6 @@ export function Messages({
     projectId: string;
     messages: z.infer<typeof apiV1.ChatMessage>[];
     toolCallResults: Record<string, z.infer<typeof apiV1.ToolMessage>>;
-    handleToolCallResults: (results: z.infer<typeof apiV1.ToolMessage>[]) => void;
     loadingAssistantResponse: boolean;
     loadingUserResponse: boolean;
     workflow: z.infer<typeof Workflow>;
@@ -742,7 +330,6 @@ export function Messages({
                             key={index}
                             toolCalls={message.tool_calls}
                             results={toolCallResults}
-                            handleResults={handleToolCallResults}
                             projectId={projectId}
                             messages={messages}
                             sender={message.agenticSender}

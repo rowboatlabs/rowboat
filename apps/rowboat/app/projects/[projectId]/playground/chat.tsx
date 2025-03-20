@@ -1,9 +1,9 @@
 'use client';
-import { getAssistantResponse, simulateUserResponse } from "../../../actions/actions";
+import { getAssistantResponse } from "../../../actions/actions";
 import { useEffect, useState } from "react";
 import { Messages } from "./messages";
 import z from "zod";
-import { PlaygroundChat } from "../../../lib/types/types";
+import { MCPServer, PlaygroundChat } from "../../../lib/types/types";
 import { convertToAgenticAPIChatMessages } from "../../../lib/types/agents_api_types";
 import { convertWorkflowToAgenticAPI } from "../../../lib/types/agents_api_types";
 import { AgenticAPIChatRequest } from "../../../lib/types/agents_api_types";
@@ -15,7 +15,7 @@ import { CopyAsJsonButton } from "./copy-as-json-button";
 import { TestProfile } from "@/app/lib/types/testing_types";
 import { ProfileSelector } from "@/app/projects/[projectId]/test/[[...slug]]/components/selectors/profile-selector";
 import { WithStringId } from "@/app/lib/types/types";
-import { XCircleIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 
 export function Chat({
     chat,
@@ -26,6 +26,8 @@ export function Chat({
     onTestProfileChange,
     systemMessage,
     onSystemMessageChange,
+    mcpServerUrls,
+    toolWebhookUrl,
 }: {
     chat: z.infer<typeof PlaygroundChat>;
     projectId: string;
@@ -35,6 +37,8 @@ export function Chat({
     onTestProfileChange: (profile: WithStringId<z.infer<typeof TestProfile>> | null) => void;
     systemMessage: string;
     onSystemMessageChange: (message: string) => void;
+    mcpServerUrls: Array<z.infer<typeof MCPServer>>;
+    toolWebhookUrl: string;
 }) {
     const [messages, setMessages] = useState<z.infer<typeof apiV1.ChatMessage>[]>(chat.messages);
     const [loadingAssistantResponse, setLoadingAssistantResponse] = useState<boolean>(false);
@@ -66,15 +70,6 @@ export function Chat({
         }];
         setMessages(updatedMessages);
         setFetchResponseError(null);
-    }
-
-    function handleToolCallResults(results: z.infer<typeof apiV1.ToolMessage>[]) {
-        setMessages([...messages, ...results.map((result) => ({
-            ...result,
-            version: 'v1' as const,
-            chatId: '',
-            createdAt: new Date().toISOString(),
-        }))]);
     }
 
     // reset state when workflow changes
@@ -113,6 +108,9 @@ export function Chat({
                 tools,
                 prompts,
                 startAgent,
+                mcpServers: mcpServerUrls,
+                toolWebhookUrl: toolWebhookUrl,
+                testProfile: testProfile ?? undefined,
             };
             setLastAgenticRequest(null);
             setLastAgenticResponse(null);
@@ -164,105 +162,7 @@ export function Chat({
         return () => {
             ignore = true;
         };
-    }, [chat.simulated, messages, projectId, agenticState, workflow, fetchResponseError, systemMessage, simulationComplete]);
-
-    // simulate user turn
-    useEffect(() => {
-        let ignore = false;
-
-        async function process() {
-            if (chat.simulationScenario === undefined) {
-                return;
-            }
-
-            // fetch next user prompt
-            setLoadingUserResponse(true);
-            try {
-
-                const response = await simulateUserResponse(projectId, messages, chat.simulationScenario)
-                if (ignore) {
-                    return;
-                }
-                if (simulationComplete) {
-                    return;
-                }
-                if (response.trim() === 'EXIT') {
-                    setSimulationComplete(true);
-                    return;
-                }
-                setMessages([...messages, {
-                    role: 'user',
-                    content: response,
-                    version: 'v1' as const,
-                    chatId: '',
-                    createdAt: new Date().toISOString(),
-                }]);
-                setFetchResponseError(null);
-            } catch (err) {
-                setFetchResponseError(`Failed to simulate user response: ${err instanceof Error ? err.message : 'Unknown error'}`);
-            } finally {
-                setLoadingUserResponse(false);
-            }
-        }
-
-        // proceed only if chat is simulated
-        if (!chat.simulated) {
-            return;
-        }
-
-        // dont proceed if simulation is complete
-        if (chat.simulated && simulationComplete) {
-            return;
-        }
-
-        // check if there are no messages yet OR
-        // check if the last message is an assistant
-        // message containing a text response. If so, 
-        // call the simulate user turn api to fetch
-        // user response
-        let last = messages[messages.length - 1];
-        if (last && last.role !== 'assistant') {
-            return;
-        }
-        if (last && 'tool_calls' in last) {
-            return;
-        }
-
-        process();
-
-        return () => {
-            ignore = true;
-        };
-    }, [chat.simulated, messages, projectId, simulationComplete, chat.simulationScenario]);
-
-    // save chat on every assistant message
-    // useEffect(() => {
-    //     let ignore = false;
-
-    //     function process() {
-    //         savePlaygroundChat(projectId, {
-    //             ...chat,
-    //             messages,
-    //             simulationComplete,
-    //             agenticState,
-    //         }, chatId)
-    //             .then((insertedChatId) => {
-    //                 if (!chatId) {
-    //                     setChatId(insertedChatId);
-    //                 }
-    //             });
-    //     }
-
-    //     if (messages.length === 0) {
-    //         return;
-    //     }
-
-    //     const lastMessage = messages[messages.length - 1];
-    //     if (lastMessage && lastMessage.role !== 'assistant') {
-    //         return;
-    //     }
-    //     process();
-    // }, [chatId, chat, messages, projectId, simulationComplete, agenticState]);
+    }, [chat.simulated, messages, projectId, agenticState, workflow, fetchResponseError, systemMessage, simulationComplete, mcpServerUrls, toolWebhookUrl, testProfile]);
 
     const handleCopyChat = () => {
         const jsonString = JSON.stringify({
@@ -303,7 +203,6 @@ export function Chat({
             projectId={projectId}
             messages={messages}
             toolCallResults={toolCallResults}
-            handleToolCallResults={handleToolCallResults}
             loadingAssistantResponse={loadingAssistantResponse}
             loadingUserResponse={loadingUserResponse}
             workflow={workflow}

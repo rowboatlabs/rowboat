@@ -2,6 +2,11 @@ import { CoreMessage, ToolCallPart } from "ai";
 import { z } from "zod";
 import { apiV1 } from "rowboat-shared";
 
+export const MCPServer = z.object({
+    name: z.string(),
+    url: z.string(),
+});
+
 export const PlaygroundChat = z.object({
     createdAt: z.string().datetime(),
     projectId: z.string(),

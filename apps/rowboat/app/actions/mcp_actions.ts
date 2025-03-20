@@ -4,7 +4,6 @@ import { WorkflowTool } from "../lib/types/workflow_types";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { projectAuthCheck } from "./project_actions";
-import { callMcpTool } from "../lib/utils";
 import { projectsCollection } from "../lib/mongodb";
 import { Project } from "../lib/types/project_types";
 
@@ -72,11 +71,4 @@ export async function updateMcpServers(projectId: string, mcpServers: z.infer<ty
     await projectsCollection.updateOne({
         _id: projectId,
     }, { $set: { mcpServers } });
-}
-
-export async function executeMcpTool(projectId: string, mcpServerName: string, toolName: string, parameters: Record<string, unknown>): Promise<unknown> {
-    await projectAuthCheck(projectId);
-
-    const result = await callMcpTool(projectId, mcpServerName, toolName, parameters);
-    return result;
 }

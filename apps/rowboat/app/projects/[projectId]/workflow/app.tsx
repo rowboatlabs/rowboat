@@ -1,5 +1,5 @@
 "use client";
-import { WithStringId } from "../../../lib/types/types";
+import { MCPServer, WithStringId } from "../../../lib/types/types";
 import { Workflow } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { z } from "zod";
@@ -13,9 +13,13 @@ import { listDataSources } from "../../../actions/datasource_actions";
 export function App({
     projectId,
     useRag,
+    mcpServerUrls,
+    toolWebhookUrl,
 }: {
     projectId: string;
     useRag: boolean;
+    mcpServerUrls: Array<z.infer<typeof MCPServer>>;
+    toolWebhookUrl: string;
 }) {
     const [selectorKey, setSelectorKey] = useState(0);
     const [workflow, setWorkflow] = useState<WithStringId<z.infer<typeof Workflow>> | null>(null);
@@ -108,6 +112,8 @@ export function App({
             handleShowSelector={handleShowSelector}
             handleCloneVersion={handleCloneVersion}
             useRag={useRag}
+            mcpServerUrls={mcpServerUrls}
+            toolWebhookUrl={toolWebhookUrl}
         />}
     </>
 }

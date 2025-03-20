@@ -8,12 +8,9 @@ import { convertFromAgenticAPIChatMessages } from "../../../../../../lib/types/a
 import { convertToAgenticAPIChatMessages } from "../../../../../../lib/types/agents_api_types";
 import { convertWorkflowToAgenticAPI } from "../../../../../../lib/types/agents_api_types";
 import { AgenticAPIChatRequest } from "../../../../../../lib/types/agents_api_types";
-import { callClientToolWebhook, getAgenticApiResponse, runRAGToolCall, mockToolResponse, callMcpTool } from "../../../../../../lib/utils";
+import { getAgenticApiResponse } from "../../../../../../lib/utils";
 import { check_query_limit } from "../../../../../../lib/rate_limiting";
 import { PrefixLogger } from "../../../../../../lib/utils";
-
-// Add max turns constant at the top with other constants
-const MAX_TURNS = 3;
 
 // get next turn / agent response
 export async function POST(
@@ -23,7 +20,7 @@ export async function POST(
     return await authCheck(req, async (session) => {
         const { chatId } = await params;
         const logger = new PrefixLogger(`widget-chat:${chatId}`);
-        
+
         logger.log(`Processing turn request for chat ${chatId}`);
 
         // check query limit
@@ -95,109 +92,32 @@ export async function POST(
         // get assistant response
         const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow);
         const unsavedMessages: z.infer<typeof apiV1.ChatMessage>[] = [userMessage];
-        let resolvingToolCalls = true;
-        let state: unknown = chat.agenticState ?? {last_agent_name: startAgent};
-        let turns = 0;  // Add turns counter
+        let state: unknown = chat.agenticState ?? { last_agent_name: startAgent };
 
-        while (resolvingToolCalls) {
-            if (turns >= MAX_TURNS) {
-                logger.log(`Max turns (${MAX_TURNS}) reached for chat ${chatId}`);
-                throw new Error("Max turns reached");
-            }
-            turns++;
-
-            const request: z.infer<typeof AgenticAPIChatRequest> = {
-                messages: convertToAgenticAPIChatMessages([systemMessage, ...messages, ...unsavedMessages]),
-                state,
-                agents,
-                tools,
-                prompts,
-                startAgent,
-            };
-            logger.log(`Turn ${turns}: sending agentic request`);
-            const response = await getAgenticApiResponse(request);
-            state = response.state;
-            if (response.messages.length === 0) {
-                throw new Error("No messages returned from assistant");
-            }
-            const convertedMessages = convertFromAgenticAPIChatMessages(response.messages);
-            unsavedMessages.push(...convertedMessages.map(m => ({
-                ...m,
-                version: 'v1' as const,
-                chatId,
-                createdAt: new Date().toISOString(),
-            })));
-
-            // if the last messages is tool call, execute them
-            const lastMessage = convertedMessages[convertedMessages.length - 1];
-            if (lastMessage.role === 'assistant' && 'tool_calls' in lastMessage) {
-                logger.log(`Processing ${lastMessage.tool_calls.length} tool calls`);
-                const toolCallResults = await Promise.all(lastMessage.tool_calls.map(async toolCall => {
-                    logger.log(`Executing tool call: ${toolCall.function.name}`);
-                    try {
-                        if (toolCall.function.name === "getArticleInfo") {
-                            logger.log(`Processing RAG tool call for agent ${lastMessage.agenticSender}`);
-                            const agent = workflow.agents.find(a => a.name === lastMessage.agenticSender);
-                            if (!agent || !agent.ragDataSources) {
-                                throw new Error("Agent not found or has no data sources");
-                            }
-                            return await runRAGToolCall(
-                                session.projectId,
-                                toolCall.function.arguments,
-                                agent.ragDataSources,
-                                agent.ragReturnType,
-                                agent.ragK
-                            );
-                        }
-
-                        const workflowTool = workflow.tools.find(t => t.name === toolCall.function.name);
-                        if (workflowTool?.mockTool) {
-                            logger.log(`Using mock response for tool: ${toolCall.function.name}`);
-                            return await mockToolResponse(
-                                toolCall.id,
-                                [...messages, ...unsavedMessages],
-                                workflowTool.mockInstructions || ''
-                            );
-                        } else if (workflowTool?.isMcp) {
-                            logger.log(`Calling MCP tool: ${toolCall.function.name}`);
-                            return await callMcpTool(
-                                session.projectId,
-                                workflowTool.mcpServerName ?? 'default',
-                                toolCall.function.name,
-                                JSON.parse(toolCall.function.arguments)
-                            );
-                        } else {
-                            logger.log(`Calling webhook for tool: ${toolCall.function.name}`);
-                            return await callClientToolWebhook(
-                                toolCall,
-                                [...messages, ...unsavedMessages],
-                                session.projectId,
-                            );
-                        }
-                    } catch (error) {
-                        logger.log(`Error executing tool call ${toolCall.id}: ${error}`);
-                        return { error: "Tool execution failed" };
-                    }
-                }));
-                unsavedMessages.push(...toolCallResults.map((result, index) => ({
-                    version: 'v1' as const,
-                    chatId,
-                    createdAt: new Date().toISOString(),
-                    role: 'tool' as const,
-                    tool_call_id: lastMessage.tool_calls[index].id,
-                    tool_name: lastMessage.tool_calls[index].function.name,
-                    content: JSON.stringify(result),
-                })));
-            } else {
-                // ensure that the last message is from an assistant
-                // and is of an external type
-                if (lastMessage.role !== 'assistant' || lastMessage.agenticResponseType !== 'external') {
-                    throw new Error("Last message is not from an assistant and is not of an external type");
-                }
-                resolvingToolCalls = false;
-                break;
-            }
+        const request: z.infer<typeof AgenticAPIChatRequest> = {
+            messages: convertToAgenticAPIChatMessages([systemMessage, ...messages, ...unsavedMessages]),
+            state,
+            agents,
+            tools,
+            prompts,
+            startAgent,
+            mcpServers: projectSettings.mcpServers ?? undefined,
+            toolWebhookUrl: projectSettings.webhookUrl ?? undefined,
+            testProfile: undefined,
+        };
+        logger.log(`Sending agentic request`);
+        const response = await getAgenticApiResponse(request);
+        state = response.state;
+        if (response.messages.length === 0) {
+            throw new Error("No messages returned from assistant");
         }
+        const convertedMessages = convertFromAgenticAPIChatMessages(response.messages);
+        unsavedMessages.push(...convertedMessages.map(m => ({
+            ...m,
+            version: 'v1' as const,
+            chatId,
+            createdAt: new Date().toISOString(),
+        })));
 
         logger.log(`Saving ${unsavedMessages.length} new messages and updating chat state`);
         await chatMessagesCollection.insertMany(unsavedMessages);

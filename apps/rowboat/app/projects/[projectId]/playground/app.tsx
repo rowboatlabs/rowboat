@@ -1,7 +1,7 @@
 'use client';
 import { useState } from "react";
 import { z } from "zod";
-import { PlaygroundChat } from "../../../lib/types/types";
+import { MCPServer, PlaygroundChat } from "../../../lib/types/types";
 import { Workflow } from "../../../lib/types/workflow_types";
 import { Chat } from "./chat";
 import { ActionButton, Pane } from "../workflow/pane";
@@ -17,11 +17,15 @@ export function App({
     projectId,
     workflow,
     messageSubscriber,
+    mcpServerUrls,
+    toolWebhookUrl,
 }: {
     hidden?: boolean;
     projectId: string;
     workflow: z.infer<typeof Workflow>;
     messageSubscriber?: (messages: z.infer<typeof apiV1.ChatMessage>[]) => void;
+    mcpServerUrls: Array<z.infer<typeof MCPServer>>;
+    toolWebhookUrl: string;
 }) {
     const [counter, setCounter] = useState<number>(0);
     const [testProfile, setTestProfile] = useState<z.infer<typeof TestProfile> | null>(null);
@@ -84,6 +88,8 @@ export function App({
                     onTestProfileChange={handleTestProfileChange}
                     systemMessage={systemMessage}
                     onSystemMessageChange={handleSystemMessageChange}
+                    mcpServerUrls={mcpServerUrls}
+                    toolWebhookUrl={toolWebhookUrl}
                 />
             </div>
         </Pane>

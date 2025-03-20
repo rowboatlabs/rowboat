@@ -1,5 +1,5 @@
 "use client";
-import { WithStringId } from "../../../lib/types/types";
+import { MCPServer, WithStringId } from "../../../lib/types/types";
 import { Workflow } from "../../../lib/types/workflow_types";
 import { WorkflowTool } from "../../../lib/types/workflow_types";
 import { WorkflowPrompt } from "../../../lib/types/workflow_types";
@@ -559,6 +559,8 @@ export function WorkflowEditor({
     handleShowSelector,
     handleCloneVersion,
     useRag,
+    mcpServerUrls,
+    toolWebhookUrl,
 }: {
     dataSources: WithStringId<z.infer<typeof DataSource>>[];
     workflow: WithStringId<z.infer<typeof Workflow>>;
@@ -566,6 +568,8 @@ export function WorkflowEditor({
     handleShowSelector: () => void;
     handleCloneVersion: (workflowId: string) => void;
     useRag: boolean;
+    mcpServerUrls: Array<z.infer<typeof MCPServer>>;
+    toolWebhookUrl: string;
 }) {
     const [state, dispatch] = useReducer<Reducer<State, Action>>(reducer, {
         patches: [],
@@ -911,6 +915,8 @@ export function WorkflowEditor({
                     projectId={state.present.workflow.projectId}
                     workflow={state.present.workflow}
                     messageSubscriber={updateChatMessages}
+                    mcpServerUrls={mcpServerUrls}
+                    toolWebhookUrl={toolWebhookUrl}
                 />
                 {state.present.selection?.type === "agent" && <AgentConfig
                     key={state.present.selection.name}

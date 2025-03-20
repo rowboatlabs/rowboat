@@ -1,7 +1,9 @@
 import { z } from "zod";
-import { ConnectedEntity, sanitizeTextWithMentions, Workflow, WorkflowAgent, WorkflowPrompt, WorkflowTool } from "./workflow_types";
+import { sanitizeTextWithMentions, Workflow, WorkflowAgent, WorkflowPrompt, WorkflowTool } from "./workflow_types";
 import { apiV1 } from "rowboat-shared";
 import { ApiMessage } from "./types";
+import { TestProfile } from "./testing_types";
+import { MCPServer } from "./types";
 
 export const AgenticAPIChatMessage = z.object({
     role: z.union([z.literal('user'), z.literal('assistant'), z.literal('tool'), z.literal('system')]),
@@ -30,12 +32,8 @@ export const AgenticAPIAgent = WorkflowAgent
         locked: true,
         toggleAble: true,
         global: true,
-        ragDataSources: true,
-        ragReturnType: true,
-        ragK: true,
     })
     .extend({
-        hasRagSources: z.boolean().default(false).optional(),
         tools: z.array(z.string()),
         prompts: z.array(z.string()),
         connectedAgents: z.array(z.string()),
@@ -43,10 +41,10 @@ export const AgenticAPIAgent = WorkflowAgent
 
 export const AgenticAPIPrompt = WorkflowPrompt;
 
-export const AgenticAPITool = WorkflowTool.omit({
-    mockTool: true,
-    autoSubmitMockedResponse: true,
-});
+export const AgenticAPITool = WorkflowTool
+    .omit({
+        autoSubmitMockedResponse: true,
+    })
 
 export const AgenticAPIChatRequest = z.object({
     messages: z.array(AgenticAPIChatMessage),
@@ -55,6 +53,9 @@ export const AgenticAPIChatRequest = z.object({
     tools: z.array(AgenticAPITool),
     prompts: z.array(WorkflowPrompt),
     startAgent: z.string(),
+    testProfile: TestProfile.optional(),
+    mcpServers: z.array(MCPServer).optional(),
+    toolWebhookUrl: z.string().optional(),
 });
 
 export const AgenticAPIChatResponse = z.object({
@@ -82,8 +83,10 @@ export function convertWorkflowToAgenticAPI(workflow: z.infer<typeof Workflow>):
                     description: agent.description,
                     instructions: sanitized,
                     model: agent.model,
-                    hasRagSources: agent.ragDataSources ? agent.ragDataSources.length > 0 : false,
                     controlType: agent.controlType,
+                    ragDataSources: agent.ragDataSources,
+                    ragK: agent.ragK,
+                    ragReturnType: agent.ragReturnType,
                     tools: entities.filter(e => e.type == 'tool').map(e => e.name),
                     prompts: entities.filter(e => e.type == 'prompt').map(e => e.name),
                     connectedAgents: entities.filter(e => e.type === 'agent').map(e => e.name),
@@ -91,10 +94,8 @@ export function convertWorkflowToAgenticAPI(workflow: z.infer<typeof Workflow>):
                 return agenticAgent;
             }),
         tools: workflow.tools.map(tool => {
-            const { mockTool, autoSubmitMockedResponse, ...rest } = tool;
-            return {
-                ...rest,
-            };
+            const { autoSubmitMockedResponse, ...rest } = tool;
+            return rest;
         }),
         prompts: workflow.prompts
             .map(p => {
