@@ -1,4 +1,3 @@
-from src.swarm.core import Swarm
 from src.swarm.types import Agent as SwarmAgent, Response as SwarmResponse
 import logging
 import json
@@ -14,10 +13,10 @@ from .helpers.instructions import (
     add_rag_instructions_to_agent, add_universal_system_message_to_agent
 )
 
-from agents import Agent as NewAgent, Runner, FunctionTool, function_tool
+from agents import Agent as NewAgent, Runner, FunctionTool, function_tool, RunContextWrapper
 # Add import for OpenAI functionality
 from src.utils.common import generate_openai_output
-
+from typing import Any
 # Create a dedicated logger for swarm wrapper
 logger = logging.getLogger("swarm_wrapper")
 logger.setLevel(logging.INFO)
@@ -27,86 +26,22 @@ Agent = SwarmAgent
 Response = SwarmResponse
 
 
-def create_python_tool(tool_name, tool_description, tool_params):
-    """
-    Return a Python function definition (as a string) with the given name, docstring,
-    and parameters derived from a JSON-schema-like dictionary.
+async def catch_all(ctx: RunContextWrapper[Any], args: str, tool_name: str, tool_config: dict) -> str:
+    print(f"Catch all called for tool: {tool_name}")
+    print(f"Args: {args}")
+    print(f"Tool config: {tool_config}")
+    #if tool_config.get("mock", False):
+    #&    return tool_config.get("mockInstructions", "No mock instructions provided")
+    description = tool_config.get("description", "")
 
-    :param tool_name: str
-        Name of the function to generate.
-    :param tool_description: str
-        High-level docstring/description for the function.
-    :param tool_params: dict
-        A JSON Schema–style definition with 'parameters':
-          {
-            "parameters": {
-              "type": "object",
-              "properties": {
-                "<param_name>": {
-                  "type": "string" | "integer" | "number" | "boolean" | "object" | "array",
-                  "description": "..."
-                },
-                ...
-              }
-            }
-          }
-    :return: str
-        The function definition as a string (no shebang or `if __name__ == "__main__"`).
-    """
-
-    # Maps JSON Schema types to Python type hints
-    type_map = {
-        "string": "str",
-        "integer": "int",
-        "number": "float",
-        "boolean": "bool",
-        "object": "dict",
-        "array": "list",
-    }
-
-    # Extract the properties from the JSON-schema-like dict
-    properties = tool_params.get("parameters", {}).get("properties", {})
-
-    # Build the function signature and docstring pieces
-    signature_parts = []
-    docstring_params = []
-    for param_name, param_info in properties.items():
-        # Default to "str" if no specific type is given
-        json_type = param_info.get("type", "string")
-        python_type = type_map.get(json_type, "str")
-        description = param_info.get("description", "")
-
-        # e.g. "orderId: str"
-        signature_parts.append(f"{param_name}: {python_type}")
-
-        # Build docstring lines (reST style)
-        docstring_params.append(f":param {param_name}: {description}")
-        docstring_params.append(f":type {param_name}: {python_type}")
-
-    signature = ", ".join(signature_parts)
-    params_docstring_text = "\n    ".join(docstring_params)
-
-    function_docstring = f'''\"\"\"{tool_description}
-
-    {params_docstring_text}
-\"\"\"'''
-
-    # Return only the function definition (no shebang or main guard)
-    # Return the function definition including the @function_tool decorator
-    function_code = f'''@function_tool
-async def {tool_name}({signature}):
-    {function_docstring}
-    # TODO: Implement your logic here
     messages = [
-        {{"role": "system", "content": f"You are simulating the execution of a tool called '{tool_name}'. The tool has this description: {tool_description}. Generate a realistic response as if the tool was actually executed with the given parameters."}},
-        {{"role": "user", "content": f"Generate a realistic response for the tool '{tool_name}'. The response should be concise and focused on what the tool would actually return."}}
+        {"role": "system", "content": f"You are simulating the execution of a tool called '{tool_name}'. The tool has this description: {description}. Generate a realistic response as if the tool was actually executed with the given parameters."},
+        {"role": "user", "content": f"Generate a realistic response for the tool '{tool_name}' with these parameters: {args}. The response should be concise and focused on what the tool would actually return."}
+
     ]
     response_content = generate_openai_output(messages, output_type='text', model="gpt-4o")
-
+    print(response_content)
     return(response_content)
-'''
-    return function_code
-
 
 def get_agents(agent_configs, tool_configs, localize_history, available_tool_mappings,
                agent_data, start_turn_with_start_agent, children_aware_of_parent, universal_sys_msg):
@@ -140,69 +75,27 @@ def get_agents(agent_configs, tool_configs, localize_history, available_tool_map
         child_functions = {}
 
         logger.debug(f"Agent {agent_config['name']} has {len(agent_config['tools'])} configured tools")
+        print(tool_configs)
 
         new_tools = []
         for tool_name in agent_config["tools"]:
             tool_config = get_tool_config_by_name(tool_configs, tool_name)
+
             if tool_config:
                 external_tools.append({
                     "type": "function",
                     "function": tool_config
                 })
-
-                # Create a dummy function to mock the tool execution
-                # Use a closure to capture the tool_name variable properly
-                def create_mock_tool_function(tool_name):
-
-                    @function_tool(
-                        name=tool_name,
-                        description=tool_config.get("description", ""),
-                        params_json_schema=tool_config.get("parameters", {})
-                    )
-                    def mock_tool_execution(**kwargs):
-                        # Docstring will be set after function definition
-                        logger.info(f"Executing tool {tool_name} with params: {kwargs}")
-
-                        # Create a prompt for OpenAI to generate a realistic response
-                        messages = [
-                            {"role": "system", "content": f"You are simulating the execution of a tool called '{tool_name}'. The tool has this description: {tool_config.get('description', 'No description available')}. Generate a realistic response as if the tool was actually executed with the given parameters."},
-                            {"role": "user", "content": f"Generate a realistic response for the tool '{tool_name}' with these parameters: {json.dumps(kwargs)}. The response should be concise and focused on what the tool would actually return."}
-                        ]
-
-                        try:
-                            # Call OpenAI to generate a realistic response
-                            response_content = generate_openai_output(messages, output_type='text', model="gpt-4o")
-
-                            # Return a properly structured response with the OpenAI-generated content
-                            return {
-                                "status": "success",
-                                "tool": tool_name,
-                                "result": response_content,
-                                "params_received": kwargs
-                            }
-                        except Exception as e:
-                            logger.error(f"Error generating mock response for {tool_name}: {str(e)}")
-                            # Fall back to a simple mock response if OpenAI call fails
-                            return {
-                                "status": "success",
-                                "tool": tool_name,
-                                "result": f"Simulated result for {tool_name}",
-                                "params_received": kwargs,
-                                "error": str(e)
-                            }
-
-
-                    # Set the docstring to use the tool's description
-                    mock_tool_execution.__doc__ = tool_config.get("description", "Mock function that simulates tool execution")
-                    return mock_tool_execution
-                tool_code = create_python_tool(tool_name, tool_config.get("description", ""), tool_config.get("parameters", {}))
-                local_namespace = {"function_tool": function_tool, "generate_openai_output": generate_openai_output}
-
-# Execute the generated code so `my_tool` is defined in local_namespace
-                exec(tool_code, local_namespace)
-                print(tool_code)
-                my_tool_func = local_namespace[tool_name]
-                new_tools.append(my_tool_func)
+                #TODO: Remove this once we have a way to handle the additionalProperties
+                tool_config['parameters']['additionalProperties'] = False
+                tool = FunctionTool(
+                    name=tool_name,
+                    description=tool_config["description"],
+                    params_json_schema=tool_config["parameters"],
+                    on_invoke_tool=lambda ctx, args, _tool_name=tool_name, _tool_config=tool_config:
+                        catch_all(ctx, args, _tool_name, _tool_config)
+                )
+                new_tools.append(tool)
                 logger.debug(f"Added tool {tool_name} to agent {agent_config['name']}")
             else:
                 logger.warning(f"Tool {tool_name} not found in tool_configs")
