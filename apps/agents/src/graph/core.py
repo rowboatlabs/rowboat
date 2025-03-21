@@ -14,6 +14,7 @@ from src.utils.common import common_logger as logger
 
 # Create a dedicated logger for swarm wrapper
 logger.setLevel(logging.INFO)
+print("Logger level set to INFO")
 
 
 def order_messages(messages):
@@ -86,6 +87,7 @@ def run_turn(
     Includes validation, agent setup, optional greeting logic, error handling, and post-processing steps.
     """
     logger.info("Running stateless turn")
+    print("Running stateless turn")
 
     # Sort messages by the specified ordering
     #messages = order_messages(messages)
@@ -124,6 +126,7 @@ def run_turn(
 
     # Initialize all agents
     logger.info("Initializing agents")
+    print("Initializing agents")
     new_agents = get_agents(
         agent_configs=agent_configs,
         tool_configs=tool_configs
@@ -134,8 +137,12 @@ def run_turn(
     # Gather external tools for Swarm
     external_tools = get_external_tools(tool_configs)
     logger.info(f"Found {len(external_tools)} external tools")
+    print(f"Found {len(external_tools)} external tools")
 
     # If no validation error yet, proceed with the main run
+
+    logger.info("Running swarm run")
+    print("Running swarm run")
 
     response = swarm_run(
         agent=last_new_agent,
@@ -143,6 +150,9 @@ def run_turn(
         external_tools=external_tools,
         tokens_used=tokens_used
     )
+
+    logger.info("Swarm run completed")
+    print("Swarm run completed")
 
     # Initialize response.messages if it doesn't exist
     if not hasattr(response, 'messages'):
@@ -170,6 +180,9 @@ def run_turn(
         # Add the converted message to response messages
         response.messages.append(standard_message)
 
+    logger.info("Converted message added to response messages")
+    print("Converted message added to response messages")
+
     # Use a dictionary for tokens_used instead of a hard-coded integer
     tokens_used = {"total": 100, "prompt": 50, "completion": 50}  # Dummy values as placeholders
 
@@ -178,10 +191,12 @@ def run_turn(
         turn_messages.extend(response.messages)
 
     logger.info(f"Completed run of agent: {last_new_agent.name}")
+    print(f"Completed run of agent: {last_new_agent.name}")
 
 
     # Otherwise, duplicate the last response as external
     logger.info("No post-processing agent found. Duplicating last response and setting to external.")
+    print("No post-processing agent found. Duplicating last response and setting to external.")
     if turn_messages:
         duplicate_msg = deepcopy(turn_messages[-1])
         duplicate_msg["response_type"] = "external"
@@ -203,6 +218,8 @@ def run_turn(
             turn_messages.extend(response.messages)
 
     # Finalize the response
+    logger.info("Finalizing response")
+    print("Finalizing response")
     return create_final_response(
         response=response,
         turn_messages=turn_messages,

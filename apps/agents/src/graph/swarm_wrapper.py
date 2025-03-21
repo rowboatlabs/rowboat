@@ -59,6 +59,7 @@ def get_agents(agent_configs, tool_configs):
     # Create Agent objects from config
     for agent_config in agent_configs:
         logger.debug(f"Processing config for agent: {agent_config['name']}")
+        print(f"Processing config for agent: {agent_config['name']}")
 
         # If hasRagSources, append the RAG tool to the agent's tools
         if agent_config.get("hasRagSources", False):
@@ -70,7 +71,7 @@ def get_agents(agent_configs, tool_configs):
         external_tools = []
 
         logger.debug(f"Agent {agent_config['name']} has {len(agent_config['tools'])} configured tools")
-        print(tool_configs)
+        print(f"Agent {agent_config['name']} has {len(agent_config['tools'])} configured tools")
 
         new_tools = []
         for tool_name in agent_config["tools"]:
@@ -92,11 +93,14 @@ def get_agents(agent_configs, tool_configs):
                 )
                 new_tools.append(tool)
                 logger.debug(f"Added tool {tool_name} to agent {agent_config['name']}")
+                print(f"Added tool {tool_name} to agent {agent_config['name']}")
             else:
                 logger.warning(f"Tool {tool_name} not found in tool_configs")
+                print(f"WARNING: Tool {tool_name} not found in tool_configs")
 
         # Create the agent object
         logger.debug(f"Creating Agent object for {agent_config['name']}")
+        print(f"Creating Agent object for {agent_config['name']}")
         try:
             new_agent = NewAgent(
                 name=agent_config["name"],
@@ -109,8 +113,10 @@ def get_agents(agent_configs, tool_configs):
             new_agent_name_to_index[agent_config["name"]] = len(new_agents)
             new_agents.append(new_agent)
             logger.debug(f"Successfully created agent: {agent_config['name']}")
+            print(f"Successfully created agent: {agent_config['name']}")
         except Exception as e:
             logger.error(f"Failed to create agent {agent_config['name']}: {str(e)}")
+            print(f"ERROR: Failed to create agent {agent_config['name']}: {str(e)}")
             raise
 
     for new_agent in new_agents:
@@ -172,6 +178,7 @@ def run(
         Response object from the Swarm client
     """
     logger.info(f"Initializing Swarm client for agent: {agent.name}")
+    print(f"Initializing Swarm client for agent: {agent.name}")
 
     # Initialize default parameters
     if external_tools is None:
@@ -198,7 +205,10 @@ def run(
             })
 
     # Run the agent with the formatted messages
+    logger.info("Beginning Swarm run with run_sync")
+    print("Beginning Swarm run with run_sync")
     response2 = Runner.run_sync(agent, formatted_messages)
 
     logger.info(f"Completed Swarm run for agent: {agent.name}")
+    print(f"Completed Swarm run for agent: {agent.name}")
     return response2

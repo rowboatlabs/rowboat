@@ -38,6 +38,7 @@ def require_api_key(f):
 @require_api_key
 def chat():
     logger.info('='*200)
+    logger.info(f"{'*'*50}Running server mode{'*'*50}")
     try:
         data = request.get_json()
         logger.info('Complete request:')
