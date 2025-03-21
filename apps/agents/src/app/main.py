@@ -37,23 +37,17 @@ def require_api_key(f):
 @app.route("/chat", methods=["POST"])
 @require_api_key
 def chat():
-    print('='*200)
     logger.info('='*200)
     try:
         data = request.get_json()
-        print('Complete request:')
-        logger.info('Complete request')
-        print(data)
+        logger.info('Complete request:')
         logger.info(data)
-
-        print('-'*200)
         logger.info('-'*200)
 
         start_time = datetime.now()
         config = read_json_from_file("./configs/default_config.json")
 
-        print('Begining turn')
-        logger.info('Begining turn')
+        logger.info('Beginning turn')
         resp_messages, resp_tokens_used, resp_state = run_turn(
             messages=data.get("messages", []),
             start_agent_name=data.get("startAgent", ""),
@@ -64,13 +58,9 @@ def chat():
             additional_tool_configs=[RAG_TOOL, CLOSE_CHAT_TOOL]
         )
 
-        print('-'*200)
         logger.info('-'*200)
-
-        print('Raw output')
-        logger.info('Raw output')
-        print(resp_messages, resp_tokens_used, resp_state)
-        logger.info(resp_messages, resp_tokens_used, resp_state)
+        logger.info('Raw output:')
+        logger.info((resp_messages, resp_tokens_used, resp_state))
 
         out = {
             "messages": resp_messages,
@@ -78,24 +68,17 @@ def chat():
             "state": resp_state,
         }
         
-        print("Output: ")
-        logger.info(f"Output: ")
+        logger.info("Output:")
         for k, v in out.items():
-            print(f"{k}: {v}")
-            print('*'*200)
             logger.info(f"{k}: {v}")
             logger.info('*'*200)
         
-        print("Processing time:")
-        print('='*200)
         logger.info('='*200)
-        print(f"Processing time: {datetime.now() - start_time}")
         logger.info(f"Processing time: {datetime.now() - start_time}")
         
         return jsonify(out)
 
     except Exception as e:
-        print(e)
         logger.error(f"Error: {e}")
         return jsonify({"error": str(e)}), 500
 
