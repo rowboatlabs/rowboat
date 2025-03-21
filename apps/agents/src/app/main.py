@@ -52,28 +52,26 @@ def chat():
         start_time = datetime.now()
         config = read_json_from_file("./configs/default_config.json")
 
+        print('Begining turn')
+        logger.info('Begining turn')
         resp_messages, resp_tokens_used, resp_state = run_turn(
             messages=data.get("messages", []),
             start_agent_name=data.get("startAgent", ""),
             agent_configs=data.get("agents", []),
             tool_configs=data.get("tools", []),
-            localize_history=config.get("localize_history", True),
-            return_diff_messages=config.get("return_diff_messages", True),
-            prompt_configs=data.get("prompts", []),
             start_turn_with_start_agent=config.get("start_turn_with_start_agent", False),
-            children_aware_of_parent=config.get("children_aware_of_parent", False),
-            parent_has_child_history=config.get("parent_has_child_history", True),
             state=data.get("state", {}),
-            additional_tool_configs=[RAG_TOOL, CLOSE_CHAT_TOOL],
-            max_messages_per_turn=config.get("max_messages_per_turn", 2),
-            max_messages_per_error_escalation_turn=config.get("max_messages_per_error_escalation_turn", 2),
-            escalate_errors=config.get("escalate_errors", True),
-            max_overall_turns=config.get("max_overall_turns", 10)
+            additional_tool_configs=[RAG_TOOL, CLOSE_CHAT_TOOL]
         )
 
         print('-'*200)
         logger.info('-'*200)
-        
+
+        print('Raw output')
+        logger.info('Raw output')
+        print(resp_messages, resp_tokens_used, resp_state)
+        logger.info(resp_messages, resp_tokens_used, resp_state)
+
         out = {
             "messages": resp_messages,
             "tokens_used": resp_tokens_used,

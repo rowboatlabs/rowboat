@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 import time
-from collections import defaultdict
 from dotenv import load_dotenv
 from openai import OpenAI
 

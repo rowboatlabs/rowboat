@@ -12,11 +12,11 @@ from .helpers.instructions import (
 
 from agents import Agent as NewAgent, Runner, FunctionTool, RunContextWrapper
 # Add import for OpenAI functionality
-from src.utils.common import generate_openai_output
+from src.utils.common import common_logger as logger, generate_openai_output
 from typing import Any
 # Create a dedicated logger for swarm wrapper
-logger = logging.getLogger("swarm_wrapper")
-logger.setLevel(logging.INFO)
+#logger = logging.getLogger("swarm_wrapper")
+#logger.setLevel(logging.INFO)
 
 from pydantic import BaseModel
 from typing import List, Optional, Dict

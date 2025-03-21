@@ -10,9 +10,9 @@ from .helpers.state import (
 )
 from .helpers.control import get_latest_assistant_msg, get_latest_non_assistant_messages, get_last_agent_name
 from .swarm_wrapper import run as swarm_run, create_response, get_agents
+from src.utils.common import common_logger as logger
 
 # Create a dedicated logger for swarm wrapper
-logger = logging.getLogger("graph")
 logger.setLevel(logging.INFO)
 
 
