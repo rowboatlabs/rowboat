@@ -49,13 +49,7 @@ def construct_state_from_response(response, agents):
     for agent in agents:
         agent_data.append({
             "name": agent.name,
-            "instructions": agent.instructions,
-            "parent_function": agent.parent_function.__name__ if agent.parent_function else None,
-            "child_functions": [f.__name__ for f in agent.child_functions.values()] if agent.child_functions else [],
-            "internal_tools": [t.get("function").get("name") for t in agent.internal_tools] if agent.internal_tools else [],
-            "external_tools": [t.get("function").get("name") for t in agent.external_tools] if agent.external_tools else [],
-            "history": agent.history,
-            "most_recent_parent_name": agent.most_recent_parent.name if agent.most_recent_parent else ""
+            "instructions": agent.instructions
         })
 
     state = {

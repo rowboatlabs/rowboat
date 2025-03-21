@@ -87,18 +87,9 @@ if __name__ == "__main__":
             start_agent_name=start_agent_name,
             agent_configs=agent_configs,
             tool_configs=tool_configs,
-            return_diff_messages=config.get("return_diff_messages", True),
-            prompt_configs=prompt_configs,
             start_turn_with_start_agent=config.get("start_turn_with_start_agent", False),
-            children_aware_of_parent=config.get("children_aware_of_parent", False),
-            parent_has_child_history=config.get("parent_has_child_history", True),
             state=state,
-            additional_tool_configs=[RAG_TOOL, CLOSE_CHAT_TOOL],
-            error_tool_call=config.get("error_tool_call", True),
-            max_messages_per_turn=config.get("max_messages_per_turn", 10),
-            max_messages_per_error_escalation_turn=config.get("max_messages_per_error_escalation_turn", 4),
-            escalate_errors=config.get("escalate_errors", True),
-            max_overall_turns=config.get("max_overall_turns", 10)
+            additional_tool_configs=[RAG_TOOL, CLOSE_CHAT_TOOL]
         )
         state = resp_state
         resp_messages = order_messages(resp_messages)
