@@ -106,7 +106,9 @@
           "required": [
             "order_id"
           ]
-        }
+        },
+        "mockTool": true,
+        "mockInstructions": "Return a mock response for Door Dash order details."
       },
       {
         "name": "get_delivery_status",
