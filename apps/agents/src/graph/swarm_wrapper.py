@@ -17,6 +17,9 @@ from typing import Any
 # Create a dedicated logger for swarm wrapper
 #logger = logging.getLogger("swarm_wrapper")
 #logger.setLevel(logging.INFO)
+import asyncio
+from mcp import ClientSession
+from mcp.client.sse import sse_client
 
 from pydantic import BaseModel
 from typing import List, Optional, Dict
@@ -90,6 +93,25 @@ async def call_webhook(tool_name: str, args: str) -> str:
         print(f"Exception in call_webhook: {str(e)}")
         return f"Error: Failed to call webhook - {str(e)}"
 
+async def call_mcp(tool_name: str, args: str, mcp_server_name: str, mcp_servers: dict) -> str:
+    """
+    Calls the MCP with the given tool name and arguments.
+    """
+    server_url = "http://localhost:8000/sse" #mcp_servers.get(tool_name, None)
+    print(args)
+    async with sse_client(url=server_url) as streams:
+        # Create a client session using the SSE streams
+        async with ClientSession(*streams) as session:
+            # Initialize the session (perform handshake with the server)
+            await session.initialize()
+            # Call the tool on the server and await the response
+            response = await session.call_tool(tool_name, arguments=json.loads(args))
+
+            # Print the response received from the server
+            print("Server response:", response)
+
+    return response
+
 async def catch_all(ctx: RunContextWrapper[Any], args: str, tool_name: str, tool_config: dict) -> str:
     """
     Handles all tool calls by dispatching to the mock_tool function.
@@ -111,6 +133,9 @@ async def catch_all(ctx: RunContextWrapper[Any], args: str, tool_name: str, tool
     if tool_config.get("mockTool", False):
         # Call mock_tool to handle the response (it will decide whether to use mock instructions or generate a response)
         response_content = await mock_tool(tool_name, args, tool_config)
+        print(response_content)
+    elif tool_config.get("isMcp", False):
+        response_content = await call_mcp(tool_name, args, tool_config.get("mcpServerName", ""), {})
         print(response_content)
     else:
         response_content = await call_webhook(tool_name, args)
