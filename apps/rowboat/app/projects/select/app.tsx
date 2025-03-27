@@ -1,7 +1,7 @@
 'use client';
 
 import { Project } from "../../lib/types/project_types";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { z } from "zod";
 import { listProjects, createProject, createProjectFromPrompt } from "../../actions/project_actions";
 import { useRouter } from 'next/navigation';
@@ -11,11 +11,10 @@ import { templates } from "@/app/lib/project_templates";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { Textarea } from "@/components/ui/textarea";
 import { Submit } from "./components/submit-button";
-import Fuse from 'fuse.js';
 import { TimeFilter } from "./components/search-input";
-import { isToday, isThisWeek, isThisMonth } from "@/lib/utils/date";
 import { TemplateCardsList } from "./components/template-cards-list";
 import { SearchProjects } from "./components/search-projects";
+import { CustomPromptCard } from "./components/custom-prompt-card";
 
 interface SearchOptions {
     query: string;
@@ -23,7 +22,6 @@ interface SearchOptions {
 }
 
 export default function App() {
-    const router = useRouter();
     const [projects, setProjects] = useState<z.infer<typeof Project>[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     
@@ -36,52 +34,6 @@ export default function App() {
         query: '',
         timeFilter: 'all'
     });
-
-    const fuseOptions = {
-        keys: ['name'],
-        threshold: 0.3,
-        distance: 100,
-        minMatchCharLength: 2,
-        shouldSort: true,
-        includeScore: true,
-    };
-
-    const fuse = useMemo(() => {
-        return new Fuse(projects, fuseOptions);
-    }, [projects]);
-
-    const filteredProjects = useMemo(() => {
-        if (!searchOptions.query.trim() && searchOptions.timeFilter === 'all') {
-            return projects;
-        }
-
-        let results = projects;
-
-        if (searchOptions.query.trim()) {
-            const fuseResults = fuse.search(searchOptions.query);
-            results = fuseResults
-                .filter(result => result.score && result.score < 0.6)
-                .map(result => result.item);
-        }
-
-        if (searchOptions.timeFilter !== 'all') {
-            results = results.filter(project => {
-                const projectDate = new Date(project.createdAt);
-                switch (searchOptions.timeFilter) {
-                    case 'today':
-                        return isToday(projectDate);
-                    case 'week':
-                        return isThisWeek(projectDate);
-                    case 'month':
-                        return isThisMonth(projectDate);
-                    default:
-                        return true;
-                }
-            });
-        }
-
-        return results;
-    }, [projects, searchOptions, fuse]);
 
     const getNextUntitledNumber = (projects: z.infer<typeof Project>[]) => {
         const untitledProjects = projects
@@ -212,6 +164,8 @@ export default function App() {
                         isLoading={isLoading}
                         searchOptions={searchOptions}
                         onSearchOptionsChange={setSearchOptions}
+                        heading="Select an existing project"
+                        subheading="Choose from your projects"
                     />
 
                     {/* Right side: Project Creation */}
@@ -234,27 +188,38 @@ export default function App() {
                             onKeyDown={handleKeyDown}
                             className="px-4 pt-4 space-y-6"
                         >
-                            <div>
+                            <div className="space-y-3">
                                 <SectionHeading>Name your assistant</SectionHeading>
                                 <Textarea
                                     required
                                     name="name"
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
-                                    className="mt-1 min-h-[60px]"
+                                    className="min-h-[60px]"
                                     placeholder={defaultName}
                                 />
                             </div>
 
                             <input type="hidden" name="template" value={selectedCard} />
 
-                            <div className="space-y-4">
-                                <TemplateCardsList
-                                    selectedCard={selectedCard}
-                                    onSelectCard={handleCardSelect}
-                                    customPrompt={customPrompt}
-                                    onCustomPromptChange={setCustomPrompt}
-                                />
+                            <div className="space-y-6">
+                                <div className="space-y-3">
+                                    <SectionHeading>Start with your own prompt</SectionHeading>
+                                    <CustomPromptCard
+                                        selected={selectedCard === 'custom'}
+                                        onSelect={() => handleCardSelect('custom')}
+                                        customPrompt={customPrompt}
+                                        onCustomPromptChange={setCustomPrompt}
+                                    />
+                                </div>
+                                
+                                <div className="space-y-3">
+                                    <SectionHeading>Or choose an example</SectionHeading>
+                                    <TemplateCardsList
+                                        selectedCard={selectedCard}
+                                        onSelectCard={handleCardSelect}
+                                    />
+                                </div>
                             </div>
                         </form>
                     </section>

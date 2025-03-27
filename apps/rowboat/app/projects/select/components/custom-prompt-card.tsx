@@ -2,17 +2,14 @@
 import { cn } from "@heroui/react";
 import { CheckIcon } from "lucide-react";
 import { tokens } from "@/app/styles/design-tokens";
-import { HighlightedField } from "@/components/ui/highlighted-field";
 import { Textarea } from "@/components/ui/textarea";
 
 interface CustomPromptCardProps {
-    onSelect: () => void;
     selected: boolean;
-    onCustomPromptChange: (prompt: string) => void;
+    onSelect: () => void;
     customPrompt: string;
+    onCustomPromptChange: (value: string) => void;
 }
-
-const DEFAULT_PROMPT = "Create a customer support assistant with one example agent";
 
 export function CustomPromptCard({
     selected,
@@ -20,6 +17,11 @@ export function CustomPromptCard({
     customPrompt,
     onCustomPromptChange
 }: CustomPromptCardProps) {
+    const DEFAULT_PROMPT = "Create a customer support assistant with one example agent";
+
+    // When unselected, show default text. When selected, show editable customPrompt
+    const displayText = selected ? customPrompt : DEFAULT_PROMPT;
+
     return (
         <div
             onClick={onSelect}
@@ -70,19 +72,19 @@ export function CustomPromptCard({
                                     tokens.transitions.default,
                                     "bg-white dark:bg-[#1F1F23]"
                                 )}
+                                autoFocus
                             />
                         ) : (
-                            <HighlightedField
-                                value={customPrompt}
-                                readOnly
+                            <div 
+                                onClick={onSelect}
                                 className={cn(
-                                    "w-full min-h-[100px]",
-                                    "resize-none",
-                                    tokens.radius.md,
-                                    tokens.transitions.default,
-                                    "bg-gray-50 dark:bg-[#1A1A1D]"
+                                    tokens.typography.sizes.sm,
+                                    tokens.colors.light.text.secondary,
+                                    tokens.colors.dark.text.secondary
                                 )}
-                            />
+                            >
+                                {displayText}
+                            </div>
                         )}
                     </div>
                 </div>

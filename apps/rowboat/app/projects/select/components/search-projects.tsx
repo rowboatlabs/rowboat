@@ -18,13 +18,17 @@ interface SearchProjectsProps {
     isLoading: boolean;
     searchOptions: SearchOptions;
     onSearchOptionsChange: (options: SearchOptions) => void;
+    heading: string;
+    subheading: string;
 }
 
 export function SearchProjects({ 
     projects, 
     isLoading, 
     searchOptions, 
-    onSearchOptionsChange 
+    onSearchOptionsChange,
+    heading,
+    subheading
 }: SearchProjectsProps) {
     const fuseOptions = {
         keys: ['name'],
@@ -76,9 +80,9 @@ export function SearchProjects({
         <section className="card overflow-hidden">
             <div className="px-4 pt-4">
                 <SectionHeading
-                    subheading="Choose from your existing projects"
+                    subheading={subheading}
                 >
-                    Select a project
+                    {heading}
                 </SectionHeading>
                 <div className="py-4">
                     <SearchInput
