@@ -1,5 +1,5 @@
-import App from "./app";
+import { redirect } from 'next/navigation';
 
 export default function Page() {
-    return <App />
-}
+    redirect('/projects/select');
+} 
