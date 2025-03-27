@@ -1,62 +1,106 @@
 'use client';
 import { cn } from "@heroui/react";
-import { Textarea } from "@/components/ui/textarea";
 import { CheckIcon } from "lucide-react";
-import { tokens } from "@/app/styles/tokens";
+import { tokens } from "@/app/styles/design-tokens";
+import { HighlightedField } from "@/components/ui/highlighted-field";
+import { Textarea } from "@/components/ui/textarea";
 
 interface CustomPromptCardProps {
     onSelect: () => void;
     selected: boolean;
-    onPromptChange: (prompt: string) => void;
+    onCustomPromptChange: (prompt: string) => void;
     customPrompt: string;
 }
 
+const DEFAULT_PROMPT = "Create a customer support assistant with one example agent";
+
 export function CustomPromptCard({
-    onSelect,
     selected,
-    onPromptChange,
-    customPrompt
+    onSelect,
+    customPrompt,
+    onCustomPromptChange
 }: CustomPromptCardProps) {
-    return <button
-        className={cn(
-            "card",
-            "relative flex flex-col gap-2 w-full",
-            tokens.colors.surface.light,
-            tokens.colors.surface.dark,
-            tokens.colors.border.light,
-            tokens.colors.border.dark,
-            tokens.colors.border.hover.light,
-            tokens.colors.border.hover.dark,
-            selected && "border-gray-800 dark:border-gray-300 shadow-md"
-        )}
-        type="button"
-        onClick={onSelect}
-    >
-        {selected && <div className="absolute top-2 right-2 bg-gray-200 dark:bg-gray-800 flex items-center justify-center rounded p-1">
-            <CheckIcon size={16} />
-        </div>}
-        <div className="text-base font-medium dark:text-gray-100 text-left">Custom Prompt</div>
-        {selected ? (
-            <Textarea
-                placeholder="Enter your custom prompt here..."
-                value={customPrompt}
-                onChange={(e) => {
-                    e.stopPropagation();
-                    onPromptChange(e.target.value);
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="min-h-[100px] text-sm w-full"
-            />
-        ) : (
-            <div 
-                className={cn(
-                    "min-h-[60px] w-full p-2 text-sm text-gray-500 dark:text-gray-400 text-left",
-                    "border border-gray-200 dark:border-gray-700",
-                    "bg-gray-50 dark:bg-gray-800"
-                )}
-            >
-                &ldquo;Create an assistant for a food delivery app that can take new orders, cancel existing orders and answer questions about refund policies&rdquo;
+    return (
+        <div
+            onClick={onSelect}
+            className={cn(
+                "w-full text-left cursor-pointer",
+                "p-4",
+                tokens.radius.lg,
+                tokens.transitions.default,
+                tokens.shadows.sm,
+                "border",
+                selected ? [
+                    "border-indigo-600 dark:border-indigo-400",
+                    "bg-indigo-50/50 dark:bg-indigo-500/10",
+                ] : [
+                    tokens.colors.light.border,
+                    tokens.colors.dark.border,
+                    tokens.colors.light.surface,
+                    tokens.colors.dark.surface,
+                    "hover:border-indigo-600/30 dark:hover:border-indigo-400/30",
+                    "hover:bg-indigo-50/30 dark:hover:bg-indigo-500/5",
+                    "transform hover:scale-[1.01]",
+                    tokens.shadows.hover,
+                ]
+            )}
+        >
+            <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 space-y-2">
+                    <h3 className={cn(
+                        tokens.typography.sizes.base,
+                        tokens.typography.weights.medium,
+                        tokens.colors.light.text.primary,
+                        tokens.colors.dark.text.primary
+                    )}>
+                        Custom Prompt
+                    </h3>
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full"
+                    >
+                        {selected ? (
+                            <Textarea
+                                value={customPrompt}
+                                onChange={(e) => onCustomPromptChange(e.target.value)}
+                                className={cn(
+                                    "w-full min-h-[100px]",
+                                    "resize-none",
+                                    tokens.radius.md,
+                                    tokens.transitions.default,
+                                    "bg-white dark:bg-[#1F1F23]"
+                                )}
+                            />
+                        ) : (
+                            <HighlightedField
+                                value={customPrompt}
+                                readOnly
+                                className={cn(
+                                    "w-full min-h-[100px]",
+                                    "resize-none",
+                                    tokens.radius.md,
+                                    tokens.transitions.default,
+                                    "bg-gray-50 dark:bg-[#1A1A1D]"
+                                )}
+                            />
+                        )}
+                    </div>
+                </div>
+                <div className={cn(
+                    "w-5 h-5 rounded-full border-2",
+                    tokens.transitions.default,
+                    selected ? [
+                        "border-indigo-600 dark:border-indigo-400",
+                        "bg-indigo-600 dark:bg-indigo-400",
+                    ] : [
+                        "border-gray-300 dark:border-gray-600",
+                    ]
+                )}>
+                    {selected && (
+                        <CheckIcon className="w-4 h-4 text-white" />
+                    )}
+                </div>
             </div>
-        )}
-    </button>
+        </div>
+    );
 } 

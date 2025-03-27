@@ -3,7 +3,6 @@ import { Project } from "@/app/lib/types/project_types";
 import { Spinner } from "@heroui/react";
 import { z } from "zod";
 import { ProjectCard } from "./project-card";
-import { cn } from "@heroui/react";
 
 interface ProjectListProps {
     projects: z.infer<typeof Project>[];
@@ -40,9 +39,14 @@ export function ProjectList({ projects, isLoading, searchQuery }: ProjectListPro
         );
     }
 
+    // Sort projects by createdAt in descending order
+    const sortedProjects = [...projects].sort((a, b) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
     return (
         <div className="divide-y divide-gray-200 dark:divide-gray-700">
-            {projects.map((project) => (
+            {sortedProjects.map((project) => (
                 <ProjectCard key={project._id} project={project} />
             ))}
         </div>

@@ -5,7 +5,7 @@ export const templates: { [key: string]: z.infer<typeof WorkflowTemplate> } = {
     // Default template
     'default': {
         name: 'Blank Template',
-        description: 'A blank canvas to build your support agents.',
+        description: 'A blank canvas to build your agents.',
         startAgent: "Example Agent",
         agents: [
             {

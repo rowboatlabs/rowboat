@@ -5,7 +5,7 @@ import { useState } from "react";
 import React from "react";
 import { WorkflowTemplate } from "@/app/lib/types/workflow_types";
 import { z } from "zod";
-import { tokens } from "@/app/styles/tokens";
+import { tokens } from "@/app/styles/design-tokens";
 
 interface TemplateCardProps {
     templateKey: string;
@@ -24,9 +24,7 @@ export function TemplateCard({
 }: TemplateCardProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const name = typeof template === "string" ? templateKey : template.name;
-    const description = typeof template === "string" 
-        ? `"${template}"`
-        : template.description;
+    const description = typeof template === "string" ? template : template.description;
 
     const textRef = React.useRef<HTMLDivElement>(null);
     const [needsExpansion, setNeedsExpansion] = useState(false);
@@ -38,63 +36,66 @@ export function TemplateCard({
         }
     }, [description]);
 
-    return <div
-        className={cn(
-            "card",
-            "relative flex flex-col cursor-pointer",
-            "border border-gray-300 dark:border-gray-700",
-            "hover:border-gray-500 dark:hover:border-gray-500",
-            "bg-white dark:bg-gray-900",
-            selected && "border-gray-800 dark:border-gray-300 shadow-md",
-            isExpanded ? "h-auto" : "h-[160px]"
-        )}
-        onClick={() => onSelect(templateKey)}
-    >
-        {selected && <div className="absolute top-2 right-2 bg-gray-200 dark:bg-gray-800 flex items-center justify-center rounded p-1">
-            <CheckIcon size={16} />
-        </div>}
-        
-        <div className="flex flex-col h-full">
-            <div className="text-base font-medium dark:text-gray-100 text-left mb-2">{name}</div>
-            <div className="relative flex-1">
-                <div 
-                    ref={textRef}
-                    className={cn(
-                        "text-sm text-gray-500 dark:text-gray-400 text-left pr-6",
-                        !isExpanded && "line-clamp-3"
-                    )}
-                >
-                    {description}
+    return (
+        <div
+            onClick={() => onSelect(templateKey)}
+            className={cn(
+                "w-full text-left cursor-pointer",
+                "p-4",
+                tokens.radius.lg,
+                tokens.transitions.default,
+                tokens.shadows.sm,
+                "border",
+                selected ? [
+                    "border-indigo-600 dark:border-indigo-400",
+                    "bg-indigo-50/50 dark:bg-indigo-500/10",
+                ] : [
+                    tokens.colors.light.border,
+                    tokens.colors.dark.border,
+                    tokens.colors.light.surface,
+                    tokens.colors.dark.surface,
+                    "hover:border-indigo-600/30 dark:hover:border-indigo-400/30",
+                    "hover:bg-indigo-50/30 dark:hover:bg-indigo-500/5",
+                    "transform hover:scale-[1.01]",
+                    tokens.shadows.hover,
+                ],
+                tokens.focus.default,
+                tokens.focus.dark
+            )}
+        >
+            <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 space-y-2">
+                    <h3 className={cn(
+                        tokens.typography.sizes.base,
+                        tokens.typography.weights.medium,
+                        tokens.colors.light.text.primary,
+                        tokens.colors.dark.text.primary
+                    )}>
+                        {name}
+                    </h3>
+                    <p className={cn(
+                        tokens.typography.sizes.sm,
+                        tokens.colors.light.text.secondary,
+                        tokens.colors.dark.text.secondary
+                    )}>
+                        {description}
+                    </p>
                 </div>
-                {needsExpansion && (
-                    <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setIsExpanded(!isExpanded);
-                        }}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setIsExpanded(!isExpanded);
-                            }
-                        }}
-                        className={cn(
-                            "absolute right-0 p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 cursor-pointer",
-                            isExpanded ? "relative mt-1" : "bottom-0"
-                        )}
-                        aria-label={isExpanded ? "Show less" : "Show more"}
-                    >
-                        {isExpanded ? (
-                            <ChevronUpIcon size={16} />
-                        ) : (
-                            <ChevronDownIcon size={16} />
-                        )}
-                    </div>
-                )}
+                <div className={cn(
+                    "w-5 h-5 rounded-full border-2",
+                    tokens.transitions.default,
+                    selected ? [
+                        "border-indigo-600 dark:border-indigo-400",
+                        "bg-indigo-600 dark:bg-indigo-400",
+                    ] : [
+                        "border-gray-300 dark:border-gray-600",
+                    ]
+                )}>
+                    {selected && (
+                        <CheckIcon className="w-4 h-4 text-white" />
+                    )}
+                </div>
             </div>
         </div>
-    </div>
+    );
 } 

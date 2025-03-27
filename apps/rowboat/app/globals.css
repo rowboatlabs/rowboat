@@ -69,10 +69,24 @@ html, body {
   }
   /* Define a card class that will be used for all card-like components */
   .card {
-    @apply rounded-lg border p-4 shadow-sm
-    border-gray-300 dark:border-gray-700
-    hover:border-gray-500 dark:hover:border-gray-500
-    bg-white dark:bg-gray-800 dark:text-white;
+    @apply rounded-xl border p-4
+    border-[#E5E7EB] dark:border-[#2E2E30]
+    bg-white dark:bg-[#1C1C1E]
+    shadow-[0_2px_8px_rgba(0,0,0,0.04)]
+    transition-all duration-200 ease-in-out;
+  }
+
+  .card:hover {
+    @apply shadow-[0_4px_12px_rgba(0,0,0,0.06)]
+    transform translate-y-[-1px];
+  }
+
+  /* Update input styles */
+  input, textarea, select {
+    @apply rounded-lg border-[#E5E7EB] dark:border-[#2E2E30]
+    bg-[#F3F4F6] dark:bg-[#2A2A2D]
+    focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50
+    transition-all duration-200;
   }
 }
 
@@ -118,4 +132,12 @@ html, body {
 
 * {
   @apply transition-colors duration-200;
+}
+
+/* Add Inter font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+/* Set base font */
+html {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }

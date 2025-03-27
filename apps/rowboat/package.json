@@ -34,6 +34,7 @@
     "cheerio": "^1.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
     "dotenv": "^16.4.5",
     "framer-motion": "^11.5.4",
     "fuse.js": "^7.1.0",
