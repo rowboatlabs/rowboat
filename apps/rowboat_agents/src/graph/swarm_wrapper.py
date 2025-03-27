@@ -311,7 +311,7 @@ def create_response(messages=None, tokens_used=None, agent=None, error_msg=''):
     )
 
 
-def run(
+async def run(
     agent,
     messages,
     external_tools=None,
@@ -344,19 +344,11 @@ def run(
                 "content": str(msg)
             })
 
-    # Create a new event loop for this thread
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    # Run the agent with the formatted messages
-    logger.info("Beginning Swarm run with run_sync")
-    print("Beginning Swarm run with run_sync")
+    logger.info("Beginning Swarm run")
+    print("Beginning Swarm run")
 
     try:
-        response = loop.run_until_complete(Runner.run(agent, formatted_messages))
+        response = await Runner.run(agent, formatted_messages)
     except Exception as e:
         logger.error(f"Error during run: {str(e)}")
         print(f"Error during run: {str(e)}")

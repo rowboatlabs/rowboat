@@ -63,19 +63,30 @@ async def chat():
     logger.info('='*100)
     logger.info(f"{'*'*100}Running server mode{'*'*100}")
     try:
-        data = await request.get_json()
-        logger.info('Complete request:')
-        logger.info(data)
-        logger.info('-'*100)
-
-        start_time = datetime.now()
+        request_data = await request.get_json()
         config = read_json_from_file("./configs/default_config.json")
 
         # filter out agent transfer messages
-        input_messages = [msg for msg in data.get("messages", []) if not is_agent_transfer_message(msg)]
+        input_messages = [msg for msg in request_data["messages"] if not is_agent_transfer_message(msg)]
 
-        logger.info('Beginning turn')
-        resp_messages, resp_tokens_used, resp_state = run_turn(
+        # Preprocess messages to handle null content and role issues
+        for msg in input_messages:
+            if (msg.get("role") == "assistant" and
+                msg.get("content") is None and
+                msg.get("tool_calls") is not None and
+                len(msg.get("tool_calls")) > 0):
+                msg["content"] = "Calling tool"
+
+            if msg.get("role") == "tool":
+                msg["role"] = "developer"
+            elif not msg.get("role"):
+                msg["role"] = "user"
+
+        print("Request:")
+        pprint(request_data)
+
+        data = request_data
+        resp_messages, resp_tokens_used, resp_state = await run_turn(
             messages=input_messages,
             start_agent_name=data.get("startAgent", ""),
             agent_configs=data.get("agents", []),
@@ -100,9 +111,6 @@ async def chat():
         for k, v in out.items():
             logger.info(f"{k}: {v}")
             logger.info('*'*100)
-
-        logger.info('='*100)
-        logger.info(f"Processing time: {datetime.now() - start_time}")
 
         return jsonify(out)
 
@@ -138,18 +146,18 @@ async def chat_stream(stream_id):
 
     request_data = json.loads(request_data)
     config = read_json_from_file("./configs/default_config.json")
-    
+
     # filter out agent transfer messages
     input_messages = [msg for msg in request_data["messages"] if not is_agent_transfer_message(msg)]
 
     # Preprocess messages to handle null content and role issues
     for msg in input_messages:
-        if (msg.get("role") == "assistant" and 
-            msg.get("content") is None and 
-            msg.get("tool_calls") is not None and 
+        if (msg.get("role") == "assistant" and
+            msg.get("content") is None and
+            msg.get("tool_calls") is not None and
             len(msg.get("tool_calls")) > 0):
             msg["content"] = "Calling tool"
-            
+
         if msg.get("role") == "tool":
             msg["role"] = "developer"
         elif not msg.get("role"):
