@@ -77,8 +77,8 @@ export function SearchProjects({
     }, [projects, searchOptions, fuse]);
 
     return (
-        <section className="card overflow-hidden">
-            <div className="px-4 pt-4">
+        <section className="card overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 200px)' }}>
+            <div className="px-4 pt-4 flex-none">
                 <SectionHeading
                     subheading={subheading}
                 >
@@ -93,13 +93,14 @@ export function SearchProjects({
                     />
                 </div>
             </div>
-            <div className="h-4"></div>
             <HorizontalDivider />
-            <ProjectList 
-                projects={filteredProjects}
-                isLoading={isLoading}
-                searchQuery={searchOptions.query}
-            />
+            <div className="flex-1 overflow-hidden">
+                <ProjectList 
+                    projects={filteredProjects}
+                    isLoading={isLoading}
+                    searchQuery={searchOptions.query}
+                />
+            </div>
         </section>
     );
 }

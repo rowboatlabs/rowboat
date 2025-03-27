@@ -10,15 +10,37 @@ import { cn } from "@heroui/react";
 import { templates } from "@/app/lib/project_templates";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { Textarea } from "@/components/ui/textarea";
-import { Submit } from "./components/submit-button";
 import { TimeFilter } from "./components/search-input";
 import { TemplateCardsList } from "./components/template-cards-list";
 import { SearchProjects } from "./components/search-projects";
 import { CustomPromptCard } from "./components/custom-prompt-card";
+import { PlusIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface SearchOptions {
     query: string;
     timeFilter: TimeFilter;
+}
+
+function Submit() {
+    return (
+        <Button
+            type="submit"
+            className={cn(
+                "self-start",
+                tokens.typography.sizes.sm,
+                tokens.typography.weights.medium,
+                "px-4 py-2",
+                tokens.colors.accent.primary,
+                tokens.colors.accent.primaryDark,
+                "transform hover:scale-[1.02] hover:brightness-105",
+                tokens.transitions.default
+            )}
+            startContent={<PlusIcon size={16} />}
+        >
+            Create project
+        </Button>
+    );
 }
 
 export default function App() {
@@ -80,6 +102,8 @@ export default function App() {
             setCustomPrompt(card.prompt || card.description);
         }
     };
+
+    const router = useRouter();
 
     async function handleSubmit(formData: FormData) {
         if (selectedCard === 'custom') {
