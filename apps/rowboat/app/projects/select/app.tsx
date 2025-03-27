@@ -16,6 +16,7 @@ import { SearchProjects } from "./components/search-projects";
 import { CustomPromptCard } from "./components/custom-prompt-card";
 import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useFormState } from 'react-dom';
 
 interface SearchOptions {
     query: string;
@@ -43,6 +44,12 @@ function Submit() {
     );
 }
 
+// Create an initial state for the form
+const initialState = {
+    message: '',
+    error: null
+};
+
 export default function App() {
     const [projects, setProjects] = useState<z.infer<typeof Project>[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -56,6 +63,9 @@ export default function App() {
         query: '',
         timeFilter: 'all'
     });
+
+    // Create the form state
+    const [state, formAction] = useFormState(handleSubmit, initialState);
 
     const getNextUntitledNumber = (projects: z.infer<typeof Project>[]) => {
         const untitledProjects = projects
@@ -107,19 +117,13 @@ export default function App() {
 
     async function handleSubmit(formData: FormData) {
         if (selectedCard === 'custom') {
-            console.log('Creating template project');
-            return await createProject(formData);
-        }
-
-        if (selectedCard instanceof typeof templates[0]) {
-            console.log('Starting prompt-based project creation');
+            console.log('Creating project from custom prompt');
             try {
                 const newFormData = new FormData();
-                const projectName = formData.get('name') as string;
-                const promptText = selectedCard.prompt;
+                const projectName = name;  // Use the name from state
                 
                 newFormData.append('name', projectName);
-                newFormData.append('prompt', promptText);
+                newFormData.append('prompt', customPrompt);
                 
                 console.log('Creating project...');
                 const response = await createProjectFromPrompt(newFormData);
@@ -130,7 +134,7 @@ export default function App() {
                 }
 
                 const params = new URLSearchParams({
-                    prompt: promptText,
+                    prompt: customPrompt,
                     autostart: 'true'
                 });
                 const url = `/projects/${response.id}/workflow?${params.toString()}`;
@@ -140,13 +144,37 @@ export default function App() {
             } catch (error) {
                 console.error('Error creating project:', error);
             }
+        } else {
+            // Handle template selection
+            console.log('Creating project from template');
+            try {
+                const newFormData = new FormData();
+                newFormData.append('name', name);
+                newFormData.append('prompt', selectedCard.prompt || selectedCard.description);
+                
+                const response = await createProjectFromPrompt(newFormData);
+                
+                if (!response?.id) {
+                    throw new Error('Project creation failed');
+                }
+
+                const params = new URLSearchParams({
+                    prompt: selectedCard.prompt || selectedCard.description,
+                    autostart: 'true'
+                });
+                window.location.href = `/projects/${response.id}/workflow?${params.toString()}`;
+            } catch (error) {
+                console.error('Error creating project:', error);
+            }
         }
     }
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
             e.preventDefault();
-            handleSubmit(e as any);
+            const formData = new FormData();
+            formData.append('name', name);
+            handleSubmit(formData);
         }
     };
 
@@ -203,11 +231,27 @@ export default function App() {
                                 </SectionHeading>
                             </div>
                             <div className="pt-1">
-                                <Submit />
+                                <Button
+                                    type="submit"
+                                    form="create-project-form"
+                                    className={cn(
+                                        tokens.typography.sizes.sm,
+                                        tokens.typography.weights.medium,
+                                        "px-4 py-2",
+                                        tokens.colors.accent.primary,
+                                        tokens.colors.accent.primaryDark,
+                                        "transform hover:scale-[1.02] hover:brightness-105",
+                                        tokens.transitions.default
+                                    )}
+                                    startContent={<PlusIcon size={16} />}
+                                >
+                                    Create project
+                                </Button>
                             </div>
                         </div>
                         
                         <form
+                            id="create-project-form"
                             action={handleSubmit}
                             onKeyDown={handleKeyDown}
                             className="px-4 pt-4 space-y-6"
