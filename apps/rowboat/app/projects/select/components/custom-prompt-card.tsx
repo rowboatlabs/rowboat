@@ -35,7 +35,7 @@ export function CustomPromptCard({
         {selected && <div className="absolute top-2 right-2 bg-gray-200 dark:bg-gray-800 flex items-center justify-center rounded p-1">
             <CheckIcon size={16} />
         </div>}
-        <div className="text-lg dark:text-gray-100 text-left">Custom Prompt</div>
+        <div className="text-base font-medium dark:text-gray-100 text-left">Custom Prompt</div>
         {selected ? (
             <Textarea
                 placeholder="Enter your custom prompt here..."

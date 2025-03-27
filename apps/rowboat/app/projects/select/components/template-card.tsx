@@ -55,7 +55,7 @@ export function TemplateCard({
         </div>}
         
         <div className="flex flex-col h-full">
-            <div className="text-lg dark:text-gray-100 text-left mb-2">{name}</div>
+            <div className="text-base font-medium dark:text-gray-100 text-left mb-2">{name}</div>
             <div className="relative flex-1">
                 <div 
                     ref={textRef}

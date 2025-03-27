@@ -4,6 +4,7 @@ import { default as NextLink } from "next/link";
 import { RelativeTime } from "@primer/react";
 import { z } from "zod";
 import { cn } from "@heroui/react";
+import { ChevronRightIcon } from "@heroicons/react/24/outline";
 
 interface ProjectCardProps {
     project: z.infer<typeof Project>;
@@ -14,20 +15,23 @@ export function ProjectCard({ project }: ProjectCardProps) {
         <NextLink
             href={`/projects/${project._id}`}
             className={cn(
-                "card",
-                "flex flex-col",
-                "hover:shadow-md transition-shadow duration-200",
-                "w-full" // Ensure full width
+                "block w-full px-4 py-3", // Consistent padding
+                "hover:bg-gray-50 dark:hover:bg-gray-800/50", // Subtle hover state
+                "transition-colors duration-200",
+                "group" // For hover effects on children
             )}
         >
-            <div>
-                <h2 className="text-lg font-medium text-gray-900 dark:text-white">
-                    {project.name}
-                </h2>
-            </div>
-            <div className="flex items-center gap-2 mt-2">
-                <div className="text-sm text-gray-500 dark:text-gray-400">
-                    Created <RelativeTime date={new Date(project.createdAt)} />
+            <div className="flex items-center justify-between">
+                <div>
+                    <h3 className="text-base font-medium text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                        {project.name}
+                    </h3>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        Created <RelativeTime date={new Date(project.createdAt)} />
+                    </p>
+                </div>
+                <div className="text-gray-400 dark:text-gray-600 group-hover:text-gray-600 dark:group-hover:text-gray-400">
+                    <ChevronRightIcon size={20} />
                 </div>
             </div>
         </NextLink>

@@ -36,6 +36,7 @@
     "clsx": "^2.1.1",
     "dotenv": "^16.4.5",
     "framer-motion": "^11.5.4",
+    "fuse.js": "^7.1.0",
     "immer": "^10.1.1",
     "jose": "^5.9.6",
     "lucide-react": "^0.465.0",

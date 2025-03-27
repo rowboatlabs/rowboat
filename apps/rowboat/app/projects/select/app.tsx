@@ -1,7 +1,7 @@
 'use client';
 
 import { Project } from "../../lib/types/project_types";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { z } from "zod";
 import { listProjects, createProject, createProjectFromPrompt } from "../../actions/project_actions";
 import { useRouter } from 'next/navigation';
@@ -14,6 +14,15 @@ import { TemplateCard } from "./components/template-card";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { Textarea } from "@/components/ui/textarea";
 import { Submit } from "./components/submit-button";
+import Fuse from 'fuse.js';
+import { SearchInput, TimeFilter } from "./components/search-input";
+import { isToday, isThisWeek, isThisMonth } from "@/lib/utils/date";
+import { HorizontalDivider } from "@/components/ui/horizontal-divider";
+
+interface SearchOptions {
+    query: string;
+    timeFilter: TimeFilter;
+}
 
 export default function App() {
     const router = useRouter();
@@ -25,6 +34,57 @@ export default function App() {
     const [selectedType, setSelectedType] = useState<"template" | "prompt">("template");
     const [customPrompt, setCustomPrompt] = useState<string>('');
     const { default: defaultTemplate, ...otherTemplates } = templates;
+
+    const [searchOptions, setSearchOptions] = useState<SearchOptions>({
+        query: '',
+        timeFilter: 'all'
+    });
+
+    const fuseOptions = {
+        keys: ['name'],
+        threshold: 0.3,
+        distance: 100,
+        minMatchCharLength: 2,
+        shouldSort: true,
+        includeScore: true,
+    };
+
+    const fuse = useMemo(() => {
+        return new Fuse(projects, fuseOptions);
+    }, [projects]);
+
+    const filteredProjects = useMemo(() => {
+        if (!searchOptions.query.trim() && searchOptions.timeFilter === 'all') {
+            return projects;
+        }
+
+        let results = projects;
+
+        if (searchOptions.query.trim()) {
+            const fuseResults = fuse.search(searchOptions.query);
+            results = fuseResults
+                .filter(result => result.score && result.score < 0.6)
+                .map(result => result.item);
+        }
+
+        if (searchOptions.timeFilter !== 'all') {
+            results = results.filter(project => {
+                const projectDate = new Date(project.createdAt);
+                switch (searchOptions.timeFilter) {
+                    case 'today':
+                        return isToday(projectDate);
+                    case 'week':
+                        return isThisWeek(projectDate);
+                    case 'month':
+                        return isThisMonth(projectDate);
+                    default:
+                        return true;
+                }
+            });
+        }
+
+        return results;
+    }, [projects, searchOptions, fuse]);
 
     useEffect(() => {
         let ignore = false;
@@ -113,30 +173,44 @@ export default function App() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-[400px,1fr] gap-8">
                     {/* Left side: Project Selection */}
-                    <section className="card space-y-6">
-                        <div>
-                            <SectionHeading>Select a project</SectionHeading>
-                            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                                Choose from your existing projects
-                            </p>
+                    <section className="card overflow-hidden">
+                        <div className="px-4 pt-4">
+                            <SectionHeading
+                                subheading="Choose from your existing projects"
+                            >
+                                Select a project
+                            </SectionHeading>
+                            <div className="py-4">
+                                <SearchInput
+                                    value={searchOptions.query}
+                                    onChange={(query) => setSearchOptions(prev => ({ ...prev, query }))}
+                                    timeFilter={searchOptions.timeFilter}
+                                    onTimeFilterChange={(timeFilter) => setSearchOptions(prev => ({ ...prev, timeFilter }))}
+                                />
+                            </div>
                         </div>
-                        <ProjectList projects={projects} isLoading={isLoading} />
+                        <div className="h-4"></div>
+                        <HorizontalDivider />
+                        <ProjectList 
+                            projects={filteredProjects}
+                            isLoading={isLoading}
+                            searchQuery={searchOptions.query}
+                        />
                     </section>
 
                     {/* Right side: Project Creation */}
-                    <section className="card space-y-6">
-                        <div>
-                            <SectionHeading>Create a new project</SectionHeading>
-                            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                                Set up a new AI assistant
-                            </p>
+                    <section className="card">
+                        <div className="px-4 pt-4">
+                            <SectionHeading
+                                subheading="Set up a new AI assistant"
+                            >
+                                Create a new project
+                            </SectionHeading>
                         </div>
                         
-                        <form className="space-y-6" action={handleSubmit}>
+                        <form className="px-4 pt-4 space-y-6" action={handleSubmit}>
                             <div>
-                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    Assistant name
-                                </label>
+                                <SectionHeading>Name your assistant</SectionHeading>
                                 <Textarea
                                     required
                                     name="name"
@@ -150,9 +224,7 @@ export default function App() {
 
                             <div className="space-y-6">
                                 <div>
-                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        Assistant configuration
-                                    </label>
+                                    <SectionHeading>Enter a prompt</SectionHeading>
                                     <CustomPromptCard
                                         onSelect={() => handleTemplateClick('custom', 'prompt')}
                                         selected={selectedTemplate === 'custom' && selectedType === "prompt"}
@@ -162,27 +234,7 @@ export default function App() {
                                 </div>
 
                                 <div>
-                                    <SectionHeading>Example starting prompts</SectionHeading>
-                                    <div className={cn(
-                                        "grid gap-4",
-                                        "grid-cols-1",
-                                        "xl:grid-cols-2"
-                                    )}>
-                                        {Object.entries(starting_copilot_prompts).map(([key, prompt]) => (
-                                            <TemplateCard
-                                                key={key}
-                                                templateKey={key}
-                                                template={prompt}
-                                                onSelect={(key) => handleTemplateClick(key, "prompt")}
-                                                selected={selectedTemplate === key && selectedType === "prompt"}
-                                                type="prompt"
-                                            />
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <SectionHeading>Pre-built examples</SectionHeading>
+                                    <SectionHeading>Or start with one of our examples</SectionHeading>
                                     <div className={cn(
                                         "grid gap-4",
                                         "grid-cols-1",
@@ -204,12 +256,26 @@ export default function App() {
                                                 selected={selectedTemplate === key && selectedType === "template"}
                                             />
                                         ))}
+                                        
+                                        {Object.entries(starting_copilot_prompts).map(([key, prompt]) => (
+                                            <TemplateCard
+                                                key={key}
+                                                templateKey={key}
+                                                template={prompt}
+                                                onSelect={(key) => handleTemplateClick(key, "prompt")}
+                                                selected={selectedTemplate === key && selectedType === "prompt"}
+                                                type="prompt"
+                                            />
+                                        ))}
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                                <Submit />
+                            <div className="pt-4">
+                                <HorizontalDivider />
+                                <div className="mt-4">
+                                    <Submit />
+                                </div>
                             </div>
                         </form>
                     </section>
