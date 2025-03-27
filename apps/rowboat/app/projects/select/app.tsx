@@ -16,7 +16,6 @@ import { SearchProjects } from "./components/search-projects";
 import { CustomPromptCard } from "./components/custom-prompt-card";
 import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useFormState } from 'react-dom';
 
 interface SearchOptions {
     query: string;
@@ -44,12 +43,6 @@ function Submit() {
     );
 }
 
-// Create an initial state for the form
-const initialState = {
-    message: '',
-    error: null
-};
-
 export default function App() {
     const [projects, setProjects] = useState<z.infer<typeof Project>[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -63,9 +56,6 @@ export default function App() {
         query: '',
         timeFilter: 'all'
     });
-
-    // Create the form state
-    const [state, formAction] = useFormState(handleSubmit, initialState);
 
     const getNextUntitledNumber = (projects: z.infer<typeof Project>[]) => {
         const untitledProjects = projects
@@ -87,9 +77,14 @@ export default function App() {
             setIsLoading(true);
             const projects = await listProjects();
             if (!ignore) {
-                setProjects(projects);
+                // Sort projects by createdAt in descending order (newest first)
+                const sortedProjects = [...projects].sort((a, b) => 
+                    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+                );
+                
+                setProjects(sortedProjects);
                 setIsLoading(false);
-                const nextNumber = getNextUntitledNumber(projects);
+                const nextNumber = getNextUntitledNumber(sortedProjects);
                 const newDefaultName = `Untitled ${nextNumber}`;
                 setDefaultName(newDefaultName);
                 setName(newDefaultName);

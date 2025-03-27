@@ -1,4 +1,4 @@
-import { Project } from "@/lib/types/project_types";
+import { Project } from "@/types/project_types";
 import { z } from "zod";
 import { useMemo } from "react";
 import Fuse from 'fuse.js';
@@ -30,16 +30,11 @@ export function SearchProjects({
     heading,
     subheading
 }: SearchProjectsProps) {
-    const fuseOptions = {
-        keys: ['name'],
-        threshold: 0.3,
-        distance: 100,
-        minMatchCharLength: 2,
-        shouldSort: true,
-        includeScore: true,
-    };
-
     const fuse = useMemo(() => {
+        const fuseOptions = {
+            keys: ['name'],
+            threshold: 0.3,
+        };
         return new Fuse(projects, fuseOptions);
     }, [projects]);
 
