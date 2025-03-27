@@ -116,41 +116,16 @@ export default function App() {
     const router = useRouter();
 
     async function handleSubmit(formData: FormData) {
-        if (selectedCard === 'custom') {
-            console.log('Creating project from custom prompt');
-            try {
-                const newFormData = new FormData();
-                const projectName = name;  // Use the name from state
-                
-                newFormData.append('name', projectName);
-                newFormData.append('prompt', customPrompt);
-                
-                console.log('Creating project...');
-                const response = await createProjectFromPrompt(newFormData);
-                console.log('Create project response:', response);
-                
-                if (!response?.id) {
-                    throw new Error('Project creation failed - no project ID returned');
-                }
+        // Check if it's a template (from templates object) or a copilot prompt
+        const isTemplate = selectedCard?.id && selectedCard.id in templates;
 
-                const params = new URLSearchParams({
-                    prompt: customPrompt,
-                    autostart: 'true'
-                });
-                const url = `/projects/${response.id}/workflow?${params.toString()}`;
-                
-                console.log('Navigating to:', url);
-                window.location.href = url;
-            } catch (error) {
-                console.error('Error creating project:', error);
-            }
-        } else {
-            // Handle template selection
-            console.log('Creating project from template');
+        if (selectedCard === 'custom' || !isTemplate) {
+            // Handle custom prompt or copilot starting prompts
+            console.log('Creating project from prompt');
             try {
                 const newFormData = new FormData();
                 newFormData.append('name', name);
-                newFormData.append('prompt', selectedCard.prompt || selectedCard.description);
+                newFormData.append('prompt', selectedCard === 'custom' ? customPrompt : selectedCard.prompt);
                 
                 const response = await createProjectFromPrompt(newFormData);
                 
@@ -159,10 +134,21 @@ export default function App() {
                 }
 
                 const params = new URLSearchParams({
-                    prompt: selectedCard.prompt || selectedCard.description,
+                    prompt: selectedCard === 'custom' ? customPrompt : selectedCard.prompt,
                     autostart: 'true'
                 });
                 window.location.href = `/projects/${response.id}/workflow?${params.toString()}`;
+            } catch (error) {
+                console.error('Error creating project:', error);
+            }
+        } else {
+            // Handle regular template
+            console.log('Creating template project');
+            try {
+                const newFormData = new FormData();
+                newFormData.append('name', name);
+                newFormData.append('template', selectedCard.id);
+                return await createProject(newFormData);
             } catch (error) {
                 console.error('Error creating project:', error);
             }
