@@ -42,7 +42,7 @@ async def simulate_simulation(
         {
             "role": "system",
             "content": (
-                f"You are a customer talking to a chatbot. Have the following chat with the chatbot. Scenario:\n{scenario.description}. You are provided no other information. If the chatbot asks you for information that is not in context, go ahead and provide one unless stated otherwise in the scenario. Directly have the chat with the chatbot. Start now."
+                f"You are role playing a customer talking to a chatbot (the user is role playing the chatbot). Have the following chat with the chatbot. Scenario:\n{scenario.description}. You are provided no other information. If the chatbot asks you for information that is not in context, go ahead and provide one unless stated otherwise in the scenario. Directly have the chat with the chatbot. Start now with your first message."
             )
         }
     ]
@@ -64,20 +64,25 @@ async def simulate_simulation(
         )
 
         simulated_content = simulated_user_response.choices[0].message.content.strip()
-        messages.append({"role": "user", "content": simulated_content})
+        messages.append({"role": "assistant", "content": simulated_content})
         # Run Rowboat chat in a thread if it's synchronous
         rowboat_response = await loop.run_in_executor(
             None,
             lambda: support_chat.run(simulated_content)
         )
 
-        messages.append({"role": "assistant", "content": rowboat_response})
+        messages.append({"role": "user", "content": rowboat_response})
 
     # -------------------------
     # (2) EVALUATION STEP
     # -------------------------
+    # swap the roles of the assistant and the user
     transcript_str = ""
     for m in messages:
+        if m.get("role") == "assistant":
+            m["role"] = "user"
+        elif m.get("role") == "user":
+            m["role"] = "assistant"
         role = m.get("role", "unknown")
         content = m.get("content", "")
         transcript_str += f"{role.upper()}: {content}\n"
