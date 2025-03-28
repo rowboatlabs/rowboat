@@ -7,6 +7,7 @@ import { isToday, isThisWeek, isThisMonth } from "@/lib/utils/date";
 import { ProjectList } from "./project-list";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { HorizontalDivider } from "@/components/ui/horizontal-divider";
+import { cn } from "@/lib/utils";
 
 interface SearchOptions {
     query: string;
@@ -20,6 +21,7 @@ interface SearchProjectsProps {
     onSearchOptionsChange: (options: SearchOptions) => void;
     heading: string;
     subheading: string;
+    className?: string;
 }
 
 export function SearchProjects({ 
@@ -28,7 +30,8 @@ export function SearchProjects({
     searchOptions, 
     onSearchOptionsChange,
     heading,
-    subheading
+    subheading,
+    className
 }: SearchProjectsProps) {
     const fuse = useMemo(() => {
         const fuseOptions = {
@@ -72,7 +75,7 @@ export function SearchProjects({
     }, [projects, searchOptions, fuse]);
 
     return (
-        <section className="card overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 200px)' }}>
+        <div className={cn("card", className)}>
             <div className="px-4 pt-4 flex-none">
                 <SectionHeading
                     subheading={subheading}
@@ -96,6 +99,6 @@ export function SearchProjects({
                     searchQuery={searchOptions.query}
                 />
             </div>
-        </section>
+        </div>
     );
 }

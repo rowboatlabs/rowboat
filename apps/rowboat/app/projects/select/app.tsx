@@ -57,6 +57,9 @@ export default function App() {
         timeFilter: 'all'
     });
 
+    // Add new state for active pane
+    const [activePane, setActivePane] = useState<'select' | 'create' | null>(null);
+
     const getNextUntitledNumber = (projects: z.infer<typeof Project>[]) => {
         const untitledProjects = projects
             .map(p => p.name)
@@ -192,86 +195,113 @@ export default function App() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-[400px,1fr] gap-8">
                     {/* Left side: Project Selection */}
-                    <SearchProjects
-                        projects={projects}
-                        isLoading={isLoading}
-                        searchOptions={searchOptions}
-                        onSearchOptionsChange={setSearchOptions}
-                        heading="Select an existing project"
-                        subheading="Choose from your projects"
-                    />
+                    <div 
+                        className={cn(
+                            "transition-all duration-300",
+                            "h-full",
+                            "hover:scale-[1.03] hover:z-10",
+                            activePane === 'select' && "scale-[1.03] z-10",
+                            activePane === 'create' && "scale-[0.97] opacity-60"
+                        )}
+                        onMouseEnter={() => setActivePane('select')}
+                        onMouseLeave={() => setActivePane(null)}
+                        onClick={() => setActivePane('select')}
+                    >
+                        <SearchProjects
+                            projects={projects}
+                            isLoading={isLoading}
+                            searchOptions={searchOptions}
+                            onSearchOptionsChange={setSearchOptions}
+                            heading="Select an existing project"
+                            subheading="Choose from your projects"
+                            className="h-full"
+                        />
+                    </div>
 
                     {/* Right side: Project Creation */}
-                    <section className="card">
-                        <div className="px-4 pt-4 flex justify-between items-start">
-                            <div>
-                                <SectionHeading
-                                    subheading="Set up a new AI assistant"
-                                >
-                                    Create a new project
-                                </SectionHeading>
-                            </div>
-                            <div className="pt-1">
-                                <Button
-                                    type="submit"
-                                    form="create-project-form"
-                                    className={cn(
-                                        tokens.typography.sizes.sm,
-                                        tokens.typography.weights.medium,
-                                        "px-4 py-2",
-                                        tokens.colors.accent.primary,
-                                        tokens.colors.accent.primaryDark,
-                                        "transform hover:scale-[1.02] hover:brightness-105",
-                                        tokens.transitions.default
-                                    )}
-                                    startContent={<PlusIcon size={16} />}
-                                >
-                                    Create project
-                                </Button>
-                            </div>
-                        </div>
-                        
-                        <form
-                            id="create-project-form"
-                            action={handleSubmit}
-                            onKeyDown={handleKeyDown}
-                            className="px-4 pt-4 space-y-6"
-                        >
-                            <div className="space-y-3">
-                                <SectionHeading>Name your assistant</SectionHeading>
-                                <Textarea
-                                    required
-                                    name="name"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    className="min-h-[60px]"
-                                    placeholder={defaultName}
-                                />
-                            </div>
-
-                            <input type="hidden" name="template" value={selectedCard} />
-
-                            <div className="space-y-6">
-                                <div className="space-y-3">
-                                    <SectionHeading>Start with your own prompt</SectionHeading>
-                                    <CustomPromptCard
-                                        selected={selectedCard === 'custom'}
-                                        onSelect={() => handleCardSelect('custom')}
-                                        customPrompt={customPrompt}
-                                        onCustomPromptChange={setCustomPrompt}
-                                    />
+                    <div 
+                        className={cn(
+                            "transition-all duration-300",
+                            "h-full",
+                            "hover:scale-[1.03] hover:z-10",
+                            activePane === 'create' && "scale-[1.03] z-10",
+                            activePane === 'select' && "scale-[0.97] opacity-60"
+                        )}
+                        onMouseEnter={() => setActivePane('create')}
+                        onMouseLeave={() => setActivePane(null)}
+                        onClick={() => setActivePane('create')}
+                    >
+                        <section className="card h-full">
+                            <div className="px-4 pt-4 flex justify-between items-start">
+                                <div>
+                                    <SectionHeading
+                                        subheading="Set up a new AI assistant"
+                                    >
+                                        Create a new project
+                                    </SectionHeading>
                                 </div>
-                                
-                                <div className="space-y-3">
-                                    <SectionHeading>Or choose an example</SectionHeading>
-                                    <TemplateCardsList
-                                        selectedCard={selectedCard}
-                                        onSelectCard={handleCardSelect}
-                                    />
+                                <div className="pt-1">
+                                    <Button
+                                        type="submit"
+                                        form="create-project-form"
+                                        className={cn(
+                                            tokens.typography.sizes.sm,
+                                            tokens.typography.weights.medium,
+                                            "px-4 py-2",
+                                            tokens.colors.accent.primary,
+                                            tokens.colors.accent.primaryDark,
+                                            "transform hover:scale-[1.02] hover:brightness-105",
+                                            tokens.transitions.default
+                                        )}
+                                        startContent={<PlusIcon size={16} />}
+                                    >
+                                        Create project
+                                    </Button>
                                 </div>
                             </div>
-                        </form>
-                    </section>
+                            
+                            <form
+                                id="create-project-form"
+                                action={handleSubmit}
+                                onKeyDown={handleKeyDown}
+                                className="px-4 pt-4 pb-8 space-y-6"
+                            >
+                                <div className="space-y-3">
+                                    <SectionHeading>Name your assistant</SectionHeading>
+                                    <Textarea
+                                        required
+                                        name="name"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                        className="min-h-[60px]"
+                                        placeholder={defaultName}
+                                    />
+                                </div>
+
+                                <input type="hidden" name="template" value={selectedCard} />
+
+                                <div className="space-y-6">
+                                    <div className="space-y-3">
+                                        <SectionHeading>Start with your own prompt</SectionHeading>
+                                        <CustomPromptCard
+                                            selected={selectedCard === 'custom'}
+                                            onSelect={() => handleCardSelect('custom')}
+                                            customPrompt={customPrompt}
+                                            onCustomPromptChange={setCustomPrompt}
+                                        />
+                                    </div>
+                                    
+                                    <div className="space-y-3">
+                                        <SectionHeading>Or choose an example</SectionHeading>
+                                        <TemplateCardsList
+                                            selectedCard={selectedCard}
+                                            onSelectCard={handleCardSelect}
+                                        />
+                                    </div>
+                                </div>
+                            </form>
+                        </section>
+                    </div>
                 </div>
             </div>
         </div>
