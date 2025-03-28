@@ -1,9 +1,8 @@
 import { cn } from "@heroui/react";
 import { ButtonHTMLAttributes, forwardRef } from "react";
-import { LucideIcon } from "lucide-react";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'default' | 'outline' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'tertiary';
   size?: 'sm' | 'md' | 'lg';
   startContent?: React.ReactNode;
   endContent?: React.ReactNode;
@@ -12,7 +11,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
   className,
-  variant = 'default',
+  variant = 'primary',
   size = 'md',
   startContent,
   endContent,
@@ -26,18 +25,18 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
       ref={ref}
       disabled={isLoading || disabled}
       className={cn(
-        "inline-flex items-center justify-center rounded-md font-medium transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400",
+        "inline-flex items-center justify-center rounded-full font-medium transition-all",
+        "focus-visible:outline-none transform hover:scale-[1.02] hover:shadow-md",
         "disabled:pointer-events-none disabled:opacity-50",
         {
-          'default': "bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200",
-          'outline': "border border-gray-300 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800",
-          'ghost': "hover:bg-gray-100 dark:hover:bg-gray-800",
+          'primary': "bg-indigo-600 hover:bg-indigo-500 text-white dark:bg-indigo-500 dark:hover:bg-indigo-400",
+          'secondary': "bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white",
+          'tertiary': "bg-transparent hover:bg-gray-100 text-gray-700 dark:hover:bg-gray-800 dark:text-gray-300",
         }[variant],
         {
           'sm': "h-8 px-3 text-sm",
           'md': "h-10 px-4",
-          'lg': "h-12 px-6 text-lg",
+          'lg': "px-4 py-2.5 text-sm",
         }[size],
         className
       )}

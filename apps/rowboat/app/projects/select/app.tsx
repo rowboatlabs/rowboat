@@ -14,8 +14,6 @@ import { TimeFilter } from "./components/search-input";
 import { TemplateCardsList } from "./components/template-cards-list";
 import { SearchProjects } from "./components/search-projects";
 import { CustomPromptCard } from "./components/custom-prompt-card";
-import { PlusIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { getPaneClasses } from "./styles/pane-effects";
 import { Submit } from "./components/submit-button";
 import { PageHeading } from "@/components/ui/page-heading";
