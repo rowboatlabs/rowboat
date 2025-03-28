@@ -69,6 +69,38 @@ export const tokens = {
   spacing: {
     page: 'max-w-[768px] mx-auto',
     section: 'space-y-8'
+  },
+  navigation: {
+    colors: {
+      item: {
+        base: 'text-zinc-600 dark:text-zinc-400',
+        hover: 'hover:text-zinc-900 dark:hover:text-zinc-200',
+        active: 'text-zinc-900 dark:text-zinc-100',
+        icon: {
+          base: 'text-zinc-400 dark:text-zinc-500',
+          hover: 'group-hover:text-zinc-600 dark:group-hover:text-zinc-300',
+          active: 'text-indigo-600 dark:text-indigo-400'
+        },
+        indicator: 'bg-indigo-600 dark:bg-indigo-400'
+      },
+      background: {
+        hover: 'hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+      }
+    },
+    typography: {
+      size: 'text-[15px]',
+      weight: {
+        base: 'font-medium',
+        active: 'font-semibold'
+      }
+    },
+    layout: {
+      padding: {
+        container: 'px-6',
+        item: 'px-3 py-1.5'
+      },
+      gap: 'gap-6'
+    }
   }
 }
 

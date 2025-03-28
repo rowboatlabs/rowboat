@@ -144,24 +144,23 @@ export default function App() {
 
     return (
         <div className={cn(
-            "min-h-full",
+            "min-h-screen flex flex-col",
             tokens.colors.light.background,
             tokens.colors.dark.background
         )}>
             <div className={cn(
-                "max-w-screen-2xl mx-auto",
-                "px-4 sm:px-6 lg:px-8",
-                "py-8 space-y-8"
+                "flex-1 px-8 pt-4 pb-32"
             )}>
                 <PageHeading 
                     title="Projects"
                     description="Select an existing project or create a new one"
                 />
 
-                <div className="grid grid-cols-1 lg:grid-cols-[400px,1fr] gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-[550px,1fr] gap-8 mt-8">
                     {/* Left side: Project Selection */}
                     <div 
                         className={cn(
+                            "overflow-auto",
                             ...getPaneClasses(
                                 activePane === 'select',
                                 activePane === 'create'
@@ -185,6 +184,7 @@ export default function App() {
                     {/* Right side: Project Creation */}
                     <div 
                         className={cn(
+                            "overflow-auto",
                             ...getPaneClasses(
                                 activePane === 'create',
                                 activePane === 'select'

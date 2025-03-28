@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import Menu from "./menu";
-import { getProjectConfig } from "../../actions/project_actions";
+import { getProjectConfig } from "@/app/actions/project_actions";
 import { FolderOpenIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 
 export function Nav({

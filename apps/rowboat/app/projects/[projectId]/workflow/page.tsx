@@ -21,8 +21,10 @@ export default async function Page({
         notFound();
     }
 
-    return <App
-        projectId={params.projectId}
-        useRag={USE_RAG}
-    />;
+    return (
+        <App
+            projectId={params.projectId}
+            useRag={USE_RAG}
+        />
+    );
 }
