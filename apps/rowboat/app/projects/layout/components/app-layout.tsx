@@ -17,7 +17,7 @@ export default function AppLayout({ children, useRag = false }: AppLayoutProps) 
   if (isProjectsRoute) {
     return (
       <div className="h-screen flex flex-col gap-5 p-5 bg-zinc-50 dark:bg-zinc-900">
-        <div className="rounded-xl bg-white dark:bg-zinc-800 shadow-sm backdrop-blur-sm">
+        <div className="overflow-hidden rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm">
           <header className="sticky top-0 z-50">
             <TopBar />
           </header>
@@ -38,13 +38,13 @@ export default function AppLayout({ children, useRag = false }: AppLayoutProps) 
   return (
     <div className="h-screen flex gap-5 p-5 bg-zinc-50 dark:bg-zinc-900">
       {/* Sidebar with improved shadow and blur */}
-      <div className="rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm">
+      <div className="overflow-hidden rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm">
         <Sidebar projectId={projectId} useRag={useRag} />
       </div>
       
       {/* Main content area with improved styling */}
       <div className="flex-1 flex flex-col">
-        <div className="rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm mb-5">
+        <div className="overflow-hidden rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm mb-5">
           <header className="sticky top-0 z-50">
             <TopBar />
           </header>
