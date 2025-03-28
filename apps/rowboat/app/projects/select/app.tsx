@@ -18,6 +18,7 @@ import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getPaneClasses } from "./styles/pane-effects";
 import { Submit } from "./components/submit-button";
+import { PageHeading } from "@/components/ui/page-heading";
 
 interface SearchOptions {
     query: string;
@@ -154,25 +155,10 @@ export default function App() {
                 "px-4 sm:px-6 lg:px-8",
                 "py-8 space-y-8"
             )}>
-                {/* Page Header */}
-                <div>
-                    <h1 className={cn(
-                        tokens.typography.weights.semibold,
-                        tokens.typography.sizes["2xl"],
-                        tokens.colors.light.text.primary,
-                        tokens.colors.dark.text.primary
-                    )}>
-                        Projects
-                    </h1>
-                    <p className={cn(
-                        "mt-2",
-                        tokens.typography.sizes.base,
-                        tokens.colors.light.text.secondary,
-                        tokens.colors.dark.text.secondary
-                    )}>
-                        Select an existing project or create a new one
-                    </p>
-                </div>
+                <PageHeading 
+                    title="Projects"
+                    description="Select an existing project or create a new one"
+                />
 
                 <div className="grid grid-cols-1 lg:grid-cols-[400px,1fr] gap-8">
                     {/* Left side: Project Selection */}
