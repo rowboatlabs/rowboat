@@ -1,2 +1,3 @@
 export { default as AppLayout } from './app-layout';
-export { default as HorizontalMenu } from './horizontal-menu';
+export { default as Sidebar } from './sidebar';
+export { default as TopBar } from './topbar';

@@ -149,14 +149,14 @@ export default function App() {
             tokens.colors.dark.background
         )}>
             <div className={cn(
-                "flex-1 px-8 pt-4 pb-32"
+                "flex-1 px-12 pt-4 pb-32"
             )}>
                 <PageHeading 
                     title="Projects"
                     description="Select an existing project or create a new one"
                 />
 
-                <div className="grid grid-cols-1 lg:grid-cols-[550px,1fr] gap-8 mt-8">
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr,2fr] gap-8 mt-8">
                     {/* Left side: Project Selection */}
                     <div 
                         className={cn(
