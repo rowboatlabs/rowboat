@@ -16,6 +16,7 @@ import { SearchProjects } from "./components/search-projects";
 import { CustomPromptCard } from "./components/custom-prompt-card";
 import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getPaneClasses } from "./styles/pane-effects";
 
 interface SearchOptions {
     query: string;
@@ -197,11 +198,10 @@ export default function App() {
                     {/* Left side: Project Selection */}
                     <div 
                         className={cn(
-                            "transition-all duration-300",
-                            "h-full",
-                            "hover:scale-[1.03] hover:z-10",
-                            activePane === 'select' && "scale-[1.03] z-10",
-                            activePane === 'create' && "scale-[0.97] opacity-60"
+                            ...getPaneClasses(
+                                activePane === 'select',
+                                activePane === 'create'
+                            )
                         )}
                         onMouseEnter={() => setActivePane('select')}
                         onMouseLeave={() => setActivePane(null)}
@@ -221,11 +221,10 @@ export default function App() {
                     {/* Right side: Project Creation */}
                     <div 
                         className={cn(
-                            "transition-all duration-300",
-                            "h-full",
-                            "hover:scale-[1.03] hover:z-10",
-                            activePane === 'create' && "scale-[1.03] z-10",
-                            activePane === 'select' && "scale-[0.97] opacity-60"
+                            ...getPaneClasses(
+                                activePane === 'create',
+                                activePane === 'select'
+                            )
                         )}
                         onMouseEnter={() => setActivePane('create')}
                         onMouseLeave={() => setActivePane(null)}
