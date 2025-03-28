@@ -17,31 +17,11 @@ import { CustomPromptCard } from "./components/custom-prompt-card";
 import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getPaneClasses } from "./styles/pane-effects";
+import { Submit } from "./components/submit-button";
 
 interface SearchOptions {
     query: string;
     timeFilter: TimeFilter;
-}
-
-function Submit() {
-    return (
-        <Button
-            type="submit"
-            className={cn(
-                "self-start",
-                tokens.typography.sizes.sm,
-                tokens.typography.weights.medium,
-                "px-4 py-2",
-                tokens.colors.accent.primary,
-                tokens.colors.accent.primaryDark,
-                "transform hover:scale-[1.02] hover:brightness-105",
-                tokens.transitions.default
-            )}
-            startContent={<PlusIcon size={16} />}
-        >
-            Create project
-        </Button>
-    );
 }
 
 export default function App() {
@@ -240,22 +220,7 @@ export default function App() {
                                     </SectionHeading>
                                 </div>
                                 <div className="pt-1">
-                                    <Button
-                                        type="submit"
-                                        form="create-project-form"
-                                        className={cn(
-                                            tokens.typography.sizes.sm,
-                                            tokens.typography.weights.medium,
-                                            "px-4 py-2",
-                                            tokens.colors.accent.primary,
-                                            tokens.colors.accent.primaryDark,
-                                            "transform hover:scale-[1.02] hover:brightness-105",
-                                            tokens.transitions.default
-                                        )}
-                                        startContent={<PlusIcon size={16} />}
-                                    >
-                                        Create project
-                                    </Button>
+                                    <Submit />
                                 </div>
                             </div>
                             
