@@ -3,7 +3,7 @@
 ## Overview
 - Agents carry out a specific part of the conversation and / or perform tasks like orchestrating between other agents, triggering internal processes and fetching information.
 - Agents carry out tasks through tools provided to them.
-- Agents are connected to each other in a Directed Acyclic Graph (DAG). Hence, every agent has a parent agent and children agents, to which they can pass control of the conversation to. 
+- Agents can be connected to other agents through a mention in the agent's instruction.
 
 ## Agent Configurations
 
@@ -11,10 +11,10 @@
 The description conveys the agent's role in the multi-agent system. Writing a good description is important for other agents to know when to pass control of the conversation to an agent.
 
 ### Instructions
-Agent instructions are the backbone of an agent, defining its behavior. RowBoat Studio's copilot produces a good framework for agent instructions, involving Role, Steps to Follow, Scope and Guidelines. Since agents are powered by LLMs, general best practices while writing prompts apply. 
+Agent instructions are the backbone of an agent, defining its behavior. RowBoat Studio's copilot produces a good framework for agent instructions, involving Role, Steps to Follow, Scope and Guidelines. Since agents are powered by LLMs, general best practices while writing prompts apply.
 
 ### Examples
-The agent uses examples as a reference for behavior in different scenarios. While there are no prescribed formats to provide examples in, examples should include what the user might say, what the agent should respond with as well as indications of any tool calls to be made. 
+The agent uses examples as a reference for behavior in different scenarios. While there are no prescribed formats to provide examples in, examples should include what the user might say, what the agent should respond with as well as indications of any tool calls to be made.
 
 ### Prompts
 Prompts attached to an agent will be used by the agent in addition to instructions.
@@ -23,7 +23,7 @@ Prompts attached to an agent will be used by the agent in addition to instructio
 Data sources added to an agent will be used as knowledge, retrieved using embedding match in a typical RAG fashion. Advanced configurations allow for setting number of matches, etc. RAG is currently implemented as a predefined tool call which the agent will use when it determines that it needs to retrieve knowledge. This behavior can be further fine-tuned by specifying corresponding instructions or prompts.
 
 ### Tools
-Tools attached to an agent will be put out as tool calls. The behavior of when to invoke tools can be fine-tuned by specifying corresponding instructions or prompts. Adding examples to agents can also be useful in controlling tool call behavior. 
+Tools attached to an agent will be put out as tool calls. The behavior of when to invoke tools can be fine-tuned by specifying corresponding instructions or prompts. Adding examples to agents can also be useful in controlling tool call behavior.
 
 ### Connected Agents
 In the agent graph, connected agents refer to children of an agent. An agent can choose to transfer control of the conversation to one of its children, by using internal tool calls (need not be configured separately). Similar to tools, the behavior of when to transfer the chat to a child agent can be fine-tuned by specifying corresponding instructions, examples and prompts.
