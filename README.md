@@ -1,7 +1,9 @@
 # RowBoat
 [![RowBoat Logo](/assets/rb-logo.png)](https://www.rowboatlabs.com/)
 
-RowBoat is the fastest way to build production-ready multi-agent systems with OpenAI's Agents SDK.
+A Cursor-like, AI-assisted, no-code IDE for building production-ready multi-agents. Start from a simple prompt to create fully functional agents with the Copilot; test them in AI-simulated scenarios; connect MCP servers and tools; interact through the Python SDK, a web widget, or a Twilio phone number; and continuously refine your agents by providing feedback to the Copilot.
+
+Built on OpenAI's Agents SDK, RowBoat is the fastest way to build multi-agents.
 
 ## Prerequisites
 
