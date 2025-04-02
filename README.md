@@ -12,6 +12,8 @@ A Cursor-like, AI-assisted, no-code IDE for building production-ready multi-agen
 
 Built on OpenAI's Agents SDK, RowBoat is the fastest way to build multi-agents.
 
+[![ui](/assets/ui_revamp_screenshot.png)](https://www.rowboatlabs.com/)
+
 # Quick start
 
 ## Prerequisites
