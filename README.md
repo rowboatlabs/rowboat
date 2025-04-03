@@ -3,7 +3,7 @@
 <h2 align="center">The AI-assisted agent builder</h2>
 <h5 align="center">
 
-[Quickstart](#quick-start) | [Advanced](#advanced) | [Documentation](https://docs.rowboatlabs.com/) |  [Discord](https://discord.gg/jHhUKkKHn8) | [Homepage](https://www.rowboatlabs.com/) |
+[Quickstart](#quick-start) | [Advanced](#advanced) | [Docs](https://docs.rowboatlabs.com/) |  [Discord](https://discord.gg/jHhUKkKHn8) | [Website](https://www.rowboatlabs.com/)
 
 </h5>
 
