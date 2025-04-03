@@ -78,7 +78,7 @@ Before running RowBoat, ensure you have:
 
 RowBoat supports adding text directly, document uploads or scraping URLs to enhance the responses with your custom knowledge base. RowBoat use Qdrant as the vector DB. 
 
-### Setup Qdrant
+### 1.1 Setup Qdrant
 To enable RAG you need to first setup Qdrant.
 
 1. Option1: Run Qdrant locally
@@ -109,7 +109,7 @@ To enable RAG you need to first setup Qdrant.
    ```bash
    docker compose --profile delete_qdrant up delete_qdrant
    ```
-### Adding Knowledge Base for RAG
+### 1.2 Adding Knowledge Base for RAG
 
 You can add a knowledge corpus to RowBoat by directly adding text information, uploading supported files or by pointing RowBoat to URLs for scraping.
 
@@ -212,12 +212,12 @@ After enabling RAG and starting the required workers, you can manage your knowle
 
 You can add your tools / APIs to RowBoat through (a) connecting MCP servers, or (b) connecting a webhook. 
 
-### MCP Servers
+### 2.1 MCP Servers
 
 You can intergrate any MCP server in Settings -> Tools -> MCP Server. The Tools on the servers will show up inside RowBoats Tools section.
 // Add images
 
-### Webhook
+### 2.2 Webhook
 
 You can point RowBoat to any webhook in Settings -> Tools -> Webhook. 
 
