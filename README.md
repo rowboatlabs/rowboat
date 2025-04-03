@@ -77,11 +77,68 @@ Refer to [Docs](https://docs.rowboatlabs.com/) to learn how to start building ag
 
 # Advanced 
 
-## 1. Retrieve Augmented Generation (RAG)
+## 1. Tool Use
+
+You can add your tools / APIs to Rowboat through (a) connecting MCP servers, or (b) connecting a webhook. 
+
+### 1.1 MCP Servers
+
+You can intergrate any MCP server in Settings -> Tools -> MCP Server. The Tools on the servers will show up inside Rowboats Tools section.
+
+### 1.2 Webhook
+
+You can point Rowboat to any webhook in Settings -> Tools -> Webhook. 
+
+Rowboat also includes a built-in webhook service that allows you to implement custom tool functions easily. To use this feature:
+
+1. **Generate Signing Secret**
+   Generate a secret for securing webhook requests:
+   ```bash
+   openssl rand -hex 32
+   ```
+
+2. **Update Environment Variables**
+   ```ini
+   SIGNING_SECRET=<your-generated-secret>
+   ```
+
+3. **Implement Your Functions**
+   Add your custom functions to `apps/tools_webhook/function_map.py`:
+   ```python
+   def get_weather(location: str, units: str = "metric"):
+       """Return weather data for the given location."""
+       # Your implementation here
+       return {"temperature": 20, "conditions": "sunny"}
+
+   def check_inventory(product_id: str):
+       """Check inventory levels for a product."""
+       # Your implementation here
+       return {"in_stock": 42, "warehouse": "NYC"}
+
+   # Add your functions to the map
+   FUNCTIONS_MAP = {
+       "get_weather": get_weather,
+       "check_inventory": check_inventory
+   }
+   ```
+
+4. **Start the Tools Webhook Service**
+   ```bash
+   docker compose --profile tools_webhook up -d
+   ```
+
+5. **Register Tools in Rowboat**
+   - Navigate to your project config at `/projects/<PROJECT_ID>/config`
+   - Ensure that the webhook URL is set to: `http://tools_webhook:3005/tool_call`
+   - Tools will automatically be forwarded to your webhook implementation
+
+The webhook service handles all the security and parameter validation, allowing you to focus on implementing your tool logic.
+
+## 2. Retrieve Augmented Generation (RAG)
 
 Rowboat supports adding text directly, document uploads or scraping URLs to enhance the responses with your custom knowledge base. Rowboat uses Qdrant as the vector DB. 
 
-### 1.1 Setup Qdrant
+### 2.1 Setup Qdrant
 To enable RAG you need to first setup Qdrant.
 
 1. Option1: Run Qdrant locally
@@ -112,7 +169,7 @@ To enable RAG you need to first setup Qdrant.
    ```bash
    docker compose --profile delete_qdrant up delete_qdrant
    ```
-### 1.2 Adding Knowledge Base for RAG
+### 2.2 Adding Knowledge Base for RAG
 
 You can add a knowledge corpus to Rowboat by directly adding text information, uploading supported files or by pointing Rowboat to URLs for scraping.
 
@@ -210,64 +267,6 @@ Rowboat supports file uploads (PDF, DOCX, TXT) for your knowledge base. It uses 
    ```
 
 After enabling RAG and starting the required workers, you can manage your knowledge base through the Rowboat UI at `/projects/<PROJECT_ID>/sources`.
-
-## 2. Tool Use
-
-You can add your tools / APIs to Rowboat through (a) connecting MCP servers, or (b) connecting a webhook. 
-
-### 2.1 MCP Servers
-
-You can intergrate any MCP server in Settings -> Tools -> MCP Server. The Tools on the servers will show up inside Rowboats Tools section.
-// Add images
-
-### 2.2 Webhook
-
-You can point Rowboat to any webhook in Settings -> Tools -> Webhook. 
-
-Rowboat also includes a built-in webhook service that allows you to implement custom tool functions easily. To use this feature:
-
-1. **Generate Signing Secret**
-   Generate a secret for securing webhook requests:
-   ```bash
-   openssl rand -hex 32
-   ```
-
-2. **Update Environment Variables**
-   ```ini
-   SIGNING_SECRET=<your-generated-secret>
-   ```
-
-3. **Implement Your Functions**
-   Add your custom functions to `apps/tools_webhook/function_map.py`:
-   ```python
-   def get_weather(location: str, units: str = "metric"):
-       """Return weather data for the given location."""
-       # Your implementation here
-       return {"temperature": 20, "conditions": "sunny"}
-
-   def check_inventory(product_id: str):
-       """Check inventory levels for a product."""
-       # Your implementation here
-       return {"in_stock": 42, "warehouse": "NYC"}
-
-   # Add your functions to the map
-   FUNCTIONS_MAP = {
-       "get_weather": get_weather,
-       "check_inventory": check_inventory
-   }
-   ```
-
-4. **Start the Tools Webhook Service**
-   ```bash
-   docker compose --profile tools_webhook up -d
-   ```
-
-5. **Register Tools in Rowboat**
-   - Navigate to your project config at `/projects/<PROJECT_ID>/config`
-   - Ensure that the webhook URL is set to: `http://tools_webhook:3005/tool_call`
-   - Tools will automatically be forwarded to your webhook implementation
-
-The webhook service handles all the security and parameter validation, allowing you to focus on implementing your tool logic.
 
 ## 3. Chat Widget
 
