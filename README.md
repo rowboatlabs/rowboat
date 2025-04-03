@@ -82,7 +82,9 @@ You can add your tools / APIs to Rowboat through (a) connecting MCP servers, or 
 
 ### 1.1 MCP Servers
 
-You can intergrate any MCP server in Settings -> Tools -> MCP Server. The Tools on the servers will show up inside Rowboats Tools section.
+You can intergrate any MCP server in Settings -> Tools -> MCP Servers. The Tools on the servers will show up inside Rowboats Tools section.
+
+<img src="/assets/mcp-import.png" alt="ui" width="400"/>
 
 ### 1.2 Webhook
 
