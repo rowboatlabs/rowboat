@@ -17,7 +17,7 @@ A Cursor-like, AI-assisted, no-code IDE for building production-ready multi-agen
 
 
 
-Built on OpenAI's Agents SDK, **RowBoat is the fastest way to build multi-agents!**
+Built on OpenAI's Agents SDK, **Rowboat is the fastest way to build multi-agents!**
 
 
 
@@ -27,7 +27,7 @@ Built on OpenAI's Agents SDK, **RowBoat is the fastest way to build multi-agents
 
 ## Prerequisites
 
-Before running RowBoat, ensure you have:
+Before running Rowboat, ensure you have:
 
 1. **Docker Desktop**
    - [Download Docker Desktop](https://www.docker.com/products/docker-desktop)
@@ -44,7 +44,7 @@ Before running RowBoat, ensure you have:
      ```
    - Other platforms: Refer to the MongoDB documentation for details.
 
-## Setup RowBoat
+## Setup Rowboat
 
 1. **Clone the Repository**
    ```bash
@@ -76,7 +76,7 @@ Before running RowBoat, ensure you have:
 
 ## 1. Retrieve Augmented Generation (RAG)
 
-RowBoat supports adding text directly, document uploads or scraping URLs to enhance the responses with your custom knowledge base. RowBoat use Qdrant as the vector DB. 
+Rowboat supports adding text directly, document uploads or scraping URLs to enhance the responses with your custom knowledge base. Rowboat uses Qdrant as the vector DB. 
 
 ### 1.1 Setup Qdrant
 To enable RAG you need to first setup Qdrant.
@@ -111,7 +111,7 @@ To enable RAG you need to first setup Qdrant.
    ```
 ### 1.2 Adding Knowledge Base for RAG
 
-You can add a knowledge corpus to RowBoat by directly adding text information, uploading supported files or by pointing RowBoat to URLs for scraping.
+You can add a knowledge corpus to Rowboat by directly adding text information, uploading supported files or by pointing Rowboat to URLs for scraping.
 
 #### (a) Create Text for Knowledge
 
@@ -119,7 +119,7 @@ Setting up Qdrant automatically enables the RAG by adding text information insid
 
 #### (b) Scrape URLs for Knowledge
 
-RowBoat supports scraping urls using Firecrawl. To setup scraping:
+Rowboat supports scraping urls using Firecrawl. To setup scraping:
 
 1. Get Firecrawl API Key
    - Sign up at [Firecrawl](https://firecrawl.co)
@@ -206,22 +206,22 @@ Rowboat supports file uploads (PDF, DOCX, TXT) for your knowledge base. It uses 
    docker compose --profile rag_files_worker up -d
    ```
 
-After enabling RAG and starting the required workers, you can manage your knowledge base through the RowBoat UI at `/projects/<PROJECT_ID>/sources`.
+After enabling RAG and starting the required workers, you can manage your knowledge base through the Rowboat UI at `/projects/<PROJECT_ID>/sources`.
 
 ## 2. Tool Use
 
-You can add your tools / APIs to RowBoat through (a) connecting MCP servers, or (b) connecting a webhook. 
+You can add your tools / APIs to Rowboat through (a) connecting MCP servers, or (b) connecting a webhook. 
 
 ### 2.1 MCP Servers
 
-You can intergrate any MCP server in Settings -> Tools -> MCP Server. The Tools on the servers will show up inside RowBoats Tools section.
+You can intergrate any MCP server in Settings -> Tools -> MCP Server. The Tools on the servers will show up inside Rowboats Tools section.
 // Add images
 
 ### 2.2 Webhook
 
-You can point RowBoat to any webhook in Settings -> Tools -> Webhook. 
+You can point Rowboat to any webhook in Settings -> Tools -> Webhook. 
 
-RowBoat also includes a built-in webhook service that allows you to implement custom tool functions easily. To use this feature:
+Rowboat also includes a built-in webhook service that allows you to implement custom tool functions easily. To use this feature:
 
 1. **Generate Signing Secret**
    Generate a secret for securing webhook requests:
@@ -259,7 +259,7 @@ RowBoat also includes a built-in webhook service that allows you to implement cu
    docker compose --profile tools_webhook up -d
    ```
 
-5. **Register Tools in RowBoat**
+5. **Register Tools in Rowboat**
    - Navigate to your project config at `/projects/<PROJECT_ID>/config`
    - Ensure that the webhook URL is set to: `http://tools_webhook:3005/tool_call`
    - Tools will automatically be forwarded to your webhook implementation
@@ -268,7 +268,7 @@ The webhook service handles all the security and parameter validation, allowing 
 
 ## 3. Chat Widget
 
-RowBoat provides an embeddable chat widget that you can add to any website. To enable and use the chat widget:
+Rowboat provides an embeddable chat widget that you can add to any website. To enable and use the chat widget:
 
 1. **Generate JWT Secret**
    Generate a secret for securing chat widget sessions:
@@ -290,12 +290,12 @@ RowBoat provides an embeddable chat widget that you can add to any website. To e
 4. **Add Widget to Your Website**
    You can find the chat-widget embed code under `/projects/<PROJECT_ID>/config`
 
-After setup, the chat widget will appear on your website and connect to your RowBoat project.
+After setup, the chat widget will appear on your website and connect to your Rowboat project.
 
 
-### 4. Interact with RowBoat API
+### 4. Interact with Rowboat API
 
-There are two ways to interact with RowBoat's API:
+There are two ways to interact with Rowboat's API:
 
 1. **Option 1: Python SDK**
 
@@ -367,13 +367,13 @@ There are two ways to interact with RowBoat's API:
 
 ### 5. Authentication
 
-By default, RowBoat runs without authentication. To enable user authentication using Auth0:
+By default, Rowboat runs without authentication. To enable user authentication using Auth0:
 
 1. **Auth0 Setup**
    - **Create an Auth0 Account**: Sign up at [Auth0](https://auth0.com).
-   - **Create a New Application**: Choose "Regular Web Application", select "Next.js" as the application type, and name it "RowBoat".
+   - **Create a New Application**: Choose "Regular Web Application", select "Next.js" as the application type, and name it "Rowboat".
    - **Configure Application**:
-     - **Allowed Callback URLs**: In the Auth0 Dashboard, go to your "RowBoat" application settings and set `http://localhost:3000/api/auth/callback` as an Allowed Callback URL.
+     - **Allowed Callback URLs**: In the Auth0 Dashboard, go to your "Rowboat" application settings and set `http://localhost:3000/api/auth/callback` as an Allowed Callback URL.
    - **Get Credentials**: Collect the following from your Auth0 application settings:
      - **Domain**: Copy your Auth0 domain (ensure you append `https://` to the Domain that the Auth0 dashboard shows you)
      - **Client ID**: Your application's unique identifier
