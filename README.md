@@ -86,6 +86,8 @@ You can intergrate any MCP server in Settings -> Tools -> MCP Servers. The Tools
 
 <img src="/assets/mcp-import.png" alt="ui" width="400"/>
 
+Tip: You might want to set the MCP url as http://host.docker.internal/... to allow services to access the MCP servers on your localhost.
+
 ### 1.2 Webhook
 
 You can point Rowboat to any webhook in Settings -> Tools -> Webhook. 
