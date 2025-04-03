@@ -3,7 +3,7 @@
 <h2 align="center">The AI-assisted agent builder</h2>
 <h5 align="center">
 
-[Quickstart](#quick-start) | [Advanced](#advanced) | [Docs](https://docs.rowboatlabs.com/) |  [Discord](https://discord.gg/jHhUKkKHn8) | [Website](https://www.rowboatlabs.com/)
+[Quickstart](#quick-start) | [Docs](https://docs.rowboatlabs.com/) | [Website](https://www.rowboatlabs.com/) |  [Discord](https://discord.gg/jHhUKkKHn8) 
 
 </h5>
 
@@ -74,27 +74,33 @@ Before running RowBoat, ensure you have:
 
 # Advanced 
 
-## Enable RAG
+## 1. Retrieve Augmented Generation (RAG)
 
-RowBoat supports RAG capabilities to enhance responses with your custom knowledge base. To enable RAG, you'll need:
+RowBoat supports adding text directly, document uploads or scraping URLs to enhance the responses with your custom knowledge base. RowBoat use Qdrant as the vector DB. 
 
-1. **Qdrant Vector Database**
-   - **Option 1**: Use [Qdrant Cloud](https://cloud.qdrant.io/)
-     - Create an account and cluster
-     - Note your cluster URL and API key
-   - **Option 2**: Run Qdrant locally with Docker:
-     ```bash
+### Setup Qdrant
+To enable RAG you need to first setup Qdrant.
+
+1. Option1: Run Qdrant locally
+    - Run Qdrant docker
+    ```bash
      docker run -p 6333:6333 qdrant/qdrant
      ```
-
-2. **Update Environment Variables**
+    - Update environment variables
    ```ini
    USE_RAG=true
-   QDRANT_URL=<your-qdrant-url>  # e.g., http://localhost:6333 for local
+   QDRANT_URL=http://localhost:6333
    QDRANT_API_KEY=<your-api-key>  # Only needed for Qdrant Cloud
    ```
-
-3. **Initialize Qdrant Collections**
+2. Option2: Use [Qdrant Cloud](https://cloud.qdrant.io/)
+    - Note your cluster URL and API key
+    - Update environment variables
+   ```ini
+   USE_RAG=true
+   QDRANT_URL=<your-qdrant-cloud-url>
+   QDRANT_API_KEY=<your-api-key>
+   ```
+3. Initialize Qdrant Collections
    ```bash
    docker compose --profile setup_qdrant up setup_qdrant
    ```
@@ -103,39 +109,42 @@ RowBoat supports RAG capabilities to enhance responses with your custom knowledg
    ```bash
    docker compose --profile delete_qdrant up delete_qdrant
    ```
+### Adding Knowledge Base for RAG
 
-### RAG Features
+You can add a knowledge corpus to RowBoat by directly adding text information, uploading supported files or by pointing RowBoat to URLs for scraping.
 
-RowBoat supports two types of knowledge base ingestion:
+#### (a) Create Text for Knowledge
 
-#### URL Scraping
+Setting up Qdrant automatically enables the RAG by adding text information inside Rowboat's RAG menu.
 
-Enable web page scraping to build your knowledge base:
+#### (b) Scrape URLs for Knowledge
 
-1. **Get Firecrawl API Key**
+RowBoat supports scraping urls using Firecrawl. To setup scraping:
+
+1. Get Firecrawl API Key
    - Sign up at [Firecrawl](https://firecrawl.co)
    - Generate an API key
 
-2. **Update Environment Variables**
+2. Update Environment Variables
    ```ini
    USE_RAG_SCRAPING=true
    FIRECRAWL_API_KEY=<your-firecrawl-api-key>
    ```
 
-3. **Start the URLs Worker**
+3. Start the URLs Worker
    ```bash
    docker compose --profile rag_urls_worker up -d
    ```
 
-#### File Uploads
+#### (c) Upload Files for Knowledge 
 
-Enable file upload support (PDF, DOCX, TXT) for your knowledge base:
+Rowboat supports file uploads (PDF, DOCX, TXT) for your knowledge base. It uses Google's Gemini LLM to convert the documents to Markdown before indexing:
 
-1. **Prerequisites**
+1. Prerequisites
    - An AWS S3 bucket for file storage
    - Google Cloud API key with Generative Language (Gemini) API enabled (for enhanced document parsing)
 
-2. **Configure AWS S3**
+2. Configure AWS S3
    - Create an S3 bucket
    - Add the following CORS configuration to your bucket:
      ```json
@@ -182,7 +191,7 @@ Enable file upload support (PDF, DOCX, TXT) for your knowledge base:
      }
      ```
 
-3. **Update Environment Variables**
+3. Update Environment Variables
    ```ini
    USE_RAG_UPLOADS=true
    AWS_ACCESS_KEY_ID=<your-aws-access-key>
@@ -192,16 +201,27 @@ Enable file upload support (PDF, DOCX, TXT) for your knowledge base:
    GOOGLE_API_KEY=<your-google-api-key>
    ```
 
-4. **Start the Files Worker**
+4. Start the Files Worker
    ```bash
    docker compose --profile rag_files_worker up -d
    ```
 
 After enabling RAG and starting the required workers, you can manage your knowledge base through the RowBoat UI at `/projects/<PROJECT_ID>/sources`.
 
-## Enable Tools Webhook
+## 2. Tool Use
 
-RowBoat includes a built-in webhook service that allows you to implement custom tool functions. To use this feature:
+You can add your tools / APIs to RowBoat through (a) connecting MCP servers, or (b) connecting a webhook. 
+
+### MCP Servers
+
+You can intergrate any MCP server in Settings -> Tools -> MCP Server. The Tools on the servers will show up inside RowBoats Tools section.
+// Add images
+
+### Webhook
+
+You can point RowBoat to any webhook in Settings -> Tools -> Webhook. 
+
+RowBoat also includes a built-in webhook service that allows you to implement custom tool functions easily. To use this feature:
 
 1. **Generate Signing Secret**
    Generate a secret for securing webhook requests:
@@ -246,7 +266,7 @@ RowBoat includes a built-in webhook service that allows you to implement custom 
 
 The webhook service handles all the security and parameter validation, allowing you to focus on implementing your tool logic.
 
-## Enable Chat Widget
+## 3. Chat Widget
 
 RowBoat provides an embeddable chat widget that you can add to any website. To enable and use the chat widget:
 
@@ -272,38 +292,8 @@ RowBoat provides an embeddable chat widget that you can add to any website. To e
 
 After setup, the chat widget will appear on your website and connect to your RowBoat project.
 
-## Enable Authentication
 
-By default, RowBoat runs without authentication. To enable user authentication using Auth0:
-
-1. **Auth0 Setup**
-   - **Create an Auth0 Account**: Sign up at [Auth0](https://auth0.com).
-   - **Create a New Application**: Choose "Regular Web Application", select "Next.js" as the application type, and name it "RowBoat".
-   - **Configure Application**:
-     - **Allowed Callback URLs**: In the Auth0 Dashboard, go to your "RowBoat" application settings and set `http://localhost:3000/api/auth/callback` as an Allowed Callback URL.
-   - **Get Credentials**: Collect the following from your Auth0 application settings:
-     - **Domain**: Copy your Auth0 domain (ensure you append `https://` to the Domain that the Auth0 dashboard shows you)
-     - **Client ID**: Your application's unique identifier
-     - **Client Secret**: Your application's secret key
-   - **Generate secret**: Generate a session encryption secret in your terminal and note the output for later:
-     ```bash
-     openssl rand -hex 32
-     ```
-
-2. **Update Environment Variables**
-   Add the following to your `.env` file:
-   ```ini
-   USE_AUTH=true
-   AUTH0_SECRET=your-generated-secret               # Generated using openssl command
-   AUTH0_BASE_URL=http://localhost:3000             # Your application's base URL
-   AUTH0_ISSUER_BASE_URL=https://example.auth0.com  # Your Auth0 domain (ensure it is prefixed with https://)
-   AUTH0_CLIENT_ID=your-client-id
-   AUTH0_CLIENT_SECRET=your-client-secret
-   ```
-   
-After enabling authentication, users will need to sign in to access the application.
-
-## Interact with RowBoat API
+### 4. Interact with RowBoat API
 
 There are two ways to interact with RowBoat's API:
 
@@ -374,4 +364,36 @@ There are two ways to interact with RowBoat's API:
        }
    }
    ```
+
+### 5. Authentication
+
+By default, RowBoat runs without authentication. To enable user authentication using Auth0:
+
+1. **Auth0 Setup**
+   - **Create an Auth0 Account**: Sign up at [Auth0](https://auth0.com).
+   - **Create a New Application**: Choose "Regular Web Application", select "Next.js" as the application type, and name it "RowBoat".
+   - **Configure Application**:
+     - **Allowed Callback URLs**: In the Auth0 Dashboard, go to your "RowBoat" application settings and set `http://localhost:3000/api/auth/callback` as an Allowed Callback URL.
+   - **Get Credentials**: Collect the following from your Auth0 application settings:
+     - **Domain**: Copy your Auth0 domain (ensure you append `https://` to the Domain that the Auth0 dashboard shows you)
+     - **Client ID**: Your application's unique identifier
+     - **Client Secret**: Your application's secret key
+   - **Generate secret**: Generate a session encryption secret in your terminal and note the output for later:
+     ```bash
+     openssl rand -hex 32
+     ```
+
+2. **Update Environment Variables**
+   Add the following to your `.env` file:
+   ```ini
+   USE_AUTH=true
+   AUTH0_SECRET=your-generated-secret               # Generated using openssl command
+   AUTH0_BASE_URL=http://localhost:3000             # Your application's base URL
+   AUTH0_ISSUER_BASE_URL=https://example.auth0.com  # Your Auth0 domain (ensure it is prefixed with https://)
+   AUTH0_CLIENT_ID=your-client-id
+   AUTH0_CLIENT_SECRET=your-client-secret
+   ```
+   
+After enabling authentication, users will need to sign in to access the application.
+
    
