@@ -365,19 +365,4 @@ There are two ways to interact with RowBoat's API:
        }
    }
    ```
-
-## Troubleshooting
-
-1. **MongoDB Connection Issues**
-   - Ensure local MongoDB service is running: `brew services list`
-   - Verify connection string and network connectivity.
-
-2. **Container Start-up Issues**
-   - Remove all containers: `docker-compose down`
-   - Rebuild: `docker-compose up --build`
-
-3. **Sign-in Button Not Appearing**
-   - If the sign-in button does not appear in the UI, ensure the Auth0 domain in your `.env` file is prefixed with `https://`.
-
-## Attribution
-Our agents framework is built on top of [OpenAI Swarm](https://github.com/openai/swarm) with custom enhancements and improvements. Check the [NOTICE](https://github.com/rowboatlabs/rowboat/blob/main/apps/agents/NOTICE.md) for attribution and license.
+   
