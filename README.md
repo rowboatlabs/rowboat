@@ -1,12 +1,4 @@
-<p align="center">
-<a href="https://www.rowboatlabs.com">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://rowboatlabs.github.io/logo/dark-logo.png">
-  <source media="(prefers-color-scheme: light)" srcset="https://rowboatlabs.github.io/logo/logo.png">
-  <img alt="Rowboat" src="https://rowboatlabs.github.io/logo/logo.png"  width="350">
-</picture>
-</a>
-</p>   
+[![ui](/assets/banner-logo.png)](https://www.rowboatlabs.com/)
 
 A Cursor-like, AI-assisted, no-code IDE for building production-ready multi-agents. Start from a simple prompt to create fully functional agents with the Copilot; test them in AI-simulated scenarios; connect MCP servers and tools; interact through the Python SDK, a web widget, or a Twilio phone number; and continuously refine your agents by providing feedback to the Copilot.
 
