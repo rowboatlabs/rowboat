@@ -21,7 +21,7 @@ Built on OpenAI's Agents SDK, **Rowboat is the fastest way to build multi-agents
 
 
 
-[![ui](/assets/ui_revamp_screenshot.png)](https://www.rowboatlabs.com/)
+![ui](/assets/ui_revamp_screenshot.png)
 
 # Quick start
 
