@@ -173,9 +173,12 @@ To enable RAG you need to first setup Qdrant.
 You can add a knowledge corpus to Rowboat by directly adding text information, uploading supported files or by pointing Rowboat to URLs for scraping.
 
 #### (a) Create Text for Knowledge
+Rowboat support directly creating a corpus of knowledge inside the platform.
 
-Setting up Qdrant automatically enables the RAG by adding text information inside Rowboat's RAG menu.
-
+- Start the Text Worker
+   ```bash
+   docker compose --profile rag_text_worker up -d
+   ```
 #### (b) Scrape URLs for Knowledge
 
 Rowboat supports scraping urls using Firecrawl. To setup scraping:
