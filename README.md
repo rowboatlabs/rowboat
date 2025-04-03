@@ -1,16 +1,21 @@
-[![ui](/assets/banner-logo.png)](https://www.rowboatlabs.com/)
+[![ui](/assets/banner.png)](https://www.rowboatlabs.com/)
 
-A Cursor-like, AI-assisted, no-code IDE for building production-ready multi-agents. Start from a simple prompt to create fully functional agents with the Copilot; test them in AI-simulated scenarios; connect MCP servers and tools; interact through the Python SDK, a web widget, or a Twilio phone number; and continuously refine your agents by providing feedback to the Copilot.
+<h2>The AI-assisted agent builder</h2>
+
+
+A Cursor-like, AI-assisted, no-code IDE for building production-ready multi-agents. 
+
+- ✨ Start from a simple prompt to create fully functional agents with the Copilot  
+- 🧪 Test them in AI-simulated scenarios  
+- 🌐 Connect MCP servers and tools  
+- 📞 Interact through the Python SDK, a web widget, or a Twilio phone number  
+- ♻️ Continuously refine your agents by providing feedback to the Copilot  
+
+
 
 Built on OpenAI's Agents SDK, **RowBoat is the fastest way to build multi-agents!**
 
 [![ui](/assets/ui_revamp_screenshot.png)](https://www.rowboatlabs.com/)
-
-<h4>
-
-[Quickstart](#quick-start) | [Docs](https://docs.rowboatlabs.com/) | [Homepage](https://www.rowboatlabs.com/) | [Discord](https://discord.gg/jHhUKkKHn8)
-
-</h4>
 
 # Quick start
 
