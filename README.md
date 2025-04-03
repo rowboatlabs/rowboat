@@ -301,7 +301,7 @@ Rowboat provides an embeddable chat widget that you can add to any website. To e
 After setup, the chat widget will appear on your website and connect to your Rowboat project.
 
 
-### 4. Interact with Rowboat API
+## 4. Interact with Rowboat API
 
 There are two ways to interact with Rowboat's API:
 
