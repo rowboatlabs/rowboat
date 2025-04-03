@@ -41,7 +41,7 @@ Before running RowBoat, ensure you have:
      ```
    - Other platforms: Refer to the MongoDB documentation for details.
 
-## Quickstart
+## Setup RowBoat
 
 1. **Clone the Repository**
    ```bash
