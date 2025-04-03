@@ -42,7 +42,7 @@ Before running Rowboat, ensure you have:
      brew install mongodb-community@8.0
      brew services start mongodb-community@8.0
      ```
-   - Other platforms: Refer to the MongoDB documentation for details.
+   - Other platforms: Refer to the [MongoDB documentation](https://www.mongodb.com/docs/manual/installation/) for details.
 
 ## Setup Rowboat
 
@@ -71,6 +71,9 @@ Before running Rowboat, ensure you have:
 
 4. **Access the App**
    - Visit [http://localhost:3000](http://localhost:3000).
+
+
+Refer to [Docs](https://docs.rowboatlabs.com/) to learn how to start building agents with Rowboat.
 
 # Advanced 
 
