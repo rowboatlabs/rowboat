@@ -1,7 +1,11 @@
 [![ui](/assets/banner.png)](https://www.rowboatlabs.com/)
 
-<h2>The AI-assisted agent builder</h2>
+<h2 align="center">The AI-assisted agent builder</h2>
+<h5 align="center">
 
+[Quickstart](#quick-start) | [Advanced](#advanced) | [Documentation](https://docs.rowboatlabs.com/) |  [Discord](https://discord.gg/jHhUKkKHn8) | [Homepage](https://www.rowboatlabs.com/) |
+
+</h5>
 
 A Cursor-like, AI-assisted, no-code IDE for building production-ready multi-agents. 
 
@@ -14,6 +18,8 @@ A Cursor-like, AI-assisted, no-code IDE for building production-ready multi-agen
 
 
 Built on OpenAI's Agents SDK, **RowBoat is the fastest way to build multi-agents!**
+
+
 
 [![ui](/assets/ui_revamp_screenshot.png)](https://www.rowboatlabs.com/)
 
