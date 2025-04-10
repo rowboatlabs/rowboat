@@ -102,11 +102,6 @@ html, body {
     transition-all duration-200 ease-in-out;
   }
 
-  .card:hover {
-    @apply shadow-[0_4px_12px_rgba(0,0,0,0.06)]
-    transform translate-y-[-1px];
-  }
-
   /* Update input styles */
   input, textarea, select {
     @apply rounded-lg border-[#E5E7EB] dark:border-[#2E2E30]

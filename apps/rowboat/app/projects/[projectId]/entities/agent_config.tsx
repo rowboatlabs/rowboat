@@ -19,6 +19,7 @@ import { Panel } from "@/components/common/panel-common";
 import { Button as CustomButton } from "@/components/ui/button";
 import clsx from "clsx";
 import { EditableField } from "@/app/lib/components/editable-field";
+import { USE_TRANSFER_CONTROL_OPTIONS } from "@/app/lib/feature_flags";
 
 // Common section header styles
 const sectionHeaderStyles = "text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400";
@@ -60,6 +61,13 @@ export function AgentConfig({
     useEffect(() => {
         setLocalName(agent.name);
     }, [agent.name]);
+
+    // Add effect to handle control type update when transfer control is disabled
+    useEffect(() => {
+        if (!USE_TRANSFER_CONTROL_OPTIONS && agent.controlType !== 'retain') {
+            handleUpdate({ ...agent, controlType: 'retain' });
+        }
+    }, [USE_TRANSFER_CONTROL_OPTIONS, agent.controlType, agent, handleUpdate]);
 
     const validateName = (value: string) => {
         if (value.length === 0) {
@@ -414,23 +422,25 @@ export function AgentConfig({
                     />
                 </div>
 
-                <div className="space-y-4">
-                    <label className={sectionHeaderStyles}>
-                        Conversation control after turn
-                    </label>
-                    <CustomDropdown
-                        value={agent.controlType}
-                        options={[
-                            { key: "retain", label: "Retain control" },
-                            { key: "relinquish_to_parent", label: "Relinquish to parent" },
-                            { key: "relinquish_to_start", label: "Relinquish to 'start' agent" }
-                        ]}
-                        onChange={(value) => handleUpdate({
-                            ...agent,
-                            controlType: value as z.infer<typeof WorkflowAgent>['controlType']
-                        })}
-                    />
-                </div>
+                {USE_TRANSFER_CONTROL_OPTIONS && (
+                    <div className="space-y-4">
+                        <label className={sectionHeaderStyles}>
+                            Conversation control after turn
+                        </label>
+                        <CustomDropdown
+                            value={agent.controlType}
+                            options={[
+                                { key: "retain", label: "Retain control" },
+                                { key: "relinquish_to_parent", label: "Relinquish to parent" },
+                                { key: "relinquish_to_start", label: "Relinquish to 'start' agent" }
+                            ]}
+                            onChange={(value) => handleUpdate({
+                                ...agent,
+                                controlType: value as z.infer<typeof WorkflowAgent>['controlType']
+                            })}
+                        />
+                    </div>
+                )}
 
                 <PreviewModalProvider>
                     <GenerateInstructionsModal 

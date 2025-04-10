@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { getAssistantResponseStreamId } from "@/app/actions/actions";
 import { Messages } from "./messages";
 import z from "zod";
@@ -27,6 +27,7 @@ export function Chat({
     onSystemMessageChange,
     mcpServerUrls,
     toolWebhookUrl,
+    onCopyClick,
 }: {
     chat: z.infer<typeof PlaygroundChat>;
     projectId: string;
@@ -38,6 +39,7 @@ export function Chat({
     onSystemMessageChange: (message: string) => void;
     mcpServerUrls: Array<z.infer<typeof MCPServer>>;
     toolWebhookUrl: string;
+    onCopyClick: (fn: () => string) => void;
 }) {
     const [messages, setMessages] = useState<z.infer<typeof apiV1.ChatMessage>[]>(chat.messages);
     const [loadingAssistantResponse, setLoadingAssistantResponse] = useState<boolean>(false);
@@ -47,9 +49,23 @@ export function Chat({
     const [fetchResponseError, setFetchResponseError] = useState<string | null>(null);
     const [lastAgenticRequest, setLastAgenticRequest] = useState<unknown | null>(null);
     const [lastAgenticResponse, setLastAgenticResponse] = useState<unknown | null>(null);
-    const [isProfileSelectorOpen, setIsProfileSelectorOpen] = useState(false);
     const [optimisticMessages, setOptimisticMessages] = useState<z.infer<typeof apiV1.ChatMessage>[]>(chat.messages);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    const getCopyContent = useCallback(() => {
+        return JSON.stringify({
+            messages: [{
+                role: 'system',
+                content: systemMessage,
+            }, ...messages],
+            lastRequest: lastAgenticRequest,
+            lastResponse: lastAgenticResponse,
+        }, null, 2);
+    }, [messages, systemMessage, lastAgenticRequest, lastAgenticResponse]);
+
+    // Expose copy function to parent
+    useEffect(() => {
+        onCopyClick(getCopyContent);
+    }, [getCopyContent, onCopyClick]);
 
     // reset optimistic messages when messages change
     useEffect(() => {
@@ -63,7 +79,6 @@ export function Chat({
         .forEach((message) => {
             toolCallResults[message.tool_call_id] = message;
         });
-    console.log('toolCallResults', toolCallResults);
 
     function handleUserMessage(prompt: string) {
         const updatedMessages: z.infer<typeof apiV1.ChatMessage>[] = [...messages, {
@@ -94,7 +109,6 @@ export function Chat({
 
     // get assistant response
     useEffect(() => {
-        console.log('stream useEffect called');
         let ignore = false;
         let eventSource: EventSource | null = null;
         let msgs: z.infer<typeof apiV1.ChatMessage>[] = [];
@@ -102,6 +116,11 @@ export function Chat({
         async function process() {
             setLoadingAssistantResponse(true);
             setFetchResponseError(null);
+            
+            // Reset request/response state before making new request
+            setLastAgenticRequest(null);
+            setLastAgenticResponse(null);
+            
             const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow);
             const request: z.infer<typeof AgenticAPIChatRequest> = {
                 projectId,
@@ -121,8 +140,9 @@ export function Chat({
                 toolWebhookUrl: toolWebhookUrl,
                 testProfile: testProfile ?? undefined,
             };
-            setLastAgenticRequest(null);
-            setLastAgenticResponse(null);
+            
+            // Store the full request object
+            setLastAgenticRequest(request);
 
             let streamId: string | null = null;
             try {
@@ -139,14 +159,9 @@ export function Chat({
             }
 
             if (ignore || !streamId) {
-                console.log('almost there', ignore, streamId);
                 return;
             }
 
-            // log the stream id
-            console.log('🔄 got assistant response', streamId);
-
-            // read from SSE stream
             eventSource = new EventSource(`/api/v1/stream-response/${streamId}`);
 
             eventSource.addEventListener("message", (event) => {
@@ -158,7 +173,6 @@ export function Chat({
                     const data = JSON.parse(event.data);
                     const msg = AgenticAPIChatMessage.parse(data);
                     const parsedMsg = convertFromAgenticAPIChatMessages([msg])[0];
-                    console.log('🔄 got assistant response chunk', parsedMsg);
                     msgs.push(parsedMsg);
                     setOptimisticMessages(prev => [...prev, parsedMsg]);
                 } catch (err) {
@@ -173,9 +187,15 @@ export function Chat({
                     eventSource.close();
                 }
 
-                console.log('🔄 got assistant response done', event.data);
-                const parsed: {state: unknown} = JSON.parse(event.data);
+                const parsed = JSON.parse(event.data);
                 setAgenticState(parsed.state);
+                
+                // Combine state and collected messages in the response
+                setLastAgenticResponse({
+                    ...parsed,
+                    messages: msgs
+                });
+                
                 setMessages([...messages, ...msgs]);
                 setLoadingAssistantResponse(false);
             });
@@ -207,7 +227,6 @@ export function Chat({
 
         return () => {
             ignore = true;
-            console.log('stream useEffect cleanup called');
             if (eventSource) {
                 eventSource.close();
             }

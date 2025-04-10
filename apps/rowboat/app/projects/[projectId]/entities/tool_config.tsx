@@ -3,7 +3,7 @@ import { WorkflowTool } from "../../../lib/types/workflow_types";
 import { Checkbox, Select, SelectItem, RadioGroup, Radio } from "@heroui/react";
 import { z } from "zod";
 import { ImportIcon, XIcon, PlusIcon } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,12 @@ export function ParameterConfig({
     handleRename: (oldName: string, newName: string) => void,
     readOnly?: boolean
 }) {
+    const [localName, setLocalName] = useState(param.name);
+
+    useEffect(() => {
+        setLocalName(param.name);
+    }, [param.name]);
+
     return (
         <div className="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4 space-y-4">
             <div className="flex items-center justify-between">
@@ -65,11 +71,11 @@ export function ParameterConfig({
                         Name
                     </label>
                     <Textarea
-                        value={param.name}
-                        onChange={(e) => {
-                            const newName = e.target.value;
-                            if (newName && newName !== param.name) {
-                                handleRename(param.name, newName);
+                        value={localName}
+                        onChange={(e) => setLocalName(e.target.value)}
+                        onBlur={() => {
+                            if (localName && localName !== param.name) {
+                                handleRename(param.name, localName);
                             }
                         }}
                         placeholder="Enter parameter name..."

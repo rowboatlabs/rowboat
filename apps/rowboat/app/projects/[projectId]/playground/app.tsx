@@ -1,5 +1,5 @@
 'use client';
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { z } from "zod";
 import { MCPServer, PlaygroundChat } from "@/app/lib/types/types";
 import { Workflow } from "@/app/lib/types/workflow_types";
@@ -42,6 +42,7 @@ export function App({
     });
     const [isProfileSelectorOpen, setIsProfileSelectorOpen] = useState(false);
     const [showCopySuccess, setShowCopySuccess] = useState(false);
+    const getCopyContentRef = useRef<(() => string) | null>(null);
 
     function handleSystemMessageChange(message: string) {
         setSystemMessage(message);
@@ -62,21 +63,23 @@ export function App({
             simulated: false,
             systemMessage: defaultSystemMessage,
         });
+        setSystemMessage(defaultSystemMessage);
     }
 
-    const handleCopyJson = () => {
-        const jsonString = JSON.stringify({
-            messages: [{
-                role: 'system',
-                content: systemMessage,
-            }, ...chat.messages],
-        }, null, 2);
-        navigator.clipboard.writeText(jsonString);
-        setShowCopySuccess(true);
-        setTimeout(() => {
-            setShowCopySuccess(false);
-        }, 2000);
-    };
+    const handleCopyJson = useCallback(() => {
+        if (getCopyContentRef.current) {
+            try {
+                const data = getCopyContentRef.current();
+                navigator.clipboard.writeText(data);
+                setShowCopySuccess(true);
+                setTimeout(() => {
+                    setShowCopySuccess(false);
+                }, 2000);
+            } catch (error) {
+                console.error('Error copying:', error);
+            }
+        }
+    }, []);
 
     if (hidden) {
         return <></>;
@@ -151,6 +154,7 @@ export function App({
                         onSystemMessageChange={handleSystemMessageChange}
                         mcpServerUrls={mcpServerUrls}
                         toolWebhookUrl={toolWebhookUrl}
+                        onCopyClick={(fn) => { getCopyContentRef.current = fn; }}
                     />
                 </div>
             </Panel>
