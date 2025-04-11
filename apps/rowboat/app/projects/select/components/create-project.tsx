@@ -1,8 +1,6 @@
 'use client';
 
-import { Project } from "@/app/lib/types/project_types";
 import { useEffect, useState, useRef } from "react";
-import { z } from "zod";
 import { createProject, createProjectFromPrompt } from "@/app/actions/project_actions";
 import { useRouter } from 'next/navigation';
 import clsx from 'clsx';

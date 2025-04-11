@@ -49,6 +49,8 @@ export async function fetchMcpTools(projectId: string): Promise<z.infer<typeof W
                 const tool: z.infer<typeof WorkflowTool> = {
                     name: mcpTool.name,
                     description: mcpTool.description ?? "",
+                    type: 'library',
+                    implementation: 'default',
                     parameters: {
                         type: "object",
                         properties: props ?? {},

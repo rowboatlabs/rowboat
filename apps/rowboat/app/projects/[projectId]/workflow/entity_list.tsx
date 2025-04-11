@@ -204,7 +204,10 @@ export function EntityList({
                                 <Button
                                     variant="secondary"
                                     size="sm"
-                                    onClick={() => onAddTool({})}
+                                    onClick={() => onAddTool({
+                                        type: 'custom',
+                                        implementation: 'mock'
+                                    })}
                                     className={`group ${buttonClasses}`}
                                     showHoverContent={true}
                                     hoverContent="Add Tool"

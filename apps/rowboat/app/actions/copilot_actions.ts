@@ -74,6 +74,8 @@ export async function getCopilotResponse(
                         const test = {
                             name: 'test',
                             description: 'test',
+                            type: 'custom' as const,
+                            implementation: 'mock' as const,
                             parameters: {
                                 type: 'object',
                                 properties: {},

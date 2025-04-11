@@ -1,7 +1,6 @@
 import { Project } from "@/app/lib/types/project_types";
 import { z } from "zod";
 import { ProjectList } from "./project-list";
-import { SectionHeading } from "@/components/ui/section-heading";
 import { HorizontalDivider } from "@/components/ui/horizontal-divider";
 import clsx from 'clsx';
 import { XMarkIcon } from "@heroicons/react/24/outline";

@@ -290,10 +290,11 @@ function reducer(state: State, action: Action): State {
                                 name: newToolName,
                                 description: "",
                                 parameters: {
-                                    type: "object",
+                                    type: 'object',
                                     properties: {},
                                 },
-                                mockTool: true,
+                                type: 'custom',
+                                implementation: 'mock',
                                 autoSubmitMockedResponse: true,
                                 ...action.tool
                             });

@@ -67,7 +67,7 @@ export function AgentConfig({
         if (!USE_TRANSFER_CONTROL_OPTIONS && agent.controlType !== 'retain') {
             handleUpdate({ ...agent, controlType: 'retain' });
         }
-    }, [USE_TRANSFER_CONTROL_OPTIONS, agent.controlType, agent, handleUpdate]);
+    }, [agent.controlType, agent, handleUpdate]);
 
     const validateName = (value: string) => {
         if (value.length === 0) {
