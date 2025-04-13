@@ -31,24 +31,11 @@ Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents
 
 3. Access the app at [http://localhost:3000](http://localhost:3000).
 
-## Demos
+## Demo
 
-#### Create a multi-agent assistant with tools from a single prompt
+#### Create a multi-agent assistant with MCP tools by chatting with Rowboat
 
-[![Prompt to agents](https://img.youtube.com/vi/3t2Fpn6Vyds/0.jpg)](https://www.youtube.com/watch?v=3t2Fpn6Vyds)
-
-#### Add MCP servers
-
-[![MCP server](https://img.youtube.com/vi/EbkIPCTyD58/0.jpg)](https://www.youtube.com/watch?v=EbkIPCTyD58)
-
-#### Use Firecrawl's MCP server and build a quick url scraping agent
-
-[![Firecrawl MCP](https://img.youtube.com/vi/_KZWla3Khco/0.jpg)](https://www.youtube.com/watch?v=_KZWla3Khco)
-
-#### Improve agents with feedback
-
-[![Feedback](https://img.youtube.com/vi/uoCEQtOe7eE/0.jpg)](https://www.youtube.com/watch?v=uoCEQtOe7eE)
-
+[![Prompt to agents](https://img.youtube.com/vi/RxmgQLLOyM0/0.jpg)](https://www.youtube.com/watch?v=RxmgQLLOyM0)
 
 ## Integrate with Rowboat agents
 
