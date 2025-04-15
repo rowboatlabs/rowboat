@@ -11,7 +11,7 @@
    - E.g. "Build me an assistant for a food delivery company to handle delivery status and missing items. Include the necessary tools."
 - 🌐 **Connect MCP servers**
    - Add the MCP servers in settings -> import the tools into Rowboat.     
-- 📞 **Integrate into your app using the HTTP API**
+- 📞 **Integrate into your app using the HTTP API or Python SDK**
    - Grab the project ID and generated API key from settings and use the API.
 
 Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents!
