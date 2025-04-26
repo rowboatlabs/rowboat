@@ -37,10 +37,11 @@ streaming_instructions = "\n\n".join([
 
 def get_streaming_response(
         messages: List[UserMessage | AssistantMessage],
-        workflow_schema: str,
-        current_workflow_config: str,
+        workflow_schema: Dict[str, Any],
+        current_workflow_config: Dict[str, Any],
         context: AgentContext | PromptContext | ToolContext | ChatContext | None = None,
 ) -> Any:
+    context_prompt = ""
     # if context is provided, create a prompt for the context
     if context:
         match context:
@@ -66,19 +67,17 @@ def get_streaming_response(
 {json.dumps(context.messages)}
 ```
 """
-    else:
-        context_prompt = ""
 
     # add the workflow schema to the system prompt
-    sys_prompt = streaming_instructions.replace("{workflow_schema}", workflow_schema)
+    sys_prompt = streaming_instructions.replace("{workflow_schema}", json.dumps(workflow_schema))
 
     # add the current workflow config to the last user message
     last_message = messages[-1]
     last_message.content = f"""
 Context:
 The current workflow config is:
-```
-{current_workflow_config}
+```json
+{json.dumps(current_workflow_config)}
 ```
 
 {context_prompt}
@@ -116,8 +115,8 @@ def create_app():
                 for msg in request_data['messages']
             ]
 
-            workflow_schema = request_data.get('workflow_schema', '')
-            current_workflow_config = request_data.get('current_workflow_config', '')
+            workflow_schema = request_data.get('workflow_schema', {})
+            current_workflow_config = request_data.get('current_workflow_config', {})
             context = None  # You can add context handling if needed
 
             def generate():
