@@ -79,7 +79,7 @@ function ProjectNameSection({ projectId }: { projectId: string }) {
         setProjectName(value);
         
         if (!value.trim()) {
-            setError("Project name cannot be empty");
+            setError("Название проекта не может быть пустым");
             return;
         }
         
@@ -88,8 +88,8 @@ function ProjectNameSection({ projectId }: { projectId: string }) {
     };
 
     return <Section 
-        title="Project Name"
-        description="The name of your project."
+        title="Название проекта"
+        description="Название вашего проекта."
     >
         {loading ? (
             <Spinner size="sm" />
@@ -104,7 +104,7 @@ function ProjectNameSection({ projectId }: { projectId: string }) {
                     <Textarea
                         value={projectName || ''}
                         onChange={handleChange}
-                        placeholder="Enter project name..."
+                        placeholder="Введите название проекта..."
                         className="w-full text-sm bg-transparent border-0 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors px-4 py-3"
                         autoResize
                     />
@@ -117,15 +117,15 @@ function ProjectNameSection({ projectId }: { projectId: string }) {
 
 function ProjectIdSection({ projectId }: { projectId: string }) {
     return <Section 
-        title="Project ID"
-        description="Your project's unique identifier."
+        title="Идентификатор проекта"
+        description="Ваш уникальный идентификатор проекта."
     >
         <div className="flex flex-row gap-2 items-center">
             <div className="text-sm font-mono text-gray-600 dark:text-gray-400">{projectId}</div>
             <CopyButton
                 onCopy={() => navigator.clipboard.writeText(projectId)}
-                label="Copy"
-                successLabel="Copied"
+                label="Копировать"
+                successLabel="Скопировано"
             />
         </div>
     </Section>;
@@ -147,7 +147,7 @@ function SecretSection({ projectId }: { projectId: string }) {
     }, [projectId]);
 
     const handleRotateSecret = async () => {
-        if (!confirm("Are you sure you want to rotate the secret? All existing signatures will become invalid.")) {
+        if (!confirm("Вы уверены, что хотите повернуть секрет? Все существующие подписи станут недействительными.")) {
             return;
         }
         setLoading(true);
@@ -162,8 +162,8 @@ function SecretSection({ projectId }: { projectId: string }) {
     };
 
     return <Section 
-        title="Project Secret"
-        description="The project secret is used for signing tool-call requests sent to your webhook."
+        title="Секрет проекта"
+        description="Секрет проекта используется для подписи запросов на вызов инструментов, отправляемых в ваш вебхук."
     >
         <div className="space-y-4">
             {loading ? (
@@ -182,8 +182,8 @@ function SecretSection({ projectId }: { projectId: string }) {
                         </button>
                         <CopyButton
                             onCopy={() => navigator.clipboard.writeText(secret || '')}
-                            label="Copy"
-                            successLabel="Copied"
+                            label="Копировать"
+                            successLabel="Скопировано"
                         />
                         <Button
                             size="sm"
@@ -191,7 +191,7 @@ function SecretSection({ projectId }: { projectId: string }) {
                             onClick={handleRotateSecret}
                             disabled={loading}
                         >
-                            Rotate
+                            Повернуть
                         </Button>
                     </div>
                 </div>
@@ -256,13 +256,13 @@ function ApiKeysSection({ projectId }: { projectId: string }) {
             setKeys([...keys, key]);
             setMessage({
                 type: 'success',
-                text: 'API key created successfully',
+                text: 'API ключ успешно создан',
             });
             setTimeout(() => setMessage(null), 2000);
         } catch (error) {
             setMessage({
                 type: 'error',
-                text: error instanceof Error ? error.message : "Failed to create API key",
+                text: error instanceof Error ? error.message : "Не удалось создать API ключ",
             });
         } finally {
             setLoading(false);
@@ -270,7 +270,7 @@ function ApiKeysSection({ projectId }: { projectId: string }) {
     };
 
     const handleDeleteKey = async (id: string) => {
-        if (!confirm("Are you sure you want to delete this API key? This action cannot be undone.")) {
+        if (!confirm("Вы уверены, что хотите удалить этот API ключ? Это действие не может быть отменено.")) {
             return;
         }
 
@@ -280,13 +280,13 @@ function ApiKeysSection({ projectId }: { projectId: string }) {
             setKeys(keys.filter((k) => k._id !== id));
             setMessage({
                 type: 'info',
-                text: 'API key deleted successfully',
+                text: 'API ключ успешно удален',
             });
             setTimeout(() => setMessage(null), 2000);
         } catch (error) {
             setMessage({
                 type: 'error',
-                text: error instanceof Error ? error.message : "Failed to delete API key",
+                text: error instanceof Error ? error.message : "Не удалось удалить API ключ",
             });
         } finally {
             setLoading(false);
@@ -294,8 +294,8 @@ function ApiKeysSection({ projectId }: { projectId: string }) {
     };
 
     return <Section 
-        title="API Keys"
-        description="API keys are used to authenticate requests to the Rowboat API."
+        title="API ключи"
+        description="API ключи используются для аутентификации запросов к API Rowboat."
     >
         <div className="space-y-4">
             <div className="flex justify-between items-center">
@@ -306,7 +306,7 @@ function ApiKeysSection({ projectId }: { projectId: string }) {
                     onClick={handleCreateKey}
                     disabled={loading}
                 >
-                    Create API Key
+                    Создать API ключ
                 </Button>
             </div>
 
@@ -315,9 +315,9 @@ function ApiKeysSection({ projectId }: { projectId: string }) {
             ) : (
                 <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                     <div className="grid grid-cols-12 items-center border-b border-gray-200 dark:border-gray-700 p-4">
-                        <div className="col-span-7 font-medium text-gray-900 dark:text-gray-100">API Key</div>
-                        <div className="col-span-3 font-medium text-gray-900 dark:text-gray-100">Created</div>
-                        <div className="col-span-2 font-medium text-gray-900 dark:text-gray-100">Last Used</div>
+                        <div className="col-span-7 font-medium text-gray-900 dark:text-gray-100">API ключ</div>
+                        <div className="col-span-3 font-medium text-gray-900 dark:text-gray-100">Создан</div>
+                        <div className="col-span-2 font-medium text-gray-900 dark:text-gray-100">Последний использован</div>
                     </div>
                     
                     {message && (
@@ -352,7 +352,7 @@ function ApiKeysSection({ projectId }: { projectId: string }) {
                     
                     {keys.length === 0 && (
                         <div className="p-6 text-center text-gray-500 dark:text-gray-400">
-                            No API keys created yet
+                            Нет API ключей
                         </div>
                     )}
                 </div>
@@ -388,8 +388,8 @@ function ChatWidgetSection({ projectId, chatWidgetHost }: { projectId: string, c
 
     return (
         <Section 
-            title="Chat Widget"
-            description="Add the chat widget to your website by copying and pasting this code snippet just before the closing </body> tag."
+            title="Чат виджет"
+            description="Добавьте виджет чата на ваш сайт, скопировав и вставив этот код в самый конец тега <body>."
         >
             <div className="space-y-4">
                 {loading ? (
@@ -399,8 +399,8 @@ function ChatWidgetSection({ projectId, chatWidgetHost }: { projectId: string, c
                         <div className="absolute top-3 right-3">
                             <CopyButton
                                 onCopy={() => navigator.clipboard.writeText(code)}
-                                label="Copy"
-                                successLabel="Copied"
+                                label="Копировать"
+                                successLabel="Скопировано"
                             />
                         </div>
                         <div className="font-mono text-sm bg-gray-50 dark:bg-gray-800 rounded-lg p-4 pr-12 overflow-x-auto">
@@ -441,14 +441,14 @@ function DeleteProjectSection({ projectId }: { projectId: string }) {
 
     return (
         <Section 
-            title="Delete Project"
-            description="Permanently delete this project and all its data."
+            title="Удалить проект"
+            description="Навсегда удалить этот проект и все его данные."
         >
             <div className="space-y-4">
                 <div className="p-4 bg-red-50/10 dark:bg-red-900/10 rounded-lg">
                     <p className="text-sm text-red-700 dark:text-red-300">
-                        Deleting a project will permanently remove all associated data, including workflows, sources, and API keys.
-                        This action cannot be undone.
+                        Удаление проекта приведет к постоянному удалению всех связанных данных, включая рабочие процессы, источники и API ключи.
+                        Это действие не может быть отменено.
                     </p>
                 </div>
 
@@ -460,25 +460,25 @@ function DeleteProjectSection({ projectId }: { projectId: string }) {
                     isLoading={loading}
                     color="red"
                 >
-                    Delete project
+                    Удалить проект
                 </Button>
 
                 <Modal isOpen={isOpen} onClose={onClose}>
                     <ModalContent>
-                        <ModalHeader>Delete Project</ModalHeader>
+                        <ModalHeader>Удалить проект</ModalHeader>
                         <ModalBody>
                             <div className="space-y-4">
                                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                                    This action cannot be undone. Please type in the following to confirm:
+                                    Это действие не может быть отменено. Пожалуйста, введите следующее для подтверждения:
                                 </p>
                                 <Input
-                                    label="Project name"
+                                    label="Название проекта"
                                     placeholder={projectName}
                                     value={projectNameInput}
                                     onChange={(e) => setProjectNameInput(e.target.value)}
                                 />
                                 <Input
-                                    label='Type "delete project" to confirm'
+                                    label='Введите "delete project" для подтверждения'
                                     placeholder="delete project"
                                     value={confirmationInput}
                                     onChange={(e) => setConfirmationInput(e.target.value)}
@@ -487,7 +487,7 @@ function DeleteProjectSection({ projectId }: { projectId: string }) {
                         </ModalBody>
                         <ModalFooter>
                             <Button variant="secondary" onClick={onClose}>
-                                Cancel
+                                Отменить
                             </Button>
                             <Button 
                                 variant="primary"
@@ -495,7 +495,7 @@ function DeleteProjectSection({ projectId }: { projectId: string }) {
                                 onClick={handleDelete}
                                 disabled={!isValid}
                             >
-                                Delete Project
+                                Удалить проект
                             </Button>
                         </ModalFooter>
                     </ModalContent>
