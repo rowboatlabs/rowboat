@@ -78,7 +78,7 @@ export function ParameterConfig({
                                 handleRename(param.name, localName);
                             }
                         }}
-                        placeholder="Enter parameter name..."
+                        placeholder="Имя параметра..."
                         disabled={readOnly}
                         className={textareaStyles}
                         autoResize
@@ -97,7 +97,7 @@ export function ParameterConfig({
                                 description: e.target.value
                             });
                         }}
-                        placeholder="Describe this parameter..."
+                        placeholder="Опишите этот параметр..."
                         disabled={readOnly}
                         className={textareaStyles}
                         autoResize
@@ -292,7 +292,7 @@ export function ToolConfig({
                                             name: value
                                         });
                                     }}
-                                    placeholder="Enter tool name..."
+                                    placeholder="Имя инструмента..."
                                     className="w-full text-sm bg-transparent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors px-4 py-3"
                                     autoResize
                                 />
@@ -315,7 +315,7 @@ export function ToolConfig({
                                 ...tool,
                                 description: e.target.value
                             })}
-                            placeholder="Describe what this tool does..."
+                            placeholder="Что делает этот инструмент?"
                             disabled={isReadOnly}
                             className={textareaStyles}
                             autoResize
@@ -391,7 +391,7 @@ export function ToolConfig({
                                         ...tool,
                                         mockInstructions: e.target.value
                                     })}
-                                    placeholder="Describe the response the mock tool should return..."
+                                    placeholder="Что должен вернуть тестовый инструмент?"
                                     className={textareaStyles}
                                     autoResize
                                 />

@@ -98,7 +98,7 @@ export function PromptConfig({
                                             name: value
                                         });
                                     }}
-                                    placeholder="Enter prompt name..."
+                                    placeholder="Имя промта..."
                                     className="w-full text-sm bg-transparent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors px-4 py-3"
                                     autoResize
                                 />

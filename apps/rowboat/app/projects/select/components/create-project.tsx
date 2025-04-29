@@ -372,7 +372,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                             setCustomPrompt(e.target.value);
                                             setPromptError(null);
                                         }}
-                                        placeholder="Пример: «Создай ассистента поддержки клиентов, который отвечает на вопросы о доставке и возвратах»"
+                                        placeholder="Например: ассистент для поддержки клиентов по доставке и возвратам"
                                         className={clsx(
                                             textareaStyles,
                                             "text-base",
@@ -399,7 +399,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                         <div className="space-y-4">
                             <div className="flex flex-col gap-4">
                                 <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                    👇 Нажми &ldquo;Создать ассистента &rdquo; ниже, чтобы начать
+                                    👇 Нажми «Создать ассистента» ниже, чтобы начать
                                 </p>
                             </div>
                         </div>

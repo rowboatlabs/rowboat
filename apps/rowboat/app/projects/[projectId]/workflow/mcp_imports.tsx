@@ -29,7 +29,7 @@ export function McpImportTools({ projectId, isOpen, onOpenChange, onImport }: Mc
             // Select all tools by default
             setSelectedTools(new Set(result.map((_, index) => index)));
         } catch (error) {
-            setError(`Unable to fetch tools: ${error}`);
+            setError(`Не удалось загрузить инструменты: ${error}`);
         } finally {
             setLoading(false);
         }
@@ -47,20 +47,20 @@ export function McpImportTools({ projectId, isOpen, onOpenChange, onImport }: Mc
             <ModalContent>
                 {(onClose) => (
                     <>
-                        <ModalHeader>Импорт из серверов MCP</ModalHeader>
+                        <ModalHeader>Импорт инструментов</ModalHeader>
                         <ModalBody>
                             {loading && <div className="flex gap-2 items-center">
                                 <Spinner size="sm" />
-                                Загрузка инструментов...
+                                Загрузка...
                             </div>}
                             {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
                                 {error}
-                                <Button size="sm" color="danger" onPress={() => process()}>Повторить</Button>
+                                <Button size="sm" color="danger" onPress={() => process()}>Ещё раз</Button>
                             </div>}
                             {!loading && !error && <>
                                 <div className="flex items-center justify-between mb-4">
                                     <div className="text-gray-600">
-                                        {tools.length === 0 ? "Инструменты не найдены" : `Найдено ${tools.length} инструментов:`}
+                                        {tools.length === 0 ? "Нет инструментов" : `Нашли ${tools.length} инструментов:`}
                                     </div>
                                     <Button
                                         size="sm"
@@ -71,7 +71,7 @@ export function McpImportTools({ projectId, isOpen, onOpenChange, onImport }: Mc
                                         }}
                                         startContent={<RefreshCwIcon className="w-4 h-4" />}
                                     >
-                                        Обновить
+                                        Обновить список
                                     </Button>
                                 </div>
                                 {tools.length > 0 && <div className="flex flex-col w-full mt-4">
@@ -126,7 +126,7 @@ export function McpImportTools({ projectId, isOpen, onOpenChange, onImport }: Mc
                                 </div>}
                                 {tools.length > 0 && (
                                     <div className="mt-4 text-sm text-gray-600">
-                                        Выбрано {selectedTools.size} из {tools.length} инструментов
+                                        Выбрано: {selectedTools.size} из {tools.length}
                                     </div>
                                 )}
                             </>}

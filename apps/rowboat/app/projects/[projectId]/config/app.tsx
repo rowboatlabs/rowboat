@@ -558,11 +558,11 @@ export function SecretSection({
 
     return <Section title="Secret">
         <p className="text-sm">
-            Секрет проекта используется для подписи запросов на вызов инструментов, отправляемых в ваш вебхук
+            Секретный ключ проекта используется для подписи запросов на вызов инструментов, отправляемых в ваш вебхук
         </p>
         <Divider />
         <SectionRow>
-            <LeftLabel label="Секрет проекта" />
+            <LeftLabel label="Секретный ключ проекта" />
             <RightContent>
                 <div className="flex flex-row gap-2 items-center">
                     {loading && <Spinner size="sm" />}
@@ -636,7 +636,7 @@ export function WebhookUrlSection({
             В редакторе рабочих процессов вызовы инструментов будут отправлены на этот URL, если они не имитируются.
         </p>
         <Divider />
-        <FormSection label="URL вебхука">
+        <FormSection label="URL вебхуки">
             {loading && <Spinner size="sm" />}
             {!loading && <EditableField
                 value={webhookUrl || ''}

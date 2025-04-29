@@ -11,33 +11,33 @@ interface TourStep {
 const TOUR_STEPS: TourStep[] = [
     {
         target: 'copilot',
-        content: 'Создавайте агентов с помощью ассистента.\nЭто может занять минуту.',
-        title: 'Шаг 1/6'
+        content: 'Создайте агента с помощью ассистента. Это займёт минуту.',
+        title: 'Шаг 1 из 6'
     },
     {
         target: 'playground',
-        content: 'Тестируйте вашего агента в песочнице.\nОтлаживайте вызовы инструментов и ответы.',
-        title: 'Шаг 2/6'
+        content: 'Проверьте, как работает ваш агент. Всё просто!',
+        title: 'Шаг 2 из 6'
     },
     {
         target: 'entity-agents',
-        content: 'Управляйте вашими агентами.\nУказывайте инструкции, примеры и использование инструментов.',
-        title: 'Шаг 3/6'
+        content: 'Управляйте агентами. Добавляйте инструкции и примеры.',
+        title: 'Шаг 3 из 6'
     },
     {
         target: 'entity-tools',
-        content: 'Создавайте свои инструменты, импортируйте инструменты MCP или используйте существующие.\nМакеты инструментов для быстрого тестирования.',
-        title: 'Шаг 4/6'
+        content: 'Создавайте и подключайте инструменты. Можно импортировать готовые.',
+        title: 'Шаг 4 из 6'
     },
     {
         target: 'entity-prompts',
-        content: 'Управляйте подсказками, которые будут использоваться агентами.\nНастраивайте приветственное сообщение.',
-        title: 'Шаг 5/6'
+        content: 'Настройте подсказки для агентов. Можно задать приветствие.',
+        title: 'Шаг 5 из 6'
     },
     {
         target: 'settings',
-        content: 'Настройте параметры проекта\nПолучите API-ключи, настройте вебхуки инструментов.',
-        title: 'Шаг 6/6'
+        content: 'Настройте проект: API-ключи, вебхуки и другое.',
+        title: 'Шаг 6 из 6'
     }
 ];
 
@@ -230,13 +230,13 @@ export function ProductTour({
                         onClick={handleSkip}
                         className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
                     >
-                        Пропустить обучение
+                        Пропустить тур
                     </button>
                     <button
                         onClick={handleNext}
                         className="px-4 py-1.5 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700"
                     >
-                        {currentStep === TOUR_STEPS.length - 1 ? 'Завершить' : 'Далее'}
+                        {currentStep === TOUR_STEPS.length - 1 ? 'Готово' : 'Дальше'}
                     </button>
                 </div>
                 <FloatingArrow

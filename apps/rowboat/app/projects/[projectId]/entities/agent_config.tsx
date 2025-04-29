@@ -154,7 +154,7 @@ export function AgentConfig({
                                             name: value
                                         });
                                     }}
-                                    placeholder="Enter agent name..."
+                                    placeholder="Имя агента..."
                                     className="w-full text-sm bg-transparent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors px-4 py-3"
                                     autoResize
                                 />
@@ -179,7 +179,7 @@ export function AgentConfig({
                                     description: e.target.value
                                 });
                             }}
-                            placeholder="Enter a description for this agent"
+                            placeholder="Опиши, что делает агент..."
                             className={textareaStyles}
                             autoResize
                         />
@@ -232,7 +232,7 @@ export function AgentConfig({
                                 examples: value
                             });
                         }}
-                        placeholder="Enter examples for this agent"
+                        placeholder="Примеры для этого агента..."
                         markdown
                         multiline
                         mentions
@@ -575,7 +575,7 @@ function GenerateInstructionsModal({
                             onChange={(e) => setPrompt(e.target.value)}
                             onKeyDown={handleKeyDown}
                             disabled={isLoading}
-                            placeholder="e.g., This agent should help users analyze their data and provide insights..."
+                            placeholder="Например: агент помогает анализировать данные и даёт советы"
                             className={textareaStyles}
                             autoResize
                         />

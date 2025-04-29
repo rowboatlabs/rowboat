@@ -292,7 +292,7 @@ export function WebhookUrlSection({ projectId }: { projectId: string }) {
                         setWebhookUrl(value);
                         updateWebhookUrl(projectId, value);
                     }}
-                    placeholder="Введите URL вебхука..."
+                    placeholder="Введите URL вебхуки..."
                     className="w-full text-sm bg-transparent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors px-4 py-3"
                     autoResize
                 />

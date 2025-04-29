@@ -232,7 +232,7 @@ export function Copilot({
                         <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
                             АССИСТЕНТ
                         </div>
-                        <Tooltip content="Попросите ассистента помочь с построением и изменением процесса">
+                        <Tooltip content="Попросите ассистента помочь с процессом — просто напишите ему!">
                             <InfoIcon className="w-4 h-4 text-gray-400 cursor-help" />
                         </Tooltip>
                     </div>
@@ -242,7 +242,7 @@ export function Copilot({
                         onClick={handleNewChat}
                         className="bg-blue-50 text-blue-700 hover:bg-blue-100"
                         showHoverContent={true}
-                        hoverContent="Новый чат"
+                        hoverContent="Новый диалог"
                     >
                         <PlusIcon className="w-4 h-4" />
                     </Button>
@@ -255,7 +255,7 @@ export function Copilot({
                         size="sm"
                         onClick={() => appRef.current?.handleCopyChat()}
                         showHoverContent={true}
-                        hoverContent={showCopySuccess ? "Скопировано" : "Скопировать JSON"}
+                        hoverContent={showCopySuccess ? "Готово!" : "Скопировать JSON"}
                     >
                         {showCopySuccess ? (
                             <CheckIcon className="w-4 h-4" />

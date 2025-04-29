@@ -46,9 +46,9 @@ interface EmptyStateProps {
 
 const EmptyState: React.FC<EmptyStateProps> = ({ entity }) => (
     <div className="flex items-center justify-center h-24 text-sm text-zinc-400 dark:text-zinc-500">
-        {entity === "agents" && "Агенты не созданы"}
-        {entity === "tools" && "Инструменты не созданы"}
-        {entity === "prompts" && "Промты не созданы"}
+        {entity === "agents" && "Пока нет агентов"}
+        {entity === "tools" && "Пока нет инструментов"}
+        {entity === "prompts" && "Пока нет промтов"}
     </div>
 );
 
@@ -231,7 +231,7 @@ export function EntityList({
                                     onClick={triggerMcpImport}
                                     className={buttonClasses}
                                     showHoverContent={true}
-                                    hoverContent="Импорт из MCP"
+                                    hoverContent="Импортировать из MCP"
                                 >
                                     <ImportIcon className="w-4 h-4" />
                                 </Button>
