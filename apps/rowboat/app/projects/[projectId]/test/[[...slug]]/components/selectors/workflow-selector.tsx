@@ -50,18 +50,18 @@ export function WorkflowSelector({ projectId, isOpen, onOpenChange, onSelect }: 
             <ModalContent>
                 {(onClose) => (
                     <>
-                        <ModalHeader>Select a Workflow</ModalHeader>
+                        <ModalHeader>Выберите рабочий процесс</ModalHeader>
                         <ModalBody>
                             {loading && <div className="flex gap-2 items-center">
                                 <Spinner size="sm" />
-                                Loading...
+                                Загрузка...
                             </div>}
                             {error && <div className="bg-red-100 p-2 rounded-md text-red-800 flex items-center gap-2 text-sm">
                                 {error}
-                                <Button size="sm" color="danger" onPress={() => fetchWorkflows(page)}>Retry</Button>
+                                <Button size="sm" color="danger" onPress={() => fetchWorkflows(page)}>Повторить</Button>
                             </div>}
                             {!loading && !error && <>
-                                {workflows.length === 0 && <div className="text-gray-600 text-center">No workflows found</div>}
+                                {workflows.length === 0 && <div className="text-gray-600 text-center">Нет рабочих процессов</div>}
                                 {workflows.length > 0 && <div className="flex flex-col gap-2">
                                     {workflows.map((workflow) => (
                                         <div 
@@ -79,7 +79,7 @@ export function WorkflowSelector({ projectId, isOpen, onOpenChange, onSelect }: 
                                                     {publishedWorkflowId === workflow._id && <PublishedBadge />}
                                                 </div>
                                                 <div className="text-xs text-gray-500">
-                                                    Updated <RelativeTime date={new Date(workflow.lastUpdatedAt)} />
+                                                    Обновлено <RelativeTime date={new Date(workflow.lastUpdatedAt)} />
                                                 </div>
                                             </div>
                                         </div>
@@ -95,7 +95,7 @@ export function WorkflowSelector({ projectId, isOpen, onOpenChange, onSelect }: 
                         </ModalBody>
                         <ModalFooter>
                             <Button size="sm" variant="flat" onPress={onClose}>
-                                Cancel
+                                Отменить
                             </Button>
                         </ModalFooter>
                     </>
