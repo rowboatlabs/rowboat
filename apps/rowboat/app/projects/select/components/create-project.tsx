@@ -254,7 +254,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                     <>
                         <div className="px-4 pt-4 pb-6 flex justify-between items-center">
                             <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                                Create new assistant
+                                Создание нового ассистента
                             </h1>
                             {!isProjectPaneOpen && (
                                 <Button
@@ -263,7 +263,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                     size="md"
                                     startContent={<FolderOpenIcon className="w-4 h-4" />}
                                 >
-                                    View Existing Projects
+                                    Мои проекты
                                 </Button>
                             )}
                         </div>
@@ -286,7 +286,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                     <div>
                         <div className="mb-5">
                             <SectionHeading>
-                                ✨ Get started
+                                ✨ Начнём
                             </SectionHeading>
                         </div>
 
@@ -298,7 +298,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                 onClick={() => handleTabChange(TabType.Describe)}
                                 className={selectedTab === TabType.Describe ? selectedTabStyles : unselectedTabStyles}
                             >
-                                Describe your assistant
+                                Опиши ассистента
                             </Button>
                             <Button
                                 variant={selectedTab === TabType.Blank ? 'primary' : 'tertiary'}
@@ -307,7 +307,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                 type="button"
                                 className={selectedTab === TabType.Blank ? selectedTabStyles : unselectedTabStyles}
                             >
-                                Start from a blank template
+                                Начнем с нуля
                             </Button>
                             <div className="relative" ref={dropdownRef}>
                                 <Button
@@ -326,7 +326,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                         </svg>
                                     }
                                 >
-                                    Customize an existing example
+                                    Выбери из шаблона
                                 </Button>
                                 
                                 {isExamplesDropdownOpen && (
@@ -363,7 +363,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                         <div className="space-y-4">
                             <div className="flex flex-col gap-4">
                                 <label className={largeSectionHeaderStyles}>
-                                    {selectedTab === TabType.Describe ? '✏️ What do you want to build?' : '✏️ Customize the description'}
+                                    {selectedTab === TabType.Describe ? '✏️ Что хочешь построить?' : '✏️ Customize the description'}
                                 </label>
                                 <div className="space-y-2">
                                     <Textarea
@@ -372,7 +372,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                             setCustomPrompt(e.target.value);
                                             setPromptError(null);
                                         }}
-                                        placeholder="Example: Create a customer support assistant that can handle product inquiries and returns"
+                                        placeholder="Пример: «Создай ассистента поддержки клиентов, который отвечает на вопросы о доставке и возвратах»"
                                         className={clsx(
                                             textareaStyles,
                                             "text-base",
@@ -399,7 +399,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                         <div className="space-y-4">
                             <div className="flex flex-col gap-4">
                                 <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                    👇 Click &ldquo;Create assistant&rdquo; below to get started
+                                    👇 Нажми &ldquo;Создать ассистента &rdquo; ниже, чтобы начать
                                 </p>
                             </div>
                         </div>
@@ -410,7 +410,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                         <div className="space-y-4">
                             <div className="flex flex-col gap-4">
                                 <label className={largeSectionHeaderStyles}>
-                                    🏷️ Name the project
+                                    🏷️ Название проекта
                                 </label>
                                 <Textarea
                                     required

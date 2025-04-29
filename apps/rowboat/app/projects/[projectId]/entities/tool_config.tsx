@@ -68,7 +68,7 @@ export function ParameterConfig({
             <div className="space-y-4">
                 <div className="space-y-2">
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                        Name
+                        Название
                     </label>
                     <Textarea
                         value={localName}
@@ -87,7 +87,7 @@ export function ParameterConfig({
 
                 <div className="space-y-2">
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                        Description
+                        Описание
                     </label>
                     <Textarea
                         value={param.description}
@@ -106,7 +106,7 @@ export function ParameterConfig({
 
                 <div className="space-y-2">
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                        Type
+                        Тип
                     </label>
                     <Select
                         variant="bordered"
@@ -141,7 +141,7 @@ export function ParameterConfig({
                     isDisabled={readOnly}
                 >
                     <span className="text-sm text-gray-500 dark:text-gray-400">
-                        Required parameter
+                        Обязательный параметр
                     </span>
                 </Checkbox>
             </div>
@@ -248,7 +248,7 @@ export function ToolConfig({
                         {tool.isLibrary && (
                             <div className="flex items-center gap-2 text-sm bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full text-gray-700 dark:text-gray-300">
                                 <FolderIcon className="w-4 h-4 text-blue-700 dark:text-blue-400" />
-                                <span className="text-xs">Library Tool</span>
+                                <span className="text-xs">Библиотека инструментов</span>
                             </div>
                         )}
                     </div>
@@ -269,7 +269,7 @@ export function ToolConfig({
                     <div className="space-y-4">
                         <div className="space-y-2">
                             <label className={sectionHeaderStyles}>
-                                Name
+                                Название
                             </label>
                             <div className={clsx(
                                 "border rounded-lg focus-within:ring-2",
@@ -307,7 +307,7 @@ export function ToolConfig({
                 <div className="space-y-4">
                     <div className="space-y-2">
                         <label className={sectionHeaderStyles}>
-                            Description
+                            Описание
                         </label>
                         <Textarea
                             value={tool.description}
@@ -326,7 +326,7 @@ export function ToolConfig({
                 {!isReadOnly && (
                     <div className="space-y-4">
                         <label className={sectionHeaderStyles}>
-                            Tool Mode
+                            Режим инструмента
                         </label>
                         
                         <RadioGroup
@@ -350,7 +350,7 @@ export function ToolConfig({
                                     label: "text-base font-normal text-gray-900 dark:text-gray-100 px-3 py-1"
                                 }}
                             >
-                                Mock tool responses
+                                Ответы инструмента-заглушки
                             </Radio>
                             <Radio 
                                 value="api"
@@ -359,7 +359,7 @@ export function ToolConfig({
                                     label: "text-base font-normal text-gray-900 dark:text-gray-100 px-3 py-1"
                                 }}
                             >
-                                Connect tool to your API
+                                Подключить инструмент к вашему API
                             </Radio>
                         </RadioGroup>
                     </div>
@@ -369,7 +369,7 @@ export function ToolConfig({
                     <div className={`space-y-4 ${dividerStyles} pt-6`}>
                         <div className="space-y-4">
                             <label className={sectionHeaderStyles}>
-                                Mock Settings
+                                Настройки инструмента-заглушки
                             </label>
                             <div className="pl-3 space-y-4">
                                 <Checkbox
@@ -381,7 +381,7 @@ export function ToolConfig({
                                     })}
                                 >
                                     <span className="text-sm text-gray-600 dark:text-gray-300">
-                                        Automatically send mock response in chat
+                                        Автоматически отправлять ответ инструмента-заглушки в чате
                                     </span>
                                 </Checkbox>
 
@@ -402,7 +402,7 @@ export function ToolConfig({
 
                 <div className={`space-y-4 ${dividerStyles} pt-6`}>
                     <label className={sectionHeaderStyles}>
-                        Parameters
+                        Параметры
                     </label>
                     <div className="pl-3 space-y-3">
                         {Object.entries(tool.parameters?.properties || {}).map(([paramName, param], index) => (
@@ -449,7 +449,7 @@ export function ToolConfig({
                                 }}
                                 className="hover:bg-indigo-100 dark:hover:bg-indigo-900 hover:shadow-indigo-500/20 dark:hover:shadow-indigo-400/20 hover:shadow-lg transition-all"
                             >
-                                Add Parameter
+                                Добавить параметр
                             </Button>
                         </div>
                     )}
