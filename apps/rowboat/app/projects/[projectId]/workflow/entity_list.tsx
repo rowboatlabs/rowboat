@@ -48,7 +48,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({ entity }) => (
     <div className="flex items-center justify-center h-24 text-sm text-zinc-400 dark:text-zinc-500">
         {entity === "agents" && "Агенты не созданы"}
         {entity === "tools" && "Инструменты не созданы"}
-        {entity === "prompts" && "Подсказки не созданы"}
+        {entity === "prompts" && "Промты не созданы"}
     </div>
 );
 
