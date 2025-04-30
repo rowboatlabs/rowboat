@@ -119,9 +119,13 @@ export function SourcePage({
                                             <DataSourceIcon type="urls" />
                                             <div>Specify URLs</div>
                                         </>}
-                                        {source.data.type === 'files' && <>
+                                        {source.data.type === 'files_local' && <>
                                             <DataSourceIcon type="files" />
-                                            <div>File upload</div>
+                                            <div>File upload (local)</div>
+                                        </>}
+                                        {source.data.type === 'files_s3' && <>
+                                            <DataSourceIcon type="files" />
+                                            <div>File upload (S3)</div>
                                         </>}
                                         {source.data.type === 'text' && <>
                                             <DataSourceIcon type="text" />
@@ -148,11 +152,12 @@ export function SourcePage({
                             handleReload={handleReload} 
                         />
                     }
-                    {source.data.type === 'files' && 
+                    {(source.data.type === 'files_local' || source.data.type === 'files_s3') && 
                         <FilesSource 
                             projectId={projectId} 
                             dataSource={source} 
                             handleReload={handleReload} 
+                            type={source.data.type}
                         />
                     }
                     {source.data.type === 'text' && 

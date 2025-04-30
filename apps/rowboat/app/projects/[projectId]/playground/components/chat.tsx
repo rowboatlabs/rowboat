@@ -164,7 +164,7 @@ export function Chat({
                 return;
             }
 
-            eventSource = new EventSource(`/api/v1/stream-response/${streamId}`);
+            eventSource = new EventSource(`/api/stream-response/${streamId}`);
 
             eventSource.addEventListener("message", (event) => {
                 if (ignore) {

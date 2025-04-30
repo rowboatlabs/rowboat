@@ -22,7 +22,10 @@ export const DataSource = z.object({
             type: z.literal('urls'),
         }),
         z.object({
-            type: z.literal('files'),
+            type: z.literal('files_local'),
+        }),
+        z.object({
+            type: z.literal('files_s3'),
         }),
         z.object({
             type: z.literal('text'),
@@ -50,7 +53,13 @@ export const DataSourceDoc = z.object({
             url: z.string(),
         }),
         z.object({
-            type: z.literal('file'),
+            type: z.literal('file_local'),
+            name: z.string(),
+            size: z.number(),
+            mimeType: z.string(),
+        }),
+        z.object({
+            type: z.literal('file_s3'),
             name: z.string(),
             size: z.number(),
             mimeType: z.string(),
