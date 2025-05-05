@@ -42,7 +42,7 @@ export function useCopilot({ projectId, workflow, context }: UseCopilotParams): 
 
         try {
             const res = await getCopilotResponseStream(projectId, messages, workflow, context || null);
-            const eventSource = new EventSource(`/api/v1/copilot-stream-response/${res.streamId}`);
+            const eventSource = new EventSource(`/api/copilot-stream-response/${res.streamId}`);
 
             eventSource.onmessage = (event) => {
                 try {

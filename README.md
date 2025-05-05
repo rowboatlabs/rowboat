@@ -3,7 +3,7 @@
 <h2 align="center">Let AI build multi-agent workflows for you in minutes</h2>
 <h5 align="center">
 
-[Quickstart](#quick-start) | [Docs](https://docs.rowboatlabs.com/) | [Website](https://www.rowboatlabs.com/) |  [Discord](https://discord.gg/jHhUKkKHn8) 
+[Quickstart](#quick-start) | [Docs](https://docs.rowboatlabs.com/) | [Discord](https://discord.gg/SsmmaxEw) | [Website](https://www.rowboatlabs.com/) | [Youtube](https://www.youtube.com/@RowBoatLabs) 
 
 </h5>
 
@@ -22,11 +22,11 @@ Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents
    export OPENAI_API_KEY=your-openai-api-key
    ```
       
-2. Clone the repository and start Rowboat docker
+2. Clone the repository and start Rowboat
    ```bash
    git clone git@github.com:rowboatlabs/rowboat.git
    cd rowboat
-   docker-compose up --build
+   ./start.sh
    ```
 
 3. Access the app at [http://localhost:3000](http://localhost:3000).

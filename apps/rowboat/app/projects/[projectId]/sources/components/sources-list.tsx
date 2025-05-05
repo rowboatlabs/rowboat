@@ -118,10 +118,16 @@ export function SourcesList({ projectId }: { projectId: string }) {
                                                         <div>Text</div>
                                                     </div>
                                                 )}
-                                                {source.data.type == 'files' && (
+                                                {source.data.type == 'files_local' && (
                                                     <div className="flex gap-2 items-center text-sm text-gray-600 dark:text-gray-300">
                                                         <DataSourceIcon type="files" />
-                                                        <div>Files</div>
+                                                        <div>Files (Local)</div>
+                                                    </div>
+                                                )}
+                                                {source.data.type == 'files_s3' && (
+                                                    <div className="flex gap-2 items-center text-sm text-gray-600 dark:text-gray-300">
+                                                        <DataSourceIcon type="files" />
+                                                        <div>Files (S3)</div>
                                                     </div>
                                                 )}
                                             </td>
