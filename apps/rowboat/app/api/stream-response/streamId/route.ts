@@ -1,10 +1,18 @@
-import { redisClient } from "@/app/lib/redis";
+import { getRedisClient } from "@/app/lib/redis";
 
 export async function GET(request: Request, { params }: { params: { streamId: string } }) {
   // get the payload from redis
-  const payload = await redisClient.get(`chat-stream-${params.streamId}`);
+  let payload: string | null = null;
+  try {
+    const client = await getRedisClient();
+    payload = await client.get(`chat-stream-${params.streamId}`);
+  } catch (error) {
+    console.error("Redis operation failed in GET /api/stream-response:", error);
+    return new Response("Failed to communicate with Redis", { status: 500 });
+  }
+
   if (!payload) {
-    return new Response("Stream not found", { status: 404 });
+    return new Response("Stream not found or expired", { status: 404 });
   }
 
   // Fetch the upstream SSE stream.

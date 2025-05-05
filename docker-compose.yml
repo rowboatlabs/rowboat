@@ -51,6 +51,8 @@ services:
     restart: unless-stopped
     volumes:
       - uploads:/app/uploads
+    depends_on:
+      - redis
 
   rowboat_agents:
     build:
@@ -69,6 +71,8 @@ services:
       - PROVIDER_API_KEY=${PROVIDER_API_KEY}
       - PROVIDER_DEFAULT_MODEL=${PROVIDER_DEFAULT_MODEL}
     restart: unless-stopped
+    depends_on:
+      - redis
 
   copilot:
     build:
@@ -84,6 +88,10 @@ services:
       - PROVIDER_DEFAULT_MODEL=${PROVIDER_DEFAULT_MODEL}
       - PROVIDER_COPILOT_MODEL=${PROVIDER_COPILOT_MODEL}
     restart: unless-stopped
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      - redis
 
   # tools_webhook:
   #   build:
@@ -152,6 +160,8 @@ services:
     restart: unless-stopped
     volumes:
       - uploads:/app/uploads
+    depends_on:
+      - redis
 
   rag_urls_worker:
     build:
@@ -170,6 +180,8 @@ services:
       - QDRANT_URL=http://qdrant:6333
       - QDRANT_API_KEY=${QDRANT_API_KEY}
     restart: unless-stopped
+    depends_on:
+      - redis
 
   rag_text_worker:
     build:
@@ -187,6 +199,8 @@ services:
       - QDRANT_URL=http://qdrant:6333
       - QDRANT_API_KEY=${QDRANT_API_KEY}
     restart: unless-stopped
+    depends_on:
+      - redis
 
   # chat_widget:
   #   build:
