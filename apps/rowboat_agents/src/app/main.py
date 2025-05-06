@@ -8,11 +8,9 @@ from hypercorn.config import Config
 from hypercorn.asyncio import serve
 import asyncio
 
-from src.graph.core import run_turn, run_turn_streamed
+from src.graph.core import run_turn_streamed
 from src.graph.tools import RAG_TOOL, CLOSE_CHAT_TOOL
 from src.utils.common import common_logger, read_json_from_file
-
-from pprint import pprint
 
 logger = common_logger
 app = Quart(__name__)
