@@ -54,6 +54,7 @@ services:
     depends_on:
       - redis
 
+
   rowboat_agents:
     build:
       context: ./apps/rowboat_agents
@@ -160,8 +161,10 @@ services:
     restart: unless-stopped
     volumes:
       - uploads:/app/uploads
+
     depends_on:
       - redis
+
 
   rag_urls_worker:
     build:
@@ -258,4 +261,6 @@ services:
       - QDRANT__STORAGE__STORAGE_PATH=/data/qdrant
     restart: unless-stopped
     volumes:
+
       - ./data/qdrant:/data/qdrant
+
