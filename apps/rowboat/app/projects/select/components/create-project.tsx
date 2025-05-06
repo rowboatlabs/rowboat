@@ -9,52 +9,11 @@ import { SectionHeading } from "@/components/ui/section-heading";
 import { Textarea } from "@/components/ui/textarea";
 import { Submit } from "./submit-button";
 import { Button } from "@/components/ui/button";
-import { FolderOpenIcon } from "@heroicons/react/24/outline";
+import { FolderOpenIcon, SparklesIcon, LightBulbIcon, PlayIcon, CommandLineIcon, ArrowPathIcon, CheckCircleIcon, DocumentChartBarIcon, LanguageIcon, ChatBubbleLeftRightIcon } from "@heroicons/react/24/outline";
 import { USE_MULTIPLE_PROJECTS } from "@/app/lib/feature_flags";
 import { HorizontalDivider } from "@/components/ui/horizontal-divider";
-
-// Add glow animation styles
-const glowStyles = `
-    @keyframes glow {
-        0% {
-            border-color: rgba(99, 102, 241, 0.3);
-            box-shadow: 0 0 8px 1px rgba(99, 102, 241, 0.2);
-        }
-        50% {
-            border-color: rgba(99, 102, 241, 0.6);
-            box-shadow: 0 0 12px 2px rgba(99, 102, 241, 0.4);
-        }
-        100% {
-            border-color: rgba(99, 102, 241, 0.3);
-            box-shadow: 0 0 8px 1px rgba(99, 102, 241, 0.2);
-        }
-    }
-
-    @keyframes glow-dark {
-        0% {
-            border-color: rgba(129, 140, 248, 0.3);
-            box-shadow: 0 0 8px 1px rgba(129, 140, 248, 0.2);
-        }
-        50% {
-            border-color: rgba(129, 140, 248, 0.6);
-            box-shadow: 0 0 12px 2px rgba(129, 140, 248, 0.4);
-        }
-        100% {
-            border-color: rgba(129, 140, 248, 0.3);
-            box-shadow: 0 0 8px 1px rgba(129, 140, 248, 0.2);
-        }
-    }
-
-    .animate-glow {
-        animation: glow 2s ease-in-out infinite;
-        border-width: 2px;
-    }
-
-    .dark .animate-glow {
-        animation: glow-dark 2s ease-in-out infinite;
-        border-width: 2px;
-    }
-`;
+import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 
 const TabType = {
     Describe: 'describe',
@@ -69,7 +28,7 @@ const isNotBlankTemplate = (tab: TabState): boolean => tab !== 'blank';
 const tabStyles = clsx(
     "px-4 py-2 text-sm font-medium",
     "rounded-lg",
-    "focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20",
+    "focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:focus:ring-emerald-400/20",
     "transition-colors duration-150"
 );
 
@@ -86,42 +45,45 @@ const inactiveTabStyles = clsx(
 );
 
 const largeSectionHeaderStyles = clsx(
-    "text-lg font-medium",
+    "text-3xl sm:text-4xl font-bold text-center mb-10 sm:mb-12",
     "text-gray-900 dark:text-gray-100"
 );
 
-const textareaStyles = clsx(
+const mainTextareaStyles = clsx(
     "w-full",
-    "rounded-lg p-3",
-    "border border-gray-200 dark:border-gray-700",
-    "bg-white dark:bg-gray-800",
-    "hover:bg-gray-50 dark:hover:bg-gray-750",
-    "focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20",
+    "min-h-[120px] sm:min-h-[140px]",
+    "rounded-xl p-4 text-lg",
+    "bg-white dark:bg-neutral-900",
+    "border border-gray-200 dark:border-neutral-800",
+    "focus-visible:outline-none focus-visible:border-emerald-500 dark:focus-visible:border-emerald-500 focus-visible:border-2",
+    "focus-visible:shadow-[0_0_0_3px_rgba(52,211,153,0.15)] dark:focus-visible:shadow-[0_0_0_3px_rgba(52,211,153,0.2)]",
     "placeholder:text-gray-400 dark:placeholder:text-gray-500",
-    "transition-all duration-200"
+    "transition-all duration-200",
+    "shadow-sm"
 );
 
 const emptyTextareaStyles = clsx(
-    "animate-glow",
-    "border-indigo-500/40 dark:border-indigo-400/40",
-    "shadow-[0_0_8px_1px_rgba(99,102,241,0.2)] dark:shadow-[0_0_8px_1px_rgba(129,140,248,0.2)]"
+    // "animate-glow",
+    // "border-emerald-500/40 dark:border-emerald-400/40",
+    // "shadow-[0_0_8px_1px_rgba(99,102,241,0.2)] dark:shadow-[0_0_8px_1px_rgba(129,140,248,0.2)]"
 );
 
-const tabButtonStyles = clsx(
-    "border border-gray-200 dark:border-gray-700"
+const sectionTitleStyles = clsx(
+    "text-2xl sm:text-3xl font-semibold mb-10 text-gray-800 dark:text-gray-100 text-left w-full"
 );
 
-const selectedTabStyles = clsx(
-    tabButtonStyles,
-    "text-gray-900 dark:text-gray-100",
-    "text-base"
+const iconPlaceholderStyles = clsx(
+    "w-12 h-12 p-3 bg-slate-100 dark:bg-slate-700/60 rounded-xl text-emerald-600 dark:text-emerald-400 mb-4 shadow-sm hover:shadow-md transition-shadow duration-200"
 );
 
-const unselectedTabStyles = clsx(
-    tabButtonStyles,
-    "text-gray-900 dark:text-gray-100",
-    "text-sm"
-);
+// Mock data for Trending Agents
+const mockTrendingAgents = [
+    { id: 'trend1', title: 'Аналитик данных', description: 'AI-ассистент для анализа таблиц, поиска инсайтов и построения графиков.', Icon: DocumentChartBarIcon, prompt: 'Проанализируй предоставленные данные CSV, выяви ключевые тенденции и создай сводный отчет с визуализациями.' },
+    { id: 'trend2', title: 'Email Помощник', description: 'Этот AI-ассистент поможет писать и сортировать электронные письма.', Icon: SparklesIcon, prompt: 'Составь вежливое письмо-напоминание клиенту, который не ответил на предыдущее предложение. Письмо должно быть кратким и дружелюбным.' },
+    { id: 'trend3', title: 'Генератор идей', description: 'AI-ассистент для мозгового штурма и создания креативных концепций.', Icon: LightBulbIcon, prompt: 'Придумай 5 креативных идей для постов в блог о будущем возобновляемой энергии.' },
+    { id: 'trend4', title: 'Переводчик документов', description: 'Быстро и точно переведет ваши документы на разные языки.', Icon: LanguageIcon, prompt: 'Переведи следующий текст с английского на русский, сохраняя форматирование: [вставить текст].' },
+    { id: 'trend5', title: 'Служба поддержки', description: 'Ответит на частые вопросы клиентов о вашем продукте.', Icon: ChatBubbleLeftRightIcon, prompt: 'Ответь на вопрос клиента о процедуре возврата товара согласно нашей политике.' },
+];
 
 interface CreateProjectProps {
     defaultName: string;
@@ -137,24 +99,13 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
     const [name, setName] = useState(defaultName);
     const [promptError, setPromptError] = useState<string | null>(null);
     const router = useRouter();
+    const [isCreating, setIsCreating] = useState(false);
+    const [highlightedTemplate, setHighlightedTemplate] = useState<string | null>(null);
 
-    // Add this effect to update name when defaultName changes
     useEffect(() => {
         setName(defaultName);
     }, [defaultName]);
 
-    // Inject glow animation styles
-    useEffect(() => {
-        const styleSheet = document.createElement("style");
-        styleSheet.innerText = glowStyles;
-        document.head.appendChild(styleSheet);
-
-        return () => {
-            document.head.removeChild(styleSheet);
-        };
-    }, []);
-
-    // Add click outside handler
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -187,254 +138,259 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
         handleTabChange(TabType.Blank);
     };
 
-    const handleExampleSelect = (exampleName: string) => {
-        setSelectedTab(TabType.Example);
-        setCustomPrompt(starting_copilot_prompts[exampleName] || '');
-        setIsExamplesDropdownOpen(false);
+    const handleExampleSelect = (examplePrompt: string, key: string) => {
+        setCustomPrompt(examplePrompt);
+        setHighlightedTemplate(key);
+        const promptTextarea = document.getElementById("prompt-textarea");
+        if (promptTextarea) {
+            promptTextarea.focus();
+            const textareaRect = promptTextarea.getBoundingClientRect();
+            if (textareaRect.top < 0 || textareaRect.bottom > window.innerHeight) {
+                promptTextarea.scrollIntoView({ behavior: "smooth", block: "center" });
+            } else {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+            }
+        } else {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+        setTimeout(() => setHighlightedTemplate(null), 2000);
     };
 
-    async function handleSubmit(formData: FormData) {
-        try {
-            if (selectedTab !== TabType.Blank && !customPrompt.trim()) {
-                setPromptError("Prompt cannot be empty");
-                return;
-            }
+    async function handleSubmit(formDataOrValues: FormData | { name: string; prompt: string }) {
+        setPromptError(null);
+        setIsCreating(true);
+        let currentName: string;
+        let currentPrompt: string;
 
-            let response;
+        if (formDataOrValues instanceof FormData) {
+            currentName = formDataOrValues.get('name') as string || name;
+            currentPrompt = formDataOrValues.get('prompt') as string || customPrompt;
+        } else {
+            currentName = formDataOrValues.name;
+            currentPrompt = formDataOrValues.prompt;
+        }
+
+        if (!currentPrompt.trim()) {
+            setPromptError("Дружище, без описания никак. Расскажи, что к чему, или выбери шаблон.");
+            setIsCreating(false);
+            return;
+        }
+
+        try {
+            const newFormData = new FormData();
+            newFormData.append('name', currentName);
+            newFormData.append('prompt', currentPrompt);
+            const response = await createProjectFromPrompt(newFormData);
             
-            if (selectedTab === TabType.Blank) {
-                const newFormData = new FormData();
-                newFormData.append('name', name);
-                newFormData.append('template', 'default');
-                response = await createProject(newFormData);
-            } else {
-                const newFormData = new FormData();
-                newFormData.append('name', name);
-                newFormData.append('prompt', customPrompt);
-                response = await createProjectFromPrompt(newFormData);
-                
-                if (response?.id && customPrompt) {
-                    localStorage.setItem(`project_prompt_${response.id}`, customPrompt);
-                }
+            if (response?.id && currentPrompt) {
+                localStorage.setItem(`project_prompt_${response.id}`, currentPrompt);
             }
 
             if (!response?.id) {
                 throw new Error('Project creation failed');
             }
-
             router.push(`/projects/${response.id}/workflow`);
         } catch (error) {
             console.error('Error creating project:', error);
+            setPromptError(`Ой, не вышло создать проект :( Вот что случилось: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setIsCreating(false);
         }
     }
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' && 
-            selectedTab !== TabType.Blank && 
-            (e.target as HTMLElement).tagName !== 'TEXTAREA') {
-            e.preventDefault();
-            const formData = new FormData();
-            formData.append('name', name);
-            handleSubmit(formData);
-        }
-    };
-
     return (
         <div className={clsx(
-            "overflow-auto",
-            !USE_MULTIPLE_PROJECTS && "max-w-none px-12 py-12",
-            USE_MULTIPLE_PROJECTS && !isProjectPaneOpen && "col-span-full"
+            "flex flex-col items-center min-h-screen py-12 sm:py-16 px-4 md:px-8",
+            "w-full",
+            "bg-white dark:bg-black"
         )}>
+            {USE_MULTIPLE_PROJECTS && !isProjectPaneOpen && (
+                <div className="absolute top-6 right-6 sm:top-8 sm:right-8 z-20">
+                    <Button
+                        onClick={onOpenProjectPane}
+                        variant="outline"
+                        size="default"
+                        className={clsx(
+                            "bg-gray-50 hover:bg-gray-100 dark:bg-neutral-800 dark:hover:bg-neutral-700",
+                            "text-gray-700 dark:text-gray-300 border-gray-300 dark:border-neutral-700",
+                            "hover:border-gray-400 dark:hover:border-neutral-600 hover:text-gray-900 dark:hover:text-gray-100",
+                            "rounded-lg shadow-sm hover:shadow-md transition-all duration-200"
+                        )}
+                    >
+                        <FolderOpenIcon className="w-5 h-5 mr-2" />
+                        Мои проекты
+                    </Button>
+                </div>
+            )}
+
             <section className={clsx(
-                "card h-full",
-                !USE_MULTIPLE_PROJECTS && "px-24",
-                USE_MULTIPLE_PROJECTS && "px-8"
+                "w-full max-w-2xl text-center mb-16 sm:mb-20"
             )}>
-                {USE_MULTIPLE_PROJECTS && (
-                    <>
-                        <div className="px-4 pt-4 pb-6 flex justify-between items-center">
-                            <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                                Создание нового ассистента
-                            </h1>
-                            {!isProjectPaneOpen && (
-                                <Button
-                                    onClick={onOpenProjectPane}
-                                    variant="primary"
-                                    size="md"
-                                    startContent={<FolderOpenIcon className="w-4 h-4" />}
-                                >
-                                    Мои проекты
-                                </Button>
-                            )}
-                        </div>
-                        <HorizontalDivider />
-                    </>
-                )}
+                <h1 className={largeSectionHeaderStyles}>
+                    Создай своего <span className="text-emerald-600">AI-ассистента</span>. Начни с идеи – остальное здесь!
+                </h1>
                 
                 <form
                     id="create-project-form"
-                    action={handleSubmit}
                     onSubmit={(e) => {
                         e.preventDefault();
-                        const formData = new FormData(e.currentTarget);
-                        handleSubmit(formData);
+                        handleSubmit({name: name, prompt: customPrompt});
                     }}
-                    onKeyDown={handleKeyDown}
-                    className="pt-6 pb-16 space-y-12"
+                    className="space-y-8 w-full"
                 >
-                    {/* Tab Section */}
-                    <div>
-                        <div className="mb-5">
-                            <SectionHeading>
-                                ✨ Начнём
-                            </SectionHeading>
-                        </div>
-
-                        {/* Tab Navigation */}
-                        <div className="flex gap-6 relative">
+                    <div className="relative">
+                        <Textarea
+                            id="prompt-textarea"
+                            name="prompt"
+                            value={customPrompt}
+                            onChange={(e) => {
+                                setCustomPrompt(e.target.value);
+                                if (promptError) setPromptError(null);
+                            }}
+                            placeholder="Опиши задачи для своего AI-ассистента: например, отвечать на вопросы клиентов или анализировать данные."
+                            className={clsx(
+                                mainTextareaStyles
+                            )}
+                            rows={5}
+                            disabled={isCreating}
+                        />
+                        <div className="mt-6 flex justify-center md:absolute md:bottom-5 md:right-5">
                             <Button
-                                variant={selectedTab === TabType.Describe ? 'primary' : 'tertiary'}
-                                size="md"
-                                onClick={() => handleTabChange(TabType.Describe)}
-                                className={selectedTab === TabType.Describe ? selectedTabStyles : unselectedTabStyles}
-                            >
-                                Опиши ассистента
-                            </Button>
-                            <Button
-                                variant={selectedTab === TabType.Blank ? 'primary' : 'tertiary'}
-                                size="md"
-                                onClick={handleBlankTemplateClick}
-                                type="button"
-                                className={selectedTab === TabType.Blank ? selectedTabStyles : unselectedTabStyles}
-                            >
-                                Начнем с нуля
-                            </Button>
-                            <div className="relative" ref={dropdownRef}>
-                                <Button
-                                    variant={selectedTab === TabType.Example ? 'primary' : 'tertiary'}
-                                    size="md"
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        setIsExamplesDropdownOpen(!isExamplesDropdownOpen);
-                                    }}
-                                    type="button"
-                                    className={selectedTab === TabType.Example ? selectedTabStyles : unselectedTabStyles}
-                                    endContent={
-                                        <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                                        </svg>
-                                    }
-                                >
-                                    Выбери из шаблона
-                                </Button>
-                                
-                                {isExamplesDropdownOpen && (
-                                    <div className="absolute z-10 mt-2 min-w-[200px] max-w-[240px] rounded-lg shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                                        <div className="py-1">
-                                            {Object.entries(starting_copilot_prompts)
-                                                .filter(([name]) => name !== 'Blank Template')
-                                                .map(([name]) => (
-                                                    <Button
-                                                        key={name}
-                                                        variant="tertiary"
-                                                        size="sm"
-                                                        className="w-full justify-start text-left text-sm py-1.5"
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            handleExampleSelect(name);
-                                                        }}
-                                                        type="button"
-                                                    >
-                                                        {name}
-                                                    </Button>
-                                                ))
-                                            }
-                                        </div>
-                                    </div>
+                                type="submit"
+                                variant="default"
+                                size="lg"
+                                className={clsx(
+                                    "group bg-gray-900 hover:bg-gray-700 active:bg-gray-950 text-white dark:bg-emerald-600 dark:hover:bg-emerald-700 dark:active:bg-emerald-800 shadow-lg hover:shadow-xl active:shadow-lg active:scale-[0.97] transition-all duration-200 rounded-xl px-8 py-3 font-semibold text-base",
+                                    isCreating && "opacity-70 cursor-not-allowed"
                                 )}
-                            </div>
+                                disabled={isCreating}
+                            >
+                                {isCreating ? (
+                                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                ) : (
+                                    <PlayIcon className="w-5 h-5 mr-2 transition-transform group-hover:scale-110"/>
+                                )}
+                                Поехали!
+                                <span className="hidden md:inline ml-2 text-xs opacity-70 group-hover:opacity-90">⌘+↵</span>
+                            </Button>
                         </div>
                     </div>
-
-                    {/* Custom Prompt Section - Only show when needed */}
-                    {(selectedTab === TabType.Describe || selectedTab === TabType.Example) && (
-                        <div className="space-y-4">
-                            <div className="flex flex-col gap-4">
-                                <label className={largeSectionHeaderStyles}>
-                                    {selectedTab === TabType.Describe ? '✏️ Что хочешь построить?' : '✏️ Customize the description'}
-                                </label>
-                                <div className="space-y-2">
-                                    <Textarea
-                                        value={customPrompt}
-                                        onChange={(e) => {
-                                            setCustomPrompt(e.target.value);
-                                            setPromptError(null);
-                                        }}
-                                        placeholder="Например: ассистент для поддержки клиентов по доставке и возвратам"
-                                        className={clsx(
-                                            textareaStyles,
-                                            "text-base",
-                                            "text-gray-900 dark:text-gray-100",
-                                            promptError && "border-red-500 focus:ring-red-500/20",
-                                            !customPrompt && emptyTextareaStyles
-                                        )}
-                                        style={{ minHeight: "120px" }}
-                                        autoFocus
-                                        autoResize
-                                        required={isNotBlankTemplate(selectedTab)}
-                                    />
-                                    {promptError && (
-                                        <p className="text-sm text-red-500">
-                                            {promptError}
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
+                    {promptError && (
+                        <p className="text-red-500 dark:text-red-400 text-sm mt-2 text-left font-medium">{promptError}</p>
                     )}
 
-                    {selectedTab === TabType.Blank && (
-                        <div className="space-y-4">
-                            <div className="flex flex-col gap-4">
-                                <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                    👇 Нажми «Создать ассистента» ниже, чтобы начать
-                                </p>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Name Section */}
                     {USE_MULTIPLE_PROJECTS && (
-                        <div className="space-y-4">
-                            <div className="flex flex-col gap-4">
-                                <label className={largeSectionHeaderStyles}>
-                                    🏷️ Название проекта
-                                </label>
-                                <Textarea
-                                    required
-                                    name="name"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    className={clsx(
-                                        textareaStyles,
-                                        "min-h-[60px]",
-                                        "text-base",
-                                        "text-gray-900 dark:text-gray-100"
-                                    )}
-                                    placeholder={defaultName}
-                                />
-                            </div>
+                        <div className="space-y-3 pt-4 text-left">
+                            <label htmlFor="project-name" className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                Как назовём проект? (можно и потом)
+                            </label>
+                            <Input
+                                id="project-name"
+                                name="name"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                className={clsx(
+                                    "w-full rounded-xl p-3 text-base",
+                                    "bg-white dark:bg-neutral-900",
+                                    "border border-gray-200 dark:border-neutral-800",
+                                    "focus-visible:outline-none focus-visible:border-emerald-500 dark:focus-visible:border-emerald-500 focus-visible:border-2",
+                                    "focus-visible:shadow-[0_0_0_3px_rgba(52,211,153,0.15)] dark:focus-visible:shadow-[0_0_0_3px_rgba(52,211,153,0.2)]",
+                                    "placeholder:text-gray-400 dark:placeholder:text-gray-500 shadow-sm"
+                                )}
+                                placeholder={defaultName}
+                                disabled={isCreating}
+                            />
                         </div>
                     )}
-
-                    {/* Submit Button */}
-                    <div className="pt-1 w-full -mt-4">
-                        <Submit />
-                    </div>
                 </form>
             </section>
+
+            {/* Trending Agents Section - Horizontal Scroll */}
+            <section className="w-full max-w-full mb-16 sm:mb-20">
+                <h2 className={clsx(sectionTitleStyles, "max-w-5xl mx-auto px-4 md:px-0")}>Популярные AI-ассистенты</h2>
+                {/* Контейнер для горизонтального скролла */}
+                <div className="flex overflow-x-auto space-x-6 pb-6 pt-3 px-4 md:px-8 scrollbar-hide">
+                    {mockTrendingAgents.map(agent => (
+                        <Card
+                            key={agent.id}
+                            className={clsx(
+                                "min-w-[300px] sm:min-w-[320px] flex-shrink-0",
+                                "bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800",
+                                "shadow-lg hover:shadow-xl dark:shadow-2xl dark:hover:shadow-2xl dark:shadow-black/20 dark:hover:shadow-black/40",
+                                "transition-all duration-300 rounded-xl transform-gpu",
+                                "hover:scale-[1.03] hover:-translate-y-1 cursor-pointer"
+                            )}
+                            onClick={() => handleExampleSelect(agent.prompt, agent.id)}
+                        >
+                            <CardHeader className="items-start text-left pt-6 px-6">
+                                <div className={iconPlaceholderStyles}>
+                                    <agent.Icon className="w-full h-full" />
+                                </div>
+                                <CardTitle className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{agent.title}</CardTitle>
+                            </CardHeader>
+                            <CardContent className="px-6 pb-6 pt-0">
+                                <p className="text-sm text-gray-600 dark:text-slate-400 text-left leading-relaxed">{agent.description}</p>
+                            </CardContent>
+                        </Card>
+                    ))}
+                    {/* Добавляем пустой div в конец для визуального отступа */}
+                    <div className="flex-shrink-0 w-1"></div>
+                </div>
+            </section>
+
+            {/* Agent Templates Section - Horizontal Scroll */}
+            {Object.keys(starting_copilot_prompts).length > 0 && (
+                <section className="w-full max-w-full">
+                    <h2 className={clsx(sectionTitleStyles, "max-w-5xl mx-auto px-4 md:px-0")}>Шаблоны AI-ассистентов: выбери основу для проекта.</h2>
+                    {/* Контейнер для горизонтального скролла */}
+                    <div className="flex overflow-x-auto space-x-6 pb-6 pt-3 px-4 md:px-8 scrollbar-hide">
+                        {Object.entries(starting_copilot_prompts).map(([key, promptText]) => (
+                            <Card
+                                key={key}
+                                className={clsx(
+                                    "min-w-[300px] sm:min-w-[320px] flex-shrink-0",
+                                    "bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800",
+                                    "shadow-lg hover:shadow-xl dark:shadow-2xl dark:hover:shadow-2xl dark:shadow-black/20 dark:hover:shadow-black/40",
+                                    "flex flex-col justify-between transition-all duration-300 rounded-xl transform-gpu",
+                                    "hover:scale-[1.03] hover:-translate-y-1",
+                                    highlightedTemplate === key && "ring-2 ring-emerald-500 ring-offset-4 dark:ring-offset-black shadow-2xl scale-[1.03] -translate-y-1"
+                                )}
+                            >
+                                <div>
+                                    <CardHeader className="items-start text-left pt-6 px-6">
+                                        <div className={iconPlaceholderStyles}>
+                                            <LightBulbIcon className="w-full h-full" />
+                                        </div>
+                                        <CardTitle className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{key.replace(/_/g, ' ')}</CardTitle>
+                                    </CardHeader>
+                                </div>
+                                <CardFooter className="pt-4 mt-auto px-6 pb-6">
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => handleExampleSelect(promptText as string, key)}
+                                        className={clsx(
+                                            "w-full border-emerald-500/70 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-500/70 dark:text-emerald-400 dark:hover:bg-emerald-900/40 dark:hover:text-emerald-300",
+                                            "transition-all duration-200 rounded-lg font-medium py-2.5 text-sm",
+                                            highlightedTemplate === key && "bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 border-emerald-600 dark:border-emerald-400"
+                                        )}
+                                    >
+                                        {highlightedTemplate === key ? (
+                                            <CheckCircleIcon className="w-5 h-5 mr-2 text-emerald-600 dark:text-emerald-400 transition-all duration-200 transform scale-110" />
+                                        ) : (
+                                            <SparklesIcon className="w-5 h-5 mr-2 text-emerald-500/80 opacity-70 group-hover:opacity-100 transition-opacity duration-200"/>
+                                        )}
+                                        Беру этот!
+                                    </Button>
+                                </CardFooter>
+                            </Card>
+                        ))}
+                        <div className="flex-shrink-0 w-1"></div>
+                    </div>
+                </section>
+            )}
         </div>
     );
 }
