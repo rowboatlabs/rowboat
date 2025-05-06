@@ -100,9 +100,9 @@ export function App({
                     <div className="flex items-center gap-3">
                         <div className="flex items-center gap-2">
                             <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                PLAYGROUND
+                                ПЕСОЧНИЦА
                             </div>
-                            <Tooltip content="Test your workflow and chat with your agents in real-time">
+                            <Tooltip content="Проверьте агента в деле — общайтесь с ним прямо здесь!">
                                 <InfoIcon className="w-4 h-4 text-gray-400 cursor-help" />
                             </Tooltip>
                         </div>
@@ -112,7 +112,7 @@ export function App({
                             onClick={handleNewChatButtonClick}
                             className="bg-blue-50 text-blue-700 hover:bg-blue-100"
                             showHoverContent={true}
-                            hoverContent="New chat"
+                            hoverContent="Новый диалог"
                         >
                             <PlusIcon className="w-4 h-4" />
                         </Button>
@@ -126,7 +126,7 @@ export function App({
                                 size="sm"
                                 onClick={() => setIsProfileSelectorOpen(true)}
                                 showHoverContent={true}
-                                hoverContent={testProfile?.name || 'Select test profile'}
+                                hoverContent={testProfile?.name || 'Выбери профиль'}
                             >
                                 <UserIcon className="w-4 h-4" />
                             </Button>
@@ -136,7 +136,7 @@ export function App({
                             size="sm"
                             onClick={handleCopyJson}
                             showHoverContent={true}
-                            hoverContent={showCopySuccess ? "Copied" : "Copy JSON"}
+                            hoverContent={showCopySuccess ? "Готово!" : "Скопировать JSON"}
                         >
                             {showCopySuccess ? (
                                 <CheckIcon className="w-4 h-4" />

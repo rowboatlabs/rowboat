@@ -6,7 +6,9 @@ mkdir -p data/qdrant
 mkdir -p data/mongo
 
 # Start with the base command and profile flags
-CMD="docker-compose"
+
+CMD="docker compose"
+
 
 # enable rag text and files workers
 CMD="$CMD --profile rag_text_worker"
@@ -26,4 +28,6 @@ fi
 CMD="$CMD up --build"
 
 echo "Running: $CMD"
+
 exec $CMD
+

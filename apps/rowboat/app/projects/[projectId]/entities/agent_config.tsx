@@ -121,7 +121,7 @@ export function AgentConfig({
                         startContent={<XIcon className="w-4 h-4" />}
                         aria-label="Close agent config"
                     >
-                        Close
+                        Закрыть
                     </CustomButton>
                 </div>
             }
@@ -131,7 +131,7 @@ export function AgentConfig({
                     <div className="space-y-4">
                         <div className="space-y-2">
                             <label className={sectionHeaderStyles}>
-                                Name
+                                Название
                             </label>
                             <div className={clsx(
                                 "border rounded-lg focus-within:ring-2",
@@ -154,7 +154,7 @@ export function AgentConfig({
                                             name: value
                                         });
                                     }}
-                                    placeholder="Enter agent name..."
+                                    placeholder="Имя агента..."
                                     className="w-full text-sm bg-transparent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors px-4 py-3"
                                     autoResize
                                 />
@@ -169,7 +169,7 @@ export function AgentConfig({
                 <div className="space-y-4">
                     <div className="space-y-2">
                         <label className={sectionHeaderStyles}>
-                            Description
+                            Описание
                         </label>
                         <Textarea
                             value={agent.description || ""}
@@ -179,7 +179,7 @@ export function AgentConfig({
                                     description: e.target.value
                                 });
                             }}
-                            placeholder="Enter a description for this agent"
+                            placeholder="Опиши, что делает агент..."
                             className={textareaStyles}
                             autoResize
                         />
@@ -189,7 +189,7 @@ export function AgentConfig({
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
                         <label className={sectionHeaderStyles}>
-                            Instructions
+                            Инструкции
                         </label>
                         <CustomButton
                             variant="primary"
@@ -197,7 +197,7 @@ export function AgentConfig({
                             onClick={() => setShowGenerateModal(true)}
                             startContent={<Sparkles className="w-4 h-4" />}
                         >
-                            Generate
+                            Сгенерировать
                         </CustomButton>
                     </div>
                     <EditableField
@@ -221,7 +221,7 @@ export function AgentConfig({
 
                 <div className="space-y-4">
                     <label className={sectionHeaderStyles}>
-                        Examples
+                        Примеры
                     </label>
                     <EditableField
                         key="examples"
@@ -232,7 +232,7 @@ export function AgentConfig({
                                 examples: value
                             });
                         }}
-                        placeholder="Enter examples for this agent"
+                        placeholder="Примеры для этого агента..."
                         markdown
                         multiline
                         mentions
@@ -306,7 +306,7 @@ export function AgentConfig({
                                                         {ds?.name || "Unknown"}
                                                     </span>
                                                     <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                        Data Source
+                                                        Источник данных
                                                     </span>
                                                 </div>
                                             </div>
@@ -323,7 +323,7 @@ export function AgentConfig({
                                                 }}
                                                 startContent={<Trash2 className="w-4 h-4" />}
                                             >
-                                                Remove
+                                                Удалить
                                             </CustomButton>
                                         </div>
                                     );
@@ -341,7 +341,7 @@ export function AgentConfig({
                                                 <ChevronDown className="w-4 h-4 text-gray-400" /> : 
                                                 <ChevronRight className="w-4 h-4 text-gray-400" />
                                             }
-                                            Advanced RAG configuration
+                                            Расширенная настройка RAG
                                         </button>
                                         
                                         {isAdvancedConfigOpen && (
@@ -349,7 +349,7 @@ export function AgentConfig({
                                                 <div className="grid gap-6">
                                                     <div className="space-y-2">
                                                         <label className={sectionHeaderStyles}>
-                                                            Return type
+                                                            Тип возвращаемого значения
                                                         </label>
                                                         <div className="flex gap-4">
                                                             {["chunks", "content"].map((type) => (
@@ -374,7 +374,7 @@ export function AgentConfig({
 
                                                     <div className="space-y-2">
                                                         <label className={sectionHeaderStyles}>
-                                                            Number of matches
+                                                            Количество совпадений
                                                         </label>
                                                         <div className="flex items-center gap-3">
                                                             <input
@@ -389,11 +389,11 @@ export function AgentConfig({
                                                                 })}
                                                             />
                                                             <span className="text-sm text-gray-500 dark:text-gray-400">
-                                                                matches
+                                                                совпадений
                                                             </span>
                                                         </div>
                                                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                                                            Number of relevant chunks to retrieve (1-20)
+                                                            Количество релевантных чанков для извлечения (1-20)
                                                         </p>
                                                     </div>
                                                 </div>
@@ -409,21 +409,21 @@ export function AgentConfig({
                 <div className="space-y-4">
                     <div className="flex items-center">
                         <label className={sectionHeaderStyles}>
-                            Model
+                            Модель
                         </label>
                         <div className="relative ml-2 group">
                             <Info 
                                 className="w-4 h-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer transition-colors"
                             />
                             <div className="absolute bottom-full left-0 mb-2 p-3 w-80 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs invisible group-hover:visible z-50">
-                                <div className="mb-1 font-medium">Model Configuration</div>
-                                Set this according to the PROVIDER_BASE_URL you have set in your .env file (such as your LiteLLM, gateway). 
+                                <div className="mb-1 font-medium">Конфигурация модели</div>
+                                Установите это в соответствии с PROVIDER_BASE_URL, который вы установили в своем .env файле (например, LiteLLM, gateway). 
                                 <br />
                                 <br />
-                                E.g. LiteLLM&apos;s naming convention is like: &apos;claude-3-7-sonnet-latest&apos;, but you may have set alias model names or might be using a different provider like openrouter, openai etc. 
+                                Например, LiteLLM&apos;s naming convention is like: &apos;claude-3-7-sonnet-latest&apos;, но вы можете использовать свои псевдонимы моделей или другого провайдера, например openrouter, openai и т.д. 
                                 <br />
                                 <br />
-                                By default, the model is set to gpt-4.1, assuming your OpenAI API key is set in PROVIDER_API_KEY and PROVIDER_BASE_URL is not set.
+                                По умолчанию модель установлена на gpt-4.1, предполагая, что ваш OpenAI API ключ установлен в PROVIDER_API_KEY и PROVIDER_BASE_URL не установлен.
                                 <div className="absolute h-2 w-2 bg-white dark:bg-gray-800 transform rotate-45 -bottom-1 left-4 border-r border-b border-gray-200 dark:border-gray-700"></div>
                             </div>
                         </div>
@@ -440,14 +440,14 @@ export function AgentConfig({
                 {USE_TRANSFER_CONTROL_OPTIONS && (
                     <div className="space-y-4">
                         <label className={sectionHeaderStyles}>
-                            Conversation control after turn
+                            Контроль после хода
                         </label>
                         <CustomDropdown
                             value={agent.controlType}
                             options={[
-                                { key: "retain", label: "Retain control" },
-                                { key: "relinquish_to_parent", label: "Relinquish to parent" },
-                                { key: "relinquish_to_start", label: "Relinquish to 'start' agent" }
+                                { key: "retain", label: "Сохранить контроль" },
+                                { key: "relinquish_to_parent", label: "Передать контроль родительскому агенту" },
+                                { key: "relinquish_to_start", label: "Передать контроль 'начальному' агенту" }
                             ]}
                             onChange={(value) => handleUpdate({
                                 ...agent,
@@ -551,7 +551,7 @@ function GenerateInstructionsModal({
     return (
         <Modal isOpen={isOpen} onClose={onClose} size="lg">
             <ModalContent>
-                <ModalHeader>Generate Instructions</ModalHeader>
+                <ModalHeader>Сгенерировать инструкции</ModalHeader>
                 <ModalBody>
                     <div className="flex flex-col gap-4">
                         {error && (
@@ -565,7 +565,7 @@ function GenerateInstructionsModal({
                                         handleGenerate();
                                     }}
                                 >
-                                    Retry
+                                    Повторить
                                 </CustomButton>
                             </div>
                         )}
@@ -575,7 +575,7 @@ function GenerateInstructionsModal({
                             onChange={(e) => setPrompt(e.target.value)}
                             onKeyDown={handleKeyDown}
                             disabled={isLoading}
-                            placeholder="e.g., This agent should help users analyze their data and provide insights..."
+                            placeholder="Например: агент помогает анализировать данные и даёт советы"
                             className={textareaStyles}
                             autoResize
                         />
@@ -588,7 +588,7 @@ function GenerateInstructionsModal({
                         onClick={onClose}
                         disabled={isLoading}
                     >
-                        Cancel
+                        Отменить
                     </CustomButton>
                     <CustomButton
                         variant="primary"
@@ -597,7 +597,7 @@ function GenerateInstructionsModal({
                         disabled={!prompt.trim() || isLoading}
                         isLoading={isLoading}
                     >
-                        Generate
+                        Сгенерировать
                     </CustomButton>
                 </ModalFooter>
             </ModalContent>

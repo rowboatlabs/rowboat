@@ -217,7 +217,7 @@ function McpServersSection({
         <div className="space-y-4">
             <div className="flex justify-between items-center">
                 <p className="text-sm text-muted-foreground">
-                    MCP servers are used to execute MCP tools.
+                    MCP серверы используются для выполнения MCP инструментов.
                 </p>
                 <Button
                     size="sm"
@@ -225,7 +225,7 @@ function McpServersSection({
                     startContent={<PlusIcon className="w-4 h-4" />}
                     onPress={handleAddServer}
                 >
-                    Add Server
+                    Добавить сервер
                 </Button>
             </div>
 
@@ -246,13 +246,13 @@ function McpServersSection({
                                     variant="light"
                                     onPress={() => handleRemoveServer(index)}
                                 >
-                                    Remove
+                                    Удалить
                                 </Button>
                             </div>
                         ))}
                         {servers.length === 0 && (
                             <div className="text-center text-muted-foreground p-4">
-                                No servers configured
+                                Серверы не настроены
                             </div>
                         )}
                     </div>
@@ -265,7 +265,7 @@ function McpServersSection({
                                 onPress={handleSave}
                                 isLoading={saving}
                             >
-                                Save Changes
+                                Сохранить изменения
                             </Button>
                         </div>
                     )}
@@ -282,12 +282,12 @@ function McpServersSection({
 
             <Modal isOpen={isOpen} onClose={onClose}>
                 <ModalContent>
-                    <ModalHeader>Add MCP Server</ModalHeader>
+                    <ModalHeader>Добавить MCP сервер</ModalHeader>
                     <ModalBody>
                         <div className="flex flex-col gap-4">
                             <Input
-                                label="Server Name"
-                                placeholder="Enter server name"
+                                label="Имя сервера"
+                                placeholder="Введите имя сервера"
                                 value={newServer.name}
                                 onChange={(e) => {
                                     setNewServer({ ...newServer, name: e.target.value });
@@ -325,14 +325,14 @@ function McpServersSection({
                     </ModalBody>
                     <ModalFooter>
                         <Button variant="light" onPress={onClose}>
-                            Cancel
+                            Отменить
                         </Button>
                         <Button
                             color="primary"
                             onPress={handleCreateServer}
                             isDisabled={!newServer.name || !newServer.url}
                         >
-                            Add Server
+                            Добавить сервер
                         </Button>
                     </ModalFooter>
                 </ModalContent>
@@ -364,8 +364,8 @@ function ApiKeyDisplay({ apiKey }: { apiKey: string }) {
                     onCopy={() => {
                         navigator.clipboard.writeText(apiKey);
                     }}
-                    label="Copy"
-                    successLabel="Copied"
+                    label="Копировать"
+                    successLabel="Скопировано"
                 />
             </div>
         </div>
@@ -444,11 +444,11 @@ export function ApiKeysSection({
         }
     };
 
-    return <Section title="API keys">
+    return <Section title="API ключи">
         <div className="space-y-4">
             <div className="flex justify-between items-center">
                 <p className="text-sm text-muted-foreground">
-                    API keys are used to authenticate requests to the Rowboat API.
+                    API ключи используются для аутентификации запросов к API Agent Bulder.
                 </p>
                 <Button
                     onPress={handleCreateKey}
@@ -457,7 +457,7 @@ export function ApiKeysSection({
                     variant="flat"
                     isDisabled={loading}
                 >
-                    Create API key
+                    Создать API ключ
                 </Button>
             </div>
 
@@ -465,9 +465,9 @@ export function ApiKeysSection({
             {loading && <Spinner size="sm" />}
             {!loading && <div className="border border-border rounded-lg text-sm">
                 <div className="flex items-center border-b border-border p-4">
-                    <div className="flex-[3] font-normal">API Key</div>
-                    <div className="flex-1 font-normal">Created</div>
-                    <div className="flex-1 font-normal">Last Used</div>
+                    <div className="flex-[3] font-normal">API ключ</div>
+                    <div className="flex-1 font-normal">Создан</div>
+                    <div className="flex-1 font-normal">Последний использован</div>
                     <div className="w-10"></div>
                 </div>
                 {message?.type === 'success' && <div className="flex flex-col p-2">
@@ -504,7 +504,7 @@ export function ApiKeysSection({
                                             className="text-destructive"
                                             onPress={() => handleDeleteKey(key._id)}
                                         >
-                                            Delete
+                                            Удалить
                                         </DropdownItem>
                                     </DropdownMenu>
                                 </Dropdown>
@@ -513,7 +513,7 @@ export function ApiKeysSection({
                     ))}
                     {keys.length === 0 && (
                         <div className="p-4 text-center text-muted-foreground">
-                            No API keys created yet
+                            API ключи не созданы
                         </div>
                     )}
                 </div>
@@ -558,11 +558,11 @@ export function SecretSection({
 
     return <Section title="Secret">
         <p className="text-sm">
-            The project secret is used for signing tool-call requests sent to your webhook
+            Секретный ключ проекта используется для подписи запросов на вызов инструментов, отправляемых в ваш вебхук
         </p>
         <Divider />
         <SectionRow>
-            <LeftLabel label="Project secret" />
+            <LeftLabel label="Секретный ключ проекта" />
             <RightContent>
                 <div className="flex flex-row gap-2 items-center">
                     {loading && <Spinner size="sm" />}
@@ -590,7 +590,7 @@ export function SecretSection({
                             onPress={handleRotateSecret}
                             isDisabled={loading}
                         >
-                            Rotate
+                            Повернуть
                         </Button>
                     </div>}
                 </div>
@@ -633,10 +633,10 @@ export function WebhookUrlSection({
 
     return <Section title="Webhook URL">
         <p className="text-sm">
-            In workflow editor, tool calls will be posted to this URL, unless they are mocked.
+            В редакторе рабочих процессов вызовы инструментов будут отправлены на этот URL, если они не имитируются.
         </p>
         <Divider />
-        <FormSection label="Webhook URL">
+        <FormSection label="URL вебхуки">
             {loading && <Spinner size="sm" />}
             {!loading && <EditableField
                 value={webhookUrl || ''}
@@ -681,7 +681,7 @@ export function ChatWidgetSection({
 
     return <Section title="Chat widget">
         <p className="text-sm">
-            To use the chat widget, copy and paste this code snippet just before the closing &lt;/body&gt; tag of your website:
+            Для использования виджета чата, скопируйте и вставьте этот код в самый конец тега &lt;/body&gt; вашего сайта:
         </p>
         {loading && <Spinner size="sm" />}
         {!loading && <Textarea
@@ -734,8 +734,8 @@ export function DeleteProjectSection({
             {loading && <Spinner size="sm" />}
             {!loading && <div className="flex flex-col gap-4">
                 <p className="text-sm">
-                    Deleting a project will permanently remove all associated data, including workflows, sources, and API keys.
-                    This action cannot be undone.
+                    Удаление проекта приведет к постоянному удалению всех связанных данных, включая рабочие процессы, источники и API ключи.
+                    Это действие не может быть отменено.
                 </p>
                 <div>
                     <Button 
@@ -745,26 +745,26 @@ export function DeleteProjectSection({
                         isDisabled={loading}
                         isLoading={loading}
                     >
-                        Delete project
+                        Удалить проект
                     </Button>
                 </div>
 
                 <Modal isOpen={isOpen} onClose={onClose}>
                     <ModalContent>
-                        <ModalHeader>Delete Project</ModalHeader>
+                        <ModalHeader>Удалить проект</ModalHeader>
                         <ModalBody>
                             <div className="flex flex-col gap-4">
                                 <p>
-                                    This action cannot be undone. Please type in the following to confirm:
+                                    Это действие не может быть отменено. Пожалуйста, введите следующее для подтверждения:
                                 </p>
                                 <Input
-                                    label="Project name"
+                                    label="Имя проекта"
                                     placeholder={projectName}
                                     value={projectNameInput}
                                     onChange={(e) => setProjectNameInput(e.target.value)}
                                 />
                                 <Input
-                                    label='Type "delete project" to confirm'
+                                    label='Введите "delete project" для подтверждения'
                                     placeholder="delete project"
                                     value={confirmationInput}
                                     onChange={(e) => setConfirmationInput(e.target.value)}
@@ -773,14 +773,14 @@ export function DeleteProjectSection({
                         </ModalBody>
                         <ModalFooter>
                             <Button variant="light" onPress={onClose}>
-                                Cancel
+                                Отменить
                             </Button>
                             <Button 
                                 color="danger" 
                                 onPress={handleDelete}
                                 isDisabled={!isValid}
                             >
-                                Delete Project
+                                Удалить проект
                             </Button>
                         </ModalFooter>
                     </ModalContent>
@@ -809,7 +809,7 @@ function NavigationMenu({
             title={
                 <div className="font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
                     <Settings className="w-4 h-4" />
-                    <span>Settings</span>
+                    <span>Настройки</span>
                 </div>
             }
         >
@@ -861,7 +861,7 @@ export function ConfigApp({
                             title={
                                 <div className="font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
                                     <Settings className="w-4 h-4" />
-                                    <span>Project Settings</span>
+                                    <span>Настройки Проекта</span>
                                 </div>
                             }
                         >
@@ -883,7 +883,7 @@ export function ConfigApp({
                             title={
                                 <div className="font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
                                     <Wrench className="w-4 h-4" />
-                                    <span>Tools Configuration</span>
+                                    <span>Настройки инструментов</span>
                                 </div>
                             }
                         >
@@ -901,7 +901,7 @@ export function ConfigApp({
                             title={
                                 <div className="font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
                                     <Phone className="w-4 h-4" />
-                                    <span>Voice Configuration</span>
+                                    <span>Настройки голоса</span>
                                 </div>
                             }
                         >

@@ -155,17 +155,17 @@ const App = forwardRef<{ handleCopyChat: () => void }, AppProps>(function App({
                                     setMessages(prev => [...prev.slice(0, -1)]); // remove last assistant if needed
                                 }}
                             >
-                                Retry
+                                Повторить
                             </Button>
                         </div>
                     )}
                     {effectiveContext && <div className="flex items-start mb-2">
                         <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 text-sm px-2 py-1 rounded-sm shadow-sm">
                             <div>
-                                {effectiveContext.type === 'chat' && "Chat"}
-                                {effectiveContext.type === 'agent' && `Agent: ${effectiveContext.name}`}
-                                {effectiveContext.type === 'tool' && `Tool: ${effectiveContext.name}`}
-                                {effectiveContext.type === 'prompt' && `Prompt: ${effectiveContext.name}`}
+                                {effectiveContext.type === 'chat' && "Чат"}
+                                {effectiveContext.type === 'agent' && `Агент: ${effectiveContext.name}`}
+                                {effectiveContext.type === 'tool' && `Инструмент: ${effectiveContext.name}`}
+                                {effectiveContext.type === 'prompt' && `Шаблон: ${effectiveContext.name}`}
                             </div>
                             <button
                                 className="text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300"
@@ -230,9 +230,9 @@ export function Copilot({
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2">
                         <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            COPILOT
+                            АССИСТЕНТ
                         </div>
-                        <Tooltip content="Ask copilot to help you build and modify your workflow">
+                        <Tooltip content="Попросите ассистента помочь с процессом — просто напишите ему!">
                             <InfoIcon className="w-4 h-4 text-gray-400 cursor-help" />
                         </Tooltip>
                     </div>
@@ -242,7 +242,7 @@ export function Copilot({
                         onClick={handleNewChat}
                         className="bg-blue-50 text-blue-700 hover:bg-blue-100"
                         showHoverContent={true}
-                        hoverContent="New chat"
+                        hoverContent="Новый диалог"
                     >
                         <PlusIcon className="w-4 h-4" />
                     </Button>
@@ -255,7 +255,7 @@ export function Copilot({
                         size="sm"
                         onClick={() => appRef.current?.handleCopyChat()}
                         showHoverContent={true}
-                        hoverContent={showCopySuccess ? "Copied" : "Copy JSON"}
+                        hoverContent={showCopySuccess ? "Готово!" : "Скопировать JSON"}
                     >
                         {showCopySuccess ? (
                             <CheckIcon className="w-4 h-4" />

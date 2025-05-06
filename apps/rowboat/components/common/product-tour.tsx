@@ -11,33 +11,33 @@ interface TourStep {
 const TOUR_STEPS: TourStep[] = [
     {
         target: 'copilot',
-        content: 'Build agents with the help of copilot.\nThis might take a minute.',
-        title: 'Step 1/6'
+        content: 'Создайте агента с помощью ассистента. Это займёт минуту.',
+        title: 'Шаг 1 из 6'
     },
     {
         target: 'playground',
-        content: 'Test your assistant in the playground.\nDebug tool calls and responses.',
-        title: 'Step 2/6'
+        content: 'Проверьте, как работает ваш агент. Всё просто!',
+        title: 'Шаг 2 из 6'
     },
     {
         target: 'entity-agents',
-        content: 'Manage your agents.\nSpecify instructions, examples and tool usage.',
-        title: 'Step 3/6'
+        content: 'Управляйте агентами. Добавляйте инструкции и примеры.',
+        title: 'Шаг 3 из 6'
     },
     {
         target: 'entity-tools',
-        content: 'Create your own tools, import MCP tools or use existing ones.\nMock tools for quick testing.',
-        title: 'Step 4/6'
+        content: 'Создавайте и подключайте инструменты. Можно импортировать готовые.',
+        title: 'Шаг 4 из 6'
     },
     {
         target: 'entity-prompts',
-        content: 'Manage prompts which will be used by agents.\nConfigure greeting message.',
-        title: 'Step 5/6'
+        content: 'Настройте подсказки для агентов. Можно задать приветствие.',
+        title: 'Шаг 5 из 6'
     },
     {
         target: 'settings',
-        content: 'Configure project settings\nGet API keys, configure tool webhooks.',
-        title: 'Step 6/6'
+        content: 'Настройте проект: API-ключи, вебхуки и другое.',
+        title: 'Шаг 6 из 6'
     }
 ];
 
@@ -230,13 +230,13 @@ export function ProductTour({
                         onClick={handleSkip}
                         className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
                     >
-                        Skip tour
+                        Пропустить тур
                     </button>
                     <button
                         onClick={handleNext}
                         className="px-4 py-1.5 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700"
                     >
-                        {currentStep === TOUR_STEPS.length - 1 ? 'Finish' : 'Next'}
+                        {currentStep === TOUR_STEPS.length - 1 ? 'Готово' : 'Дальше'}
                     </button>
                 </div>
                 <FloatingArrow

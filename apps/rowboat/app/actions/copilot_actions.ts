@@ -12,7 +12,7 @@ import { assert } from "node:console";
 import { check_query_limit } from "../lib/rate_limiting";
 import { QueryLimitError, validateConfigChanges } from "../lib/client_utils";
 import { projectAuthCheck } from "./project_actions";
-import { redisClient } from "../lib/redis";
+import { getRedisClient } from "../lib/redis";
 
 export async function getCopilotResponse(
     projectId: string,
@@ -120,9 +120,16 @@ export async function getCopilotResponseStream(
     const streamId = crypto.randomUUID();
 
     // store payload in redis
-    await redisClient.set(`copilot-stream-${streamId}`, payload, {
-        EX: 60 * 10, // expire in 10 minutes
-    });
+    try {
+      const client = await getRedisClient();
+      await client.set(`copilot-stream-${streamId}`, payload, {
+          EX: 60 * 10, // expire in 10 minutes
+      });
+    } catch (error) {
+      console.error("Redis operation failed in getCopilotResponseStream:", error);
+      // Decide how to handle the error. Maybe throw it or return an error indicator.
+      throw new Error("Failed to store stream data in Redis.");
+    }
 
     return {
         streamId,

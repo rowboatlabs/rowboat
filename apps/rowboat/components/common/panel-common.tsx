@@ -1,3 +1,4 @@
+import * as React from "react";
 import clsx from "clsx";
 import { Sparkles } from "lucide-react";
 import { SHOW_COPILOT_MARQUEE } from "@/app/lib/feature_flags";
@@ -70,15 +71,10 @@ export function Panel({
     >
         {variant === 'copilot' && showWelcome && (
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none -mt-16">
-                <Sparkles className="w-32 h-32 text-blue-400/40 dark:text-blue-500/25 animate-sparkle" />
-                {SHOW_COPILOT_MARQUEE && (
-                    <div className="relative mt-8 max-w-full px-8">
-                        <div className="font-mono text-sm whitespace-nowrap text-blue-400/60 dark:text-blue-500/40 font-small inline-flex">
-                            <div className="overflow-hidden w-0 animate-typing">What can I help you build?</div>
-                            <div className="border-r-2 border-blue-400 dark:border-blue-500 animate-cursor">&nbsp;</div>
-                        </div>
-                    </div>
-                )}
+                <img src="/A-B-Testing--Streamline-Manila.svg" alt="Лодка" className="w-40 h-40 mb-4" />
+                <div className="text-base text-center text-blue-900 dark:text-blue-200 font-medium pointer-events-none select-none px-4">
+                    Задайте ассистенту первый вопрос — он уже готов помочь!
+                </div>
             </div>
         )}
         <div 

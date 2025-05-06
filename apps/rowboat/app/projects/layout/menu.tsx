@@ -41,14 +41,14 @@ export default function Menu({
         <div className="flex flex-col gap-1">
             <NavLink
                 href={`/projects/${projectId}/workflow`}
-                label="Build"
+                label="Конструктор"
                 collapsed={collapsed}
                 icon={WorkflowIcon}
                 selected={pathname.startsWith(`/projects/${projectId}/workflow`)}
             />
             <NavLink
                 href={`/projects/${projectId}/test`}
-                label="Test"
+                label="Тестирование"
                 collapsed={collapsed}
                 icon={PlayIcon}
                 selected={pathname.startsWith(`/projects/${projectId}/test`)}
@@ -56,7 +56,7 @@ export default function Menu({
             {useRag && (
                 <NavLink
                     href={`/projects/${projectId}/sources`}
-                    label="Knowledge"
+                    label="База знаний"
                     collapsed={collapsed}
                     icon={DatabaseIcon}
                     selected={pathname.startsWith(`/projects/${projectId}/sources`)}
@@ -64,7 +64,7 @@ export default function Menu({
             )}
             <NavLink
                 href={`/projects/${projectId}/config`}
-                label="Settings"
+                label="Настройки"
                 collapsed={collapsed}
                 icon={SettingsIcon}
                 selected={pathname.startsWith(`/projects/${projectId}/config`)}

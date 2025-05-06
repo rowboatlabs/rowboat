@@ -3,7 +3,7 @@ import { z } from "zod";
 import { generateObject } from "ai";
 import { ApiMessage } from "./types/types";
 import { openai } from "@ai-sdk/openai";
-import { redisClient } from "./redis";
+import { getRedisClient } from "./redis";
 
 export async function getAgenticApiResponse(
     request: z.infer<typeof AgenticAPIChatRequest>,
@@ -46,9 +46,15 @@ export async function getAgenticResponseStreamId(
     const streamId = crypto.randomUUID();
 
     // store payload in redis
-    await redisClient.set(`chat-stream-${streamId}`, payload, {
-        EX: 60 * 10, // expire in 10 minutes
-    });
+    try {
+        const client = await getRedisClient();
+        await client.set(`chat-stream-${streamId}`, payload, {
+            EX: 60 * 10, // expire in 10 minutes
+        });
+    } catch (error) {
+        console.error("Redis operation failed in getAgenticResponseStreamId:", error);
+        throw new Error("Failed to store stream data in Redis.");
+    }
 
     return {
         streamId,

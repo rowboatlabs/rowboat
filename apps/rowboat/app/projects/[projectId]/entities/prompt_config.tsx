@@ -65,7 +65,7 @@ export function PromptConfig({
                         aria-label="Close prompt config"
                         className="transition-colors"
                     >
-                        Close
+                        Закрыть
                     </Button>
                 </div>
             }
@@ -75,7 +75,7 @@ export function PromptConfig({
                     <div className="space-y-4">
                         <div className="space-y-2">
                             <label className={sectionHeaderStyles}>
-                                Name
+                                Название
                             </label>
                             <div className={clsx(
                                 "border rounded-lg focus-within:ring-2",
@@ -98,7 +98,7 @@ export function PromptConfig({
                                             name: value
                                         });
                                     }}
-                                    placeholder="Enter prompt name..."
+                                    placeholder="Имя промта..."
                                     className="w-full text-sm bg-transparent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors px-4 py-3"
                                     autoResize
                                 />
@@ -112,7 +112,7 @@ export function PromptConfig({
 
                 <div className="space-y-4">
                     <label className={sectionHeaderStyles}>
-                        Prompt
+                        Промт
                     </label>
                     <Textarea
                         value={prompt.prompt}
@@ -122,7 +122,7 @@ export function PromptConfig({
                                 prompt: e.target.value
                             });
                         }}
-                        placeholder="Edit prompt here..."
+                        placeholder="Измените промт здесь..."
                         className={`${textareaStyles} min-h-[200px]`}
                         autoResize
                     />

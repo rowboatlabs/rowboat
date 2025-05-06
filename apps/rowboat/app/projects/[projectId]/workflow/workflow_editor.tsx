@@ -790,7 +790,7 @@ export function WorkflowEditor({
                     key={state.present.workflow._id}
                     value={state.present.workflow?.name || ''}
                     onChange={handleRenameWorkflow}
-                    placeholder="Name this version"
+                    placeholder="Назовите эту версию"
                     className="text-sm font-semibold"
                     inline={true}
                 />
@@ -828,7 +828,7 @@ export function WorkflowEditor({
                                 startContent={<div className="text-gray-500"><BackIcon size={16} /></div>}
                                 className="gap-x-2"
                             >
-                                View versions
+                                Просмотр версий
                             </DropdownItem>
                         </DropdownSection>
 
@@ -838,7 +838,7 @@ export function WorkflowEditor({
                                 startContent={<div className="text-gray-500"><Layers2Icon size={16} /></div>}
                                 className="gap-x-2"
                             >
-                                Clone this version
+                                Клонировать эту версию
                             </DropdownItem>
 
                             <DropdownItem
@@ -846,7 +846,7 @@ export function WorkflowEditor({
                                 startContent={<div className="text-indigo-500"><RadioIcon size={16} /></div>}
                                 className="gap-x-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20"
                             >
-                                Make version live
+                                Сделать версию активной
                             </DropdownItem>
                         </DropdownSection>
 
@@ -856,41 +856,41 @@ export function WorkflowEditor({
                                 startContent={<div className="text-gray-500"><CopyIcon size={16} /></div>}
                                 className="gap-x-2"
                             >
-                                Export as JSON
+                                Экспорт в JSON
                             </DropdownItem>
                         </DropdownSection>
                     </DropdownMenu>
                 </Dropdown>
             </div>
             {showCopySuccess && <div className="flex items-center gap-2">
-                <div className="text-green-500">Copied to clipboard</div>
+                <div className="text-green-500">Скопировано в буфер обмена</div>
             </div>}
             <div className="flex items-center gap-2">
                 {isLive && <div className="flex items-center gap-2">
                     <div className="bg-yellow-50 text-yellow-500 px-2 py-1 rounded-md text-sm">
-                        This version is locked. You cannot make changes.
+                        Эта версия заблокирована. Вы не можете вносить изменения.
                     </div>
                     <Button
                         variant="bordered"
                         size="sm"
                         onPress={() => handleCloneVersion(state.present.workflow._id)}
                     >
-                        Clone this version
+                        Клонировать эту версию
                     </Button>
                 </div>}
                 {!isLive && <div className="text-xs text-gray-400">
                     {state.present.saving && <div className="flex items-center gap-1">
                         <Spinner size="sm" />
-                        <div>Saving...</div>
+                        <div>Сохранение...</div>
                     </div>}
                     {!state.present.saving && state.present.workflow && <div>
-                        Updated <RelativeTime date={new Date(state.present.lastUpdatedAt)} />
+                        Обновлено <RelativeTime date={new Date(state.present.lastUpdatedAt)} />
                     </div>}
                 </div>}
                 {!isLive && <>
                     <button
                         className="p-1 text-gray-400 hover:text-black hover:cursor-pointer"
-                        title="Undo"
+                        title="Отменить"
                         disabled={state.currentIndex <= 0}
                         onClick={() => dispatch({ type: "undo" })}
                     >
@@ -898,7 +898,7 @@ export function WorkflowEditor({
                     </button>
                     <button
                         className="p-1 text-gray-400 hover:text-black hover:cursor-pointer"
-                        title="Redo"
+                        title="Повторить"
                         disabled={state.currentIndex >= state.patches.length}
                         onClick={() => dispatch({ type: "redo" })}
                     >
@@ -911,7 +911,7 @@ export function WorkflowEditor({
                         className="gap-2 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-base"
                         startContent={<Sparkles size={20} />}
                     >
-                        Copilot
+                        Ассистент
                     </Button>
                 </>}
             </div>

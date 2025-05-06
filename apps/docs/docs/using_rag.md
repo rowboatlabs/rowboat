@@ -27,13 +27,15 @@ To enable S3 file uploads, set the following variables:
 
 ```bash
 # Enable S3 uploads
-export USE_RAG_S3_UPLOADS=true
+=======
+USE_RAG_S3_UPLOADS=true
 
 # S3 Configuration
-export AWS_ACCESS_KEY_ID=your_access_key
-export AWS_SECRET_ACCESS_KEY=your_secret_key
-export RAG_UPLOADS_S3_BUCKET=your_bucket_name
-export RAG_UPLOADS_S3_REGION=your_region
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+RAG_UPLOADS_S3_BUCKET=your_bucket_name
+RAG_UPLOADS_S3_REGION=your_region
+
 ```
 
 ### 4. URL Scraping
@@ -41,10 +43,12 @@ To enable URL scraping, set the following variables:
 
 ```bash
 # Enable URL scraping
-export USE_RAG_SCRAPING=true
+
+USE_RAG_SCRAPING=true
 
 # Firecrawl API key for web scraping
-export FIRECRAWL_API_KEY=your_firecrawl_api_key
+FIRECRAWL_API_KEY=your_firecrawl_api_key
+
 ```
 
 ## File Parsing Options
@@ -54,14 +58,17 @@ By default, uploaded PDF files are parsed using `gpt-4o`. You can customize this
 
 ```bash
 # Override the default parsing model
-export FILE_PARSING_MODEL=your-preferred-model
+FILE_PARSING_MODEL=your-preferred-model
+
 ```
 
 You can also change the model provider like so:
 ```bash
 # Optional: Override the parsing provider settings
-export FILE_PARSING_PROVIDER_BASE_URL=your-provider-base-url
-export FILE_PARSING_PROVIDER_API_KEY=your-provider-api-key
+
+FILE_PARSING_PROVIDER_BASE_URL=your-provider-base-url
+FILE_PARSING_PROVIDER_API_KEY=your-provider-api-key
+
 ```
 
 ### Using Gemini for File Parsing
@@ -69,8 +76,9 @@ To use Google's Gemini model for parsing uploaded PDFs, set the following variab
 
 ```bash
 # Enable Gemini for file parsing
-export USE_GEMINI_FILE_PARSING=true
-export GOOGLE_API_KEY=your_google_api_key
+USE_GEMINI_FILE_PARSING=true
+GOOGLE_API_KEY=your_google_api_key
+
 ```
 
 ## Embedding Model options
@@ -79,14 +87,16 @@ By default, Rowboat uses OpenAI's `text-embedding-3-small` model for generating 
 
 ```bash
 # Override the default embedding model
-export EMBEDDING_MODEL=your-preferred-model
+EMBEDDING_MODEL=your-preferred-model
+
 ```
 
 You can also change the model provider like so:
 ```bash
 # Optional: Override the embedding provider settings
-export EMBEDDING_PROVIDER_BASE_URL=your-provider-base-url
-export EMBEDDING_PROVIDER_API_KEY=your-provider-api-key
+EMBEDDING_PROVIDER_BASE_URL=your-provider-base-url
+EMBEDDING_PROVIDER_API_KEY=your-provider-api-key
+
 ```
 
 If you don't specify the provider settings, Rowboat will use OpenAI as the default provider.
