@@ -13,11 +13,12 @@ CMD="docker compose"
 # enable rag text and files workers
 CMD="$CMD --profile rag_text_worker"
 CMD="$CMD --profile rag_files_worker"
+CMD="$CMD --profile rag_urls_worker"
 
 # enable rag urls worker
-if [ "$USE_RAG_SCRAPING" = "true" ]; then
-  CMD="$CMD --profile rag_urls_worker"
-fi
+# if [ "$USE_RAG_SCRAPING" = "true" ]; then
+#   CMD="$CMD --profile rag_urls_worker"
+# fi
 
 # Add more mappings as needed
 # if [ "$SOME_OTHER_ENV" = "true" ]; then
