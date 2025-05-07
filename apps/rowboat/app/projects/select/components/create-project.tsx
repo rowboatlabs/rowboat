@@ -18,62 +18,35 @@ import { Input } from "@/components/ui/input";
 const TabType = {
     Describe: 'describe',
     Blank: 'blank',
-    Example: 'example'
+    // Example: 'example' // No longer needed with ChatGPT style
 } as const;
 
 type TabState = typeof TabType[keyof typeof TabType];
 
-const isNotBlankTemplate = (tab: TabState): boolean => tab !== 'blank';
+// const isNotBlankTemplate = (tab: TabState): boolean => tab !== 'blank'; // Might be unused
 
-const tabStyles = clsx(
-    "px-4 py-2 text-sm font-medium",
-    "rounded-lg",
-    "focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:focus:ring-emerald-400/20",
-    "transition-colors duration-150"
-);
-
-const activeTabStyles = clsx(
-    "bg-white dark:bg-gray-800",
-    "text-gray-900 dark:text-gray-100",
-    "shadow-sm",
-    "border border-gray-200 dark:border-gray-700"
-);
-
-const inactiveTabStyles = clsx(
-    "text-gray-600 dark:text-gray-400",
-    "hover:bg-gray-50 dark:hover:bg-gray-750"
-);
+// Removed tabStyles, activeTabStyles, inactiveTabStyles as tabs are removed
 
 const largeSectionHeaderStyles = clsx(
-    "text-3xl sm:text-4xl font-bold text-center mb-10 sm:mb-12",
+    "text-3xl sm:text-5xl font-semibold text-center mb-8 sm:mb-10", // Adjusted margins
     "text-gray-900 dark:text-gray-100"
 );
 
 const mainTextareaStyles = clsx(
     "w-full",
-    "min-h-[120px] sm:min-h-[140px]",
-    "rounded-xl p-4 text-lg",
+    "min-h-[140px] sm:min-h-[160px]", // Slightly adjusted height
+    "rounded-2xl p-4 text-base sm:text-lg", // Adjusted padding and text size
     "bg-white dark:bg-neutral-900",
-    "border border-gray-200 dark:border-neutral-800",
-    "focus-visible:outline-none focus-visible:border-emerald-500 dark:focus-visible:border-emerald-500 focus-visible:border-2",
-    "focus-visible:shadow-[0_0_0_3px_rgba(52,211,153,0.15)] dark:focus-visible:shadow-[0_0_0_3px_rgba(52,211,153,0.2)]",
+    "border border-gray-300 dark:border-neutral-700",
+    "focus-visible:outline-none focus-visible:border-emerald-500 dark:focus-visible:border-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500/30 dark:focus-visible:ring-emerald-500/30",
     "placeholder:text-gray-400 dark:placeholder:text-gray-500",
-    "transition-all duration-200",
-    "shadow-sm"
+    "transition-all duration-200"
 );
 
 const emptyTextareaStyles = clsx(
     // "animate-glow",
     // "border-emerald-500/40 dark:border-emerald-400/40",
     // "shadow-[0_0_8px_1px_rgba(99,102,241,0.2)] dark:shadow-[0_0_8px_1px_rgba(129,140,248,0.2)]"
-);
-
-const sectionTitleStyles = clsx(
-    "text-2xl sm:text-3xl font-semibold mb-10 text-gray-800 dark:text-gray-100 text-left w-full"
-);
-
-const iconPlaceholderStyles = clsx(
-    "w-12 h-12 p-3 bg-slate-100 dark:bg-slate-700/60 rounded-xl text-emerald-600 dark:text-emerald-400 mb-4 shadow-sm hover:shadow-md transition-shadow duration-200"
 );
 
 // Mock data for Trending Agents
@@ -85,6 +58,18 @@ const mockTrendingAgents = [
     { id: 'trend5', title: 'Служба поддержки', description: 'Ответит на частые вопросы клиентов о вашем продукте.', Icon: ChatBubbleLeftRightIcon, prompt: 'Ответь на вопрос клиента о процедуре возврата товара согласно нашей политике.' },
 ];
 
+// Consolidate suggestions - Text only now
+const chatGptStyleSuggestions = [
+    { id: 'sugg1', title: 'Аналитик данных', prompt: mockTrendingAgents.find(a => a.title === 'Аналитик данных')?.prompt || 'Проанализируй предоставленные данные CSV, выяви ключевые тенденции и создай сводный отчет с визуализациями.'}, 
+    { id: 'sugg2', title: 'Email Помощник', prompt: mockTrendingAgents.find(a => a.title === 'Email Помощник')?.prompt || 'Составь вежливое письмо-напоминание клиенту, который не ответил на предыдущее предложение. Письмо должно быть кратким и дружелюбным.'}, 
+    { id: 'sugg3', title: 'Генератор идей', prompt: mockTrendingAgents.find(a => a.title === 'Генератор идей')?.prompt || 'Придумай 5 креативных идей для постов в блог о будущем возобновляемой энергии.'}, 
+    ...Object.entries(starting_copilot_prompts).slice(0, 2).map(([key, promptText], index) => ({
+        id: `sugg_tpl_${index}`,
+        title: key.replace(/_/g, ' '),
+        prompt: promptText as string,
+    }))
+].slice(0, 5); // Ensure 5 suggestions
+
 interface CreateProjectProps {
     defaultName: string;
     onOpenProjectPane: () => void;
@@ -92,9 +77,9 @@ interface CreateProjectProps {
 }
 
 export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpen }: CreateProjectProps) {
-    const [selectedTab, setSelectedTab] = useState<TabState>(TabType.Describe);
-    const [isExamplesDropdownOpen, setIsExamplesDropdownOpen] = useState(false);
-    const dropdownRef = useRef<HTMLDivElement>(null);
+    // const [selectedTab, setSelectedTab] = useState<TabState>(TabType.Describe); // Removed
+    // const [isExamplesDropdownOpen, setIsExamplesDropdownOpen] = useState(false); // Removed
+    // const dropdownRef = useRef<HTMLDivElement>(null); // Removed
     const [customPrompt, setCustomPrompt] = useState("");
     const [name, setName] = useState(defaultName);
     const [promptError, setPromptError] = useState<string | null>(null);
@@ -106,37 +91,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
         setName(defaultName);
     }, [defaultName]);
 
-    useEffect(() => {
-        function handleClickOutside(event: MouseEvent) {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-                setIsExamplesDropdownOpen(false);
-            }
-        }
-
-        if (isExamplesDropdownOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-        }
-
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, [isExamplesDropdownOpen]);
-
-    const handleTabChange = (tab: TabState) => {
-        setSelectedTab(tab);
-        setIsExamplesDropdownOpen(false);
-
-        if (tab === TabType.Blank) {
-            setCustomPrompt('');
-        } else if (tab === TabType.Describe) {
-            setCustomPrompt('');
-        }
-    };
-
-    const handleBlankTemplateClick = (e: React.MouseEvent) => {
-        e.preventDefault();
-        handleTabChange(TabType.Blank);
-    };
+    // }, [isExamplesDropdownOpen]); // Removed
 
     const handleExampleSelect = (examplePrompt: string, key: string) => {
         setCustomPrompt(examplePrompt);
@@ -148,11 +103,9 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
             if (textareaRect.top < 0 || textareaRect.bottom > window.innerHeight) {
                 promptTextarea.scrollIntoView({ behavior: "smooth", block: "center" });
             } else {
-                window.scrollTo({ top: 0, behavior: "smooth" });
+                // If already in view, do not scroll to top, let user see the text they selected
             }
-        } else {
-            window.scrollTo({ top: 0, behavior: "smooth" });
-        }
+        } 
         setTimeout(() => setHighlightedTemplate(null), 2000);
     };
 
@@ -200,7 +153,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
 
     return (
         <div className={clsx(
-            "flex flex-col items-center min-h-screen py-12 sm:py-16 px-4 md:px-8",
+            "flex flex-col items-center min-h-screen py-16 sm:py-24 px-4 md:px-8", // Adjusted padding
             "w-full",
             "bg-white dark:bg-black"
         )}>
@@ -212,23 +165,48 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                         size="md"
                         className={clsx(
                             "bg-gray-50 hover:bg-gray-100 dark:bg-neutral-800 dark:hover:bg-neutral-700",
-                            "text-gray-700 dark:text-gray-300 border-gray-300 dark:border-neutral-700",
-                            "hover:border-gray-400 dark:hover:border-neutral-600 hover:text-gray-900 dark:hover:text-gray-100",
-                            "rounded-lg shadow-sm hover:shadow-md transition-all duration-200"
+                            "text-gray-700 dark:text-gray-300",
+                            "border border-gray-300 dark:border-neutral-700 hover:border-gray-400 dark:hover:border-neutral-600",
+                            "hover:text-gray-900 dark:hover:text-gray-100",
+                            "rounded-lg shadow-none transition-all duration-200"
                         )}
                     >
-                        <FolderOpenIcon className="w-5 h-5 mr-2" />
-                        Мои проекты
+                        <span className="flex flex-row items-center justify-center">
+                            <FolderOpenIcon className="w-5 h-5 mr-2" />
+                            Мои проекты
+                        </span>
                     </Button>
                 </div>
             )}
 
             <section className={clsx(
-                "w-full max-w-2xl text-center mb-16 sm:mb-20"
+                "w-full max-w-2xl text-center mb-12 sm:mb-16" // Adjusted bottom margin
             )}>
                 <h1 className={largeSectionHeaderStyles}>
-                    Создай своего <span className="text-emerald-600">AI-ассистента</span>. Начни с идеи – остальное здесь!
+                    Создай своего <span className="text-emerald-600 dark:text-emerald-500">AI-ассистента</span>. <br className="hidden sm:block" /> Начни с идеи – остальное здесь!
                 </h1>
+                
+                {/* Suggestions Area - Moved above the form input */}
+                <div className="w-full max-w-2xl mb-6 text-center">
+                    <div className="flex flex-wrap gap-2 justify-center">
+                        {chatGptStyleSuggestions.map(suggestion => (
+                            <Button
+                                key={suggestion.id}
+                                onClick={() => handleExampleSelect(suggestion.prompt, suggestion.id)}
+                                className={clsx(
+                                    "font-normal text-sm rounded-full transition-colors",
+                                    "py-1.5 px-4",
+                                    "bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 hover:border-gray-300",
+                                    "dark:bg-neutral-800 dark:hover:bg-neutral-700 dark:text-gray-300 dark:border-neutral-700 dark:hover:border-neutral-600",
+                                    highlightedTemplate === suggestion.id && "ring-2 ring-emerald-500 dark:ring-emerald-500",
+                                    "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+                                )}
+                            >
+                                {suggestion.title} 
+                            </Button>
+                        ))}
+                    </div>
+                </div>
                 
                 <form
                     id="create-project-form"
@@ -236,9 +214,9 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                         e.preventDefault();
                         handleSubmit({name: name, prompt: customPrompt});
                     }}
-                    className="space-y-8 w-full"
+                    className="space-y-6 w-full" // Adjusted spacing
                 >
-                    <div className="relative">
+                    <div className="relative w-full"> {/* Wrapper for Textarea and submit button */}
                         <Textarea
                             id="prompt-textarea"
                             name="prompt"
@@ -247,43 +225,57 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                 setCustomPrompt(e.target.value);
                                 if (promptError) setPromptError(null);
                             }}
-                            placeholder="Опиши задачи для своего AI-ассистента: например, отвечать на вопросы клиентов или анализировать данные."
-                            className={clsx(
-                                mainTextareaStyles
-                            )}
-                            rows={5}
+                            placeholder="Введите свой запрос или выберите подсказку..." // New placeholder
+                            className={clsx(mainTextareaStyles)}
+                            rows={5} 
                             disabled={isCreating}
                         />
-                        <div className="mt-6 flex justify-center md:absolute md:bottom-5 md:right-5">
-                            <Button
-                                type="submit"
-                                variant="primary"
-                                size="lg"
-                                className={clsx(
-                                    "group bg-gray-900 hover:bg-gray-700 active:bg-gray-950 text-white dark:bg-emerald-600 dark:hover:bg-emerald-700 dark:active:bg-emerald-800 shadow-lg hover:shadow-xl active:shadow-lg active:scale-[0.97] transition-all duration-200 rounded-xl px-8 py-3 font-semibold text-base",
-                                    isCreating && "opacity-70 cursor-not-allowed"
-                                )}
-                                disabled={isCreating}
-                            >
-                                {isCreating ? (
-                                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                    </svg>
-                                ) : (
-                                    <PlayIcon className="w-5 h-5 mr-2 transition-transform group-hover:scale-110"/>
-                                )}
-                                Поехали!
-                                <span className="hidden md:inline ml-2 text-xs opacity-70 group-hover:opacity-90">⌘+↵</span>
-                            </Button>
-                        </div>
                     </div>
                     {promptError && (
                         <p className="text-red-500 dark:text-red-400 text-sm mt-2 text-left font-medium">{promptError}</p>
                     )}
 
+                    {/* Restored larger submit button here */}
+                    <div className="mt-8 flex justify-center">
+                        <Button
+                            type="submit"
+                            variant="secondary"
+                            className={clsx(
+                                "group rounded-lg px-8 py-3 font-semibold text-base transition-all duration-200 active:scale-[0.98]",
+                                "bg-gray-50 hover:bg-gray-100 active:bg-gray-200",
+                                "text-gray-700 hover:text-gray-900",
+                                "border border-gray-300 hover:border-gray-400",
+                                "dark:bg-neutral-800 dark:hover:bg-neutral-700 dark:active:bg-neutral-600",
+                                "dark:text-gray-300 dark:hover:text-gray-100",
+                                "dark:border-neutral-700 dark:hover:border-neutral-600",
+                                "shadow-none",
+                                isCreating && "opacity-70 cursor-not-allowed"
+                            )}
+                            disabled={isCreating}
+                        >
+                            <span className="flex flex-row items-center justify-center w-full">
+                                {isCreating ? (
+                                    <span className="mr-3">
+                                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> {/* Removed text-white */}
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                    </span>
+                                ) : (
+                                    <span className="mr-2">
+                                        <PlayIcon className="w-5 h-5 transition-transform group-hover:scale-110"/>
+                                    </span>
+                                )}
+                                <span>
+                                    Поехали!
+                                    <span className="hidden md:inline ml-2 text-xs opacity-70 group-hover:opacity-90">⌘+↵</span>
+                                </span>
+                            </span>
+                        </Button>
+                    </div>
+
                     {USE_MULTIPLE_PROJECTS && (
-                        <div className="space-y-3 pt-4 text-left">
+                        <div className="space-y-3 pt-4 text-left"> 
                             <label htmlFor="project-name" className="text-sm font-medium text-gray-600 dark:text-gray-400">
                                 Как назовём проект? (можно и потом)
                             </label>
@@ -293,12 +285,11 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 className={clsx(
-                                    "w-full rounded-xl p-3 text-base",
+                                    "w-full rounded-lg p-3 text-base",
                                     "bg-white dark:bg-neutral-900",
-                                    "border border-gray-200 dark:border-neutral-800",
-                                    "focus-visible:outline-none focus-visible:border-emerald-500 dark:focus-visible:border-emerald-500 focus-visible:border-2",
-                                    "focus-visible:shadow-[0_0_0_3px_rgba(52,211,153,0.15)] dark:focus-visible:shadow-[0_0_0_3px_rgba(52,211,153,0.2)]",
-                                    "placeholder:text-gray-400 dark:placeholder:text-gray-500 shadow-sm"
+                                    "border border-gray-300 dark:border-neutral-700",
+                                    "focus-visible:outline-none focus-visible:border-emerald-500 dark:focus-visible:border-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500/30 dark:focus-visible:ring-emerald-500/30",
+                                    "placeholder:text-gray-400 dark:placeholder:text-gray-500 shadow-none"
                                 )}
                                 placeholder={defaultName}
                                 disabled={isCreating}
@@ -308,89 +299,8 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                 </form>
             </section>
 
-            {/* Trending Agents Section - Horizontal Scroll */}
-            <section className="w-full max-w-full mb-16 sm:mb-20">
-                <h2 className={clsx(sectionTitleStyles, "max-w-5xl mx-auto px-4 md:px-0")}>Популярные AI-ассистенты</h2>
-                {/* Контейнер для горизонтального скролла */}
-                <div className="flex overflow-x-auto space-x-6 pb-6 pt-3 px-4 md:px-8 scrollbar-hide">
-                    {mockTrendingAgents.map(agent => (
-                        <Card
-                            key={agent.id}
-                            className={clsx(
-                                "min-w-[300px] sm:min-w-[320px] flex-shrink-0",
-                                "bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800",
-                                "shadow-lg hover:shadow-xl dark:shadow-2xl dark:hover:shadow-2xl dark:shadow-black/20 dark:hover:shadow-black/40",
-                                "transition-all duration-300 rounded-xl transform-gpu",
-                                "hover:scale-[1.03] hover:-translate-y-1 cursor-pointer"
-                            )}
-                            onClick={() => handleExampleSelect(agent.prompt, agent.id)}
-                        >
-                            <CardHeader className="items-start text-left pt-6 px-6">
-                                <div className={iconPlaceholderStyles}>
-                                    <agent.Icon className="w-full h-full" />
-                                </div>
-                                <CardTitle className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{agent.title}</CardTitle>
-                            </CardHeader>
-                            <CardContent className="px-6 pb-6 pt-0">
-                                <p className="text-sm text-gray-600 dark:text-slate-400 text-left leading-relaxed">{agent.description}</p>
-                            </CardContent>
-                        </Card>
-                    ))}
-                    {/* Добавляем пустой div в конец для визуального отступа */}
-                    <div className="flex-shrink-0 w-1"></div>
-                </div>
-            </section>
-
-            {/* Agent Templates Section - Horizontal Scroll */}
-            {Object.keys(starting_copilot_prompts).length > 0 && (
-                <section className="w-full max-w-full">
-                    <h2 className={clsx(sectionTitleStyles, "max-w-5xl mx-auto px-4 md:px-0")}>Шаблоны AI-ассистентов: выбери основу для проекта.</h2>
-                    {/* Контейнер для горизонтального скролла */}
-                    <div className="flex overflow-x-auto space-x-6 pb-6 pt-3 px-4 md:px-8 scrollbar-hide">
-                        {Object.entries(starting_copilot_prompts).map(([key, promptText]) => (
-                            <Card
-                                key={key}
-                                className={clsx(
-                                    "min-w-[300px] sm:min-w-[320px] flex-shrink-0",
-                                    "bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800",
-                                    "shadow-lg hover:shadow-xl dark:shadow-2xl dark:hover:shadow-2xl dark:shadow-black/20 dark:hover:shadow-black/40",
-                                    "flex flex-col justify-between transition-all duration-300 rounded-xl transform-gpu",
-                                    "hover:scale-[1.03] hover:-translate-y-1",
-                                    highlightedTemplate === key && "ring-2 ring-emerald-500 ring-offset-4 dark:ring-offset-black shadow-2xl scale-[1.03] -translate-y-1"
-                                )}
-                            >
-                                <div>
-                                    <CardHeader className="items-start text-left pt-6 px-6">
-                                        <div className={iconPlaceholderStyles}>
-                                            <LightBulbIcon className="w-full h-full" />
-                                        </div>
-                                        <CardTitle className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{key.replace(/_/g, ' ')}</CardTitle>
-                                    </CardHeader>
-                                </div>
-                                <CardFooter className="pt-4 mt-auto px-6 pb-6">
-                                    <Button
-                                        variant="secondary"
-                                        onClick={() => handleExampleSelect(promptText as string, key)}
-                                        className={clsx(
-                                            "w-full border-emerald-500/70 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-500/70 dark:text-emerald-400 dark:hover:bg-emerald-900/40 dark:hover:text-emerald-300",
-                                            "transition-all duration-200 rounded-lg font-medium py-2.5 text-sm",
-                                            highlightedTemplate === key && "bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 border-emerald-600 dark:border-emerald-400"
-                                        )}
-                                    >
-                                        {highlightedTemplate === key ? (
-                                            <CheckCircleIcon className="w-5 h-5 mr-2 text-emerald-600 dark:text-emerald-400 transition-all duration-200 transform scale-110" />
-                                        ) : (
-                                            <SparklesIcon className="w-5 h-5 mr-2 text-emerald-500/80 opacity-70 group-hover:opacity-100 transition-opacity duration-200"/>
-                                        )}
-                                        Беру этот!
-                                    </Button>
-                                </CardFooter>
-                            </Card>
-                        ))}
-                        <div className="flex-shrink-0 w-1"></div>
-                    </div>
-                </section>
-            )}
+            {/* Trending Agents Section - REMOVED */}
+            {/* Agent Templates Section - REMOVED */}
         </div>
     );
 }
