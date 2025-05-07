@@ -208,8 +208,8 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                 <div className="absolute top-6 right-6 sm:top-8 sm:right-8 z-20">
                     <Button
                         onClick={onOpenProjectPane}
-                        variant="outline"
-                        size="default"
+                        variant="secondary"
+                        size="md"
                         className={clsx(
                             "bg-gray-50 hover:bg-gray-100 dark:bg-neutral-800 dark:hover:bg-neutral-700",
                             "text-gray-700 dark:text-gray-300 border-gray-300 dark:border-neutral-700",
@@ -257,7 +257,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                         <div className="mt-6 flex justify-center md:absolute md:bottom-5 md:right-5">
                             <Button
                                 type="submit"
-                                variant="default"
+                                variant="primary"
                                 size="lg"
                                 className={clsx(
                                     "group bg-gray-900 hover:bg-gray-700 active:bg-gray-950 text-white dark:bg-emerald-600 dark:hover:bg-emerald-700 dark:active:bg-emerald-800 shadow-lg hover:shadow-xl active:shadow-lg active:scale-[0.97] transition-all duration-200 rounded-xl px-8 py-3 font-semibold text-base",
@@ -369,7 +369,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                 </div>
                                 <CardFooter className="pt-4 mt-auto px-6 pb-6">
                                     <Button
-                                        variant="outline"
+                                        variant="secondary"
                                         onClick={() => handleExampleSelect(promptText as string, key)}
                                         className={clsx(
                                             "w-full border-emerald-500/70 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-500/70 dark:text-emerald-400 dark:hover:bg-emerald-900/40 dark:hover:text-emerald-300",
