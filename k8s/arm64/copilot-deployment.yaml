@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: copilot
+  labels:
+    app: copilot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: copilot
+  template:
+    metadata:
+      labels:
+        app: copilot
+    spec:
+      containers:
+      - name: copilot
+        image: stevef1uk/copilot:arm64
+        ports:
+        - containerPort: 3002
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openai-secret
+              key: api-key
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openai-secret
+              key: api-key
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: copilot
+spec:
+  selector:
+    app: copilot
+  ports:
+  - port: 3002
+    targetPort: 3002
+  type: ClusterIP 

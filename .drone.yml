@@ -1,0 +1,124 @@
+kind: pipeline
+type: docker
+name: build-deploy-k8s
+
+platform:
+  arch: arm64
+  os: linux
+
+steps:
+  - name: build-push-docs
+    image: alpine:latest
+    volumes:
+      - name: docker
+        path: /var/run/docker.sock
+    commands:
+      - apk add --no-cache docker git
+      - cd apps/docs
+      - docker login -u $docker_username -p $docker_password
+      - docker build -t $docker_username/docs:arm64 .
+      - docker push $docker_username/docs:arm64
+    environment:
+      docker_username:
+        from_secret: docker_username
+      docker_password:
+        from_secret: docker_password
+
+  - name: build-push-copilot
+    image: alpine:latest
+    volumes:
+      - name: docker
+        path: /var/run/docker.sock
+    commands:
+      - apk add --no-cache docker git
+      - cd apps/copilot
+      - docker login -u $docker_username -p $docker_password
+      - docker build -f Dockerfile.arm64 -t $docker_username/copilot:arm64 .
+      - docker push $docker_username/copilot:arm64
+    environment:
+      docker_username:
+        from_secret: docker_username
+      docker_password:
+        from_secret: docker_password
+
+  - name: build-push-rowboat
+    image: alpine:latest
+    volumes:
+      - name: docker
+        path: /var/run/docker.sock
+    commands:
+      - apk add --no-cache docker git
+      - cd apps/rowboat
+      - docker login -u $docker_username -p $docker_password
+      - docker build -f Dockerfile.arm64 -t $docker_username/rowboat:arm64 .
+      - docker push $docker_username/rowboat:arm64
+    environment:
+      docker_username:
+        from_secret: docker_username
+      docker_password:
+        from_secret: docker_password
+
+  - name: build-push-rowboat-agents
+    image: alpine:latest
+    volumes:
+      - name: docker
+        path: /var/run/docker.sock
+    commands:
+      - apk add --no-cache docker git
+      - cd apps/rowboat_agents
+      - docker login -u $docker_username -p $docker_password
+      - docker build -f Dockerfile.arm64 -t $docker_username/rowboat_agents:arm64 .
+      - docker push $docker_username/rowboat_agents:arm64
+    environment:
+      docker_username:
+        from_secret: docker_username
+      docker_password:
+        from_secret: docker_password
+
+  - name: deploy
+    image: alpine:latest
+    commands:
+      - apk add --no-cache curl openssh-client sshpass
+      - pwd
+      - ls -la
+      - ls -la k8s
+      - mkdir -p ~/.ssh
+      - ssh-keyscan -H 192.168.10.2 >> ~/.ssh/known_hosts
+      - echo '#!/bin/bash' > apply.sh
+      - echo 'cd ~/k8s' >> apply.sh
+      # Update image references in deployment files
+      - echo 'sed -i "s/your-registry/'"$docker_username"'/g" *.yaml' >> apply.sh
+      # Apply all deployments and services in correct order
+      - echo 'kubectl apply -f redis-deployment.yaml' >> apply.sh
+      - echo 'kubectl apply -f mongodb-deployment.yaml' >> apply.sh
+      - echo 'kubectl apply -f rowboat_agents-deployment.yaml' >> apply.sh
+      - echo 'kubectl apply -f copilot-deployment.yaml' >> apply.sh
+      - echo 'kubectl apply -f rowboat-deployment.yaml' >> apply.sh
+      - echo 'kubectl apply -f docs-deployment.yaml' >> apply.sh
+      # Restart deployments to ensure new images are pulled
+      - echo 'kubectl rollout restart deployment redis' >> apply.sh
+      - echo 'kubectl rollout restart deployment mongodb' >> apply.sh
+      - echo 'kubectl rollout restart deployment rowboat-agents' >> apply.sh
+      - echo 'kubectl rollout restart deployment copilot' >> apply.sh
+      - echo 'kubectl rollout restart deployment rowboat' >> apply.sh
+      - echo 'kubectl rollout restart deployment docs' >> apply.sh
+      - chmod +x apply.sh
+      # Copy k8s files and apply script to the target server
+      - sshpass -p "$SSH_PASSWORD" scp -r k8s pi@192.168.10.2:~/
+      - sshpass -p "$SSH_PASSWORD" scp apply.sh pi@192.168.10.2:~/
+      - sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no pi@192.168.10.2 './apply.sh'
+    environment:
+      SSH_PASSWORD:
+        from_secret: SSH_PASSWORD
+      docker_username:
+        from_secret: docker_username
+
+volumes:
+  - name: docker
+    host:
+      path: /run/user/1000/docker.sock
+
+trigger:
+  event:
+    - push
+    - custom 

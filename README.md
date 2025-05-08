@@ -97,3 +97,129 @@ There are 2 ways to integrate with the agents you create in Rowboat
 
 
 Refer to [Docs](https://docs.rowboatlabs.com/) to learn how to start building agents with Rowboat.
+
+## Running on Kubernetes
+
+### Prerequisites
+- Kubernetes cluster (tested with k3s on Raspberry Pi)
+- kubectl configured to access your cluster
+- Docker registry access (for pushing images)
+- SSH access to the target server (for deployment)
+
+### Important Configuration Note
+Before deploying, you must update the image names in the Kubernetes configuration files to use your own Docker Hub username and image names:
+
+1. In `k8s/arm64/rowboat_agents-deployment.yaml`:
+   - Change `stevef1uk/rowboat_agents:arm64` to `your-dockerhub-username/rowboat_agents:arm64`
+
+2. In `k8s/arm64/rowboat-deployment.yaml`:
+   - Change `stevef1uk/rowboat:arm64` to `your-dockerhub-username/rowboat:arm64`
+
+3. In `k8s/arm64/copilot-deployment.yaml`:
+   - Change `stevef1uk/copilot:arm64` to `your-dockerhub-username/copilot:arm64`
+
+Replace `your-dockerhub-username` with your actual Docker Hub username. These changes ensure that Kubernetes pulls the correct images from your Docker Hub repository.
+
+### Deployment Steps
+1. Clone the repository
+2. Update the following files with your specific configuration. Including your dockerhub name!:
+   - `k8s/app-config.yaml`: Update environment variables
+   - `k8s/app-secrets.yaml`: Add your secrets (Auth0, OpenAI, etc.)
+   - `k8s/openai-secret.yaml`: Add your OpenAI API key
+   - `.drone.yml`: Update the SSH configuration (IP address and credentials)
+
+   Note: The `.drone.yml` file contains hardcoded SSH configuration (IP address and username). You'll need to manually update these values to match your target server's configuration.
+
+3. Set up the OpenAI secret:
+   ```bash
+   # Generate base64-encoded API key
+   echo -n "your-openai-api-key" | base64
+   
+   # Copy the output and replace the api-key value in k8s/openai-secret.yaml
+   # The file should look like this:
+   # apiVersion: v1
+   # kind: Secret
+   # metadata:
+   #   name: openai-secret
+   # type: Opaque
+   # data:
+   #   api-key: "YOUR_BASE64_ENCODED_API_KEY"
+   ```
+
+4. Apply the configurations in order:
+   ```bash
+   kubectl apply -f k8s/app-config.yaml
+   kubectl apply -f k8s/app-secrets.yaml
+   kubectl apply -f k8s/openai-secret.yaml
+   ```
+
+5. Deploy the applications:
+   ```bash
+   kubectl apply -f k8s/redis-deployment.yaml
+   kubectl apply -f k8s/mongodb-deployment.yaml
+   kubectl apply -f k8s/rowboat_agents-deployment.yaml
+   kubectl apply -f k8s/copilot-deployment.yaml
+   kubectl apply -f k8s/rowboat-deployment.yaml
+   ```
+
+6. Restart the deployments to ensure they pick up the new configurations:
+   ```bash
+   kubectl rollout restart deployment redis
+   kubectl rollout restart deployment mongodb
+   kubectl rollout restart deployment rowboat-agents
+   kubectl rollout restart deployment copilot
+   kubectl rollout restart deployment rowboat
+   ```
+
+### Configuration
+
+The application uses the following configuration files:
+- `k8s/app-config.yaml`: Contains environment variables and service configurations
+- `k8s/app-secrets.yaml`: Contains sensitive information like API keys and Auth0 configuration
+
+### Troubleshooting
+
+1. Check deployment status:
+```bash
+kubectl get deployments
+kubectl get pods
+```
+
+2. View logs:
+```bash
+kubectl logs deployment/rowboat
+kubectl logs deployment/rowboat-agents
+kubectl logs deployment/copilot
+```
+
+3. Common issues:
+- If services are not accessible, verify port forwarding is running
+- If MongoDB connection fails, check the connection string in `app-config.yaml`
+- If Auth0 authentication fails, verify the configuration in `app-secrets.yaml`
+
+### Cleanup
+
+To remove all Kubernetes resources:
+```bash
+kubectl delete -f k8s/rowboat-deployment.yaml
+kubectl delete -f k8s/rowboat_agents-deployment.yaml
+kubectl delete -f k8s/copilot-deployment.yaml
+kubectl delete -f k8s/redis-deployment.yaml
+kubectl delete -f k8s/mongodb-deployment.yaml
+kubectl delete -f k8s/app-config.yaml
+kubectl delete -f k8s/app-secrets.yaml
+```
+
+## CI/CD Configuration
+
+The project uses Drone CI for continuous integration and deployment. The configuration is defined in `.drone.yml` and supports building and deploying to ARM64-based Kubernetes clusters.
+
+### Required Secrets
+
+The following secrets need to be configured in your Drone CI environment:
+
+- `docker_username`: Your Docker Hub username
+- `docker_password`: Your Docker Hub password
+- `SSH_USER`: Username for SSH access to the target server
+- `SSH_PASSWORD`: Password for SSH access to the target server
+- `
