@@ -7,22 +7,58 @@
     {
       "version": "v1",
       "chatId": "",
-      "createdAt": "2025-05-08T12:18:10.212Z",
+      "createdAt": "2025-05-08T07:06:48.280Z",
       "role": "assistant",
       "content": "How can I help you today?",
-      "agenticSender": "Blog Writer Hub",
+      "agenticSender": "Example Agent",
       "agenticResponseType": "external"
     },
     {
       "role": "user",
-      "content": "write a blog on bitcoin",
+      "content": "Tell me about article 1",
       "version": "v1",
       "chatId": "",
-      "createdAt": "2025-05-08T12:18:15.023Z"
+      "createdAt": "2025-05-08T07:06:53.518Z"
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-08T07:06:55.690Z",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_uzRd4Y1CeBioJ9h26XeGhCvH",
+          "function": {
+            "name": "rag_search",
+            "arguments": "{\"query\":\"article 1\"}"
+          },
+          "type": "function"
+        }
+      ],
+      "agenticSender": "Example Agent",
+      "agenticResponseType": "internal"
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-08T07:06:55.690Z",
+      "role": "tool",
+      "content": "{\n  \"Information\": [\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 1.\",\n      \"docId\": \"681c50f17e7a18621c7215cd\",\n      \"sourceId\": \"681c50f17e7a18621c7215cc\"\n    },\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 2.\",\n      \"docId\": \"681c51067e7a18621c7215cf\",\n      \"sourceId\": \"681c51067e7a18621c7215ce\"\n    },\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 3.\",\n      \"docId\": \"681c51137e7a18621c7215d1\",\n      \"sourceId\": \"681c51137e7a18621c7215d0\"\n    }\n  ]\n}",
+      "tool_call_id": "call_uzRd4Y1CeBioJ9h26XeGhCvH",
+      "tool_name": ""
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-08T07:06:57.096Z",
+      "role": "assistant",
+      "content": "Article 1 states: \"This is article 1.\"\n\nIf you need more details or information about another article, please let me know!",
+      "agenticSender": "Example Agent",
+      "agenticResponseType": "external"
     }
   ],
   "lastRequest": {
-    "projectId": "e088bfb0-793d-4da8-8e3d-001bfb6fb647",
+    "projectId": "8e59c4b6-91d2-42e9-8990-41583f4105f1",
     "messages": [
       {
         "content": "",
@@ -35,14 +71,14 @@
       {
         "content": "How can I help you today?",
         "role": "assistant",
-        "sender": "Blog Writer Hub",
+        "sender": "Example Agent",
         "tool_calls": null,
         "tool_call_id": null,
         "tool_name": null,
         "response_type": "external"
       },
       {
-        "content": "write a blog on bitcoin",
+        "content": "Tell me about article 1",
         "role": "user",
         "sender": null,
         "tool_calls": null,
@@ -51,84 +87,31 @@
       }
     ],
     "state": {
-      "last_agent_name": "Blog Writer Hub",
+      "last_agent_name": "Example Agent",
       "tokens": {
         "total": 0,
         "prompt": 0,
         "completion": 0
-      },
-      "turn_messages": [
-        {
-          "content": "How can I help you today?",
-          "role": "assistant",
-          "sender": "Blog Writer Hub",
-          "tool_calls": null,
-          "tool_call_id": null,
-          "tool_name": null,
-          "response_type": "external"
-        }
-      ]
+      }
     },
     "agents": [
       {
-        "name": "Blog Writer Hub",
+        "name": "Example Agent",
         "type": "conversation",
-        "description": "Hub agent to orchestrate the blog writing process from research to final blog post.",
-        "instructions": "## 🧑‍💼 Role:\nYou are the hub agent responsible for orchestrating the blog writing process for the user.\n\n---\n## ⚙️ Steps to Follow:\n1. Greet the user and ask for the blog topic.\n2. FIRST: Send the topic to [@agent:Research Agent] to gather and compile research notes.\n3. Wait for the complete research notes from the Research Agent.\n4. THEN: Send the research notes to [@agent:Outline Agent] to generate a detailed outline.\n5. Wait for the outline from the Outline Agent.\n6. THEN: Send the outline to [@agent:Writing Agent] to write the full blog post (1000+ words).\n7. Once the blog post is ready, return it to the user.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Orchestrating the sequential process of research, outlining, and writing\n- Returning the final blog post to the user\n\n❌ Out of Scope:\n- Performing research, outlining, or writing directly\n- Handling requests unrelated to blog writing\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Follow the strict sequence: Research → Outline → Writing\n- Wait for each agent's complete response before proceeding\n- Only interact with the user for topic input and final blog post delivery\n\n🚫 Don'ts:\n- Do not perform research, outlining, or writing yourself\n- Do not try to get responses from multiple agents simultaneously\n- CRITICAL: The system does not support more than 1 tool call in a single output when the tool call is about transferring to another agent (a handoff). You must only put out 1 transfer related tool call in one output.\n\n# Examples\n- **User** : I want a blog post about 'Benefits of Remote Work'.\n - **Agent actions**: Call [@agent:Research Agent]\n\n- **Agent receives research notes** :\n - **Agent actions**: Call [@agent:Outline Agent]\n\n- **Agent receives outline** :\n - **Agent actions**: Call [@agent:Writing Agent]\n\n- **Agent receives blog post** :\n - **Agent response**: Here is your completed blog post on 'Benefits of Remote Work': [Full blog post]\n\n- **User** : Can you write a blog post on 'AI in Healthcare'?\n - **Agent actions**: Call [@agent:Research Agent](#mention)\n\n- **User** : Hi!\n - **Agent response**: Hello! What blog topic would you like to write about today?",
+        "description": "An example agent that uses the rag_search tool to fetch information for customer support queries.",
+        "instructions": "## 🧑‍💼 Role:\nYou are a helpful customer support assistant who fetches information using the rag_search tool.\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user what they would like help with.\n2. If the user's query requires information or an answer, use the [@tool:rag_search] tool with the user's question as the query.\n3. Provide the user with an answer based on the information retrieved from the tool.\n4. If the user's issue is about follow-up or requires human support, ask for their email address and let them know someone will contact them soon.\n5. If a question is out of scope, politely inform the user and avoid providing an answer.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Answering customer support questions using information from articles.\n- Asking the user their issue and getting their email if needed.\n\n❌ Out of Scope:\n- Questions unrelated to customer support.\n- Providing answers without using the rag_search tool when information is needed.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Use [@tool:rag_search](#mention) to fetch accurate information for user queries.\n- Provide clear and concise answers based on the tool's results.\n- Ask for the user's email if the issue requires follow-up.\n\n🚫 Don'ts:\n- Do not provide answers without fetching information when required.\n- Do not ask for details other than the user's email.\n\n# Examples\n- **User** : What is your refund policy?\n - **Agent actions**: Call [@tool:rag_search](#mention)\n - **Agent response**: Our refund policy is as follows: <summary from rag_search results>\n\n- **User** : How can I change my password?\n - **Agent actions**: Call [@tool:rag_search](#mention)\n - **Agent response**: To change your password, follow these steps: <steps from rag_search results>\n\n- **User** : I need help with my order.\n - **Agent actions**: Call [@tool:rag_search](#mention)\n - **Agent response**: Can you please provide more details about your order issue? <additional info from rag_search results if relevant>\n\n- **User** : I want someone to contact me about a billing issue.\n - **Agent response**: Sure, could you please provide your email address so someone from our team can contact you soon?\n\n- **User** : Can you tell me about your subscription plans?\n - **Agent actions**: Call [@tool:rag_search](#mention)\n - **Agent response**: Here are our subscription plans: <details from rag_search results>",
         "model": "gpt-4.1",
         "controlType": "retain",
-        "ragK": 3,
-        "ragReturnType": "chunks",
-        "outputVisibility": "user_facing",
-        "tools": [],
-        "prompts": [],
-        "connectedAgents": [
-          "Research Agent",
-          "Outline Agent",
-          "Writing Agent"
-        ]
-      },
-      {
-        "name": "Research Agent",
-        "type": "conversation",
-        "description": "Researches the given blog topic and compiles relevant information.",
-        "instructions": "## 🧑‍💼 Role:\nYou are responsible for researching the provided blog topic and compiling relevant, up-to-date information.\n\n---\n## ⚙️ Steps to Follow:\n1. Use the [@tool:web_search] tool to gather information about the topic.\n2. Summarize and compile the most important and recent findings, statistics, and facts relevant to the topic.\n3. Return a concise, well-organized compilation of research notes (not an outline or blog post).\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Researching the topic using web sources\n- Compiling factual, relevant information\n\n❌ Out of Scope:\n- Creating outlines or writing the blog post\n- Providing opinions or unverified information\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Use multiple reputable sources\n- Organize findings clearly\n\n🚫 Don'ts:\n- Do not create outlines or write the blog post\n- Do not include personal opinions\n\n# Examples\n- **User** : Research the topic 'Benefits of Remote Work'.\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: \"Compiled research notes: 1. Increased productivity: Studies show remote workers are 13% more productive (Stanford, 2020). 2. Cost savings: Companies save on office space and utilities. 3. Improved work-life balance...\"",
-        "model": "gpt-4.1",
-        "controlType": "retain",
-        "ragK": 3,
-        "ragReturnType": "chunks",
-        "outputVisibility": "internal",
-        "tools": [
-          "web_search"
+        "ragDataSources": [
+          "681c50f17e7a18621c7215cc",
+          "681c51067e7a18621c7215ce",
+          "681c51137e7a18621c7215d0"
         ],
-        "prompts": [],
-        "connectedAgents": []
-      },
-      {
-        "name": "Outline Agent",
-        "type": "conversation",
-        "description": "Creates a detailed bullet-point outline for the blog post based on research notes.",
-        "instructions": "## 🧑‍💼 Role:\nYou are responsible for creating a detailed outline for the blog post using the compiled research notes.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the compiled research notes.\n2. Create a logical, well-structured bullet-point outline for the blog post (including introduction, main sections, and conclusion).\n3. Ensure the outline covers all key points from the research.\n4. Return only the outline (not the full blog post).\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Creating outlines for blog posts\n\n❌ Out of Scope:\n- Conducting research\n- Writing the full blog post\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure logical flow and coverage of all research points\n- Use clear, concise bullet points\n\n🚫 Don'ts:\n- Do not write full paragraphs or the blog post itself\n\n# Examples\n- **User** : Create an outline for a blog on 'Benefits of Remote Work'.\n - **Agent response**: \"Outline: 1. Introduction 2. Increased Productivity 3. Cost Savings for Companies 4. Improved Work-Life Balance 5. Challenges and Solutions 6. Conclusion\"",
-        "model": "gpt-4.1",
-        "controlType": "retain",
-        "ragK": 3,
+        "ragK": 1,
         "ragReturnType": "chunks",
-        "outputVisibility": "internal",
-        "tools": [],
-        "prompts": [],
-        "connectedAgents": []
-      },
-      {
-        "name": "Writing Agent",
-        "type": "conversation",
-        "description": "Writes a full blog post (1000+ words) based on the provided outline.",
-        "instructions": "## 🧑‍💼 Role:\nYou are responsible for writing a complete, well-structured blog post based on the provided outline.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the outline for the blog post.\n2. Write a detailed, engaging blog post that follows the outline and incorporates all key points.\n3. Ensure the blog post is at least 1000 words.\n4. Return only the completed blog post.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Writing full blog posts based on outlines\n\n❌ Out of Scope:\n- Creating outlines or conducting research\n- Writing posts shorter than 1000 words\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure clarity, coherence, and logical flow\n- Expand on each outline point with relevant details\n- Use engaging and professional language\n\n🚫 Don'ts:\n- Do not skip any outline sections\n- Do not write less than 1000 words\n\n# Examples\n- **User** : Write a blog post on 'Benefits of Remote Work' using the provided outline.\n - **Agent response**: \"[Full blog post, 1000+ words, covering all outline points]\"",
-        "model": "gpt-4.1",
-        "controlType": "retain",
-        "ragK": 3,
-        "ragReturnType": "chunks",
-        "outputVisibility": "internal",
-        "tools": [],
+        "tools": [
+          "rag_search"
+        ],
         "prompts": [],
         "connectedAgents": []
       }
@@ -142,12 +125,76 @@
           "properties": {}
         },
         "isLibrary": true
+      },
+      {
+        "name": "rag_search",
+        "description": "Fetch articles with knowledge relevant to the query",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The query to retrieve articles for"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "isLibrary": true
       }
     ],
     "prompts": [],
-    "startAgent": "Blog Writer Hub",
+    "startAgent": "Example Agent",
     "mcpServers": [],
     "toolWebhookUrl": ""
   },
-  "lastResponse": null
+  "lastResponse": {
+    "state": {
+      "last_agent_name": "Example Agent",
+      "tokens": {
+        "total": 1581,
+        "prompt": 1533,
+        "completion": 48
+      }
+    },
+    "messages": [
+      {
+        "version": "v1",
+        "chatId": "",
+        "createdAt": "2025-05-08T07:06:55.690Z",
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "call_uzRd4Y1CeBioJ9h26XeGhCvH",
+            "function": {
+              "name": "rag_search",
+              "arguments": "{\"query\":\"article 1\"}"
+            },
+            "type": "function"
+          }
+        ],
+        "agenticSender": "Example Agent",
+        "agenticResponseType": "internal"
+      },
+      {
+        "version": "v1",
+        "chatId": "",
+        "createdAt": "2025-05-08T07:06:55.690Z",
+        "role": "tool",
+        "content": "{\n  \"Information\": [\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 1.\",\n      \"docId\": \"681c50f17e7a18621c7215cd\",\n      \"sourceId\": \"681c50f17e7a18621c7215cc\"\n    },\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 2.\",\n      \"docId\": \"681c51067e7a18621c7215cf\",\n      \"sourceId\": \"681c51067e7a18621c7215ce\"\n    },\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 3.\",\n      \"docId\": \"681c51137e7a18621c7215d1\",\n      \"sourceId\": \"681c51137e7a18621c7215d0\"\n    }\n  ]\n}",
+        "tool_call_id": "call_uzRd4Y1CeBioJ9h26XeGhCvH",
+        "tool_name": ""
+      },
+      {
+        "version": "v1",
+        "chatId": "",
+        "createdAt": "2025-05-08T07:06:57.096Z",
+        "role": "assistant",
+        "content": "Article 1 states: \"This is article 1.\"\n\nIf you need more details or information about another article, please let me know!",
+        "agenticSender": "Example Agent",
+        "agenticResponseType": "external"
+      }
+    ]
+  }
 }

@@ -29,15 +29,15 @@ export function Section({ title, description, children, className }: SectionProp
 
 export function SectionRow({ children, className }: { children: ReactNode; className?: string }) {
     return (
-        <div className={`flex items-center gap-6 ${className || ''}`}>
+        <div className={`flex items-start gap-6 py-1 ${className || ''}`}>
             {children}
         </div>
     );
 }
 
-export function SectionLabel({ children }: { children: ReactNode }) {
+export function SectionLabel({ children, className }: { children: ReactNode; className?: string }) {
     return (
-        <div className="w-24 flex-shrink-0 text-sm text-gray-500 dark:text-gray-400">
+        <div className={`w-24 flex-shrink-0 text-sm text-gray-500 dark:text-gray-400 ${className || ''}`}>
             {children}
         </div>
     );

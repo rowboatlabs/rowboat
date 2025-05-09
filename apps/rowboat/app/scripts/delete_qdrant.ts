@@ -2,8 +2,10 @@ import '../lib/loadenv';
 import { qdrantClient } from '../lib/qdrant';
 
 (async () => {
-    await qdrantClient.deleteCollection('embeddings');
-
-    const { collections } = await qdrantClient.getCollections();
-    console.log(collections);
+    try {
+        const result = await qdrantClient.deleteCollection('embeddings');
+        console.log(`Delete qdrant collection 'embeddings' completed with result: ${result}`);
+    } catch (error) {
+        console.error(`Unable to delete qdrant collection 'embeddings': ${error}`);
+    }
 })();

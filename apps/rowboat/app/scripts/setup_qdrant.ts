@@ -1,14 +1,18 @@
 import '../lib/loadenv';
 import { qdrantClient } from '../lib/qdrant';
 
-(async () => {
-    await qdrantClient.createCollection('embeddings', {
-        vectors: {
-            size: 1536,
-            distance: 'Dot',
-        },
-    });
+const EMBEDDING_VECTOR_SIZE = Number(process.env.EMBEDDING_VECTOR_SIZE) || 1536;
 
-    const { collections } = await qdrantClient.getCollections();
-    console.log(collections);
+(async () => {
+    try {
+        const result = await qdrantClient.createCollection('embeddings', {
+            vectors: {
+                size: EMBEDDING_VECTOR_SIZE,
+                distance: 'Dot',
+            },
+        });
+        console.log(`Create qdrant collection 'embeddings' completed with result: ${result}`);
+    } catch (error) {
+        console.error(`Unable to create qdrant collection 'embeddings': ${error}`);
+    }
 })();

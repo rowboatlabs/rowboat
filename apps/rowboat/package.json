@@ -15,7 +15,7 @@
     "ragTextWorker": "tsx app/scripts/rag_text_worker.ts"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^0.0.37",
+    "@ai-sdk/openai": "^1.3.21",
     "@auth0/nextjs-auth0": "^3.5.0",
     "@aws-sdk/client-s3": "^3.743.0",
     "@aws-sdk/s3-request-presigner": "^3.743.0",
@@ -31,7 +31,7 @@
     "@modelcontextprotocol/sdk": "^1.7.0",
     "@primer/react": "^36.27.0",
     "@qdrant/js-client-rest": "^1.13.0",
-    "ai": "^3.3.28",
+    "ai": "^4.3.13",
     "cheerio": "^1.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

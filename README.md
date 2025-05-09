@@ -22,14 +22,16 @@ Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents
    export OPENAI_API_KEY=your-openai-api-key
    ```
       
-2. Clone the repository and start Rowboat docker
+2. Clone the repository and start Rowboat
    ```bash
    git clone git@github.com:rowboatlabs/rowboat.git
    cd rowboat
-   docker-compose up --build
+   ./start.sh
    ```
 
 3. Access the app at [http://localhost:3000](http://localhost:3000).
+
+Note: We have added native RAG support including file-uploads and URL scraping. See the [RAG](https://docs.rowboatlabs.com/using_rag) section of our docs for this.
 
 Note: See the [Using custom LLM providers](https://docs.rowboatlabs.com/setup/#using-custom-llm-providers) section of our docs for using custom providers like OpenRouter and LiteLLM.
 

@@ -22,6 +22,7 @@ import { EditableField } from "@/app/lib/components/editable-field";
 import { USE_TRANSFER_CONTROL_OPTIONS } from "@/app/lib/feature_flags";
 import { Input } from "@/components/ui/input";
 import { Info } from "lucide-react";
+import { useCopilot } from "../copilot/use-copilot";
 
 // Common section header styles
 const sectionHeaderStyles = "text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400";
@@ -44,6 +45,7 @@ export function AgentConfig({
     handleUpdate,
     handleClose,
     useRag,
+    triggerCopilotChat,
 }: {
     projectId: string,
     workflow: z.infer<typeof Workflow>,
@@ -56,6 +58,7 @@ export function AgentConfig({
     handleUpdate: (agent: z.infer<typeof WorkflowAgent>) => void,
     handleClose: () => void,
     useRag: boolean,
+    triggerCopilotChat: (message: string) => void,
 }) {
     const [isAdvancedConfigOpen, setIsAdvancedConfigOpen] = useState(false);
     const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -65,10 +68,41 @@ export function AgentConfig({
     const [localName, setLocalName] = useState(agent.name);
     const [nameError, setNameError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<TabType>('instructions');
+    const [showRagCta, setShowRagCta] = useState(false);
+    const [previousRagSources, setPreviousRagSources] = useState<string[]>([]);
     
+    const {
+        start: startCopilotChat,
+    } = useCopilot({
+        projectId,
+        workflow,
+        context: null,
+        dataSources
+    });
+
     useEffect(() => {
         setLocalName(agent.name);
     }, [agent.name]);
+
+    // Track changes in RAG datasources
+    useEffect(() => {
+        const currentSources = agent.ragDataSources || [];
+        // Show CTA when transitioning from 0 to 1 datasource
+        if (currentSources.length === 1 && previousRagSources.length === 0) {
+            setShowRagCta(true);
+        }
+        // Hide CTA when all datasources are deleted
+        if (currentSources.length === 0) {
+            setShowRagCta(false);
+        }
+        setPreviousRagSources(currentSources);
+    }, [agent.ragDataSources, previousRagSources.length]);
+
+    const handleUpdateInstructions = async () => {
+        const message = `Update the instructions for agent "${agent.name}" to use the rag tool (rag_search) since data sources have been added. If this has already been done, do not take any action, but let me know.`;
+        triggerCopilotChat(message);
+        setShowRagCta(false);
+    };
 
     // Add effect to handle control type update when transfer control is disabled
     useEffect(() => {
@@ -455,7 +489,7 @@ export function AgentConfig({
                                         RAG
                                     </label>
                                     <div className="flex flex-col gap-3">
-                                        <div>
+                                        <div className="flex items-center gap-3">
                                             <Select
                                                 variant="bordered"
                                                 placeholder="Add data source"
@@ -481,6 +515,17 @@ export function AgentConfig({
                                                     ))
                                                 }
                                             </Select>
+
+                                            {showRagCta && (
+                                                <CustomButton
+                                                    variant="primary"
+                                                    size="sm"
+                                                    onClick={handleUpdateInstructions}
+                                                    className="whitespace-nowrap"
+                                                >
+                                                    Update Instructions
+                                                </CustomButton>
+                                            )}
                                         </div>
 
                                         <div className="flex flex-col gap-2">

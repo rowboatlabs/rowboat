@@ -14,6 +14,7 @@ nav:
     - Test chats in the playground: playground.md
     - Add tools: add_tools.md
     - Update agents: update_agents.md
+    - Using RAG: using_rag.md
 
   - API & SDK:
     - Using the API: using_the_api.md

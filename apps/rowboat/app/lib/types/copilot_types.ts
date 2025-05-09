@@ -3,11 +3,23 @@ import { Workflow } from "./workflow_types";
 import { apiV1 } from "rowboat-shared"
 import { AgenticAPIChatMessage } from "./agents_api_types";
 import { convertToAgenticAPIChatMessages } from "./agents_api_types";
+import { DataSource } from "./datasource_types";
+
+// Create a filtered version of DataSource for copilot
+export const CopilotDataSource = DataSource.omit({
+    projectId: true,
+    version: true,
+    attempts: true,
+    createdAt: true,
+    lastUpdatedAt: true,
+    pendingRefresh: true,
+});
 
 export const CopilotWorkflow = Workflow.omit({
     lastUpdatedAt: true,
     projectId: true,
-});export const CopilotUserMessage = z.object({
+});
+export const CopilotUserMessage = z.object({
     role: z.literal('user'),
     content: z.string(),
 });
@@ -77,6 +89,7 @@ export const CopilotAPIRequest = z.object({
     workflow_schema: z.string(),
     current_workflow_config: z.string(),
     context: CopilotApiChatContext.nullable(),
+    dataSources: z.array(CopilotDataSource).optional(),
 });
 export const CopilotAPIResponse = z.union([
     z.object({

@@ -245,7 +245,7 @@ function ClientToolCall({
     delta: number;
 }) {
     return (
-        <div className="self-start flex flex-col gap-1">
+        <div className="self-start flex flex-col gap-1 mb-4">
             {sender && (
                 <div className="text-gray-500 dark:text-gray-400 text-xs pl-1">
                     {sender}
