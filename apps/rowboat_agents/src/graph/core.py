@@ -196,9 +196,13 @@ async def run_turn_streamed(
                     if event.type == "raw_response_event":
                         # Handle token usage counting
                         if hasattr(event.data, 'type') and event.data.type == "response.completed" and hasattr(event.data.response, 'usage'):
-                            tokens_used["total"] += event.data.response.usage.total_tokens
-                            tokens_used["prompt"] += event.data.response.usage.input_tokens
-                            tokens_used["completion"] += event.data.response.usage.output_tokens
+                            usage = getattr(event.data.response, "usage", None)
+                            if usage and getattr(usage, "total_tokens", None) is not None:
+                                tokens_used["total"] += usage.total_tokens
+                            if usage and getattr(usage, "prompt_tokens", None) is not None:
+                                tokens_used["prompt"] += usage.prompt_tokens
+                            if usage and getattr(usage, "completion_tokens", None) is not None:
+                                tokens_used["completion"] += usage.completion_tokens
                             print('-'*50)
                             print(f"Found usage information. Updated cumulative tokens: {tokens_used}")
                             print('-'*50)
