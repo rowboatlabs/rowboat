@@ -104,7 +104,7 @@ services:
     environment:
       - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
-    restart: no
+    restart: "no"
 
   delete_qdrant:
     build:
@@ -115,7 +115,7 @@ services:
     environment:
       - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
-    restart: no
+    restart: "no"
 
   rag_files_worker:
     build:
@@ -180,7 +180,6 @@ services:
     ports:
       - "27017:27017"
     restart: unless-stopped
-    attach: false
     volumes:
       - ./data/mongo:/data/db
 
