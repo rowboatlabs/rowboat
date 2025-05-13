@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rowboat-service
+  namespace: default
+spec:
+  selector:
+    app: rowboat  # This should match the labels in your Rowboat pod/deployment
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000  # This should match the port your Rowboat app is listening on
+  type: ClusterIP  # This makes the service only accessible within the cluster

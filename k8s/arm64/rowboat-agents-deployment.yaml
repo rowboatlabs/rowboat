@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rowboat-agents
+  labels:
+    app: rowboat-agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rowboat-agents
+  template:
+    metadata:
+      labels:
+        app: rowboat-agents
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: rowboat-cluster
+                operator: In
+                values:
+                - "true"
+      containers:
+      - name: rowboat-agents
+        image: stevef1uk/rowboat-agents:arm64
+        ports:
+        - containerPort: 3001
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3001"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: OPENAI_API_KEY
+        - name: PROVIDER_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PROVIDER_BASE_URL
+        - name: PROVIDER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: PROVIDER_API_KEY
+        - name: PROVIDER_DEFAULT_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PROVIDER_DEFAULT_MODEL
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rowboat-agents
+spec:
+  selector:
+    app: rowboat-agents
+  ports:
+  - port: 3001
+    targetPort: 3001
+  type: ClusterIP 
