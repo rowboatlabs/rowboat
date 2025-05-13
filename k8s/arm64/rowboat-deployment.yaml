@@ -1,0 +1,154 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rowboat
+  labels:
+    app: rowboat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rowboat
+  template:
+    metadata:
+      labels:
+        app: rowboat
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: rowboat-cluster
+                operator: In
+                values:
+                - "true"
+      containers:
+      - name: rowboat
+        image: stevef1uk/rowboat:arm64
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: DEBUG
+          value: "next:*,mongodb:*,express:*,app:*,MongoClient:*,MongoDB:*"
+        - name: MONGODB_DEBUG
+          value: "true"
+        - name: MONGODB_DRIVER_DEBUG
+          value: "true"
+        - name: HOSTNAME
+          value: "0.0.0.0"
+        - name: PORT
+          value: "3000"
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL
+        - name: MONGODB_CONNECTION_STRING
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: MONGODB_CONNECTION_STRING
+        - name: AUTH0_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: AUTH0_DOMAIN
+        - name: AUTH0_AUDIENCE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: AUTH0_AUDIENCE
+        - name: AUTH0_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: AUTH0_BASE_URL
+        - name: AUTH0_ISSUER_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: AUTH0_ISSUER_BASE_URL
+        - name: AUTH0_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: AUTH0_CLIENT_ID
+        - name: AUTH0_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: AUTH0_CLIENT_SECRET
+        - name: AUTH0_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: AUTH0_SECRET
+        - name: AGENTS_API_URL
+          value: "http://rowboat-agents:3001"
+        - name: AGENTS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: AGENTS_API_KEY
+        - name: COPILOT_API_URL
+          value: "http://copilot:3002"
+        - name: COPILOT_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: COPILOT_API_KEY
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: OPENAI_API_KEY
+        - name: ENABLE_AGENT_SWITCHING
+          value: "true"
+        - name: DEFAULT_AGENT
+          value: "Example Agent"
+        - name: AGENT_SWITCHING_RULES
+          value: '{"Story Agent": {"keywords": ["story", "tell me a", "write a", "narrative", "tale"]}}'
+        - name: USE_AUTH
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: USE_AUTH
+        - name: PROVIDER_DEFAULT_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PROVIDER_DEFAULT_MODEL
+        - name: PROVIDER_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PROVIDER_BASE_URL
+        - name: PROVIDER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: PROVIDER_API_KEY
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rowboat
+spec:
+  selector:
+    app: rowboat
+  ports:
+  - port: 3000
+    targetPort: 3000
+    nodePort: 30000
+  type: NodePort 

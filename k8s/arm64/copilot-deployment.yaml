@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: copilot
+  labels:
+    app: copilot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: copilot
+  template:
+    metadata:
+      labels:
+        app: copilot
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: rowboat-cluster
+                operator: In
+                values:
+                - "true"
+      containers:
+      - name: copilot
+        image: stevef1uk/copilot:arm64
+        ports:
+        - containerPort: 3002
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: OPENAI_API_KEY
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: COPILOT_API_KEY
+        - name: PROVIDER_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PROVIDER_BASE_URL
+        - name: PROVIDER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: PROVIDER_API_KEY
+        - name: PROVIDER_DEFAULT_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PROVIDER_DEFAULT_MODEL
+        - name: PROVIDER_COPILOT_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PROVIDER_COPILOT_MODEL
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: copilot
+spec:
+  selector:
+    app: copilot
+  ports:
+  - port: 3002
+    targetPort: 3002
+  type: ClusterIP 

@@ -1,13 +1,5 @@
 version: '3.8'
 
-volumes:
-  uploads:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./data/uploads
-
 services:
   rowboat:
     build:
@@ -30,10 +22,9 @@ services:
       - COPILOT_API_KEY=${COPILOT_API_KEY}
       - REDIS_URL=redis://redis:6379
       - USE_RAG=${USE_RAG}
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
       - USE_RAG_UPLOADS=${USE_RAG_UPLOADS}
-      - USE_RAG_S3_UPLOADS=${USE_RAG_S3_UPLOADS}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - RAG_UPLOADS_S3_BUCKET=${RAG_UPLOADS_S3_BUCKET}
@@ -46,11 +37,7 @@ services:
       - MAX_QUERIES_PER_MINUTE=${MAX_QUERIES_PER_MINUTE}
       - MAX_PROJECTS_PER_USER=${MAX_PROJECTS_PER_USER}
       - VOICE_API_URL=${VOICE_API_URL}
-      - PROVIDER_DEFAULT_MODEL=${PROVIDER_DEFAULT_MODEL}
-      - RAG_UPLOADS_DIR=/app/uploads
     restart: unless-stopped
-    volumes:
-      - uploads:/app/uploads
 
   rowboat_agents:
     build:
@@ -63,13 +50,8 @@ services:
       - API_KEY=${AGENTS_API_KEY}
       - REDIS_URL=redis://redis:6379
       - MONGODB_URI=mongodb://mongo:27017/rowboat
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
-      - PROVIDER_BASE_URL=${PROVIDER_BASE_URL}
-      - PROVIDER_API_KEY=${PROVIDER_API_KEY}
-      - PROVIDER_DEFAULT_MODEL=${PROVIDER_DEFAULT_MODEL}
-      - MAX_CALLS_PER_CHILD_AGENT=${MAX_CALLS_PER_CHILD_AGENT}
-      - ENABLE_TRACING=${ENABLE_TRACING}
     restart: unless-stopped
 
   copilot:
@@ -81,10 +63,6 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - API_KEY=${COPILOT_API_KEY}
-      - PROVIDER_BASE_URL=${PROVIDER_BASE_URL}
-      - PROVIDER_API_KEY=${PROVIDER_API_KEY}
-      - PROVIDER_DEFAULT_MODEL=${PROVIDER_DEFAULT_MODEL}
-      - PROVIDER_COPILOT_MODEL=${PROVIDER_COPILOT_MODEL}
     restart: unless-stopped
 
   # tools_webhook:
@@ -111,28 +89,21 @@ services:
     build:
       context: ./apps/rowboat
       dockerfile: scripts.Dockerfile
-    command: ["sh", "-c", "npm run setupQdrant"]
+    command: ["sh", "-c", "npm run setupQdrant && echo 'index created successfully'"]
     profiles: [ "setup_qdrant" ]
-    depends_on:
-      qdrant:
-        condition: service_healthy
     environment:
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
-      - EMBEDDING_VECTOR_SIZE=${EMBEDDING_VECTOR_SIZE}
     restart: no
 
   delete_qdrant:
     build:
       context: ./apps/rowboat
       dockerfile: scripts.Dockerfile
-    command: ["sh", "-c", "npm run deleteQdrant"]
+    command: ["sh", "-c", "npm run deleteQdrant && echo 'index deleted successfully'"]
     profiles: [ "delete_qdrant" ]
-    depends_on:
-      qdrant:
-        condition: service_healthy
     environment:
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
     restart: no
 
@@ -144,23 +115,15 @@ services:
     profiles: [ "rag_files_worker" ]
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - EMBEDDING_PROVIDER_BASE_URL=${EMBEDDING_PROVIDER_BASE_URL}
-      - EMBEDDING_PROVIDER_API_KEY=${EMBEDDING_PROVIDER_API_KEY}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
       - MONGODB_CONNECTION_STRING=mongodb://mongo:27017/rowboat
-      - REDIS_URL=redis://redis:6379
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - RAG_UPLOADS_S3_BUCKET=${RAG_UPLOADS_S3_BUCKET}
       - RAG_UPLOADS_S3_REGION=${RAG_UPLOADS_S3_REGION}
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
-      - RAG_UPLOADS_DIR=/app/uploads
-      - USE_GEMINI_FILE_PARSING=${USE_GEMINI_FILE_PARSING}
     restart: unless-stopped
-    volumes:
-      - uploads:/app/uploads
 
   rag_urls_worker:
     build:
@@ -170,13 +133,9 @@ services:
     profiles: [ "rag_urls_worker" ]
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - EMBEDDING_PROVIDER_BASE_URL=${EMBEDDING_PROVIDER_BASE_URL}
-      - EMBEDDING_PROVIDER_API_KEY=${EMBEDDING_PROVIDER_API_KEY}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
       - MONGODB_CONNECTION_STRING=mongodb://mongo:27017/rowboat
-      - REDIS_URL=redis://redis:6379
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
     restart: unless-stopped
 
@@ -188,12 +147,8 @@ services:
     profiles: [ "rag_text_worker" ]
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - EMBEDDING_PROVIDER_BASE_URL=${EMBEDDING_PROVIDER_BASE_URL}
-      - EMBEDDING_PROVIDER_API_KEY=${EMBEDDING_PROVIDER_API_KEY}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
       - MONGODB_CONNECTION_STRING=mongodb://mongo:27017/rowboat
-      - REDIS_URL=redis://redis:6379
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
     restart: unless-stopped
 
@@ -244,21 +199,3 @@ services:
   #     - ROWBOAT_API_HOST=http://rowboat:3000
   #     - MONGODB_URI=mongodb://mongo:27017/rowboat
   #   restart: unless-stopped
-
-  qdrant:
-    build:
-      context: .
-      dockerfile: Dockerfile.qdrant
-    ports:
-      - "6333:6333"
-    environment:
-      - QDRANT__STORAGE__STORAGE_PATH=/data/qdrant
-    restart: unless-stopped
-    profiles: [ "qdrant" ]
-    volumes:
-      - ./data/qdrant:/data/qdrant
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
-      interval: 5s
-      timeout: 10s
-      retries: 3

@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  REDIS_URL: "redis://redis:6379"
+  MONGODB_CONNECTION_STRING: "mongodb://admin:password@mongodb:27017/rowboat?authSource=admin"
+  AUTH0_DOMAIN: ""
+  AUTH0_AUDIENCE: ""
+  AUTH0_BASE_URL: ""
+  AUTH0_ISSUER_BASE_URL: ""
+  USE_AUTH: "false"
+  USE_RAG: "true"
+  AGENTS_API_URL: "http://rowboat-agents:3001"
+  COPILOT_API_URL: "http://copilot:3002"
+  USE_RAG_UPLOADS: "true"
+  USE_RAG_SCRAPING: "true"
+  USE_CHAT_WIDGET: "false"
+  CHAT_WIDGET_HOST: "http://localhost:3006"
+  MAX_QUERIES_PER_MINUTE: "60"
+  MAX_PROJECTS_PER_USER: "10"
+  VOICE_API_URL: ""
+  PROVIDER_DEFAULT_MODEL: "gpt-4"
+  PROVIDER_COPILOT_MODEL: "gpt-4"
+  PROVIDER_BASE_URL: ""
+  MAX_CALLS_PER_CHILD_AGENT: "10"
+  ENABLE_TRACING: "false" 
