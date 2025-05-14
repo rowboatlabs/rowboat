@@ -82,6 +82,13 @@ export async function listMcpServers(projectId: string): Promise<z.infer<typeof 
     return project?.mcpServers ?? [];
 }
 
+/**
+ * Create an MCP server instance using the Klavis AI API
+ * @param serverName Name of the server, e.g. 'Github'
+ * @param userId Unique user ID
+ * @param platformName Platform name, set to 'Rowboat'
+ * @returns Response containing serverUrl and instanceId
+ */
 export async function createMcpServerInstance(
   serverName: string,
   userId: string,
