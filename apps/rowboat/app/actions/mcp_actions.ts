@@ -81,3 +81,41 @@ export async function listMcpServers(projectId: string): Promise<z.infer<typeof 
     });
     return project?.mcpServers ?? [];
 }
+
+/**
+ * Create an MCP server instance using the Klavis AI API
+ * @param serverName Name of the server, e.g. 'Github'
+ * @param userId Unique user ID
+ * @param platformName Platform name, set to 'Rowboat'
+ * @returns Response containing serverUrl and instanceId
+ */
+export async function createMcpServerInstance(
+  serverName: string,
+  userId: string,
+  platformName: string,
+): Promise<{ serverUrl: string; instanceId: string }> {
+  try {
+    const response = await fetch('https://api.klavis.ai/mcp-server/instance/create', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.KLAVIS_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        serverName,
+        userId,
+        platformName,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create MCP server instance: ${response.status} ${errorText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating MCP server instance:', error);
+    throw error;
+  }
+}

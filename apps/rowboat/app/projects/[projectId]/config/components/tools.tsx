@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useMemo } from "react";
-import { Spinner, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
+import { Spinner, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, Switch } from "@heroui/react";
 import { getProjectConfig, updateWebhookUrl } from "../../../../actions/project_actions";
-import { updateMcpServers } from "../../../../actions/mcp_actions";
+import { updateMcpServers, createMcpServerInstance } from "../../../../actions/mcp_actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,6 +37,7 @@ function McpServersSection({ projectId }: { projectId: string }) {
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const { isOpen, onOpen, onClose } = useDisclosure();
     const [newServer, setNewServer] = useState({ name: '', url: '' });
+    const [toggleState, setToggleState] = useState(false);
     const [validationErrors, setValidationErrors] = useState<{
         name?: string;
         url?: string;
@@ -113,12 +114,37 @@ function McpServersSection({ projectId }: { projectId: string }) {
         setSaving(false);
     };
 
+    const handleToggleGithubServer = async (newValue: boolean) => {
+        setToggleState(newValue);
+        if (newValue) {
+            try {
+                setSaving(true);
+                // Create a new MCP server instance using Klavis API
+                const result = await createMcpServerInstance("GitHub", '123456789', "Rowboat");
+
+                const newServer = { name: "GitHub MCP Server", url: result.serverUrl };
+                setServers([...servers, newServer]);
+                setMessage({ type: 'success', text: 'GitHub MCP server created successfully' });
+                
+                // Redirect to Klavis OAuth Service
+                window.open(`https://api.klavis.ai/oauth/github/authorize?instance_id=${result.instanceId}`, '_blank');
+                
+                setTimeout(() => setMessage(null), 3000);
+            } catch (error) {
+                setMessage({ type: 'error', text: 'Failed to create GitHub MCP server' });
+                setToggleState(false); // Reset toggle on error
+            } finally {
+                setSaving(false);
+            }
+        }
+    };
+
     return <Section 
         title="MCP Servers"
         description="MCP servers are used to execute MCP tools."
     >
         <div className="space-y-4">
-            <div className="flex justify-start">
+            <div className="flex justify-between items-center w-full">
                 <Button
                     size="sm"
                     variant="primary"
@@ -126,6 +152,13 @@ function McpServersSection({ projectId }: { projectId: string }) {
                 >
                     + Add Server
                 </Button>
+                <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">Github MCP Server</span>
+                    <Switch 
+                        isSelected={toggleState} 
+                        onValueChange={handleToggleGithubServer} 
+                    />
+                </div>
             </div>
 
             {loading ? (
