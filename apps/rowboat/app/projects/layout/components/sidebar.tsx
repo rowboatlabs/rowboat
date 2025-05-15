@@ -147,7 +147,7 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
                             }
                           `}
                           disabled={isDisabled}
-                          data-tour-target={item.href === 'config' ? 'settings' : undefined}
+                          data-tour-target={item.href === 'config' ? 'settings' : item.href === 'sources' ? 'entity-data-sources' : undefined}
                         >
                           <Icon 
                             size={collapsed ? COLLAPSED_ICON_SIZE : EXPANDED_ICON_SIZE} 

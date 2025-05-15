@@ -13,37 +13,51 @@ import { Panel } from "@/components/common/panel-common";
 export function Form({
     projectId,
     useRagUploads,
+    useRagS3Uploads,
     useRagScraping,
 }: {
     projectId: string;
     useRagUploads: boolean;
+    useRagS3Uploads: boolean;
     useRagScraping: boolean;
 }) {
     const [sourceType, setSourceType] = useState("");
     const router = useRouter();
 
-    const dropdownOptions = [
+    let dropdownOptions = [
         {
             key: "text",
             label: "Text",
             startContent: <DataSourceIcon type="text" />
         },
-        {
+    ];
+    if (useRagUploads) {
+        dropdownOptions.push({
+            key: "files_local",
+            label: "Upload files (Local)",
+            startContent: <DataSourceIcon type="files" />
+        });
+    }
+    if (useRagS3Uploads) {
+        dropdownOptions.push({
+            key: "files_s3",
+            label: "Upload files (S3)",
+            startContent: <DataSourceIcon type="files" />
+        });
+    }
+    if (useRagScraping) {
+        dropdownOptions.push({
             key: "urls",
             label: "Scrape URLs",
             startContent: <DataSourceIcon type="urls" />
-        },
-        {
-            key: "files",
-            label: "Upload files",
-            startContent: <DataSourceIcon type="files" />
-        }
-    ];
+        });
+    }
 
     async function createUrlsDataSource(formData: FormData) {
         const source = await createDataSource({
             projectId,
             name: formData.get('name') as string,
+            description: formData.get('description') as string,
             data: {
                 type: 'urls',
             },
@@ -72,10 +86,10 @@ export function Form({
         const source = await createDataSource({
             projectId,
             name: formData.get('name') as string,
+            description: formData.get('description') as string,
             data: {
-                type: 'files',
+                type: formData.get('type') as 'files_local' | 'files_s3',
             },
-            status: 'ready',
         });
 
         router.push(`/projects/${projectId}/sources/${source._id}`);
@@ -85,6 +99,7 @@ export function Form({
         const source = await createDataSource({
             projectId,
             name: formData.get('name') as string,
+            description: formData.get('description') as string,
             data: {
                 type: 'text',
             },
@@ -119,15 +134,31 @@ export function Form({
         >
             <div className="h-full overflow-auto px-4 py-4">
                 <div className="max-w-[768px] mx-auto flex flex-col gap-4">
+                    <div className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-200 dark:border-blue-800">
+                        <div className="flex items-start gap-3">
+                            <svg 
+                                className="w-5 h-5 text-blue-500 mt-0.5" 
+                                fill="none" 
+                                stroke="currentColor" 
+                                viewBox="0 0 24 24"
+                            >
+                                <path 
+                                    strokeLinecap="round" 
+                                    strokeLinejoin="round" 
+                                    strokeWidth={2} 
+                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" 
+                                />
+                            </svg>
+                            <div className="text-sm text-blue-700 dark:text-blue-300">
+                                After creating data sources, go to the RAG tab inside individual agent settings to connect them to agents.
+                            </div>
+                        </div>
+                    </div>
                     <Dropdown
                         label="Select type"
                         value={sourceType}
                         onChange={setSourceType}
                         options={dropdownOptions}
-                        disabledKeys={[
-                            ...(useRagUploads ? [] : ['files']),
-                            ...(useRagScraping ? [] : ['urls']),
-                        ]}
                     />
 
                     {sourceType === "urls" && <form
@@ -155,6 +186,17 @@ export function Form({
                                 name="name"
                                 placeholder="e.g. Help articles"
                                 rows={1}
+                                className="rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                Description
+                            </label>
+                            <Textarea
+                                name="description"
+                                placeholder="e.g. A collection of help articles from our documentation"
+                                rows={2}
                                 className="rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-gray-400 dark:placeholder:text-gray-500"
                             />
                         </div>
@@ -196,10 +238,11 @@ export function Form({
                         />
                     </form>}
 
-                    {sourceType === "files" && <form
+                    {(sourceType === "files_local" || sourceType === "files_s3") && <form
                         action={createFilesDataSource}
                         className="flex flex-col gap-4"
                     >
+                        <input type="hidden" name="type" value={sourceType} />
                         <div className="space-y-2">
                             <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                                 Name
@@ -209,6 +252,17 @@ export function Form({
                                 name="name"
                                 placeholder="e.g. Documentation files"
                                 rows={1}
+                                className="rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                Description
+                            </label>
+                            <Textarea
+                                name="description"
+                                placeholder="e.g. A collection of documentation files"
+                                rows={2}
                                 className="rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-gray-400 dark:placeholder:text-gray-500"
                             />
                         </div>
@@ -268,6 +322,17 @@ export function Form({
                                 name="name"
                                 placeholder="e.g. Product documentation"
                                 rows={1}
+                                className="rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                Description
+                            </label>
+                            <Textarea
+                                name="description"
+                                placeholder="e.g. A collection of documentation for our product"
+                                rows={2}
                                 className="rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-gray-400 dark:placeholder:text-gray-500"
                             />
                         </div>

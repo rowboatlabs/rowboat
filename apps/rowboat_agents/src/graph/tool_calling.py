@@ -75,18 +75,19 @@ async def call_rag_tool(
         "active": True
     }).to_list(length=None)
 
-    print(sources)
+    print(f"Sources: {sources}")
     # Filter sources to those in source_ids
     valid_source_ids = [
         str(s["_id"]) for s in sources if str(s["_id"]) in source_ids
     ]
 
-    print(valid_source_ids)
+    print(f"Valid source ids: {valid_source_ids}")
     # If no valid sources are found, return empty results
     if not valid_source_ids:
         return ''
 
     # Perform Qdrant vector search
+    print(f"Calling Qdrant search with limit {k}")
     qdrant_results = qdrant_client.search(
         collection_name="embeddings",
         query_vector=embed_result["embedding"],
@@ -112,11 +113,13 @@ async def call_rag_tool(
         for point in qdrant_results
     ]
 
-    print(return_type)
-    print(results)
+    print(f"Return type: {return_type}")
+    print(f"Results: {results}")
     # If return_type is 'chunks', return the results directly
     if return_type == "chunks":
-        return json.dumps({"Information": results}, indent=2)
+        chunks = json.dumps({"Information": results}, indent=2)
+        print(f"Returning chunks: {chunks}")
+        return chunks
 
     # Otherwise, fetch the full document contents from MongoDB
     doc_ids = [ObjectId(r["docId"]) for r in results]
@@ -132,10 +135,9 @@ async def call_rag_tool(
     ]
 
     # Convert results to a JSON string
-    formatted_string = json.dumps({"Information": results}, indent=2)
-    print(formatted_string)
-    return formatted_string
-
+    docs = json.dumps({"Information": results}, indent=2)
+    print(f"Returning docs: {docs}")
+    return docs
 
 if __name__ == "__main__":
     asyncio.run(call_rag_tool(

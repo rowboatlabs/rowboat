@@ -12,42 +12,47 @@ const TOUR_STEPS: TourStep[] = [
     {
         target: 'copilot',
         content: 'Build agents with the help of copilot.\nThis might take a minute.',
-        title: 'Step 1/8'
+        title: 'Step 1/9'
     },
     {
         target: 'playground',
         content: 'Test your assistant in the playground.\nDebug tool calls and responses.',
-        title: 'Step 2/8'
+        title: 'Step 2/9'
     },
     {
         target: 'entity-agents',
         content: 'Manage your agents.\nSpecify instructions, examples and tool usage.',
-        title: 'Step 3/8'
+        title: 'Step 3/9'
     },
     {
         target: 'entity-tools',
         content: 'Create your own tools, import MCP tools or use existing ones.\nMock tools for quick testing.',
-        title: 'Step 4/8'
+        title: 'Step 4/9'
     },
     {
         target: 'entity-prompts',
         content: 'Manage prompts which will be used by agents.\nConfigure greeting message.',
-        title: 'Step 5/8'
+        title: 'Step 5/9'
+    },
+    {
+        target: 'entity-data-sources',
+        content: 'Add and manage RAG data sources which will be used by agents.\nAvailable sources are local files, S3 files, web URLs and plain text.  \n\nIMPORTANT: Once you have added a data source, make sure to add it inside your\nagent configuration and agent instructions (mention the @tool:rag_search).',
+        title: 'Step 6/9'
     },
     {
         target: 'settings',
         content: 'Configure project settings\nGet API keys, configure tool webhooks.',
-        title: 'Step 6/8'
+        title: 'Step 7/9'
     },
     {
         target: 'deploy',
         content: 'Deploy your workflow version to make it live.\nThis will make your workflow available for use via the API and SDK.\n\nLearn more:\n• <a href="https://docs.rowboatlabs.com/using_the_api/" target="_blank" class="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300">Using the API</a>\n• <a href="https://docs.rowboatlabs.com/using_the_sdk/" target="_blank" class="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300">Using the SDK</a>',
-        title: 'Step 7/8'
+        title: 'Step 8/9'
     },
     {
         target: 'tour-button',
         content: 'Come back here anytime to restart the tour.\nStill have questions? See our <a href="https://docs.rowboatlabs.com/" target="_blank" class="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300">docs</a> or reach out on <a href="https://discord.gg/gtbGcqF4" target="_blank" class="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300">discord</a>.',
-        title: 'Step 8/8'
+        title: 'Step 9/9'
     }
 ];
 

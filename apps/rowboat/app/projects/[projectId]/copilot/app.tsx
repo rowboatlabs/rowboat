@@ -5,6 +5,7 @@ import { useRef, useState, createContext, useContext, useCallback, forwardRef, u
 import { CopilotChatContext } from "../../../lib/types/copilot_types";
 import { CopilotMessage } from "../../../lib/types/copilot_types";
 import { Workflow } from "@/app/lib/types/workflow_types";
+import { DataSource } from "@/app/lib/types/datasource_types";
 import { z } from "zod";
 import { Action as WorkflowDispatch } from "../workflow/workflow_editor";
 import { Panel } from "@/components/common/panel-common";
@@ -30,9 +31,10 @@ interface AppProps {
     onCopyJson?: (data: { messages: any[] }) => void;
     onMessagesChange?: (messages: z.infer<typeof CopilotMessage>[]) => void;
     isInitialState?: boolean;
+    dataSources?: z.infer<typeof DataSource>[];
 }
 
-const App = forwardRef<{ handleCopyChat: () => void }, AppProps>(function App({
+const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message: string) => void }, AppProps>(function App({
     projectId,
     workflow,
     dispatch,
@@ -40,6 +42,7 @@ const App = forwardRef<{ handleCopyChat: () => void }, AppProps>(function App({
     onCopyJson,
     onMessagesChange,
     isInitialState = false,
+    dataSources,
 }, ref) {
     const [messages, setMessages] = useState<z.infer<typeof CopilotMessage>[]>([]);
     const [discardContext, setDiscardContext] = useState(false);
@@ -63,7 +66,8 @@ const App = forwardRef<{ handleCopyChat: () => void }, AppProps>(function App({
     } = useCopilot({
         projectId,
         workflow: workflowRef.current,
-        context: effectiveContext
+        context: effectiveContext,
+        dataSources: dataSources
     });
 
     // Store latest start/cancel functions in refs
@@ -129,7 +133,8 @@ const App = forwardRef<{ handleCopyChat: () => void }, AppProps>(function App({
     }, [messages, onCopyJson]);
 
     useImperativeHandle(ref, () => ({
-        handleCopyChat
+        handleCopyChat,
+        handleUserMessage
     }), [handleCopyChat]);
 
     return (
@@ -190,23 +195,27 @@ const App = forwardRef<{ handleCopyChat: () => void }, AppProps>(function App({
     );
 });
 
-export function Copilot({
-    projectId,
-    workflow,
-    chatContext = undefined,
-    dispatch,
-    isInitialState = false,
-}: {
+App.displayName = 'App';
+
+export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void }, {
     projectId: string;
     workflow: z.infer<typeof Workflow>;
     chatContext?: z.infer<typeof CopilotChatContext>;
     dispatch: (action: WorkflowDispatch) => void;
     isInitialState?: boolean;
-}) {
+    dataSources?: z.infer<typeof DataSource>[];
+}>(({
+    projectId,
+    workflow,
+    chatContext = undefined,
+    dispatch,
+    isInitialState = false,
+    dataSources,
+}, ref) => {
     const [copilotKey, setCopilotKey] = useState(0);
     const [showCopySuccess, setShowCopySuccess] = useState(false);
     const [messages, setMessages] = useState<z.infer<typeof CopilotMessage>[]>([]);
-    const appRef = useRef<{ handleCopyChat: () => void }>(null);
+    const appRef = useRef<{ handleCopyChat: () => void; handleUserMessage: (message: string) => void }>(null);
 
     function handleNewChat() {
         setCopilotKey(prev => prev + 1);
@@ -221,6 +230,16 @@ export function Copilot({
             setShowCopySuccess(false);
         }, 2000);
     }
+
+    // Expose handleUserMessage through ref
+    useImperativeHandle(ref, () => ({
+        handleUserMessage: (message: string) => {
+            const app = appRef.current as any;
+            if (app?.handleUserMessage) {
+                app.handleUserMessage(message);
+            }
+        }
+    }), []);
 
     return (
         <Panel variant="copilot"
@@ -277,9 +296,12 @@ export function Copilot({
                     onCopyJson={handleCopyJson}
                     onMessagesChange={setMessages}
                     isInitialState={isInitialState}
+                    dataSources={dataSources}
                 />
             </div>
         </Panel>
     );
-}
+});
+
+Copilot.displayName = 'Copilot';
 

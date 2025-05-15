@@ -16,10 +16,8 @@ print("Master config:", master_config)
 
 # Get environment variables with defaults
 ENABLE_TRACING = False
-try:
+if os.environ.get('ENABLE_TRACING'):
     ENABLE_TRACING = os.environ.get('ENABLE_TRACING').lower() == 'true'
-except Exception as e:
-    print(f"Error getting ENABLE_TRACING: {e}, using default of False")
 
 # filter out agent transfer messages using a function
 def is_agent_transfer_message(msg):

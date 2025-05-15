@@ -6,7 +6,7 @@ import { Workflow } from "@/app/lib/types/workflow_types";
 import { WorkflowTool } from "@/app/lib/types/workflow_types";
 import MarkdownContent from "@/app/lib/components/markdown-content";
 import { apiV1 } from "rowboat-shared";
-import { MessageSquareIcon, EllipsisIcon, CircleCheckIcon, ChevronRightIcon, ChevronDownIcon, ChevronUpIcon, XIcon, PlusIcon } from "lucide-react";
+import { MessageSquareIcon, EllipsisIcon, CircleCheckIcon, ChevronRightIcon, ChevronDownIcon, ChevronUpIcon, XIcon, PlusIcon, CodeIcon, CheckCircleIcon, FileTextIcon } from "lucide-react";
 import { TestProfile } from "@/app/lib/types/testing_types";
 import { ProfileContextBox } from "./profile-context-box";
 
@@ -245,7 +245,7 @@ function ClientToolCall({
     delta: number;
 }) {
     return (
-        <div className="self-start flex flex-col gap-1">
+        <div className="self-start flex flex-col gap-1 mb-4">
             {sender && (
                 <div className="text-gray-500 dark:text-gray-400 text-xs pl-1">
                     {sender}
@@ -258,18 +258,19 @@ function ClientToolCall({
                     <div className="flex flex-col gap-1">
                         <div className="shrink-0 flex gap-2 items-center">
                             {!availableResult && <Spinner size="sm" />}
-                            {availableResult && <CircleCheckIcon size={16} />}
-                            <div className="font-semibold text-sm">
-                                Function Call: <code className="bg-gray-100 dark:bg-neutral-800 px-2 py-0.5 rounded font-mono">
+                            {availableResult && <CheckCircleIcon size={16} className="text-green-500" />}
+                            <div className="flex items-center font-semibold text-sm gap-2">
+                                <span>Function Call:</span>
+                                <span className="px-2 py-0.5 rounded-full bg-purple-50 text-purple-800 dark:bg-purple-900/30 dark:text-purple-100 font-bold text-sm align-middle">
                                     {toolCall.function.name}
-                                </code>
+                                </span>
                             </div>
                         </div>
                     </div>
 
                     <div className="flex flex-col gap-2">
-                        <ExpandableContent label="Params" content={toolCall.function.arguments} expanded={false} />
-                        {availableResult && <ExpandableContent label="Result" content={availableResult.content} expanded={false} />}
+                        <ExpandableContent label="Params" content={toolCall.function.arguments} expanded={false} icon={<CodeIcon size={14} />} />
+                        {availableResult && <ExpandableContent label="Result" content={availableResult.content} expanded={false} icon={<FileTextIcon size={14} className="text-blue-500" />} />}
                     </div>
                 </div>
             </div>
@@ -280,11 +281,13 @@ function ClientToolCall({
 function ExpandableContent({
     label,
     content,
-    expanded = false
+    expanded = false,
+    icon
 }: {
     label: string,
     content: string | object | undefined,
-    expanded?: boolean
+    expanded?: boolean,
+    icon?: React.ReactNode
 }) {
     const [isExpanded, setIsExpanded] = useState(expanded);
 
@@ -314,6 +317,7 @@ function ExpandableContent({
         <div className='flex gap-1 items-start cursor-pointer text-gray-500 dark:text-gray-400' onClick={toggleExpanded}>
             {!isExpanded && <ChevronRightIcon size={16} />}
             {isExpanded && <ChevronDownIcon size={16} />}
+            {icon && <span className="mr-1">{icon}</span>}
             <div className='text-left break-all text-xs'>{label}</div>
         </div>
         {isExpanded && (
@@ -322,7 +326,10 @@ function ExpandableContent({
                     <MarkdownContent content={content as string} />
                 </div>
             ) : (
-                <pre className='text-sm font-mono bg-gray-100 dark:bg-gray-800 p-2 rounded break-all whitespace-pre-wrap overflow-x-auto text-gray-900 dark:text-gray-100'>
+                <pre
+                  className="text-xs leading-snug bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 rounded-lg px-2 py-1 overflow-x-auto font-mono shadow-sm border border-zinc-100 dark:border-zinc-700"
+                  style={{ fontFamily: "'JetBrains Mono', 'Fira Mono', 'Menlo', 'Consolas', 'Liberation Mono', monospace" }}
+                >
                     {formattedContent}
                 </pre>
             )

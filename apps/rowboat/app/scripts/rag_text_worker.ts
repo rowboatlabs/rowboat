@@ -112,13 +112,13 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
 // fetch next job from mongodb
 (async () => {
     while (true) {
-        console.log("Polling for job...")
         const now = Date.now();
         let job: WithId<z.infer<typeof DataSource>> | null = null;
 
         // first try to find a job that needs deleting
         job = await dataSourcesCollection.findOneAndUpdate({
             status: "deleted",
+            "data.type": "text",
             $or: [
                 { attempts: { $exists: false } },
                 { attempts: { $lte: 3 } }

@@ -22,6 +22,7 @@ import { EditableField } from "@/app/lib/components/editable-field";
 import { USE_TRANSFER_CONTROL_OPTIONS } from "@/app/lib/feature_flags";
 import { Input } from "@/components/ui/input";
 import { Info } from "lucide-react";
+import { useCopilot } from "../copilot/use-copilot";
 
 // Common section header styles
 const sectionHeaderStyles = "text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400";
@@ -30,7 +31,7 @@ const sectionHeaderStyles = "text-xs font-medium uppercase tracking-wider text-g
 const textareaStyles = "rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-gray-400 dark:placeholder:text-gray-500";
 
 // Add this type definition after the imports
-type TabType = 'instructions' | 'examples' | 'configurations';
+type TabType = 'instructions' | 'examples' | 'configurations' | 'rag';
 
 export function AgentConfig({
     projectId,
@@ -44,6 +45,7 @@ export function AgentConfig({
     handleUpdate,
     handleClose,
     useRag,
+    triggerCopilotChat,
 }: {
     projectId: string,
     workflow: z.infer<typeof Workflow>,
@@ -56,6 +58,7 @@ export function AgentConfig({
     handleUpdate: (agent: z.infer<typeof WorkflowAgent>) => void,
     handleClose: () => void,
     useRag: boolean,
+    triggerCopilotChat: (message: string) => void,
 }) {
     const [isAdvancedConfigOpen, setIsAdvancedConfigOpen] = useState(false);
     const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -65,10 +68,41 @@ export function AgentConfig({
     const [localName, setLocalName] = useState(agent.name);
     const [nameError, setNameError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<TabType>('instructions');
+    const [showRagCta, setShowRagCta] = useState(false);
+    const [previousRagSources, setPreviousRagSources] = useState<string[]>([]);
     
+    const {
+        start: startCopilotChat,
+    } = useCopilot({
+        projectId,
+        workflow,
+        context: null,
+        dataSources
+    });
+
     useEffect(() => {
         setLocalName(agent.name);
     }, [agent.name]);
+
+    // Track changes in RAG datasources
+    useEffect(() => {
+        const currentSources = agent.ragDataSources || [];
+        // Show CTA when transitioning from 0 to 1 datasource
+        if (currentSources.length === 1 && previousRagSources.length === 0) {
+            setShowRagCta(true);
+        }
+        // Hide CTA when all datasources are deleted
+        if (currentSources.length === 0) {
+            setShowRagCta(false);
+        }
+        setPreviousRagSources(currentSources);
+    }, [agent.ragDataSources, previousRagSources.length]);
+
+    const handleUpdateInstructions = async () => {
+        const message = `Update the instructions for agent "${agent.name}" to use the rag tool (rag_search) since data sources have been added. If this has already been done, do not take any action, but let me know.`;
+        triggerCopilotChat(message);
+        setShowRagCta(false);
+    };
 
     // Add effect to handle control type update when transfer control is disabled
     useEffect(() => {
@@ -152,7 +186,7 @@ export function AgentConfig({
             <div className="flex flex-col gap-6 p-4 h-[calc(100vh-100px)] min-h-0 flex-1">
                 {/* Tabs */}
                 <div className="flex border-b border-gray-200 dark:border-gray-700">
-                    {(['instructions', 'examples', 'configurations'] as TabType[]).map((tab) => (
+                    {(['instructions', 'examples', 'configurations', 'rag'] as TabType[]).map((tab) => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -163,7 +197,7 @@ export function AgentConfig({
                                     : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
                             )}
                         >
-                            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                            {tab === 'rag' ? 'RAG' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                         </button>
                     ))}
                 </div>
@@ -449,169 +483,6 @@ export function AgentConfig({
                                 />
                             </div>
 
-                            {useRag && (
-                                <div className="space-y-4">
-                                    <label className={sectionHeaderStyles}>
-                                        RAG
-                                    </label>
-                                    <div className="flex flex-col gap-3">
-                                        <div>
-                                            <Select
-                                                variant="bordered"
-                                                placeholder="Add data source"
-                                                size="sm"
-                                                className="w-64"
-                                                onSelectionChange={(keys) => {
-                                                    const key = keys.currentKey as string;
-                                                    if (key) {
-                                                        handleUpdate({
-                                                            ...agent,
-                                                            ragDataSources: [...(agent.ragDataSources || []), key]
-                                                        });
-                                                    }
-                                                }}
-                                                startContent={<PlusIcon className="w-4 h-4 text-gray-500" />}
-                                            >
-                                                {dataSources
-                                                    .filter((ds) => !(agent.ragDataSources || []).includes(ds._id))
-                                                    .map((ds) => (
-                                                        <SelectItem key={ds._id}>
-                                                            {ds.name}
-                                                        </SelectItem>
-                                                    ))
-                                                }
-                                            </Select>
-                                        </div>
-
-                                        <div className="flex flex-col gap-2">
-                                            {(agent.ragDataSources || []).map((source) => {
-                                                const ds = dataSources.find((ds) => ds._id === source);
-                                                return (
-                                                    <div 
-                                                        key={source}
-                                                        className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
-                                                    >
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="flex items-center justify-center w-8 h-8 rounded-md bg-indigo-50 dark:bg-indigo-900/20">
-                                                                <svg 
-                                                                    className="w-4 h-4 text-indigo-600 dark:text-indigo-400" 
-                                                                    fill="none" 
-                                                                    viewBox="0 0 24 24" 
-                                                                    stroke="currentColor"
-                                                                >
-                                                                    <path 
-                                                                        strokeLinecap="round" 
-                                                                        strokeLinejoin="round" 
-                                                                        strokeWidth={2} 
-                                                                        d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" 
-                                                                    />
-                                                                </svg>
-                                                            </div>
-                                                            <div className="flex flex-col">
-                                                                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                                                    {ds?.name || "Unknown"}
-                                                                </span>
-                                                                <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                                    Data Source
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                        <CustomButton
-                                                            variant="tertiary"
-                                                            size="sm"
-                                                            className="text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-                                                            onClick={() => {
-                                                                const newSources = agent.ragDataSources?.filter((s) => s !== source);
-                                                                handleUpdate({
-                                                                    ...agent,
-                                                                    ragDataSources: newSources
-                                                                });
-                                                            }}
-                                                            startContent={<Trash2 className="w-4 h-4" />}
-                                                        >
-                                                            Remove
-                                                        </CustomButton>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-
-                                        {agent.ragDataSources !== undefined && agent.ragDataSources.length > 0 && (
-                                            <>
-                                                <div className="mt-4">
-                                                    <button
-                                                        onClick={() => setIsAdvancedConfigOpen(!isAdvancedConfigOpen)}
-                                                        className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-                                                    >
-                                                        {isAdvancedConfigOpen ? 
-                                                            <ChevronDown className="w-4 h-4 text-gray-400" /> : 
-                                                            <ChevronRight className="w-4 h-4 text-gray-400" />
-                                                        }
-                                                        Advanced RAG configuration
-                                                    </button>
-                                                    
-                                                    {isAdvancedConfigOpen && (
-                                                        <div className="mt-3 ml-4 p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-                                                            <div className="grid gap-6">
-                                                                <div className="space-y-2">
-                                                                    <label className={sectionHeaderStyles}>
-                                                                        Return type
-                                                                    </label>
-                                                                    <div className="flex gap-4">
-                                                                        {["chunks", "content"].map((type) => (
-                                                                            <button
-                                                                                key={type}
-                                                                                onClick={() => handleUpdate({
-                                                                                    ...agent,
-                                                                                    ragReturnType: type as z.infer<typeof WorkflowAgent>['ragReturnType']
-                                                                                })}
-                                                                                className={clsx(
-                                                                                    "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-                                                                                    agent.ragReturnType === type
-                                                                                        ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-2 border-indigo-200 dark:border-indigo-800"
-                                                                                        : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-                                                                                )}
-                                                                            >
-                                                                                {type.charAt(0).toUpperCase() + type.slice(1)}
-                                                                            </button>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-
-                                                                <div className="space-y-2">
-                                                                    <label className={sectionHeaderStyles}>
-                                                                        Number of matches
-                                                                    </label>
-                                                                    <div className="flex items-center gap-3">
-                                                                        <input
-                                                                            type="number"
-                                                                            min="1"
-                                                                            max="20"
-                                                                            className="w-24 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 focus:border-indigo-500 dark:focus:border-indigo-400"
-                                                                            value={agent.ragK}
-                                                                            onChange={(e) => handleUpdate({
-                                                                                ...agent,
-                                                                                ragK: parseInt(e.target.value)
-                                                                            })}
-                                                                        />
-                                                                        <span className="text-sm text-gray-500 dark:text-gray-400">
-                                                                            matches
-                                                                        </span>
-                                                                    </div>
-                                                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                                                        Number of relevant chunks to retrieve (1-20)
-                                                                    </p>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
                             <div className="space-y-4">
                                 <div className="flex items-center">
                                     <label className={sectionHeaderStyles}>
@@ -695,6 +566,182 @@ export function AgentConfig({
                                     />
                                 </div>
                             )}
+                        </div>
+                    )}
+
+                    {activeTab === 'rag' && useRag && (
+                        <div className="space-y-6">
+                            <div className="flex flex-col gap-3">
+                                <div className="space-y-2">
+                                    <label className={sectionHeaderStyles}>
+                                        DATA SOURCES
+                                    </label>
+                                    <div className="flex items-center gap-3">
+                                        <Select
+                                            variant="bordered"
+                                            placeholder="Add data source"
+                                            size="sm"
+                                            className="w-64"
+                                            onSelectionChange={(keys) => {
+                                                const key = keys.currentKey as string;
+                                                if (key) {
+                                                    handleUpdate({
+                                                        ...agent,
+                                                        ragDataSources: [...(agent.ragDataSources || []), key]
+                                                    });
+                                                }
+                                            }}
+                                            startContent={<PlusIcon className="w-4 h-4 text-gray-500" />}
+                                        >
+                                            {dataSources
+                                                .filter((ds) => !(agent.ragDataSources || []).includes(ds._id))
+                                                .map((ds) => (
+                                                    <SelectItem key={ds._id}>
+                                                        {ds.name}
+                                                    </SelectItem>
+                                                ))
+                                            }
+                                        </Select>
+
+                                        {showRagCta && (
+                                            <CustomButton
+                                                variant="primary"
+                                                size="sm"
+                                                onClick={handleUpdateInstructions}
+                                                className="whitespace-nowrap"
+                                            >
+                                                Update Instructions
+                                            </CustomButton>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col gap-2">
+                                    {(agent.ragDataSources || []).map((source) => {
+                                        const ds = dataSources.find((ds) => ds._id === source);
+                                        return (
+                                            <div 
+                                                key={source}
+                                                className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className="flex items-center justify-center w-8 h-8 rounded-md bg-indigo-50 dark:bg-indigo-900/20">
+                                                        <svg 
+                                                            className="w-4 h-4 text-indigo-600 dark:text-indigo-400" 
+                                                            fill="none" 
+                                                            viewBox="0 0 24 24" 
+                                                            stroke="currentColor"
+                                                        >
+                                                            <path 
+                                                                strokeLinecap="round" 
+                                                                strokeLinejoin="round" 
+                                                                strokeWidth={2} 
+                                                                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" 
+                                                            />
+                                                        </svg>
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                                            {ds?.name || "Unknown"}
+                                                        </span>
+                                                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                            Data Source
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <CustomButton
+                                                    variant="tertiary"
+                                                    size="sm"
+                                                    className="text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                                    onClick={() => {
+                                                        const newSources = agent.ragDataSources?.filter((s) => s !== source);
+                                                        handleUpdate({
+                                                            ...agent,
+                                                            ragDataSources: newSources
+                                                        });
+                                                    }}
+                                                    startContent={<Trash2 className="w-4 h-4" />}
+                                                >
+                                                    Remove
+                                                </CustomButton>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                {agent.ragDataSources !== undefined && agent.ragDataSources.length > 0 && (
+                                    <>
+                                        <div className="mt-4">
+                                            <button
+                                                onClick={() => setIsAdvancedConfigOpen(!isAdvancedConfigOpen)}
+                                                className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                                            >
+                                                {isAdvancedConfigOpen ? 
+                                                    <ChevronDown className="w-4 h-4 text-gray-400" /> : 
+                                                    <ChevronRight className="w-4 h-4 text-gray-400" />
+                                                }
+                                                Advanced RAG configuration
+                                            </button>
+                                            
+                                            {isAdvancedConfigOpen && (
+                                                <div className="mt-3 ml-4 p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                                                    <div className="grid gap-6">
+                                                        <div className="space-y-2">
+                                                            <label className={sectionHeaderStyles}>
+                                                                Return type
+                                                            </label>
+                                                            <div className="flex gap-4">
+                                                                {["chunks", "content"].map((type) => (
+                                                                    <button
+                                                                        key={type}
+                                                                        onClick={() => handleUpdate({
+                                                                            ...agent,
+                                                                            ragReturnType: type as z.infer<typeof WorkflowAgent>['ragReturnType']
+                                                                        })}
+                                                                        className={clsx(
+                                                                            "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                                                                            agent.ragReturnType === type
+                                                                                ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-2 border-indigo-200 dark:border-indigo-800"
+                                                                                : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                                                                        )}
+                                                                    >
+                                                                        {type.charAt(0).toUpperCase() + type.slice(1)}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="space-y-2">
+                                                            <label className={sectionHeaderStyles}>
+                                                                Number of matches
+                                                            </label>
+                                                            <div className="flex items-center gap-3">
+                                                                <input
+                                                                    type="number"
+                                                                    min="1"
+                                                                    max="20"
+                                                                    className="w-24 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 focus:border-indigo-500 dark:focus:border-indigo-400"
+                                                                    value={agent.ragK}
+                                                                    onChange={(e) => handleUpdate({
+                                                                        ...agent,
+                                                                        ragK: parseInt(e.target.value)
+                                                                    })}
+                                                                />
+                                                                <span className="text-sm text-gray-500 dark:text-gray-400">
+                                                                    matches
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                                Number of relevant chunks to retrieve (1-20)
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>

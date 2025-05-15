@@ -33,8 +33,26 @@ export const templates: { [key: string]: z.infer<typeof WorkflowTemplate> } = {
                     "properties": {},
                 },
                 "isLibrary": true
+            },
+            {
+                "name": "rag_search",
+                "description": "Fetch articles with knowledge relevant to the query",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The query to retrieve articles for"
+                        }
+                    },
+                    "required": [
+                        "query"
+                    ]
+                },
+                "isLibrary": true
             }
         ],
+        
     }
 }
 

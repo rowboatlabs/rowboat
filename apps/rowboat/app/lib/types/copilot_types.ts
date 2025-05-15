@@ -3,11 +3,42 @@ import { Workflow } from "./workflow_types";
 import { apiV1 } from "rowboat-shared"
 import { AgenticAPIChatMessage } from "./agents_api_types";
 import { convertToAgenticAPIChatMessages } from "./agents_api_types";
+import { DataSource } from "./datasource_types";
+
+// Create a filtered version of DataSource for copilot
+export const CopilotDataSource = z.object({
+    _id: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    active: z.boolean().default(true),
+    status: z.union([
+        z.literal('pending'),
+        z.literal('ready'),
+        z.literal('error'),
+        z.literal('deleted'),
+    ]),
+    error: z.string().optional(),
+    data: z.discriminatedUnion('type', [
+        z.object({
+            type: z.literal('urls'),
+        }),
+        z.object({
+            type: z.literal('files_local'),
+        }),
+        z.object({
+            type: z.literal('files_s3'),
+        }),
+        z.object({
+            type: z.literal('text'),
+        })
+    ]),
+}).passthrough();
 
 export const CopilotWorkflow = Workflow.omit({
     lastUpdatedAt: true,
     projectId: true,
-});export const CopilotUserMessage = z.object({
+});
+export const CopilotUserMessage = z.object({
     role: z.literal('user'),
     content: z.string(),
 });
@@ -77,6 +108,7 @@ export const CopilotAPIRequest = z.object({
     workflow_schema: z.string(),
     current_workflow_config: z.string(),
     context: CopilotApiChatContext.nullable(),
+    dataSources: z.array(CopilotDataSource).optional(),
 });
 export const CopilotAPIResponse = z.union([
     z.object({

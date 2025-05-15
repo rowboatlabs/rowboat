@@ -611,6 +611,16 @@ export function WorkflowEditor({
     const [isMcpImportModalOpen, setIsMcpImportModalOpen] = useState(false);
     const [isInitialState, setIsInitialState] = useState(true);
     const [showTour, setShowTour] = useState(true);
+    const copilotRef = useRef<{ handleUserMessage: (message: string) => void }>(null);
+
+    // Function to trigger copilot chat
+    const triggerCopilotChat = useCallback((message: string) => {
+        setShowCopilot(true);
+        // Small delay to ensure copilot is mounted
+        setTimeout(() => {
+            copilotRef.current?.handleUserMessage(message);
+        }, 100);
+    }, []);
 
     console.log(`workflow editor chat key: ${state.present.chatKey}`);
 
@@ -992,6 +1002,7 @@ export function WorkflowEditor({
                     handleUpdate={handleUpdateAgent.bind(null, state.present.selection.name)}
                     handleClose={handleUnselectAgent}
                     useRag={useRag}
+                    triggerCopilotChat={triggerCopilotChat}
                 />}
                 {state.present.selection?.type === "tool" && <ToolConfig
                     key={state.present.selection.name}
@@ -1020,6 +1031,7 @@ export function WorkflowEditor({
                         onResize={(size) => setCopilotWidth(size)}
                     >
                         <Copilot
+                            ref={copilotRef}
                             projectId={state.present.workflow.projectId}
                             workflow={state.present.workflow}
                             dispatch={dispatch}
@@ -1033,6 +1045,7 @@ export function WorkflowEditor({
                                 } : undefined
                             }
                             isInitialState={isInitialState}
+                            dataSources={dataSources}
                         />
                     </ResizablePanel>
                 </>

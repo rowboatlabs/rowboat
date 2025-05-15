@@ -2,10 +2,12 @@
 import { 
     convertToCopilotWorkflow, convertToCopilotMessage, convertToCopilotApiMessage,
     convertToCopilotApiChatContext, CopilotAPIResponse, CopilotAPIRequest,
-    CopilotChatContext, CopilotMessage, CopilotAssistantMessage, CopilotWorkflow 
+    CopilotChatContext, CopilotMessage, CopilotAssistantMessage, CopilotWorkflow,
+    CopilotDataSource
 } from "../lib/types/copilot_types";
 import { 
     Workflow} from "../lib/types/workflow_types";
+import { DataSource } from "../lib/types/datasource_types";
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { assert } from "node:console";
@@ -18,7 +20,8 @@ export async function getCopilotResponse(
     projectId: string,
     messages: z.infer<typeof CopilotMessage>[],
     current_workflow_config: z.infer<typeof Workflow>,
-    context: z.infer<typeof CopilotChatContext> | null
+    context: z.infer<typeof CopilotChatContext> | null,
+    dataSources?: z.infer<typeof DataSource>[]
 ): Promise<{
     message: z.infer<typeof CopilotAssistantMessage>;
     rawRequest: unknown;
@@ -35,6 +38,24 @@ export async function getCopilotResponse(
         workflow_schema: JSON.stringify(zodToJsonSchema(CopilotWorkflow)),
         current_workflow_config: JSON.stringify(convertToCopilotWorkflow(current_workflow_config)),
         context: context ? convertToCopilotApiChatContext(context) : null,
+        dataSources: dataSources ? dataSources.map(ds => {
+            console.log('Original data source:', JSON.stringify(ds));
+            // First parse to validate, then ensure _id is included
+            CopilotDataSource.parse(ds); // validate but don't use the result
+            // Cast to any to handle the WithStringId type
+            const withId = ds as any;
+            const result = {
+                _id: withId._id,
+                name: withId.name,
+                description: withId.description,
+                active: withId.active,
+                status: withId.status,
+                error: withId.error,
+                data: withId.data
+            };
+            console.log('Processed data source:', JSON.stringify(result));
+            return result;
+        }) : undefined,
     };
     console.log(`sending copilot request`, JSON.stringify(request));
 
@@ -96,7 +117,8 @@ export async function getCopilotResponseStream(
     projectId: string,
     messages: z.infer<typeof CopilotMessage>[],
     current_workflow_config: z.infer<typeof Workflow>,
-    context: z.infer<typeof CopilotChatContext> | null
+    context: z.infer<typeof CopilotChatContext> | null,
+    dataSources?: z.infer<typeof DataSource>[]
 ): Promise<{
     streamId: string;
 }> {
@@ -111,6 +133,7 @@ export async function getCopilotResponseStream(
         workflow_schema: JSON.stringify(zodToJsonSchema(CopilotWorkflow)),
         current_workflow_config: JSON.stringify(convertToCopilotWorkflow(current_workflow_config)),
         context: context ? convertToCopilotApiChatContext(context) : null,
+        dataSources: dataSources ? dataSources.map(ds => CopilotDataSource.parse(ds)) : undefined,
     };
 
     // serialize the request

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const DataSource = z.object({
     name: z.string(),
+    description: z.string().optional(),
     projectId: z.string(),
     active: z.boolean().default(true),
     status: z.union([
@@ -9,7 +10,7 @@ export const DataSource = z.object({
         z.literal('ready'),
         z.literal('error'),
         z.literal('deleted'),
-    ]),
+    ]).optional(),
     version: z.number(),
     error: z.string().optional(),
     createdAt: z.string().datetime(),
@@ -22,7 +23,10 @@ export const DataSource = z.object({
             type: z.literal('urls'),
         }),
         z.object({
-            type: z.literal('files'),
+            type: z.literal('files_local'),
+        }),
+        z.object({
+            type: z.literal('files_s3'),
         }),
         z.object({
             type: z.literal('text'),
@@ -50,7 +54,13 @@ export const DataSourceDoc = z.object({
             url: z.string(),
         }),
         z.object({
-            type: z.literal('file'),
+            type: z.literal('file_local'),
+            name: z.string(),
+            size: z.number(),
+            mimeType: z.string(),
+        }),
+        z.object({
+            type: z.literal('file_s3'),
             name: z.string(),
             size: z.number(),
             mimeType: z.string(),

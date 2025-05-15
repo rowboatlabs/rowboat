@@ -10,6 +10,7 @@ import { WithStringId } from "../lib/types/types";
 import { DataSourceDoc } from "../lib/types/datasource_types";
 import { DataSource } from "../lib/types/datasource_types";
 import { uploadsS3Client } from "../lib/uploads_s3_client";
+import { USE_RAG_S3_UPLOADS } from "../lib/feature_flags";
 
 export async function getDataSource(projectId: string, sourceId: string): Promise<WithStringId<z.infer<typeof DataSource>>> {
     await projectAuthCheck(projectId);
@@ -42,11 +43,13 @@ export async function listDataSources(projectId: string): Promise<WithStringId<z
 export async function createDataSource({
     projectId,
     name,
+    description,
     data,
     status = 'pending',
 }: {
     projectId: string,
     name: string,
+    description?: string,
     data: z.infer<typeof DataSource>['data'],
     status?: 'pending' | 'ready',
 }): Promise<WithStringId<z.infer<typeof DataSource>>> {
@@ -56,12 +59,18 @@ export async function createDataSource({
         projectId: projectId,
         active: true,
         name: name,
+        description,
         createdAt: (new Date()).toISOString(),
         attempts: 0,
-        status: status,
         version: 1,
         data,
     };
+
+    // Only set status for non-file data sources
+    if (data.type !== 'files_local' && data.type !== 'files_s3') {
+        source.status = status;
+    }
+
     await dataSourcesCollection.insertOne(source);
 
     const { _id, ...rest } = source as WithId<z.infer<typeof DataSource>>;
@@ -154,7 +163,7 @@ export async function addDocsToDataSource({
     }[]
 }): Promise<void> {
     await projectAuthCheck(projectId);
-    await getDataSource(projectId, sourceId);
+    const source = await getDataSource(projectId, sourceId);
 
     await dataSourceDocsCollection.insertMany(docData.map(doc => {
         const record: z.infer<typeof DataSourceDoc> = {
@@ -173,19 +182,22 @@ export async function addDocsToDataSource({
         return recordWithId;
     }));
 
-    await dataSourcesCollection.updateOne(
-        { _id: new ObjectId(sourceId) },
-        {
-            $set: {
-                status: 'pending',
-                attempts: 0,
-                lastUpdatedAt: new Date().toISOString(),
-            },
-            $inc: {
-                version: 1,
-            },
-        }
-    );
+    // Only set status to pending when files are added
+    if (docData.length > 0 && (source.data.type === 'files_local' || source.data.type === 'files_s3')) {
+        await dataSourcesCollection.updateOne(
+            { _id: new ObjectId(sourceId) },
+            {
+                $set: {
+                    status: 'pending',
+                    attempts: 0,
+                    lastUpdatedAt: new Date().toISOString(),
+                },
+                $inc: {
+                    version: 1,
+                },
+            }
+        );
+    }
 }
 
 export async function listDocsInDataSource({
@@ -279,26 +291,27 @@ export async function getDownloadUrlForFile(
 ): Promise<string> {
     await projectAuthCheck(projectId);
     await getDataSource(projectId, sourceId);
-
-    // fetch s3 key for file
     const file = await dataSourceDocsCollection.findOne({
         sourceId,
         _id: new ObjectId(fileId),
-        'data.type': 'file',
+        'data.type': { $in: ['file_local', 'file_s3'] },
     });
     if (!file) {
         throw new Error('File not found');
     }
-    if (file.data.type !== 'file') {
-        throw new Error('File not found');
+
+    // if local, return path
+    if (file.data.type === 'file_local') {
+        return `/api/uploads/${fileId}`;
+    } else if (file.data.type === 'file_s3') {
+        const command = new GetObjectCommand({
+            Bucket: process.env.RAG_UPLOADS_S3_BUCKET,
+            Key: file.data.s3Key,
+        });
+        return await getSignedUrl(uploadsS3Client, command, { expiresIn: 60 }); // URL valid for 1 minute
     }
 
-    const command = new GetObjectCommand({
-        Bucket: process.env.RAG_UPLOADS_S3_BUCKET,
-        Key: file.data.s3Key,
-    });
-
-    return await getSignedUrl(uploadsS3Client, command, { expiresIn: 60 }); // URL valid for 1 minute
+    throw new Error('Invalid file type');
 }
 
 export async function getUploadUrlsForFilesDataSource(
@@ -307,38 +320,73 @@ export async function getUploadUrlsForFilesDataSource(
     files: { name: string; type: string; size: number }[]
 ): Promise<{
     fileId: string,
-    presignedUrl: string,
-    s3Key: string,
+    uploadUrl: string,
+    path: string,
 }[]> {
     await projectAuthCheck(projectId);
     const source = await getDataSource(projectId, sourceId);
-    if (source.data.type !== 'files') {
+    if (source.data.type !== 'files_local' && source.data.type !== 'files_s3') {
         throw new Error('Invalid files data source');
     }
 
     const urls: {
         fileId: string,
-        presignedUrl: string,
-        s3Key: string,
+        uploadUrl: string,
+        path: string,
     }[] = [];
 
     for (const file of files) {
         const fileId = new ObjectId().toString();
-        const projectIdPrefix = projectId.slice(0, 2); // 2 characters from the start of the projectId
-        const s3Key = `datasources/files/${projectIdPrefix}/${projectId}/${sourceId}/${fileId}/${file.name}`;
-        // Generate presigned URL
-        const command = new PutObjectCommand({
-            Bucket: process.env.RAG_UPLOADS_S3_BUCKET,
-            Key: s3Key,
-            ContentType: file.type,
-        });
-        const presignedUrl = await getSignedUrl(uploadsS3Client, command, { expiresIn: 10 * 60 }); // valid for 10 minutes
-        urls.push({
-            fileId,
-            presignedUrl,
-            s3Key,
-        });
+
+        if (source.data.type === 'files_s3') {
+            // Generate presigned URL
+            const projectIdPrefix = projectId.slice(0, 2); // 2 characters from the start of the projectId
+            const path = `datasources/files/${projectIdPrefix}/${projectId}/${sourceId}/${fileId}/${file.name}`;
+            const command = new PutObjectCommand({
+                Bucket: process.env.RAG_UPLOADS_S3_BUCKET,
+                Key: path,
+                ContentType: file.type,
+            });
+            const uploadUrl = await getSignedUrl(uploadsS3Client, command, { expiresIn: 10 * 60 }); // valid for 10 minutes
+            urls.push({
+                fileId,
+                uploadUrl,
+                path,
+            });
+        } else if (source.data.type === 'files_local') {
+            // Generate local upload URL
+            urls.push({
+                fileId,
+                uploadUrl: '/api/uploads/' + fileId,
+                path: '/api/uploads/' + fileId,
+            });
+        }
     }
 
     return urls;
+}
+
+export async function updateDataSource({
+    projectId,
+    sourceId,
+    description,
+}: {
+    projectId: string,
+    sourceId: string,
+    description: string,
+}) {
+    await projectAuthCheck(projectId);
+    await getDataSource(projectId, sourceId);
+
+    await dataSourcesCollection.updateOne({
+        _id: new ObjectId(sourceId),
+    }, {
+        $set: {
+            description,
+            lastUpdatedAt: (new Date()).toISOString(),
+        },
+        $inc: {
+            version: 1,
+        },
+    });
 }

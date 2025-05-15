@@ -2,12 +2,14 @@ import { useCallback, useRef, useState } from "react";
 import { getCopilotResponseStream } from "@/app/actions/copilot_actions";
 import { CopilotMessage } from "@/app/lib/types/copilot_types";
 import { Workflow } from "@/app/lib/types/workflow_types";
+import { DataSource } from "@/app/lib/types/datasource_types";
 import { z } from "zod";
 
 interface UseCopilotParams {
     projectId: string;
     workflow: z.infer<typeof Workflow>;
     context: any;
+    dataSources?: z.infer<typeof DataSource>[];
 }
 
 interface UseCopilotResult {
@@ -21,7 +23,7 @@ interface UseCopilotResult {
     cancel: () => void;
 }
 
-export function useCopilot({ projectId, workflow, context }: UseCopilotParams): UseCopilotResult {
+export function useCopilot({ projectId, workflow, context, dataSources }: UseCopilotParams): UseCopilotResult {
     const [streamingResponse, setStreamingResponse] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -41,7 +43,7 @@ export function useCopilot({ projectId, workflow, context }: UseCopilotParams): 
         setLoading(true);
 
         try {
-            const res = await getCopilotResponseStream(projectId, messages, workflow, context || null);
+            const res = await getCopilotResponseStream(projectId, messages, workflow, context || null, dataSources);
             const eventSource = new EventSource(`/api/copilot-stream-response/${res.streamId}`);
 
             eventSource.onmessage = (event) => {
@@ -71,7 +73,7 @@ export function useCopilot({ projectId, workflow, context }: UseCopilotParams): 
             setError('Failed to initiate stream');
             setLoading(false);
         }
-    }, [projectId, workflow, context]);
+    }, [projectId, workflow, context, dataSources]);
 
     const cancel = useCallback(() => {
         cancelRef.current?.();
