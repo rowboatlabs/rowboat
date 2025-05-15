@@ -1,6 +1,7 @@
 import { z } from "zod";
 export const WorkflowAgent = z.object({
     name: z.string(),
+    order: z.number().int().optional(),
     type: z.union([
         z.literal('conversation'),
         z.literal('post_process'),
@@ -41,12 +42,31 @@ export const WorkflowTool = z.object({
         properties: z.record(z.object({
             type: z.string(),
             description: z.string(),
+            enum: z.array(z.any()).optional(),
+            default: z.any().optional(),
+            minimum: z.number().optional(),
+            maximum: z.number().optional(),
+            items: z.any().optional(),  // For array types
+            format: z.string().optional(),
+            pattern: z.string().optional(),
+            minLength: z.number().optional(),
+            maxLength: z.number().optional(),
+            minItems: z.number().optional(),
+            maxItems: z.number().optional(),
+            uniqueItems: z.boolean().optional(),
+            multipleOf: z.number().optional(),
+            examples: z.array(z.any()).optional(),
         })),
-        required: z.array(z.string()).optional(),
+        required: z.array(z.string()).default([]),
+    }).default({
+        type: 'object',
+        properties: {},
+        required: [],
     }),
     isMcp: z.boolean().default(false).optional(),
     isLibrary: z.boolean().default(false).optional(),
     mcpServerName: z.string().optional(),
+    mcpServerURL: z.string().optional(),
 });
 export const Workflow = z.object({
     name: z.string().optional(),
@@ -81,6 +101,7 @@ export function sanitizeTextWithMentions(
         tools: z.infer<typeof WorkflowTool>[],
         prompts: z.infer<typeof WorkflowPrompt>[],
     },
+    projectTools: z.infer<typeof WorkflowTool>[] = []
 ): {
     sanitized: string;
     entities: z.infer<typeof ConnectedEntity>[];
@@ -110,7 +131,8 @@ export function sanitizeTextWithMentions(
             if (entity.type === 'agent') {
                 return workflow.agents.some(a => a.name === entity.name);
             } else if (entity.type === 'tool') {
-                return workflow.tools.some(t => t.name === entity.name);
+                return workflow.tools.some(t => t.name === entity.name) || 
+                       projectTools.some(t => t.name === entity.name);
             } else if (entity.type === 'prompt') {
                 return workflow.prompts.some(p => p.name === entity.name);
             }

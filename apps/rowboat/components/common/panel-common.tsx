@@ -35,7 +35,7 @@ interface PanelProps {
     actions?: React.ReactNode;
     children: React.ReactNode;
     maxHeight?: string;
-    variant?: 'default' | 'copilot' | 'playground' | 'projects';
+    variant?: 'default' | 'copilot' | 'playground' | 'projects' | 'entity-list';
     showWelcome?: boolean;
     className?: string;
     onClick?: () => void;
@@ -54,6 +54,8 @@ export function Panel({
     onClick,
     tourTarget,
 }: PanelProps) {
+    const isEntityList = variant === 'entity-list';
+    
     return <div 
         className={clsx(
             "flex flex-col overflow-hidden rounded-xl border relative",
@@ -84,7 +86,11 @@ export function Panel({
         <div 
             className={clsx(
                 "shrink-0 border-b border-zinc-100 dark:border-zinc-800 relative",
-                variant === 'projects' ? "flex flex-col gap-3 px-4 py-3" : "flex items-center justify-between px-4 py-3"
+                {
+                    "flex flex-col gap-3 px-4 py-3": variant === 'projects',
+                    "flex items-center justify-between h-[53px] p-3": isEntityList,
+                    "flex items-center justify-between px-6 py-3": !isEntityList && variant !== 'projects'
+                }
             )}
         >
             {variant === 'projects' ? (
@@ -103,6 +109,13 @@ export function Panel({
                     </div>
                     {rightActions}
                 </>
+            ) : isEntityList ? (
+                <div className="flex items-center justify-between w-full">
+                    {title}
+                    {actions && <div className="flex items-center gap-2">
+                        {actions}
+                    </div>}
+                </div>
             ) : (
                 <>
                     {title}
@@ -112,10 +125,10 @@ export function Panel({
         </div>
         <div className={clsx(
             "min-h-0 flex-1 overflow-y-auto",
-            variant === 'projects' && "custom-scrollbar"
+            (variant === 'projects' || isEntityList) && "custom-scrollbar"
         )}>
-            {variant === 'projects' ? (
-                <div className="px-3 py-2 pb-4">
+            {(variant === 'projects' || isEntityList) ? (
+                <div className="px-4 py-3">
                     {children}
                 </div>
             ) : children}

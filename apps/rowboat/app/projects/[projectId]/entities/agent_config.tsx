@@ -1,7 +1,7 @@
 "use client";
 import { WithStringId } from "../../../lib/types/types";
 import { AgenticAPITool } from "../../../lib/types/agents_api_types";
-import { WorkflowPrompt, WorkflowAgent, Workflow } from "../../../lib/types/workflow_types";
+import { WorkflowPrompt, WorkflowAgent, Workflow, WorkflowTool } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { z } from "zod";
 import { PlusIcon, Sparkles, X as XIcon, ChevronDown, ChevronRight, Trash2, Maximize2, Minimize2 } from "lucide-react";
@@ -40,6 +40,7 @@ export function AgentConfig({
     usedAgentNames,
     agents,
     tools,
+    projectTools,
     prompts,
     dataSources,
     handleUpdate,
@@ -53,6 +54,7 @@ export function AgentConfig({
     usedAgentNames: Set<string>,
     agents: z.infer<typeof WorkflowAgent>[],
     tools: z.infer<typeof AgenticAPITool>[],
+    projectTools: z.infer<typeof WorkflowTool>[],
     prompts: z.infer<typeof WorkflowPrompt>[],
     dataSources: WithStringId<z.infer<typeof DataSource>>[],
     handleUpdate: (agent: z.infer<typeof WorkflowAgent>) => void,
@@ -160,7 +162,7 @@ export function AgentConfig({
     const atMentions = createAtMentions({
         agents,
         prompts,
-        tools,
+        tools: [...tools, ...projectTools],
         currentAgentName: agent.name
     });
 

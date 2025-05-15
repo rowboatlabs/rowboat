@@ -11,6 +11,7 @@ import { AgenticAPIChatRequest } from "../../../../../../lib/types/agents_api_ty
 import { getAgenticApiResponse } from "../../../../../../lib/utils";
 import { check_query_limit } from "../../../../../../lib/rate_limiting";
 import { PrefixLogger } from "../../../../../../lib/utils";
+import { fetchProjectMcpTools } from "@/app/lib/project_tools";
 
 // get next turn / agent response
 export async function POST(
@@ -80,6 +81,9 @@ export async function POST(
             throw new Error("Project settings not found");
         }
 
+        // fetch project tools
+        const projectTools = await fetchProjectMcpTools(session.projectId);
+
         // fetch workflow
         const workflow = await agentWorkflowsCollection.findOne({
             projectId: session.projectId,
@@ -90,7 +94,7 @@ export async function POST(
         }
 
         // get assistant response
-        const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow);
+        const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow, projectTools);
         const unsavedMessages: z.infer<typeof apiV1.ChatMessage>[] = [userMessage];
         let state: unknown = chat.agenticState ?? { last_agent_name: startAgent };
 
@@ -102,7 +106,11 @@ export async function POST(
             tools,
             prompts,
             startAgent,
-            mcpServers: projectSettings.mcpServers ?? [],
+            mcpServers: (projectSettings.mcpServers ?? []).map(server => ({
+                name: server.name,
+                serverUrl: server.serverUrl || '',
+                isReady: server.isReady
+            })),
             toolWebhookUrl: projectSettings.webhookUrl ?? '',
             testProfile: undefined,
         };

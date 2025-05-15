@@ -48,6 +48,9 @@ services:
       - VOICE_API_URL=${VOICE_API_URL}
       - PROVIDER_DEFAULT_MODEL=${PROVIDER_DEFAULT_MODEL}
       - RAG_UPLOADS_DIR=/app/uploads
+      - KLAVIS_API_KEY=${KLAVIS_API_KEY}
+      - KLAVIS_GITHUB_CLIENT_ID=${KLAVIS_GITHUB_CLIENT_ID}
+      - KLAVIS_GOOGLE_CLIENT_ID=${KLAVIS_GOOGLE_CLIENT_ID}
     restart: unless-stopped
     volumes:
       - uploads:/app/uploads

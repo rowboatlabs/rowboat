@@ -5,6 +5,8 @@
     box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
     background-color: white;
     z-index: 1000;
+    top: 100% !important; /* Force dropdown below the cursor */
+    margin-top: 4px; /* Add some spacing between cursor and dropdown */
 }
 
 /* Dark mode styles */

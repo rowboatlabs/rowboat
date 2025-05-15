@@ -2,7 +2,7 @@
 import { useState, useCallback, useRef } from "react";
 import { z } from "zod";
 import { MCPServer, PlaygroundChat } from "@/app/lib/types/types";
-import { Workflow } from "@/app/lib/types/workflow_types";
+import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
 import { Chat } from "./components/chat";
 import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ export function App({
     toolWebhookUrl,
     isInitialState = false,
     onPanelClick,
+    projectTools,
 }: {
     hidden?: boolean;
     projectId: string;
@@ -35,6 +36,7 @@ export function App({
     toolWebhookUrl: string;
     isInitialState?: boolean;
     onPanelClick?: () => void;
+    projectTools: z.infer<typeof WorkflowTool>[];
 }) {
     const [counter, setCounter] = useState<number>(0);
     const [testProfile, setTestProfile] = useState<WithStringId<z.infer<typeof TestProfile>> | null>(null);
@@ -185,6 +187,7 @@ export function App({
                         toolWebhookUrl={toolWebhookUrl}
                         onCopyClick={(fn) => { getCopyContentRef.current = fn; }}
                         showDebugMessages={showDebugMessages}
+                        projectTools={projectTools}
                     />
                 </div>
             </Panel>

@@ -26,15 +26,6 @@ export const templates: { [key: string]: z.infer<typeof WorkflowTemplate> } = {
         prompts: [],
         tools: [
             {
-                "name": "web_search",
-                "description": "Fetch information from the web based on chat context",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                },
-                "isLibrary": true
-            },
-            {
                 "name": "rag_search",
                 "description": "Fetch articles with knowledge relevant to the query",
                 "parameters": {

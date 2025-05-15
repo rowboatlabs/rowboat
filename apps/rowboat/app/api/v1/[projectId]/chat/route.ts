@@ -9,6 +9,7 @@ import { getAgenticApiResponse } from "../../../../lib/utils";
 import { check_query_limit } from "../../../../lib/rate_limiting";
 import { PrefixLogger } from "../../../../lib/utils";
 import { TestProfile } from "@/app/lib/types/testing_types";
+import { fetchProjectMcpTools } from "@/app/lib/project_tools";
 
 // get next turn / agent response
 export async function POST(
@@ -54,6 +55,9 @@ export async function POST(
             return Response.json({ error: "Project not found" }, { status: 404 });
         }
 
+        // fetch project tools
+        const projectTools = await fetchProjectMcpTools(projectId);
+
         // if workflow id is provided in the request, use it, else use the published workflow id
         let workflowId = result.data.workflowId ?? project.publishedWorkflowId;
         if (!workflowId) {
@@ -86,7 +90,7 @@ export async function POST(
         let currentState: unknown = reqState ?? { last_agent_name: workflow.agents[0].name };
 
         // get assistant response
-        const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow);
+        const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow, projectTools);
         const request: z.infer<typeof AgenticAPIChatRequest> = {
             projectId,
             messages: convertFromApiToAgenticApiMessages(reqMessages),
@@ -96,7 +100,11 @@ export async function POST(
             prompts,
             startAgent,
             testProfile: testProfile ?? undefined,
-            mcpServers: project.mcpServers ?? [],
+            mcpServers: (project.mcpServers ?? []).map(server => ({
+                name: server.name,
+                serverUrl: server.serverUrl ?? '',
+                isReady: server.isReady ?? false
+            })),
             toolWebhookUrl: project.webhookUrl ?? '',
         };
 

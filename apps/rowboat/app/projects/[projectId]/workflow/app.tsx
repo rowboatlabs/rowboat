@@ -9,8 +9,9 @@ import { WorkflowSelector } from "./workflow_selector";
 import { Spinner } from "@heroui/react";
 import { cloneWorkflow, createWorkflow, fetchPublishedWorkflowId, fetchWorkflow } from "../../../actions/workflow_actions";
 import { listDataSources } from "../../../actions/datasource_actions";
-import { listMcpServers } from "@/app/actions/mcp_actions";
+import { listMcpServers, listProjectMcpTools } from "@/app/actions/mcp_actions";
 import { getProjectConfig } from "@/app/actions/project_actions";
+import { WorkflowTool } from "@/app/lib/types/workflow_types";
 
 export function App({
     projectId,
@@ -25,6 +26,7 @@ export function App({
     const [workflow, setWorkflow] = useState<WithStringId<z.infer<typeof Workflow>> | null>(null);
     const [publishedWorkflowId, setPublishedWorkflowId] = useState<string | null>(null);
     const [dataSources, setDataSources] = useState<WithStringId<z.infer<typeof DataSource>>[] | null>(null);
+    const [projectTools, setProjectTools] = useState<z.infer<typeof WorkflowTool>[] | null>(null);
     const [loading, setLoading] = useState(false);
     const [autoSelectIfOnlyOneWorkflow, setAutoSelectIfOnlyOneWorkflow] = useState(true);
     const [mcpServerUrls, setMcpServerUrls] = useState<Array<z.infer<typeof MCPServer>>>([]);
@@ -37,6 +39,7 @@ export function App({
         const dataSources = await listDataSources(projectId);
         const mcpServers = await listMcpServers(projectId);
         const projectConfig = await getProjectConfig(projectId);
+        const projectTools = await listProjectMcpTools(projectId);
         // Store the selected workflow ID in local storage
         localStorage.setItem(`lastWorkflowId_${projectId}`, workflowId);
         setWorkflow(workflow);
@@ -44,6 +47,7 @@ export function App({
         setDataSources(dataSources);
         setMcpServerUrls(mcpServers);
         setToolWebhookUrl(projectConfig.webhookUrl ?? '');
+        setProjectTools(projectTools);
         setLoading(false);
     }, [projectId]);
 
@@ -110,10 +114,11 @@ export function App({
             handleCreateNewVersion={handleCreateNewVersion}
             autoSelectIfOnlyOneWorkflow={autoSelectIfOnlyOneWorkflow}
         />}
-        {!loading && workflow && (dataSources !== null) && <WorkflowEditor
+        {!loading && workflow && (dataSources !== null) && (projectTools !== null) && <WorkflowEditor
             key={workflow._id}
             workflow={workflow}
             dataSources={dataSources}
+            projectTools={projectTools}
             publishedWorkflowId={publishedWorkflowId}
             handleShowSelector={handleShowSelector}
             handleCloneVersion={handleCloneVersion}

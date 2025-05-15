@@ -1,10 +1,7 @@
 "use client";
 import React, { useReducer, Reducer, useState, useCallback, useEffect, useRef, createContext, useContext } from "react";
 import { MCPServer, WithStringId } from "../../../lib/types/types";
-import { Workflow } from "../../../lib/types/workflow_types";
-import { WorkflowTool } from "../../../lib/types/workflow_types";
-import { WorkflowPrompt } from "../../../lib/types/workflow_types";
-import { WorkflowAgent } from "../../../lib/types/workflow_types";
+import { Workflow, WorkflowTool, WorkflowPrompt, WorkflowAgent } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { produce, applyPatches, enablePatches, produceWithPatches, Patch } from 'immer';
 import { AgentConfig } from "../entities/agent_config";
@@ -29,7 +26,6 @@ import { PublishedBadge } from "./published_badge";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
 import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle } from "lucide-react";
 import { EntityList } from "./entity_list";
-import { McpImportTools } from "./mcp_imports";
 import { ProductTour } from "@/components/common/product-tour";
 
 enablePatches();
@@ -140,12 +136,11 @@ export type Action = {
     type: "restore_state";
     state: StateItem;
 } | {
-    type: "import_mcp_tools";
-    tools: z.infer<typeof WorkflowTool>[];
+    type: "reorder_agents";
+    agents: z.infer<typeof WorkflowAgent>[];
 };
 
 function reducer(state: State, action: Action): State {
-    console.log('running reducer', action);
     let newState: State;
 
     if (action.type === "restore_state") {
@@ -219,6 +214,23 @@ function reducer(state: State, action: Action): State {
                 draft.present.lastUpdatedAt = !action.saving ? new Date().toISOString() : state.present.workflow.lastUpdatedAt;
             });
             break;
+        }
+        case "reorder_agents": {
+            const newState = produce(state.present, draft => {
+                draft.workflow.agents = action.agents;
+                draft.lastUpdatedAt = new Date().toISOString();
+            });
+            const [nextState, patches, inversePatches] = produceWithPatches(state.present, draft => {
+                draft.workflow.agents = action.agents;
+                draft.lastUpdatedAt = new Date().toISOString();
+            });
+            return {
+                ...state,
+                present: nextState,
+                patches: [...state.patches.slice(0, state.currentIndex), patches],
+                inversePatches: [...state.inversePatches.slice(0, state.currentIndex), inversePatches],
+                currentIndex: state.currentIndex + 1,
+            };
         }
         default: {
             const [nextState, patches, inversePatches] = produceWithPatches(
@@ -296,6 +308,7 @@ function reducer(state: State, action: Action): State {
                                 parameters: {
                                     type: 'object',
                                     properties: {},
+                                    required: []
                                 },
                                 mockTool: true,
                                 autoSubmitMockedResponse: true,
@@ -521,27 +534,6 @@ function reducer(state: State, action: Action): State {
                             draft.workflow.startAgent = action.name;
                             draft.chatKey++;
                             break;
-                        case "import_mcp_tools":
-                            if (isLive) {
-                                break;
-                            }
-                            // Process each tool one by one
-                            action.tools.forEach(newTool => {
-                                const existingToolIndex = draft.workflow.tools.findIndex(
-                                    tool => tool.name === newTool.name
-                                );
-
-                                if (existingToolIndex !== -1) {
-                                    // Replace existing tool
-                                    draft.workflow.tools[existingToolIndex] = newTool;
-                                } else {
-                                    // Add new tool
-                                    draft.workflow.tools.push(newTool);
-                                }
-                            });
-                            draft.pendingChanges = true;
-                            draft.chatKey++;
-                            break;
                     }
                 }
             );
@@ -570,6 +562,7 @@ export function WorkflowEditor({
     mcpServerUrls,
     toolWebhookUrl,
     defaultModel,
+    projectTools,
 }: {
     dataSources: WithStringId<z.infer<typeof DataSource>>[];
     workflow: WithStringId<z.infer<typeof Workflow>>;
@@ -580,7 +573,9 @@ export function WorkflowEditor({
     mcpServerUrls: Array<z.infer<typeof MCPServer>>;
     toolWebhookUrl: string;
     defaultModel: string;
+    projectTools: z.infer<typeof WorkflowTool>[];
 }) {
+
     const [state, dispatch] = useReducer<Reducer<State, Action>>(reducer, {
         patches: [],
         inversePatches: [],
@@ -608,10 +603,29 @@ export function WorkflowEditor({
     const [showCopySuccess, setShowCopySuccess] = useState(false);
     const [showCopilot, setShowCopilot] = useState(true);
     const [copilotWidth, setCopilotWidth] = useState<number>(PANEL_RATIOS.copilot);
-    const [isMcpImportModalOpen, setIsMcpImportModalOpen] = useState(false);
     const [isInitialState, setIsInitialState] = useState(true);
     const [showTour, setShowTour] = useState(true);
     const copilotRef = useRef<{ handleUserMessage: (message: string) => void }>(null);
+
+    // Load agent order from localStorage on mount
+    useEffect(() => {
+        const storedOrder = localStorage.getItem(`workflow_${workflow._id}_agent_order`);
+        if (storedOrder) {
+            try {
+                const orderMap = JSON.parse(storedOrder);
+                const orderedAgents = [...workflow.agents].sort((a, b) => {
+                    const orderA = orderMap[a.name] ?? Number.MAX_SAFE_INTEGER;
+                    const orderB = orderMap[b.name] ?? Number.MAX_SAFE_INTEGER;
+                    return orderA - orderB;
+                });
+                if (JSON.stringify(orderedAgents) !== JSON.stringify(workflow.agents)) {
+                    dispatch({ type: "reorder_agents", agents: orderedAgents });
+                }
+            } catch (e) {
+                console.error("Error loading agent order:", e);
+            }
+        }
+    }, [workflow._id, workflow.agents]);
 
     // Function to trigger copilot chat
     const triggerCopilotChat = useCallback((message: string) => {
@@ -725,6 +739,17 @@ export function WorkflowEditor({
         dispatch({ type: "set_main_agent", name });
     }
 
+    function handleReorderAgents(agents: z.infer<typeof WorkflowAgent>[]) {
+        // Save order to localStorage
+        const orderMap = agents.reduce((acc, agent, index) => {
+            acc[agent.name] = index;
+            return acc;
+        }, {} as Record<string, number>);
+        localStorage.setItem(`workflow_${workflow._id}_agent_order`, JSON.stringify(orderMap));
+        
+        dispatch({ type: "reorder_agents", agents });
+    }
+
     async function handleRenameWorkflow(name: string) {
         await renameWorkflow(state.present.workflow.projectId, state.present.workflow._id, name);
         dispatch({ type: "update_workflow_name", name });
@@ -745,10 +770,6 @@ export function WorkflowEditor({
         setTimeout(() => {
             setShowCopySuccess(false);
         }, 1500);
-    }
-
-    function triggerMcpImport() {
-        setIsMcpImportModalOpen(true);
     }
 
     const processQueue = useCallback(async (state: State, dispatch: React.Dispatch<Action>) => {
@@ -773,10 +794,6 @@ export function WorkflowEditor({
             }
         }
     }, [isLive]);
-
-    function handleImportMcpTools(tools: z.infer<typeof WorkflowTool>[]) {
-        dispatch({ type: "import_mcp_tools", tools });
-    }
 
     useEffect(() => {
         if (state.present.pendingChanges && state.present.workflow) {
@@ -952,27 +969,31 @@ export function WorkflowEditor({
         </div>
         <ResizablePanelGroup direction="horizontal" className="grow flex overflow-auto gap-1">
             <ResizablePanel minSize={10} defaultSize={PANEL_RATIOS.entityList}>
-                <EntityList
-                    agents={state.present.workflow.agents}
-                    tools={state.present.workflow.tools}
-                    prompts={state.present.workflow.prompts}
-                    selectedEntity={state.present.selection}
-                    startAgentName={state.present.workflow.startAgent}
-                    onSelectAgent={handleSelectAgent}
-                    onSelectTool={handleSelectTool}
-                    onSelectPrompt={handleSelectPrompt}
-                    onAddAgent={handleAddAgent}
-                    onAddTool={handleAddTool}
-                    onAddPrompt={handleAddPrompt}
-                    onToggleAgent={handleToggleAgent}
-                    onSetMainAgent={handleSetMainAgent}
-                    onDeleteAgent={handleDeleteAgent}
-                    onDeleteTool={handleDeleteTool}
-                    onDeletePrompt={handleDeletePrompt}
-                    triggerMcpImport={triggerMcpImport}
-                />
+                <div className="flex flex-col h-full">
+                    <EntityList
+                        agents={state.present.workflow.agents}
+                        tools={state.present.workflow.tools}
+                        projectTools={projectTools}
+                        prompts={state.present.workflow.prompts}
+                        selectedEntity={state.present.selection}
+                        startAgentName={state.present.workflow.startAgent}
+                        onSelectAgent={handleSelectAgent}
+                        onSelectTool={handleSelectTool}
+                        onSelectPrompt={handleSelectPrompt}
+                        onAddAgent={handleAddAgent}
+                        onAddTool={handleAddTool}
+                        onAddPrompt={handleAddPrompt}
+                        onToggleAgent={handleToggleAgent}
+                        onSetMainAgent={handleSetMainAgent}
+                        onDeleteAgent={handleDeleteAgent}
+                        onDeleteTool={handleDeleteTool}
+                        onDeletePrompt={handleDeletePrompt}
+                        projectId={state.present.workflow.projectId}
+                        onReorderAgents={handleReorderAgents}
+                    />
+                </div>
             </ResizablePanel>
-            <ResizableHandle className="w-[3px] bg-transparent" />
+            <ResizableHandle withHandle className="w-[3px] bg-transparent" />
             <ResizablePanel
                 minSize={20}
                 defaultSize={showCopilot ? PANEL_RATIOS.chatApp : PANEL_RATIOS.chatApp + PANEL_RATIOS.copilot}
@@ -988,6 +1009,7 @@ export function WorkflowEditor({
                     toolWebhookUrl={toolWebhookUrl}
                     isInitialState={isInitialState}
                     onPanelClick={handlePlaygroundClick}
+                    projectTools={projectTools}
                 />
                 {state.present.selection?.type === "agent" && <AgentConfig
                     key={state.present.selection.name}
@@ -997,6 +1019,7 @@ export function WorkflowEditor({
                     usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
                     agents={state.present.workflow.agents}
                     tools={state.present.workflow.tools}
+                    projectTools={projectTools}
                     prompts={state.present.workflow.prompts}
                     dataSources={dataSources}
                     handleUpdate={handleUpdateAgent.bind(null, state.present.selection.name)}
@@ -1004,13 +1027,23 @@ export function WorkflowEditor({
                     useRag={useRag}
                     triggerCopilotChat={triggerCopilotChat}
                 />}
-                {state.present.selection?.type === "tool" && <ToolConfig
-                    key={state.present.selection.name}
-                    tool={state.present.workflow.tools.find((tool) => tool.name === state.present.selection!.name)!}
-                    usedToolNames={new Set(state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name))}
-                    handleUpdate={handleUpdateTool.bind(null, state.present.selection.name)}
-                    handleClose={handleUnselectTool}
-                />}
+                {state.present.selection?.type === "tool" && (() => {
+                    const selectedTool = state.present.workflow.tools.find(
+                        (tool) => tool.name === state.present.selection!.name
+                    ) || projectTools.find(
+                        (tool) => tool.name === state.present.selection!.name
+                    );
+                    return <ToolConfig
+                        key={state.present.selection.name}
+                        tool={selectedTool!}
+                        usedToolNames={new Set([
+                            ...state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name),
+                            ...projectTools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name)
+                        ])}
+                        handleUpdate={handleUpdateTool.bind(null, state.present.selection.name)}
+                        handleClose={handleUnselectTool}
+                    />;
+                })()}
                 {state.present.selection?.type === "prompt" && <PromptConfig
                     key={state.present.selection.name}
                     prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
@@ -1024,7 +1057,7 @@ export function WorkflowEditor({
             </ResizablePanel>
             {showCopilot && (
                 <>
-                    <ResizableHandle className="w-[3px] bg-transparent" />
+                    <ResizableHandle withHandle className="w-[3px] bg-transparent" />
                     <ResizablePanel
                         minSize={10}
                         defaultSize={PANEL_RATIOS.copilot}
@@ -1057,11 +1090,5 @@ export function WorkflowEditor({
                 onComplete={() => setShowTour(false)}
             />
         )}
-        <McpImportTools
-            projectId={state.present.workflow.projectId}
-            isOpen={isMcpImportModalOpen}
-            onOpenChange={setIsMcpImportModalOpen}
-            onImport={handleImportMcpTools}
-        />
     </div>;
 }
