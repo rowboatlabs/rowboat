@@ -1,7 +1,6 @@
 from agents import TracingProcessor
 import logging
 from datetime import datetime, timedelta
-import json
 
 logger = logging.getLogger(__name__)
 
