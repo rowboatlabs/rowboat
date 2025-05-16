@@ -30,9 +30,6 @@ class DataSource(BaseModel):
 with open('copilot_multi_agent.md', 'r', encoding='utf-8') as file:
     copilot_instructions_multi_agent = file.read()
 
-with open('copilot_edit_agent.md', 'r', encoding='utf-8') as file:
-    copilot_instructions_edit_agent = file.read()
-
 with open('example_multi_agent_1.md', 'r', encoding='utf-8') as file:
     copilot_multi_agent_example1 = file.read()
 
