@@ -169,7 +169,7 @@ async def chat_stream():
                 elif event_type == 'done':
                     yield format_sse(event_data, "done")
                 elif event_type == 'error':
-                    yield format_sse(event_data, " error")
+                    yield format_sse(event_data, "error")
 
         except Exception as e:
             print(f"Streaming error: {str(e)}")
