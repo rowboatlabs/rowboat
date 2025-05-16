@@ -35,9 +35,9 @@ def get_last_agent_name(state, agent_configs, start_agent_name, msg_type, latest
 
 def get_latest_assistant_msg(messages):
     # Find the latest message with role assistant
-    for i in range(len(messages)-1, -1, -1):
-        if messages[i].get("role") == "assistant":
-            return messages[i]
+    for msg in reversed(messages):
+        if msg.get("role") == "assistant":
+            return msg
     return None
 
 def get_latest_non_assistant_messages(messages):
