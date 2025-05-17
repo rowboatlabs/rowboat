@@ -34,6 +34,22 @@ def is_agent_transfer_message(msg):
         return True
     return False
 
+def preprocess_messages(messages: List[Dict[str, Any]]) -> None:
+    for msg in messages:
+        role = msg.get("role")
+        
+        if (role == "assistant" and
+            msg.get("content") is None and
+            msg.get("tool_calls") and
+            len(msg.get("tool_calls")) > 0):
+            msg["content"] = "Calling tool" 
+
+        if role == "tool":
+            msg["role"] = "developer"
+        elif not role:
+            msg["role"] = "user"
+
+
 @app.route("/health", methods=["GET"])
 async def health():
     return jsonify({"status": "ok"})
