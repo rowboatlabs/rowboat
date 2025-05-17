@@ -23,6 +23,9 @@ export default function RootLayout({
   return <html lang="en" className="h-dvh">
     <UserProvider>
       <ThemeProvider>
+        <head>
+          <script async src="https://js.stripe.com/v3/pricing-table.js"></script>
+        </head>
         <body className={`${inter.className} h-full text-base [scrollbar-width:thin] bg-background`}>
           <Providers className='h-full flex flex-col'>
             <HelpModalProvider>
