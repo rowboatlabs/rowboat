@@ -23,7 +23,7 @@ const GUEST_CUSTOMER: WithStringId<z.infer<typeof Customer>> = {
 }
 
 export async function getBillingCustomer(id: string): Promise<WithStringId<z.infer<typeof Customer>> | null> {
-    const response = await fetch(`${BILLING_API_URL}/customers/${id}`, {
+    const response = await fetch(`${BILLING_API_URL}/api/customers/${id}`, {
         method: 'GET',
         headers: {
             'Authorization': `Bearer ${BILLING_API_KEY}`,
@@ -31,34 +31,38 @@ export async function getBillingCustomer(id: string): Promise<WithStringId<z.inf
         }
     });
     if (!response.ok) {
-        throw new Error('Failed to fetch billing customer');
+        throw new Error(`Failed to fetch billing customer: ${response.status} ${response.statusText} ${await response.text()}`);
     }
     const json = await response.json();
     const parseResult = Customer.safeParse(json);
     if (!parseResult.success) {
-        throw new Error('Failed to parse billing customer');
+        throw new Error(`Failed to parse billing customer: ${JSON.stringify(parseResult.error)}`);
     }
     return parseResult.data as z.infer<typeof Customer>;
 }
 
 export async function createBillingCustomer(userId: string, email: string, name: string): Promise<WithStringId<z.infer<typeof Customer>>> {
-    const response = await fetch(`${BILLING_API_URL}/customers`, {
+    const response = await fetch(`${BILLING_API_URL}/api/customers`, {
         method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${BILLING_API_KEY}`,
+            'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ userId, email, name })
     });
     if (!response.ok) {
-        throw new Error('Failed to create billing customer');
+        throw new Error(`Failed to create billing customer: ${response.status} ${response.statusText} ${await response.text()}`);
     }
     const json = await response.json();
     const parseResult = Customer.safeParse(json);
     if (!parseResult.success) {
-        throw new Error('Failed to parse billing customer');
+        throw new Error(`Failed to parse billing customer: ${JSON.stringify(parseResult.error)}`);
     }
     return parseResult.data as z.infer<typeof Customer>;
 }
 
 export async function createStripePricingTableSession(customerId: string): Promise<z.infer<typeof PricingTableSession>> {
-    const response = await fetch(`${BILLING_API_URL}/customers/${customerId}/pricing-table-session`, {
+    const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/stripe-pricing-table-session`, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${BILLING_API_KEY}`,
@@ -66,14 +70,28 @@ export async function createStripePricingTableSession(customerId: string): Promi
         }
     });
     if (!response.ok) {
-        throw new Error('Failed to get stripe pricing table client secret');
+        throw new Error(`Failed to get stripe pricing table client secret: ${response.status} ${response.statusText} ${await response.text()}`);
     }
     const json = await response.json();
     const parseResult = PricingTableSession.safeParse(json);
     if (!parseResult.success) {
-        throw new Error('Failed to parse stripe pricing table session');
+        throw new Error(`Failed to parse stripe pricing table session: ${JSON.stringify(parseResult.error)}`);
     }
+    console.log('stripe pricing table session', json);
     return parseResult.data as z.infer<typeof PricingTableSession>;
+}
+
+export async function syncWithStripe(customerId: string): Promise<void> {
+    const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/sync-with-stripe`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${BILLING_API_KEY}`,
+            'Content-Type': 'application/json'
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to sync with stripe: ${response.status} ${response.statusText} ${await response.text()}`);
+    }
 }
 
 export async function requireBillingCustomer(): Promise<WithStringId<z.infer<typeof Customer>>> {
