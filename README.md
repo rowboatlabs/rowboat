@@ -3,7 +3,7 @@
 <h2 align="center">Let AI build multi-agent workflows for you in minutes</h2>
 <h5 align="center">
 
-[Quickstart](#quick-start) | [Docs](https://docs.rowboatlabs.com/) | [Discord](https://discord.com/invite/JkJdx3g7) | [Website](https://www.rowboatlabs.com/) | [Youtube](https://www.youtube.com/@RowBoatLabs) 
+[Quickstart](#quick-start) | [Docs](https://docs.rowboatlabs.com/) | [Discord](https://discord.gg/rxB8pzHxaS) | [Website](https://www.rowboatlabs.com/) | [Youtube](https://www.youtube.com/@RowBoatLabs) 
 
 </h5>
 
