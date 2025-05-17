@@ -29,7 +29,7 @@ import { PublishedBadge } from "./published_badge";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
 import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle } from "lucide-react";
 import { EntityList } from "./entity_list";
-import { McpImportTools } from "./mcp_imports";
+import { ToolsModal } from "./tools_modal";
 import { ProductTour } from "@/components/common/product-tour";
 
 enablePatches();
@@ -1057,11 +1057,19 @@ export function WorkflowEditor({
                 onComplete={() => setShowTour(false)}
             />
         )}
-        <McpImportTools
+        <ToolsModal
             projectId={state.present.workflow.projectId}
             isOpen={isMcpImportModalOpen}
             onOpenChange={setIsMcpImportModalOpen}
             onImport={handleImportMcpTools}
+            onConfigureWebhook={() => handleAddTool({
+                mockTool: true,
+                parameters: {
+                    type: 'object',
+                    properties: {}
+                }
+            })}
+            webhookUrl={toolWebhookUrl}
         />
     </div>;
 }

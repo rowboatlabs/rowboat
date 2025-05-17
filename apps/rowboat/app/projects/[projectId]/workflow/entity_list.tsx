@@ -222,34 +222,16 @@ export function EntityList({
                                 <Wrench className="w-4 h-4" />
                                 <span>Tools</span>
                             </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={triggerMcpImport}
-                                    className={buttonClasses}
-                                    showHoverContent={true}
-                                    hoverContent="Import from MCP"
-                                >
-                                    <ImportIcon className="w-4 h-4" />
-                                </Button>
-                                <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={() => onAddTool({
-                                        mockTool: true,
-                                        parameters: {
-                                            type: 'object',
-                                            properties: {}
-                                        }
-                                    })}
-                                    className={`group ${buttonClasses}`}
-                                    showHoverContent={true}
-                                    hoverContent="Add Tool"
-                                >
-                                    <PlusIcon className="w-4 h-4" />
-                                </Button>
-                            </div>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={triggerMcpImport}
+                                className={`group ${buttonClasses}`}
+                                showHoverContent={true}
+                                hoverContent="Add Tool"
+                            >
+                                <PlusIcon className="w-4 h-4" />
+                            </Button>
                         </div>
                     }
                     maxHeight={calculateSectionHeight(SECTION_HEIGHT_PERCENTAGES.TOOLS)}

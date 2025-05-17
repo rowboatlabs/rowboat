@@ -47,6 +47,7 @@ export const WorkflowTool = z.object({
     isMcp: z.boolean().default(false).optional(),
     isLibrary: z.boolean().default(false).optional(),
     mcpServerName: z.string().optional(),
+    mcpServerURL: z.string().optional(),
 });
 export const Workflow = z.object({
     name: z.string().optional(),

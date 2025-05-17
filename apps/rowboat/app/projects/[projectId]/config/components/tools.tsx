@@ -29,7 +29,7 @@ function Section({ title, children, description }: {
     );
 }
 
-function McpServersSection({ projectId }: { projectId: string }) {
+export function McpServersSection({ projectId }: { projectId: string }) {
     const [servers, setServers] = useState<Array<{ name: string; url: string }>>([]);
     const [originalServers, setOriginalServers] = useState<Array<{ name: string; url: string }>>([]);
     const [loading, setLoading] = useState(true);
@@ -161,7 +161,7 @@ function McpServersSection({ projectId }: { projectId: string }) {
                                 size="sm"
                                 variant="primary"
                                 onClick={handleSave}
-                                isLoading={saving}
+                                disabled={saving}
                             >
                                 Save Changes
                             </Button>
