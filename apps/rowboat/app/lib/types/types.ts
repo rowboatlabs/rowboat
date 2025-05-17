@@ -7,6 +7,15 @@ export const MCPServer = z.object({
     url: z.string(),
 });
 
+export const User = z.object({
+    auth0Id: z.string(),
+    billingCustomerId: z.string().optional(),
+    name: z.string().optional(),
+    email: z.string().optional(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+});
+
 export const PlaygroundChat = z.object({
     createdAt: z.string().datetime(),
     projectId: z.string(),
