@@ -1,5 +1,6 @@
 "use client";
 import { PricingTableSession } from '@/app/lib/types/billing_types';
+import { z } from 'zod';
 import * as React from 'react';
 
 // If using TypeScript, add the following snippet to your file as well.

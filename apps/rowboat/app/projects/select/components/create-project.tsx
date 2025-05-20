@@ -213,17 +213,16 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                 newFormData.append('name', name);
                 newFormData.append('prompt', customPrompt);
                 response = await createProjectFromPrompt(newFormData);
-                
-                if (response?.id && customPrompt) {
+            }
+
+            if ('id' in response) {
+                if (selectedTab !== TabType.Blank && customPrompt) {
                     localStorage.setItem(`project_prompt_${response.id}`, customPrompt);
                 }
+                router.push(`/projects/${response.id}/workflow`);
+            } else {
+                alert(`There was a billing error while creating your project: ${response.billingError}`);
             }
-
-            if (!response?.id) {
-                throw new Error('Project creation failed');
-            }
-
-            router.push(`/projects/${response.id}/workflow`);
         } catch (error) {
             console.error('Error creating project:', error);
         }
