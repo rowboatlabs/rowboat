@@ -18,7 +18,8 @@ interface UseCopilotResult {
     error: string | null;
     start: (
         messages: z.infer<typeof CopilotMessage>[],
-        onDone: (finalResponse: string) => void
+        onDone: (finalResponse: string) => void,
+        onBillingError?: (error: { billingError: string }) => void
     ) => void;
     cancel: () => void;
 }
@@ -33,7 +34,8 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
 
     const start = useCallback(async (
         messages: z.infer<typeof CopilotMessage>[],
-        onDone: (finalResponse: string) => void
+        onDone: (finalResponse: string) => void,
+        onBillingError?: (error: { billingError: string }) => void
     ) => {
         if (!messages.length || messages.at(-1)?.role !== 'user') return;
 
@@ -44,6 +46,14 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
 
         try {
             const res = await getCopilotResponseStream(projectId, messages, workflow, context || null, dataSources);
+            
+            // Check for billing error
+            if ('billingError' in res) {
+                setLoading(false);
+                onBillingError?.({ billingError: res.billingError });
+                return;
+            }
+
             const eventSource = new EventSource(`/api/copilot-stream-response/${res.streamId}`);
 
             eventSource.onmessage = (event) => {

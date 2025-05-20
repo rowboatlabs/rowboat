@@ -4,7 +4,7 @@ import { usersCollection } from './mongodb';
 import { getSession } from '@auth0/nextjs-auth0';
 import { WithStringId } from './types/types';
 import { z } from 'zod';
-import { Customer, PricingTableResponse, AuthorizeRequest, AuthorizeResponse } from './types/billing_types';
+import { Customer, PricingTableResponse, AuthorizeRequest, AuthorizeResponse, LogUsageRequest } from './types/billing_types';
 
 const BILLING_API_URL = process.env.BILLING_API_URL || 'http://billing';
 const BILLING_API_KEY = process.env.BILLING_API_KEY || 'test';
@@ -171,4 +171,22 @@ export async function authorize(customerId: string, request: z.infer<typeof Auth
         throw new Error(`Failed to parse authorize billing response: ${JSON.stringify(parseResult.error)}`);
     }
     return parseResult.data as z.infer<typeof AuthorizeResponse>;
+}
+
+export async function logUsage(customerId: string, request: z.infer<typeof LogUsageRequest>) {
+    if (!USE_BILLING) {
+        return;
+    }
+
+    const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/log-usage`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${BILLING_API_KEY}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(request)
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to log usage: ${response.status} ${response.statusText} ${await response.text()}`);
+    }
 }

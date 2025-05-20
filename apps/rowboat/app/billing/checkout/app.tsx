@@ -1,5 +1,5 @@
 "use client";
-import { PricingTableSession } from '@/app/lib/types/billing_types';
+import { PricingTableResponse } from '@/app/lib/types/billing_types';
 import { z } from 'zod';
 import * as React from 'react';
 
@@ -12,13 +12,13 @@ declare global {
   }
 }
 
-export function PricingPage({ session }: { session: z.infer<typeof PricingTableSession> }) {
+export function PricingPage({ response }: { response: z.infer<typeof PricingTableResponse> }) {
   // Paste the stripe-pricing-table snippet in your React component
   return (
     <stripe-pricing-table
-      pricing-table-id={session.pricingTableId}
-      publishable-key={session.publishableKey}
-      customer-session-client-secret={session.clientSecret}
+      pricing-table-id={response.pricingTableId}
+      publishable-key={response.publishableKey}
+      customer-session-client-secret={response.clientSecret}
     >
     </stripe-pricing-table>
   );

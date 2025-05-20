@@ -1,10 +1,10 @@
 "use server";
 
-import { createBillingCustomer, authorize } from "../lib/billing";
+import { createBillingCustomer, authorize, logUsage } from "../lib/billing";
 import { usersCollection } from "../lib/mongodb";
 import { authCheck } from "./actions";
 import { USE_BILLING } from "../lib/feature_flags";
-import { AuthorizeRequest, AuthorizeResponse } from "../lib/types/billing_types";
+import { AuthorizeRequest, AuthorizeResponse, LogUsageRequest } from "../lib/types/billing_types";
 import { z } from "zod";
 import { getSession } from "@auth0/nextjs-auth0";
 
@@ -60,4 +60,29 @@ export async function authorizeUserAction(request: z.infer<typeof AuthorizeReque
 
     const response = await authorize(dbUser.billingCustomerId, request);
     return response;
+}
+
+export async function logBillingUsage(request: z.infer<typeof LogUsageRequest>) {
+    if (!USE_BILLING) {
+        return;
+    }
+
+    const user = await authCheck();
+
+    // fetch user from db
+    const dbUser = await usersCollection.findOne({
+        auth0Id: user.sub,
+    });
+    if (!dbUser) {
+        throw new Error('User not found');
+    }
+
+    // ensure billing customer exists
+    if (!dbUser.billingCustomerId) {
+        throw new Error('Billing customer not found');
+    }
+
+    // log usage
+    await logUsage(dbUser.billingCustomerId, request);
+    return;
 }

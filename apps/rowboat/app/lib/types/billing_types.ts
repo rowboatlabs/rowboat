@@ -21,9 +21,9 @@ export const Customer = z.object({
     usageUpdatedAt: z.string().datetime().optional(),
 });
 
-export const UsageIncrementRequest = z.object({
-    "metric": UsageType,
-    "value": z.number().int().positive(),
+export const LogUsageRequest = z.object({
+    type: UsageType,
+    amount: z.number().int().positive(),
 });
 
 export const PricingTableResponse = z.object({
@@ -44,6 +44,10 @@ export const AuthorizeRequest = z.discriminatedUnion("type", [
         "data": z.object({
             "expected_rag_tokens": z.number(),
         }),
+    }),
+    z.object({
+        "type": z.literal("copilot-request"),
+        "data": z.object({}),
     }),
 ]);
 

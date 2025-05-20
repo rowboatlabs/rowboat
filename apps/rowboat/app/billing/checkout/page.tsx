@@ -9,9 +9,9 @@ export default async function Page() {
     }
 
     const customer = await requireBillingCustomer();
-    const session = await createStripePricingTableSession(customer._id);
+    const response = await createStripePricingTableSession(customer._id);
 
     return (
-        <PricingPage session={session} />
+        <PricingPage response={response} />
     );
 }
