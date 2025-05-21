@@ -196,7 +196,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
         setIsExamplesDropdownOpen(false);
     };
 
-    async function handleSubmit(formData: FormData) {
+    async function handleSubmit() {
         try {
             if (selectedTab !== TabType.Blank && !customPrompt.trim()) {
                 setPromptError("Prompt cannot be empty");
@@ -277,11 +277,6 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                     <form
                         id="create-project-form"
                         action={handleSubmit}
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            const formData = new FormData(e.currentTarget);
-                            handleSubmit(formData);
-                        }}
                         onKeyDown={handleKeyDown}
                         className="pt-6 pb-16 space-y-12"
                     >
