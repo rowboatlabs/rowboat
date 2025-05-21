@@ -16,10 +16,12 @@ interface UseCopilotResult {
     streamingResponse: string;
     loading: boolean;
     error: string | null;
+    clearError: () => void;
+    billingError: string | null;
+    clearBillingError: () => void;
     start: (
         messages: z.infer<typeof CopilotMessage>[],
         onDone: (finalResponse: string) => void,
-        onBillingError?: (error: { billingError: string }) => void
     ) => void;
     cancel: () => void;
 }
@@ -28,14 +30,21 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
     const [streamingResponse, setStreamingResponse] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
+    const [billingError, setBillingError] = useState<string | null>(null);
     const cancelRef = useRef<() => void>(() => { });
     const responseRef = useRef('');
+
+    function clearError() {
+        setError(null);
+    }
+
+    function clearBillingError() {
+        setBillingError(null);
+    }
 
     const start = useCallback(async (
         messages: z.infer<typeof CopilotMessage>[],
         onDone: (finalResponse: string) => void,
-        onBillingError?: (error: { billingError: string }) => void
     ) => {
         if (!messages.length || messages.at(-1)?.role !== 'user') return;
 
@@ -50,7 +59,8 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
             // Check for billing error
             if ('billingError' in res) {
                 setLoading(false);
-                onBillingError?.({ billingError: res.billingError });
+                setError(res.billingError);
+                setBillingError(res.billingError);
                 return;
             }
 
@@ -94,6 +104,9 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
         streamingResponse,
         loading,
         error,
+        clearError,
+        billingError,
+        clearBillingError,
         start,
         cancel,
     };

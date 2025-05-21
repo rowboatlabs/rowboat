@@ -1,4 +1,5 @@
-import { requireBillingCustomer, syncWithStripe } from "@/app/lib/billing";
+import { syncWithStripe } from "@/app/lib/billing";
+import { requireBillingCustomer } from '../utils';
 import { redirect } from "next/navigation";
 
 export const dynamic = 'force-dynamic';

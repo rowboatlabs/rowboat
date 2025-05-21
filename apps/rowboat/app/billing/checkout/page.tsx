@@ -1,6 +1,7 @@
 import { PricingPage } from "./app";
 import { redirect } from "next/navigation";
-import { createStripePricingTableSession, requireBillingCustomer } from "@/app/lib/billing";
+import { createStripePricingTableSession } from "@/app/lib/billing";
+import { requireBillingCustomer } from '../utils';
 import { USE_BILLING } from "@/app/lib/feature_flags";
 
 export default async function Page() {

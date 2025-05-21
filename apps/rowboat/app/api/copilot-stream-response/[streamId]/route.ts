@@ -25,7 +25,7 @@ export async function GET(request: Request, { params }: { params: { streamId: st
 
   // fetch project user from db
   const user = await usersCollection.findOne({
-    auth0Id: project.createdByUserId,
+    _id: new ObjectId(project.createdByUserId),
   });
   if (!user) {
     return new Response("User not found", { status: 404 });

@@ -48,7 +48,6 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     const [messages, setMessages] = useState<z.infer<typeof CopilotMessage>[]>([]);
     const [discardContext, setDiscardContext] = useState(false);
     const [isLastInteracted, setIsLastInteracted] = useState(isInitialState);
-    const [billingError, setBillingError] = useState<string | null>(null);
     const workflowRef = useRef(workflow);
     const startRef = useRef<any>(null);
     const cancelRef = useRef<any>(null);
@@ -63,6 +62,9 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         streamingResponse,
         loading: loadingResponse,
         error: responseError,
+        clearError: clearResponseError,
+        billingError,
+        clearBillingError,
         start,
         cancel
     } = useCopilot({
@@ -110,6 +112,10 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     useEffect(() => {
         if (!messages.length || messages.at(-1)?.role !== 'user') return;
 
+        if (responseError) {
+            return;
+        }
+
         const currentStart = startRef.current;
         const currentCancel = cancelRef.current;
 
@@ -121,12 +127,10 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                     content: finalResponse
                 }
             ]);
-        }, (error: { billingError: string }) => {
-            setBillingError(error.billingError);
         });
 
         return () => currentCancel();
-    }, [messages]); // Only depend on messages
+    }, [messages, responseError]);
 
     const handleCopyChat = useCallback(() => {
         if (onCopyJson) {
@@ -161,7 +165,15 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                                 size="sm"
                                 color="danger"
                                 onClick={() => {
-                                    setMessages(prev => [...prev.slice(0, -1)]); // remove last assistant if needed
+                                    // remove the last assistant message, if any
+                                    setMessages(prev => {
+                                        const lastMessage = prev[prev.length - 1];
+                                        if (lastMessage?.role === 'assistant') {
+                                            return prev.slice(0, -1);
+                                        }
+                                        return prev;
+                                    });
+                                    clearResponseError();
                                 }}
                             >
                                 Retry
@@ -197,7 +209,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
             </div>
             <BillingErrorModal
                 isOpen={!!billingError}
-                onClose={() => setBillingError(null)}
+                onClose={clearBillingError}
                 errorMessage={billingError || ''}
             />
         </CopilotContext.Provider>
@@ -312,11 +324,6 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
                     />
                 </div>
             </Panel>
-            <BillingErrorModal
-                isOpen={!!billingError}
-                onClose={() => setBillingError(null)}
-                errorMessage={billingError || ''}
-            />
         </>
     );
 });

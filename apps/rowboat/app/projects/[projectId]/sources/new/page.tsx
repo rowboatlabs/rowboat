@@ -2,7 +2,7 @@ import { Metadata } from "next";
 import { Form } from "./form";
 import { redirect } from "next/navigation";
 import { USE_RAG, USE_RAG_UPLOADS, USE_RAG_S3_UPLOADS, USE_RAG_SCRAPING } from "../../../../lib/feature_flags";
-import { requireActiveBillingSubscription } from "@/app/lib/billing";
+import { requireActiveBillingSubscription } from '@/app/billing/utils';
 
 export const metadata: Metadata = {
     title: "Add data source"

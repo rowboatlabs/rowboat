@@ -3,7 +3,7 @@ import { App } from "./app";
 import { USE_RAG } from "@/app/lib/feature_flags";
 import { projectsCollection } from "@/app/lib/mongodb";
 import { notFound } from "next/navigation";
-import { requireActiveBillingSubscription } from "@/app/lib/billing";
+import { requireActiveBillingSubscription } from '@/app/billing/utils';
 
 const DEFAULT_MODEL = process.env.PROVIDER_DEFAULT_MODEL || "gpt-4.1";
 

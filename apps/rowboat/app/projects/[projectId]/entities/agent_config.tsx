@@ -816,6 +816,7 @@ function GenerateInstructionsModal({
             const newInstructions = await getCopilotAgentInstructions(projectId, msgs, workflow, agent.name);
             if (typeof newInstructions === 'object' && 'billingError' in newInstructions) {
                 setBillingError(newInstructions.billingError);
+                setError(newInstructions.billingError);
                 setIsLoading(false);
                 return;
             }

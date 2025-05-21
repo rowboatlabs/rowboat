@@ -1,34 +1,26 @@
 "use server";
-
-import { createBillingCustomer, authorize, logUsage } from "../lib/billing";
+import { createBillingCustomer, authorize, logUsage, getBillingCustomer } from "../lib/billing";
 import { usersCollection } from "../lib/mongodb";
-import { authCheck } from "./actions";
+import { authCheck } from "./auth_actions";
 import { USE_BILLING } from "../lib/feature_flags";
 import { AuthorizeRequest, AuthorizeResponse, LogUsageRequest } from "../lib/types/billing_types";
 import { z } from "zod";
-import { getSession } from "@auth0/nextjs-auth0";
+import { ObjectId } from "mongodb";
+import { redirect } from "next/navigation";
+import { User } from "../lib/types/types";
 
 export async function createBillingProfile(name: string, email: string) {
     if (!USE_BILLING) {
         return;
     }
-
     const user = await authCheck();
 
-    // fetch user from db
-    const dbUser = await usersCollection.findOne({
-        auth0Id: user.sub,
-    });
-    if (!dbUser) {
-        throw new Error('User not found');
-    }
-
     // create billing customer
-    const billingCustomer = await createBillingCustomer(dbUser._id.toString(), email, name);
+    const billingCustomer = await createBillingCustomer(user._id.toString(), email, name);
 
     // update customer id in db
     await usersCollection.updateOne({
-        auth0Id: user.sub,
+        _id: new ObjectId(user._id),
     }, {
         $set: {
             billingCustomerId: billingCustomer._id,
@@ -37,28 +29,30 @@ export async function createBillingProfile(name: string, email: string) {
     });
 }
 
+export async function requireBillingProfile(): Promise<z.infer<typeof User> & { billingCustomerId: string }> {
+    const user = await authCheck();
+    if (!USE_BILLING) {
+        return {
+            ...user,
+            billingCustomerId: 'guest-user',
+        };
+    }
+    if (!user.billingCustomerId) {
+        redirect('/billing/onboarding');
+    }
+    return {
+        ...user,
+        billingCustomerId: user.billingCustomerId,
+    };
+}
+
 export async function authorizeUserAction(request: z.infer<typeof AuthorizeRequest>): Promise<z.infer<typeof AuthorizeResponse>> {
     if (!USE_BILLING) {
         return { success: true };
     }
 
-    // fetch user
-    const user = await authCheck();
-
-    // fetch user from db
-    const dbUser = await usersCollection.findOne({
-        auth0Id: user.sub,
-    });
-    if (!dbUser) {
-        throw new Error('User not found');
-    }
-
-    // ensure billing customer exists
-    if (!dbUser.billingCustomerId) {
-        throw new Error('Billing customer not found');
-    }
-
-    const response = await authorize(dbUser.billingCustomerId, request);
+    const user = await requireBillingProfile();
+    const response = await authorize(user.billingCustomerId, request);
     return response;
 }
 
@@ -67,22 +61,7 @@ export async function logBillingUsage(request: z.infer<typeof LogUsageRequest>) 
         return;
     }
 
-    const user = await authCheck();
-
-    // fetch user from db
-    const dbUser = await usersCollection.findOne({
-        auth0Id: user.sub,
-    });
-    if (!dbUser) {
-        throw new Error('User not found');
-    }
-
-    // ensure billing customer exists
-    if (!dbUser.billingCustomerId) {
-        throw new Error('Billing customer not found');
-    }
-
-    // log usage
-    await logUsage(dbUser.billingCustomerId, request);
+    const user = await requireBillingProfile();
+    await logUsage(user.billingCustomerId, request);
     return;
 }

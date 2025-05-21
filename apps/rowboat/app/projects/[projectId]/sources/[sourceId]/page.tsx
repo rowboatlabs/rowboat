@@ -1,5 +1,5 @@
 import { SourcePage } from "./source-page";
-import { requireActiveBillingSubscription } from "@/app/lib/billing";
+import { requireActiveBillingSubscription } from '@/app/billing/utils';
 
 export default async function Page({
     params,

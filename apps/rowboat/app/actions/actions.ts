@@ -6,29 +6,12 @@ import { webpagesCollection } from "../lib/mongodb";
 import { z } from 'zod';
 import FirecrawlApp, { ScrapeResponse } from '@mendable/firecrawl-js';
 import { apiV1 } from "rowboat-shared";
-import { Claims, getSession } from "@auth0/nextjs-auth0";
 import { getAgenticApiResponse, getAgenticResponseStreamId } from "../lib/utils";
 import { check_query_limit } from "../lib/rate_limiting";
 import { QueryLimitError } from "../lib/client_utils";
 import { projectAuthCheck } from "./project_actions";
-import { USE_AUTH } from "../lib/feature_flags";
 
 const crawler = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY || '' });
-
-export async function authCheck(): Promise<Claims> {
-    if (!USE_AUTH) {
-        return {
-            email: 'guestuser@rowboatlabs.com',
-            email_verified: true,
-            sub: 'guest_user',
-        };
-    }
-    const { user } = await getSession() || {};
-    if (!user) {
-        throw new Error('User not authenticated');
-    }
-    return user;
-}
 
 export async function scrapeWebpage(url: string): Promise<z.infer<typeof WebpageCrawlResponse>> {
     const page = await webpagesCollection.findOne({

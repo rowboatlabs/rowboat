@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireActiveBillingSubscription } from "@/app/lib/billing";
+import { requireActiveBillingSubscription } from '@/app/billing/utils';
 
 export default async function Page({
     params
