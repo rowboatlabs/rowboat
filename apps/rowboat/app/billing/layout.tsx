@@ -6,7 +6,7 @@ export default function Layout({
     children: React.ReactNode;
 }>) {
     return (
-        <AppLayout useRag={false} useAuth={true}>
+        <AppLayout useRag={false} useAuth={true} useBilling={true}>
             {children}
         </AppLayout>
     );

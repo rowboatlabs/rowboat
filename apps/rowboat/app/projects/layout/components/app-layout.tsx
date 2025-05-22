@@ -7,9 +7,10 @@ interface AppLayoutProps {
   children: ReactNode;
   useRag?: boolean;
   useAuth?: boolean;
+  useBilling?: boolean;
 }
 
-export default function AppLayout({ children, useRag = false, useAuth = false }: AppLayoutProps) {
+export default function AppLayout({ children, useRag = false, useAuth = false, useBilling = false }: AppLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const pathname = usePathname();
 
@@ -29,6 +30,7 @@ export default function AppLayout({ children, useRag = false, useAuth = false }:
           useAuth={useAuth}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          useBilling={useBilling}
         />
       </div>
       

@@ -4,6 +4,8 @@ import { USE_BILLING } from "@/app/lib/feature_flags";
 import { getDbUserForAuthUser } from "@/app/lib/user";
 import { getSession } from "@auth0/nextjs-auth0";
 
+export const dynamic = 'force-dynamic';
+
 export default async function Page() {
     if (!USE_BILLING) {
         redirect('/projects');

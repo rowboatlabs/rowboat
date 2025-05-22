@@ -4,6 +4,8 @@ import { createStripePricingTableSession, getBillingCustomer } from "@/app/lib/b
 import { requireBillingCustomer } from '../utils';
 import { USE_BILLING } from "@/app/lib/feature_flags";
 
+export const dynamic = 'force-dynamic';
+
 export default async function Page() {
     if (!USE_BILLING) {
         redirect('/projects');

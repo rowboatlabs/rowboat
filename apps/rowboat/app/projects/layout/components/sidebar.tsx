@@ -27,12 +27,13 @@ interface SidebarProps {
   useAuth: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  useBilling?: boolean;
 }
 
 const EXPANDED_ICON_SIZE = 20;
 const COLLAPSED_ICON_SIZE = 20; // DO NOT CHANGE THIS
 
-export default function Sidebar({ projectId, useRag, useAuth, collapsed = false, onToggleCollapse }: SidebarProps) {
+export default function Sidebar({ projectId, useRag, useAuth, collapsed = false, onToggleCollapse, useBilling }: SidebarProps) {
   const pathname = usePathname();
   const [projectName, setProjectName] = useState<string>("Select Project");
   const isProjectsRoute = pathname === '/projects' || pathname === '/projects/select';
@@ -235,7 +236,7 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
                     hover:bg-zinc-100 dark:hover:bg-zinc-800/50
                   `}
                 >
-                  <UserButton />
+                  <UserButton useBilling={useBilling} />
                   {!collapsed && <span>Account</span>}
                 </div>
               </Tooltip>

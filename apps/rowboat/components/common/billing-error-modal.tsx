@@ -11,8 +11,8 @@ interface BillingErrorModalProps {
 export function BillingErrorModal({ isOpen, onClose, errorMessage }: BillingErrorModalProps) {
     const router = useRouter();
 
-    const handleViewUsage = () => {
-        router.push('/billing/usage');
+    const handleManage = () => {
+        router.push('/billing');
         onClose();
     };
 
@@ -52,9 +52,9 @@ export function BillingErrorModal({ isOpen, onClose, errorMessage }: BillingErro
                         </Button>
                         <Button
                             variant="solid"
-                            onClick={handleViewUsage}
+                            onPress={handleManage}
                         >
-                            View Usage / Upgrade
+                            View usage / upgrade
                         </Button>
                     </div>
                 </ModalFooter>
