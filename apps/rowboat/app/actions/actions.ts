@@ -10,6 +10,7 @@ import { getAgenticApiResponse, getAgenticResponseStreamId } from "../lib/utils"
 import { check_query_limit } from "../lib/rate_limiting";
 import { QueryLimitError } from "../lib/client_utils";
 import { projectAuthCheck } from "./project_actions";
+import { authorizeUserAction } from "./billing_actions";
 
 const crawler = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY || '' });
 
@@ -77,10 +78,19 @@ export async function getAssistantResponse(request: z.infer<typeof AgenticAPICha
     };
 }
 
-export async function getAssistantResponseStreamId(request: z.infer<typeof AgenticAPIChatRequest>): Promise<z.infer<typeof AgenticAPIInitStreamResponse>> {
+export async function getAssistantResponseStreamId(request: z.infer<typeof AgenticAPIChatRequest>): Promise<z.infer<typeof AgenticAPIInitStreamResponse> | { billingError: string }> {
     await projectAuthCheck(request.projectId);
     if (!await check_query_limit(request.projectId)) {
         throw new QueryLimitError();
+    }
+
+    // Check billing authorization
+    const { success, error } = await authorizeUserAction({
+        type: 'agent_response',
+        data: {},
+    });
+    if (!success) {
+        return { billingError: error || 'Billing error' };
     }
 
     const response = await getAgenticResponseStreamId(request);

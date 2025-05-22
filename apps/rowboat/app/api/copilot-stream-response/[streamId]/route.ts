@@ -1,9 +1,7 @@
-import { logUsage } from "@/app/lib/billing";
+import { getCustomerIdForProject, logUsage } from "@/app/lib/billing";
 import { USE_BILLING } from "@/app/lib/feature_flags";
-import { projectsCollection, usersCollection } from "@/app/lib/mongodb";
 import { redisClient } from "@/app/lib/redis";
 import { CopilotAPIRequest } from "@/app/lib/types/copilot_types";
-import { ObjectId } from "mongodb";
 
 export async function GET(request: Request, { params }: { params: { streamId: string } }) {
   // get the payload from redis
@@ -15,25 +13,10 @@ export async function GET(request: Request, { params }: { params: { streamId: st
   // parse the payload
   const parsedPayload = CopilotAPIRequest.parse(JSON.parse(payload));
 
-  // fetch project from db
-  const project = await projectsCollection.findOne({
-    _id: parsedPayload.projectId,
-  });
-  if (!project) {
-    return new Response("Project not found", { status: 404 });
-  }
-
-  // fetch project user from db
-  const user = await usersCollection.findOne({
-    _id: new ObjectId(project.createdByUserId),
-  });
-  if (!user) {
-    return new Response("User not found", { status: 404 });
-  }
-
-  // ensure user has billing customer id
-  if (USE_BILLING && !user.billingCustomerId) {
-    return new Response("User has no billing customer id", { status: 404 });
+  // fetch billing customer id
+  let billingCustomerId: string | null = null;
+  if (USE_BILLING) {
+    billingCustomerId = await getCustomerIdForProject(parsedPayload.projectId);
   }
 
   // Fetch the upstream SSE stream.
@@ -67,9 +50,9 @@ export async function GET(request: Request, { params }: { params: { streamId: st
         controller.close();
 
         // increment copilot request count in billing
-        if (USE_BILLING && user.billingCustomerId) {
+        if (USE_BILLING && billingCustomerId) {
           try {
-            await logUsage(user.billingCustomerId, {
+            await logUsage(billingCustomerId, {
               type: "copilot_requests",
               amount: 1,
             });

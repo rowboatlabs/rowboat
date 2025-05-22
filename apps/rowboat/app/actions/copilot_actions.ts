@@ -40,10 +40,6 @@ export async function getCopilotResponse(
         return { billingError: authResponse.error || 'Billing error' };
     }
 
-    if (!await check_query_limit(projectId)) {
-        throw new QueryLimitError();
-    }
-
     // prepare request
     const request: z.infer<typeof CopilotAPIRequest> = {
         projectId: projectId,
