@@ -41,9 +41,7 @@ export const AuthorizeRequest = z.discriminatedUnion("type", [
     }),
     z.object({
         "type": z.literal("process-rag"),
-        "data": z.object({
-            "expected_rag_tokens": z.number(),
-        }),
+        "data": z.object({}),
     }),
     z.object({
         "type": z.literal("copilot-request"),

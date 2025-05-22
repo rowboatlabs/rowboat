@@ -1,10 +1,33 @@
-import { USE_BILLING } from '@/app/lib/feature_flags'
 import { WithStringId } from './types/types';
 import { z } from 'zod';
 import { Customer, PricingTableResponse, AuthorizeRequest, AuthorizeResponse, LogUsageRequest } from './types/billing_types';
+import { ObjectId } from 'mongodb';
+import { projectsCollection, usersCollection } from './mongodb';
 
 const BILLING_API_URL = process.env.BILLING_API_URL || 'http://billing';
 const BILLING_API_KEY = process.env.BILLING_API_KEY || 'test';
+
+export class BillingError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'BillingError';
+    }
+}
+
+export async function getCustomerIdForProject(projectId: string): Promise<string> {
+    const project = await projectsCollection.findOne({ _id: projectId });
+    if (!project) {
+        throw new Error("Project not found");
+    }
+    const user = await usersCollection.findOne({ _id: new ObjectId(project.createdByUserId) });
+    if (!user) {
+        throw new Error("User not found");
+    }
+    if (!user.billingCustomerId) {
+        throw new Error("User has no billing customer id");
+    }
+    return user.billingCustomerId;
+}
 
 export async function getBillingCustomer(id: string): Promise<WithStringId<z.infer<typeof Customer>> | null> {
     const response = await fetch(`${BILLING_API_URL}/api/customers/${id}`, {
@@ -79,10 +102,6 @@ export async function syncWithStripe(customerId: string): Promise<void> {
 }
 
 export async function authorize(customerId: string, request: z.infer<typeof AuthorizeRequest>): Promise<z.infer<typeof AuthorizeResponse>> {
-    if (!USE_BILLING) {
-        return { success: true };
-    }
-
     const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/authorize`, {
         method: 'POST',
         headers: {
@@ -103,10 +122,6 @@ export async function authorize(customerId: string, request: z.infer<typeof Auth
 }
 
 export async function logUsage(customerId: string, request: z.infer<typeof LogUsageRequest>) {
-    if (!USE_BILLING) {
-        return;
-    }
-
     const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/log-usage`, {
         method: 'POST',
         headers: {

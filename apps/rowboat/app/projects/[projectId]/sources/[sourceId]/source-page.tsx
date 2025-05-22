@@ -17,7 +17,7 @@ import { Section, SectionRow, SectionLabel, SectionContent } from "../components
 import Link from "next/link";
 import { BackIcon } from "../../../../lib/components/icons";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, TriangleAlertIcon } from "lucide-react";
 
 export function SourcePage({
     sourceId,
@@ -206,6 +206,17 @@ export function SourcePage({
                                     <SectionLabel>Status</SectionLabel>
                                     <SectionContent>
                                         <SourceStatus status={source.status} projectId={projectId} />
+                                    </SectionContent>
+                                </SectionRow>
+                            )}
+
+                            {("hasBillingError" in source) && source.hasBillingError && (
+                                <SectionRow>
+                                    <SectionLabel>
+                                        <TriangleAlertIcon className="w-4 h-4" />
+                                    </SectionLabel>
+                                    <SectionContent>
+                                        We were unable to process this data source due to a billing error. Please <Link href={`/projects/${projectId}/settings/billing`}> update your billing information</Link>.
                                     </SectionContent>
                                 </SectionRow>
                             )}

@@ -230,17 +230,6 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
         }
     }
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' && 
-            selectedTab !== TabType.Blank && 
-            (e.target as HTMLElement).tagName !== 'TEXTAREA') {
-            e.preventDefault();
-            const formData = new FormData();
-            formData.append('name', name);
-            handleSubmit(formData);
-        }
-    };
-
     return (
         <>
             <div className={clsx(
@@ -277,7 +266,6 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                     <form
                         id="create-project-form"
                         action={handleSubmit}
-                        onKeyDown={handleKeyDown}
                         className="pt-6 pb-16 space-y-12"
                     >
                         {/* Tab Section */}
