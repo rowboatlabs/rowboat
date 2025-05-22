@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
+import { requireActiveBillingSubscription } from '@/app/billing/utils';
 
-export default function Page({
+export default async function Page({
     params
 }: {
     params: { projectId: string }
 }) {
+    await requireActiveBillingSubscription();
     redirect(`/projects/${params.projectId}/workflow`);
 }

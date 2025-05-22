@@ -16,9 +16,12 @@ interface UseCopilotResult {
     streamingResponse: string;
     loading: boolean;
     error: string | null;
+    clearError: () => void;
+    billingError: string | null;
+    clearBillingError: () => void;
     start: (
         messages: z.infer<typeof CopilotMessage>[],
-        onDone: (finalResponse: string) => void
+        onDone: (finalResponse: string) => void,
     ) => void;
     cancel: () => void;
 }
@@ -27,13 +30,21 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
     const [streamingResponse, setStreamingResponse] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
+    const [billingError, setBillingError] = useState<string | null>(null);
     const cancelRef = useRef<() => void>(() => { });
     const responseRef = useRef('');
 
+    function clearError() {
+        setError(null);
+    }
+
+    function clearBillingError() {
+        setBillingError(null);
+    }
+
     const start = useCallback(async (
         messages: z.infer<typeof CopilotMessage>[],
-        onDone: (finalResponse: string) => void
+        onDone: (finalResponse: string) => void,
     ) => {
         if (!messages.length || messages.at(-1)?.role !== 'user') return;
 
@@ -44,6 +55,15 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
 
         try {
             const res = await getCopilotResponseStream(projectId, messages, workflow, context || null, dataSources);
+            
+            // Check for billing error
+            if ('billingError' in res) {
+                setLoading(false);
+                setError(res.billingError);
+                setBillingError(res.billingError);
+                return;
+            }
+
             const eventSource = new EventSource(`/api/copilot-stream-response/${res.streamId}`);
 
             eventSource.onmessage = (event) => {
@@ -84,6 +104,9 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
         streamingResponse,
         loading,
         error,
+        clearError,
+        billingError,
+        clearBillingError,
         start,
         cancel,
     };

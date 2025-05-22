@@ -17,7 +17,8 @@ import { Section, SectionRow, SectionLabel, SectionContent } from "../components
 import Link from "next/link";
 import { BackIcon } from "../../../../lib/components/icons";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, TriangleAlertIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export function SourcePage({
     sourceId,
@@ -101,7 +102,7 @@ export function SourcePage({
             <div className="h-full overflow-auto px-4 py-4">
                 <div className="max-w-[768px] mx-auto space-y-6">
                     <div className="flex items-center gap-2 mb-4">
-                        <Link 
+                        <Link
                             href={`/projects/${projectId}/sources`}
                             className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
                         >
@@ -117,14 +118,14 @@ export function SourcePage({
                             <SectionRow>
                                 <SectionLabel>Toggle</SectionLabel>
                                 <SectionContent>
-                                    <ToggleSource 
-                                        projectId={projectId} 
-                                        sourceId={sourceId} 
-                                        active={source.active} 
+                                    <ToggleSource
+                                        projectId={projectId}
+                                        sourceId={sourceId}
+                                        active={source.active}
                                     />
                                 </SectionContent>
                             </SectionRow>
-                            
+
                             <SectionRow>
                                 <SectionLabel>Name</SectionLabel>
                                 <SectionContent>
@@ -206,33 +207,45 @@ export function SourcePage({
                                     <SectionLabel>Status</SectionLabel>
                                     <SectionContent>
                                         <SourceStatus status={source.status} projectId={projectId} />
+
+                                        {("billingError" in source) && source.billingError && <div className="flex flex-col gap-1 items-start mt-4">
+                                            <div className="text-sm">{source.billingError}</div>
+                                            <Link
+                                                href={`/projects/${projectId}/settings/billing`}
+                                                className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 hover:text-yellow-700 dark:hover:text-yellow-300 text-sm p-2 rounded-md"
+                                            >
+                                                Update billing information
+                                            </Link>
+                                        </div>}
                                     </SectionContent>
                                 </SectionRow>
                             )}
+
+
                         </div>
                     </Section>
 
                     {/* Source-specific sections */}
-                    {source.data.type === 'urls' && 
-                        <ScrapeSource 
-                            projectId={projectId} 
-                            dataSource={source} 
-                            handleReload={handleReload} 
+                    {source.data.type === 'urls' &&
+                        <ScrapeSource
+                            projectId={projectId}
+                            dataSource={source}
+                            handleReload={handleReload}
                         />
                     }
-                    {(source.data.type === 'files_local' || source.data.type === 'files_s3') && 
-                        <FilesSource 
-                            projectId={projectId} 
-                            dataSource={source} 
-                            handleReload={handleReload} 
+                    {(source.data.type === 'files_local' || source.data.type === 'files_s3') &&
+                        <FilesSource
+                            projectId={projectId}
+                            dataSource={source}
+                            handleReload={handleReload}
                             type={source.data.type}
                         />
                     }
-                    {source.data.type === 'text' && 
-                        <TextSource 
-                            projectId={projectId} 
-                            dataSource={source} 
-                            handleReload={handleReload} 
+                    {source.data.type === 'text' &&
+                        <TextSource
+                            projectId={projectId}
+                            dataSource={source}
+                            handleReload={handleReload}
                         />
                     }
 
@@ -251,7 +264,7 @@ export function SourcePage({
                         </div>
                     </Section>
                 </div>
-            </div>
-        </Panel>
+            </div >
+        </Panel >
     );
 }

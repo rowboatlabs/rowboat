@@ -1,10 +1,22 @@
+import { getCustomerIdForProject, logUsage } from "@/app/lib/billing";
+import { USE_BILLING } from "@/app/lib/feature_flags";
 import { redisClient } from "@/app/lib/redis";
+import { CopilotAPIRequest } from "@/app/lib/types/copilot_types";
 
 export async function GET(request: Request, { params }: { params: { streamId: string } }) {
   // get the payload from redis
   const payload = await redisClient.get(`copilot-stream-${params.streamId}`);
   if (!payload) {
     return new Response("Stream not found", { status: 404 });
+  }
+
+  // parse the payload
+  const parsedPayload = CopilotAPIRequest.parse(JSON.parse(payload));
+
+  // fetch billing customer id
+  let billingCustomerId: string | null = null;
+  if (USE_BILLING) {
+    billingCustomerId = await getCustomerIdForProject(parsedPayload.projectId);
   }
 
   // Fetch the upstream SSE stream.
@@ -36,6 +48,18 @@ export async function GET(request: Request, { params }: { params: { streamId: st
           controller.enqueue(value);
         }
         controller.close();
+
+        // increment copilot request count in billing
+        if (USE_BILLING && billingCustomerId) {
+          try {
+            await logUsage(billingCustomerId, {
+              type: "copilot_requests",
+              amount: 1,
+            });
+          } catch (error) {
+            console.error("Error logging usage", error);
+          }
+        }
       } catch (error) {
         controller.error(error);
       }

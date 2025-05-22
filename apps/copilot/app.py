@@ -22,6 +22,7 @@ class DataSource(BaseModel):
         populate_by_name = True
 
 class ApiRequest(BaseModel):
+    projectId: str
     messages: List[UserMessage | AssistantMessage]
     workflow_schema: str
     current_workflow_config: str

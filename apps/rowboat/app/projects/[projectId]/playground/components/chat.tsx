@@ -15,6 +15,7 @@ import { TestProfile } from "@/app/lib/types/testing_types";
 import { WithStringId } from "@/app/lib/types/types";
 import { ProfileContextBox } from "./profile-context-box";
 import { USE_TESTING_FEATURE } from "@/app/lib/feature_flags";
+import { BillingErrorModal } from "@/components/common/billing-error-modal";
 
 export function Chat({
     chat,
@@ -49,6 +50,7 @@ export function Chat({
         last_agent_name: workflow.startAgent,
     });
     const [fetchResponseError, setFetchResponseError] = useState<string | null>(null);
+    const [billingError, setBillingError] = useState<string | null>(null);
     const [lastAgenticRequest, setLastAgenticRequest] = useState<unknown | null>(null);
     const [lastAgenticResponse, setLastAgenticResponse] = useState<unknown | null>(null);
     const [optimisticMessages, setOptimisticMessages] = useState<z.infer<typeof apiV1.ChatMessage>[]>(chat.messages);
@@ -120,11 +122,11 @@ export function Chat({
         async function process() {
             setLoadingAssistantResponse(true);
             setFetchResponseError(null);
-            
+
             // Reset request/response state before making new request
             setLastAgenticRequest(null);
             setLastAgenticResponse(null);
-            
+
             const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow);
             const request: z.infer<typeof AgenticAPIChatRequest> = {
                 projectId,
@@ -144,7 +146,7 @@ export function Chat({
                 toolWebhookUrl: toolWebhookUrl,
                 testProfile: testProfile ?? undefined,
             };
-            
+
             // Store the full request object
             setLastAgenticRequest(request);
 
@@ -152,6 +154,13 @@ export function Chat({
             try {
                 const response = await getAssistantResponseStreamId(request);
                 if (ignore) {
+                    return;
+                }
+                if ('billingError' in response) {
+                    setBillingError(response.billingError);
+                    setFetchResponseError(response.billingError);
+                    setLoadingAssistantResponse(false);
+                    console.log('returning from getAssistantResponseStreamId due to billing error'); 
                     return;
                 }
                 streamId = response.streamId;
@@ -193,13 +202,13 @@ export function Chat({
 
                 const parsed = JSON.parse(event.data);
                 setAgenticState(parsed.state);
-                
+
                 // Combine state and collected messages in the response
                 setLastAgenticResponse({
                     ...parsed,
                     messages: msgs
                 });
-                
+
                 setMessages([...messages, ...msgs]);
                 setLoadingAssistantResponse(false);
             });
@@ -240,6 +249,7 @@ export function Chat({
             return;
         }
 
+        console.log(`executing response process: fetchresponseerr: ${fetchResponseError}`);
         process();
 
         return () => {
@@ -270,7 +280,7 @@ export function Chat({
                 />
             )}
         </div>
-        
+
         <div className="flex-1 overflow-auto pr-1 
             [&::-webkit-scrollbar]{width:4px}
             [&::-webkit-scrollbar-track]{background:transparent}
@@ -300,13 +310,16 @@ export function Chat({
                     <Button
                         size="sm"
                         color="danger"
-                        onPress={() => setFetchResponseError(null)}
+                        onPress={() => {
+                            setFetchResponseError(null);
+                            setBillingError(null);
+                        }}
                     >
                         Retry
                     </Button>
                 </div>
             )}
-            
+
             <ComposeBoxPlayground
                 handleUserMessage={handleUserMessage}
                 messages={messages.filter(msg => msg.content !== undefined) as any}
@@ -315,5 +328,12 @@ export function Chat({
                 onFocus={() => setIsLastInteracted(true)}
             />
         </div>
+
+
+        <BillingErrorModal
+            isOpen={!!billingError}
+            onClose={() => setBillingError(null)}
+            errorMessage={billingError || ''}
+        />
     </div>;
 }

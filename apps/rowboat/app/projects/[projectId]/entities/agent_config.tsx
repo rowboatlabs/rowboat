@@ -23,6 +23,7 @@ import { USE_TRANSFER_CONTROL_OPTIONS } from "@/app/lib/feature_flags";
 import { Input } from "@/components/ui/input";
 import { Info } from "lucide-react";
 import { useCopilot } from "../copilot/use-copilot";
+import { BillingErrorModal } from "@/components/common/billing-error-modal";
 
 // Common section header styles
 const sectionHeaderStyles = "text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400";
@@ -787,6 +788,7 @@ function GenerateInstructionsModal({
     const [prompt, setPrompt] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [billingError, setBillingError] = useState<string | null>(null);
     const { showPreview } = usePreviewModal();
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -795,6 +797,7 @@ function GenerateInstructionsModal({
             setPrompt("");
             setIsLoading(false);
             setError(null);
+            setBillingError(null);
             textareaRef.current?.focus();
         }
     }, [isOpen]);
@@ -802,6 +805,7 @@ function GenerateInstructionsModal({
     const handleGenerate = async () => {
         setIsLoading(true);
         setError(null);
+        setBillingError(null);
         try {
             const msgs: z.infer<typeof CopilotMessage>[] = [
                 {
@@ -810,6 +814,12 @@ function GenerateInstructionsModal({
                 },
             ];
             const newInstructions = await getCopilotAgentInstructions(projectId, msgs, workflow, agent.name);
+            if (typeof newInstructions === 'object' && 'billingError' in newInstructions) {
+                setBillingError(newInstructions.billingError);
+                setError(newInstructions.billingError);
+                setIsLoading(false);
+                return;
+            }
             
             onClose();
             
@@ -838,59 +848,66 @@ function GenerateInstructionsModal({
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} size="lg">
-            <ModalContent>
-                <ModalHeader>Generate Instructions</ModalHeader>
-                <ModalBody>
-                    <div className="flex flex-col gap-4">
-                        {error && (
-                            <div className="p-2 bg-red-50 border border-red-200 rounded-lg flex gap-2 justify-between items-center text-sm">
-                                <p className="text-red-600">{error}</p>
-                                <CustomButton
-                                    variant="primary"
-                                    size="sm"
-                                    onClick={() => {
-                                        setError(null);
-                                        handleGenerate();
-                                    }}
-                                >
-                                    Retry
-                                </CustomButton>
-                            </div>
-                        )}
-                        <Textarea
-                            ref={textareaRef}
-                            value={prompt}
-                            onChange={(e) => setPrompt(e.target.value)}
-                            onKeyDown={handleKeyDown}
+        <>
+            <Modal isOpen={isOpen} onClose={onClose} size="lg">
+                <ModalContent>
+                    <ModalHeader>Generate Instructions</ModalHeader>
+                    <ModalBody>
+                        <div className="flex flex-col gap-4">
+                            {error && (
+                                <div className="p-2 bg-red-50 border border-red-200 rounded-lg flex gap-2 justify-between items-center text-sm">
+                                    <p className="text-red-600">{error}</p>
+                                    <CustomButton
+                                        variant="primary"
+                                        size="sm"
+                                        onClick={() => {
+                                            setError(null);
+                                            handleGenerate();
+                                        }}
+                                    >
+                                        Retry
+                                    </CustomButton>
+                                </div>
+                            )}
+                            <Textarea
+                                ref={textareaRef}
+                                value={prompt}
+                                onChange={(e) => setPrompt(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                disabled={isLoading}
+                                placeholder="e.g., This agent should help users analyze their data and provide insights..."
+                                className={textareaStyles}
+                                autoResize
+                            />
+                        </div>
+                    </ModalBody>
+                    <ModalFooter>
+                        <CustomButton
+                            variant="secondary"
+                            size="sm"
+                            onClick={onClose}
                             disabled={isLoading}
-                            placeholder="e.g., This agent should help users analyze their data and provide insights..."
-                            className={textareaStyles}
-                            autoResize
-                        />
-                    </div>
-                </ModalBody>
-                <ModalFooter>
-                    <CustomButton
-                        variant="secondary"
-                        size="sm"
-                        onClick={onClose}
-                        disabled={isLoading}
-                    >
-                        Cancel
-                    </CustomButton>
-                    <CustomButton
-                        variant="primary"
-                        size="sm"
-                        onClick={handleGenerate}
-                        disabled={!prompt.trim() || isLoading}
-                        isLoading={isLoading}
-                    >
-                        Generate
-                    </CustomButton>
-                </ModalFooter>
-            </ModalContent>
-        </Modal>
+                        >
+                            Cancel
+                        </CustomButton>
+                        <CustomButton
+                            variant="primary"
+                            size="sm"
+                            onClick={handleGenerate}
+                            disabled={!prompt.trim() || isLoading}
+                            isLoading={isLoading}
+                        >
+                            Generate
+                        </CustomButton>
+                    </ModalFooter>
+                </ModalContent>
+            </Modal>
+            <BillingErrorModal
+                isOpen={!!billingError}
+                onClose={() => setBillingError(null)}
+                errorMessage={billingError || ''}
+            />
+        </>
     );
 }
 

@@ -1,5 +1,5 @@
 import { MongoClient } from "mongodb";
-import { Webpage } from "./types/types";
+import { User, Webpage } from "./types/types";
 import { Workflow } from "./types/workflow_types";
 import { ApiKey } from "./types/project_types";
 import { ProjectMember } from "./types/project_types";
@@ -31,6 +31,7 @@ export const testResultsCollection = db.collection<z.infer<typeof TestResult>>("
 export const chatsCollection = db.collection<z.infer<typeof apiV1.Chat>>("chats");
 export const chatMessagesCollection = db.collection<z.infer<typeof apiV1.ChatMessage>>("chat_messages");
 export const twilioConfigsCollection = db.collection<z.infer<typeof TwilioConfig>>("twilio_configs");
+export const usersCollection = db.collection<z.infer<typeof User>>("users");
 
 // Create indexes
 twilioConfigsCollection.createIndexes([
