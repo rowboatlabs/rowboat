@@ -90,7 +90,8 @@ export async function POST(
         }
 
         // get assistant response
-        const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow);
+        const workflowApi = await convertWorkflowToAgenticAPI(workflow);
+        const { agents, tools, prompts, startAgent } = workflowApi;
         const unsavedMessages: z.infer<typeof apiV1.ChatMessage>[] = [userMessage];
         let state: unknown = chat.agenticState ?? { last_agent_name: startAgent };
 
@@ -102,7 +103,11 @@ export async function POST(
             tools,
             prompts,
             startAgent,
-            mcpServers: projectSettings.mcpServers ?? [],
+            mcpServers: (projectSettings.mcpServers ?? []).map(server => ({
+                name: server.name,
+                serverUrl: server.serverUrl || '',
+                isReady: server.isReady
+            })),
             toolWebhookUrl: projectSettings.webhookUrl ?? '',
             testProfile: undefined,
         };

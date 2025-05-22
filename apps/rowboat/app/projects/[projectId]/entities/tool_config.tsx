@@ -160,9 +160,37 @@ export function ToolConfig({
     handleUpdate: (tool: z.infer<typeof WorkflowTool>) => void,
     handleClose: () => void
 }) {
+    console.log('[ToolConfig] Received tool data:', {
+        name: tool.name,
+        isMcp: tool.isMcp,
+        fullTool: tool,
+        parameters: tool.parameters,
+        parameterKeys: tool.parameters ? Object.keys(tool.parameters.properties) : [],
+        required: tool.parameters?.required || []
+    });
+
     const [selectedParams, setSelectedParams] = useState(new Set([]));
     const isReadOnly = tool.isMcp || tool.isLibrary;
     const [nameError, setNameError] = useState<string | null>(null);
+
+    // Log when parameters are being rendered
+    useEffect(() => {
+        console.log('[ToolConfig] Processing parameters for render:', {
+            toolName: tool.name,
+            hasParameters: !!tool.parameters,
+            parameterDetails: tool.parameters ? {
+                type: tool.parameters.type,
+                propertyCount: Object.keys(tool.parameters.properties).length,
+                properties: Object.entries(tool.parameters.properties).map(([name, param]) => ({
+                    name,
+                    type: param.type,
+                    description: param.description,
+                    isRequired: tool.parameters?.required?.includes(name)
+                })),
+                required: tool.parameters.required
+            } : null
+        });
+    }, [tool.name, tool.parameters]);
 
     function handleParamRename(oldName: string, newName: string) {
         const newProperties = { ...tool.parameters!.properties };
@@ -230,6 +258,43 @@ export function ToolConfig({
         }
         return null;
     }
+
+    // Log parameter rendering in the actual parameter section
+    const renderParameters = () => {
+        if (!tool.parameters?.properties) {
+            console.log('[ToolConfig] No parameters to render');
+            return null;
+        }
+
+        console.log('[ToolConfig] Rendering parameters:', {
+            count: Object.keys(tool.parameters.properties).length,
+            parameters: Object.keys(tool.parameters.properties)
+        });
+
+        return Object.entries(tool.parameters.properties).map(([paramName, param], index) => {
+            console.log('[ToolConfig] Rendering parameter:', {
+                name: paramName,
+                param,
+                isRequired: tool.parameters?.required?.includes(paramName)
+            });
+
+            return (
+                <ParameterConfig
+                    key={paramName}
+                    param={{
+                        name: paramName,
+                        description: param.description,
+                        type: param.type,
+                        required: tool.parameters?.required?.includes(paramName) ?? false
+                    }}
+                    handleUpdate={handleParamUpdate}
+                    handleDelete={handleParamDelete}
+                    handleRename={handleParamRename}
+                    readOnly={isReadOnly}
+                />
+            );
+        });
+    };
 
     return (
         <Panel 
@@ -405,21 +470,7 @@ export function ToolConfig({
                         Parameters
                     </label>
                     <div className="pl-3 space-y-3">
-                        {Object.entries(tool.parameters?.properties || {}).map(([paramName, param], index) => (
-                            <ParameterConfig
-                                key={paramName}
-                                param={{
-                                    name: paramName,
-                                    description: param.description,
-                                    type: param.type,
-                                    required: tool.parameters?.required?.includes(paramName) ?? false
-                                }}
-                                handleUpdate={handleParamUpdate}
-                                handleDelete={handleParamDelete}
-                                handleRename={handleParamRename}
-                                readOnly={isReadOnly}
-                            />
-                        ))}
+                        {renderParameters()}
                     </div>
 
                     {!isReadOnly && (

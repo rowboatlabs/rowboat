@@ -3,7 +3,8 @@ import { sanitizeTextWithMentions, Workflow, WorkflowAgent, WorkflowPrompt, Work
 import { apiV1 } from "rowboat-shared";
 import { ApiMessage } from "./types";
 import { TestProfile } from "./testing_types";
-import { MCPServer } from "./types";
+import { MCPServer, MCPServerMinimal } from "./types";
+import { getMcpToolsFromProject, mergeMcpTools } from "@/app/actions/mcp_actions";
 
 export const AgenticAPIChatMessage = z.object({
     role: z.union([z.literal('user'), z.literal('assistant'), z.literal('tool'), z.literal('system')]),
@@ -55,7 +56,7 @@ export const AgenticAPIChatRequest = z.object({
     prompts: z.array(WorkflowPrompt),
     startAgent: z.string(),
     testProfile: TestProfile.optional(),
-    mcpServers: z.array(MCPServer),
+    mcpServers: z.array(MCPServerMinimal),
     toolWebhookUrl: z.string(),
 });
 
@@ -68,19 +69,25 @@ export const AgenticAPIInitStreamResponse = z.object({
     streamId: z.string(),
 });
 
-export function convertWorkflowToAgenticAPI(workflow: z.infer<typeof Workflow>): {
+export async function convertWorkflowToAgenticAPI(workflow: z.infer<typeof Workflow>): Promise<{
     agents: z.infer<typeof AgenticAPIAgent>[];
     tools: z.infer<typeof AgenticAPITool>[];
     prompts: z.infer<typeof AgenticAPIPrompt>[];
     startAgent: string;
-} {
+}> {
+    // Get MCP tools from project settings
+    const mcpTools = await getMcpToolsFromProject(workflow.projectId);
+    
+    // Merge workflow tools with MCP tools
+    const mergedTools = await mergeMcpTools(workflow.tools, mcpTools);
+
     return {
         agents: workflow.agents
             .filter(agent => !agent.disabled)
             .map(agent => {
                 const compiledInstructions = agent.instructions +
                     (agent.examples ? '\n\n# Examples\n' + agent.examples : '');
-                const { sanitized, entities } = sanitizeTextWithMentions(compiledInstructions, workflow);
+                const { sanitized, entities } = sanitizeTextWithMentions(compiledInstructions, workflow, mcpTools);
 
                 const agenticAgent: z.infer<typeof AgenticAPIAgent> = {
                     name: agent.name,
@@ -100,13 +107,10 @@ export function convertWorkflowToAgenticAPI(workflow: z.infer<typeof Workflow>):
                 };
                 return agenticAgent;
             }),
-        tools: workflow.tools.map(tool => {
-            const { autoSubmitMockedResponse, ...rest } = tool;
-            return rest;
-        }),
+        tools: mergedTools,
         prompts: workflow.prompts
             .map(p => {
-                const { sanitized } = sanitizeTextWithMentions(p.prompt, workflow);
+                const { sanitized } = sanitizeTextWithMentions(p.prompt, workflow, mcpTools);
                 return {
                     ...p,
                     prompt: sanitized,

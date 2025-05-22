@@ -14,7 +14,8 @@ import {
   ChevronRightIcon,
   Moon,
   Sun,
-  HelpCircle
+  HelpCircle,
+  Wrench
 } from "lucide-react";
 import { getProjectConfig } from "@/app/actions/project_actions";
 import { useTheme } from "@/app/providers/theme-provider";
@@ -73,6 +74,12 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
       icon: DatabaseIcon,
       requiresProject: true
     }] : []),
+    {
+      href: 'tools',
+      label: 'Tools',
+      icon: Wrench,
+      requiresProject: true
+    },
     {
       href: 'config',
       label: 'Settings',

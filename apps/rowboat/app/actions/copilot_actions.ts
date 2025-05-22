@@ -15,6 +15,7 @@ import { check_query_limit } from "../lib/rate_limiting";
 import { QueryLimitError, validateConfigChanges } from "../lib/client_utils";
 import { projectAuthCheck } from "./project_actions";
 import { redisClient } from "../lib/redis";
+import { getMcpToolsFromProject, mergeMcpTools } from "./mcp_actions";
 
 export async function getCopilotResponse(
     projectId: string,
@@ -32,11 +33,20 @@ export async function getCopilotResponse(
         throw new QueryLimitError();
     }
 
+    // Get MCP tools from project and merge with workflow tools
+    const mcpTools = await getMcpToolsFromProject(projectId);
+    
+    // Convert workflow to copilot format with both workflow and project tools
+    const copilotWorkflow = convertToCopilotWorkflow({
+        ...current_workflow_config,
+        tools: await mergeMcpTools(current_workflow_config.tools, mcpTools)
+    });
+
     // prepare request
     const request: z.infer<typeof CopilotAPIRequest> = {
         messages: messages.map(convertToCopilotApiMessage),
         workflow_schema: JSON.stringify(zodToJsonSchema(CopilotWorkflow)),
-        current_workflow_config: JSON.stringify(convertToCopilotWorkflow(current_workflow_config)),
+        current_workflow_config: JSON.stringify(copilotWorkflow),
         context: context ? convertToCopilotApiChatContext(context) : null,
         dataSources: dataSources ? dataSources.map(ds => {
             console.log('Original data source:', JSON.stringify(ds));
@@ -127,11 +137,20 @@ export async function getCopilotResponseStream(
         throw new QueryLimitError();
     }
 
+    // Get MCP tools from project and merge with workflow tools
+    const mcpTools = await getMcpToolsFromProject(projectId);
+    
+    // Convert workflow to copilot format with both workflow and project tools
+    const copilotWorkflow = convertToCopilotWorkflow({
+        ...current_workflow_config,
+        tools: await mergeMcpTools(current_workflow_config.tools, mcpTools)
+    });
+
     // prepare request
     const request: z.infer<typeof CopilotAPIRequest> = {
         messages: messages.map(convertToCopilotApiMessage),
         workflow_schema: JSON.stringify(zodToJsonSchema(CopilotWorkflow)),
-        current_workflow_config: JSON.stringify(convertToCopilotWorkflow(current_workflow_config)),
+        current_workflow_config: JSON.stringify(copilotWorkflow),
         context: context ? convertToCopilotApiChatContext(context) : null,
         dataSources: dataSources ? dataSources.map(ds => CopilotDataSource.parse(ds)) : undefined,
     };
@@ -163,11 +182,20 @@ export async function getCopilotAgentInstructions(
         throw new QueryLimitError();
     }
 
+    // Get MCP tools from project and merge with workflow tools
+    const mcpTools = await getMcpToolsFromProject(projectId);
+    
+    // Convert workflow to copilot format with both workflow and project tools
+    const copilotWorkflow = convertToCopilotWorkflow({
+        ...current_workflow_config,
+        tools: await mergeMcpTools(current_workflow_config.tools, mcpTools)
+    });
+
     // prepare request
     const request: z.infer<typeof CopilotAPIRequest> = {
         messages: messages.map(convertToCopilotApiMessage),
         workflow_schema: JSON.stringify(zodToJsonSchema(CopilotWorkflow)),
-        current_workflow_config: JSON.stringify(convertToCopilotWorkflow(current_workflow_config)),
+        current_workflow_config: JSON.stringify(copilotWorkflow),
         context: {
             type: 'agent',
             agentName: agentName,

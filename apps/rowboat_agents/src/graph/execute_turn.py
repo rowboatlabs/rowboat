@@ -96,7 +96,7 @@ async def call_webhook(tool_name: str, args: str, webhook_url: str, signing_secr
 
 async def call_mcp(tool_name: str, args: str, mcp_server_url: str) -> str:
     try:
-        print(f"MCP tool called for: {tool_name}")
+        print(f"MCP tool called for: {tool_name} with args: {args} at url: {mcp_server_url}")
         async with sse_client(url=mcp_server_url) as streams:
             async with ClientSession(*streams) as session:
                 await session.initialize()
@@ -131,9 +131,7 @@ async def catch_all(ctx: RunContextWrapper[Any], args: str, tool_name: str, tool
                 response_content = await mock_tool(tool_name, args, tool_config.get("description", ""), tool_config.get("mockInstructions", ""))
             print(response_content)
         elif tool_config.get("isMcp", False):
-            mcp_server_name = tool_config.get("mcpServerName", "")
-            mcp_servers = complete_request.get("mcpServers", {})
-            mcp_server_url = next((server.get("url", "") for server in mcp_servers if server.get("name") == mcp_server_name), "")
+            mcp_server_url = tool_config.get("mcpServerURL", "")
             response_content = await call_mcp(tool_name, args, mcp_server_url)
         else:
             collection = db["projects"]

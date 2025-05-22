@@ -42,11 +42,16 @@ export const WorkflowTool = z.object({
             type: z.string(),
             description: z.string(),
         })),
-        required: z.array(z.string()).optional(),
+        required: z.array(z.string()).default([]),
+    }).default({
+        type: 'object',
+        properties: {},
+        required: [],
     }),
     isMcp: z.boolean().default(false).optional(),
     isLibrary: z.boolean().default(false).optional(),
     mcpServerName: z.string().optional(),
+    mcpServerURL: z.string().optional(),
 });
 export const Workflow = z.object({
     name: z.string().optional(),
@@ -81,6 +86,7 @@ export function sanitizeTextWithMentions(
         tools: z.infer<typeof WorkflowTool>[],
         prompts: z.infer<typeof WorkflowPrompt>[],
     },
+    projectTools: z.infer<typeof WorkflowTool>[] = []
 ): {
     sanitized: string;
     entities: z.infer<typeof ConnectedEntity>[];
@@ -110,7 +116,8 @@ export function sanitizeTextWithMentions(
             if (entity.type === 'agent') {
                 return workflow.agents.some(a => a.name === entity.name);
             } else if (entity.type === 'tool') {
-                return workflow.tools.some(t => t.name === entity.name);
+                return workflow.tools.some(t => t.name === entity.name) || 
+                       projectTools.some(t => t.name === entity.name);
             } else if (entity.type === 'prompt') {
                 return workflow.prompts.some(p => p.name === entity.name);
             }
