@@ -22,7 +22,7 @@ import { USE_TESTING_FEATURE, USE_PRODUCT_TOUR } from '@/app/lib/feature_flags';
 import { useHelpModal } from "@/app/providers/help-modal-provider";
 
 interface SidebarProps {
-  projectId: string;
+  projectId?: string;
   useRag: boolean;
   useAuth: boolean;
   collapsed?: boolean;
@@ -115,8 +115,8 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
                 </Tooltip>
               </div>
 
-              {/* Navigation Items */}
-              <nav className="p-3 space-y-4">
+              {/* Project-specific navigation Items */}
+              {projectId && <nav className="p-3 space-y-4">
                 {navItems.map((item) => {
                   const Icon = item.icon;
                   const fullPath = `/projects/${projectId}/${item.href}`;
@@ -167,7 +167,7 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
                     </Tooltip>
                   );
                 })}
-              </nav>
+              </nav>}
             </>
           )}
         </div>

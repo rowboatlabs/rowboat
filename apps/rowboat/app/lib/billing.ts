@@ -1,6 +1,6 @@
 import { WithStringId } from './types/types';
 import { z } from 'zod';
-import { Customer, PricingTableResponse, AuthorizeRequest, AuthorizeResponse, LogUsageRequest } from './types/billing_types';
+import { Customer, PricingTableResponse, AuthorizeRequest, AuthorizeResponse, LogUsageRequest, UsageResponse, CustomerPortalSessionResponse } from './types/billing_types';
 import { ObjectId } from 'mongodb';
 import { projectsCollection, usersCollection } from './mongodb';
 
@@ -133,4 +133,43 @@ export async function logUsage(customerId: string, request: z.infer<typeof LogUs
     if (!response.ok) {
         throw new Error(`Failed to log usage: ${response.status} ${response.statusText} ${await response.text()}`);
     }
+}
+
+export async function getUsage(customerId: string): Promise<z.infer<typeof UsageResponse>> {
+    const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/usage`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${BILLING_API_KEY}`,
+            'Content-Type': 'application/json'
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to get usage: ${response.status} ${response.statusText} ${await response.text()}`);
+    }
+    const json = await response.json();
+    const parseResult = UsageResponse.safeParse(json);
+    if (!parseResult.success) {
+        throw new Error(`Failed to parse usage response: ${JSON.stringify(parseResult.error)}`);
+    }
+    return parseResult.data as z.infer<typeof UsageResponse>;
+}
+
+export async function createCustomerPortalSession(customerId: string, returnUrl: string): Promise<string> {
+    const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/customer-portal-session`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${BILLING_API_KEY}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ returnUrl })
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to get customer portal url: ${response.status} ${response.statusText} ${await response.text()}`);
+    }
+    const json = await response.json();
+    const parseResult = CustomerPortalSessionResponse.safeParse(json);
+    if (!parseResult.success) {
+        throw new Error(`Failed to parse customer portal session response: ${JSON.stringify(parseResult.error)}`);
+    }
+    return parseResult.data.url;
 }

@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-const UsageType = z.enum([
+export const SubscriptionPlan = z.enum(["free", "basic", "pro"]);
+
+export const UsageType = z.enum([
     "copilot_requests",
     "agent_messages",
     "rag_tokens",
@@ -12,7 +14,7 @@ export const Customer = z.object({
     name: z.string(),
     email: z.string(),
     stripeCustomerId: z.string(),
-    subscriptionPlan: z.enum(["free", "basic", "pro"]).optional(),
+    subscriptionPlan: SubscriptionPlan.optional(),
     subscriptionActive: z.boolean().optional(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
@@ -56,4 +58,19 @@ export const AuthorizeRequest = z.discriminatedUnion("type", [
 export const AuthorizeResponse = z.object({
     success: z.boolean(),
     error: z.string().optional(),
+});
+
+export const UsageResponse = z.object({
+    usage: z.record(UsageType, z.object({
+        usage: z.number(),
+        total: z.number(),
+    })),
+});
+
+export const CustomerPortalSessionRequest = z.object({
+    returnUrl: z.string(),
+});
+
+export const CustomerPortalSessionResponse = z.object({
+    url: z.string(),
 });

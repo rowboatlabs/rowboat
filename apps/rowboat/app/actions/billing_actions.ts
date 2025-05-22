@@ -1,5 +1,5 @@
 "use server";
-import { createBillingCustomer, authorize, logUsage, getBillingCustomer } from "../lib/billing";
+import { createBillingCustomer, authorize, logUsage, getBillingCustomer, createCustomerPortalSession } from "../lib/billing";
 import { usersCollection } from "../lib/mongodb";
 import { authCheck } from "./auth_actions";
 import { USE_BILLING } from "../lib/feature_flags";
@@ -64,4 +64,17 @@ export async function logBillingUsage(request: z.infer<typeof LogUsageRequest>) 
     const user = await requireBillingProfile();
     await logUsage(user.billingCustomerId, request);
     return;
+}
+
+export async function getCustomerPortalUrl(returnUrl: string): Promise<string> {
+    if (!USE_BILLING) {
+        return "";
+    }
+    
+    const user = await requireBillingProfile();
+    const customer = await getBillingCustomer(user.billingCustomerId);
+    if (!customer) {
+        throw new Error("Customer not found");
+    }
+    return await createCustomerPortalSession(customer._id, returnUrl);
 }
