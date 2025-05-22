@@ -30,6 +30,9 @@ export async function getCopilotResponse(
     rawResponse: unknown;
 } | { billingError: string }> {
     await projectAuthCheck(projectId);
+    if (!await check_query_limit(projectId)) {
+        throw new QueryLimitError();
+    }
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
@@ -132,6 +135,9 @@ export async function getCopilotResponseStream(
     streamId: string;
 } | { billingError: string }> {
     await projectAuthCheck(projectId);
+    if (!await check_query_limit(projectId)) {
+        throw new QueryLimitError();
+    }
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
@@ -179,6 +185,9 @@ export async function getCopilotAgentInstructions(
     agentName: string,
 ): Promise<string | { billingError: string }> {
     await projectAuthCheck(projectId);
+    if (!await check_query_limit(projectId)) {
+        throw new QueryLimitError();
+    }
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
