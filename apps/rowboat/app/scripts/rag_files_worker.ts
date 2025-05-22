@@ -407,7 +407,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                 }, {
                     $set: {
                         status: "error",
-                        hasBillingError: true,
+                        billingError: e.message,
                         lastUpdatedAt: new Date().toISOString(),
                     }
                 });

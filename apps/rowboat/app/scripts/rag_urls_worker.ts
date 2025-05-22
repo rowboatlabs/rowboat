@@ -332,8 +332,29 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                 }
             }
         } catch (e) {
+            if (e instanceof BillingError) {
+                logger.log("Billing error:", e.message);
+                await dataSourcesCollection.updateOne({
+                    _id: job._id,
+                    version: job.version,
+                }, {
+                    $set: {
+                        status: "error",
+                        billingError: e.message,
+                        lastUpdatedAt: new Date().toISOString(),
+                    }
+                });
+            }
             logger.log("Error processing job; will retry:", e);
-            await dataSourcesCollection.updateOne({ _id: job._id, version: job.version }, { $set: { status: "error" } });
+            await dataSourcesCollection.updateOne({
+                _id: job._id,
+                version: job.version,
+            }, {
+                $set: {
+                    status: "error",
+                    lastUpdatedAt: new Date().toISOString(),
+                }
+            });
             continue;
         }
 
