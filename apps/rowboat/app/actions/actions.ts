@@ -1,12 +1,11 @@
 'use server';
-import { AgenticAPIInitStreamResponse, convertFromAgenticAPIChatMessages } from "../lib/types/agents_api_types";
+import { AgenticAPIInitStreamResponse } from "../lib/types/agents_api_types";
 import { AgenticAPIChatRequest } from "../lib/types/agents_api_types";
 import { WebpageCrawlResponse } from "../lib/types/tool_types";
 import { webpagesCollection } from "../lib/mongodb";
 import { z } from 'zod';
 import FirecrawlApp, { ScrapeResponse } from '@mendable/firecrawl-js';
-import { apiV1 } from "rowboat-shared";
-import { getAgenticApiResponse, getAgenticResponseStreamId } from "../lib/utils";
+import { getAgenticResponseStreamId } from "../lib/utils";
 import { check_query_limit } from "../lib/rate_limiting";
 import { QueryLimitError } from "../lib/client_utils";
 import { projectAuthCheck } from "./project_actions";
@@ -55,26 +54,6 @@ export async function scrapeWebpage(url: string): Promise<z.infer<typeof Webpage
     return {
         title: scrapeResult.metadata?.title || '',
         content: scrapeResult.markdown || '',
-    };
-}
-
-export async function getAssistantResponse(request: z.infer<typeof AgenticAPIChatRequest>): Promise<{
-    messages: z.infer<typeof apiV1.ChatMessage>[],
-    state: unknown,
-    rawRequest: unknown,
-    rawResponse: unknown,
-}> {
-    await projectAuthCheck(request.projectId);
-    if (!await check_query_limit(request.projectId)) {
-        throw new QueryLimitError();
-    }
-
-    const response = await getAgenticApiResponse(request);
-    return {
-        messages: convertFromAgenticAPIChatMessages(response.messages),
-        state: response.state,
-        rawRequest: request,
-        rawResponse: response.rawAPIResponse,
     };
 }
 
