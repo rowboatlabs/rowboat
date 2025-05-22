@@ -11,7 +11,6 @@ import { User, WithStringId } from "../lib/types/types";
 import { ApiKey } from "../lib/types/project_types";
 import { Project } from "../lib/types/project_types";
 import { USE_AUTH } from "../lib/feature_flags";
-import { Claims } from "@auth0/nextjs-auth0/edge";
 import { authorizeUserAction } from "./billing_actions";
 
 export async function projectAuthCheck(projectId: string) {
@@ -35,7 +34,7 @@ async function createBaseProject(name: string, user: WithStringId<z.infer<typeof
     });
     // billing limit check
     const authResponse = await authorizeUserAction({
-        type: 'create-project',
+        type: 'create_project',
         data: {
             existingProjectCount: projectCount,
         },

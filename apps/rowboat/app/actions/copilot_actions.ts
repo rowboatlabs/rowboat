@@ -33,7 +33,7 @@ export async function getCopilotResponse(
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
-        type: 'copilot-request',
+        type: 'copilot_request',
         data: {},
     });
     if (!authResponse.success) {
@@ -139,7 +139,7 @@ export async function getCopilotResponseStream(
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
-        type: 'copilot-request',
+        type: 'copilot_request',
         data: {},
     });
     if (!authResponse.success) {
@@ -186,7 +186,7 @@ export async function getCopilotAgentInstructions(
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
-        type: 'copilot-request',
+        type: 'copilot_request',
         data: {},
     });
     if (!authResponse.success) {

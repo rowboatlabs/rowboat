@@ -34,17 +34,21 @@ export const PricingTableResponse = z.object({
 
 export const AuthorizeRequest = z.discriminatedUnion("type", [
     z.object({
-        "type": z.literal("create-project"),
+        "type": z.literal("create_project"),
         "data": z.object({
             "existingProjectCount": z.number(),
         }),
     }),
     z.object({
-        "type": z.literal("process-rag"),
+        "type": z.literal("process_rag"),
         "data": z.object({}),
     }),
     z.object({
-        "type": z.literal("copilot-request"),
+        "type": z.literal("copilot_request"),
+        "data": z.object({}),
+    }),
+    z.object({
+        "type": z.literal("agent_response"),
         "data": z.object({}),
     }),
 ]);

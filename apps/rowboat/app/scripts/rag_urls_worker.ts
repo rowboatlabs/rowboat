@@ -272,7 +272,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                 // authorize with billing
                 if (USE_BILLING && billingCustomerId) {
                     const authResponse = await authorize(billingCustomerId, {
-                        type: "process-rag",
+                        type: "process_rag",
                         data: {}
                     });
 
