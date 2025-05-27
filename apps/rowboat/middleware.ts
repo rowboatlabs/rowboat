@@ -33,7 +33,9 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     return response;
   }
 
-  if (request.nextUrl.pathname.startsWith('/projects') || request.nextUrl.pathname.startsWith('/billing')) {
+  if (request.nextUrl.pathname.startsWith('/projects') ||
+    request.nextUrl.pathname.startsWith('/billing') ||
+    request.nextUrl.pathname.startsWith('/onboarding')) {
     // Skip auth check if USE_AUTH is not enabled
     if (process.env.USE_AUTH !== 'true') {
       return NextResponse.next();
@@ -48,6 +50,7 @@ export const config = {
   matcher: [
     '/projects/:path*',
     '/billing/:path*',
+    // '/onboarding/:path*',
     '/api/v1/:path*',
     '/api/widget/v1/:path*',
   ],

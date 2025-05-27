@@ -15,6 +15,7 @@ export async function getDbUserForAuthUser(authUser: Claims): Promise<WithString
             auth0Id: authUser.sub,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
+            email: authUser.email,
         };
         await usersCollection.insertOne(dbUser);
 

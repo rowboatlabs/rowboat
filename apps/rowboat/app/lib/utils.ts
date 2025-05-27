@@ -4,6 +4,36 @@ import { generateObject } from "ai";
 import { ApiMessage } from "./types/types";
 import { openai } from "@ai-sdk/openai";
 import { redisClient } from "./redis";
+import { getSession } from "@auth0/nextjs-auth0";
+import { redirect } from "next/navigation";
+import { getDbUserForAuthUser } from "./user";
+
+/**
+ * This function should be used as an initial check in server page components to ensure
+ * the user is authenticated. It will:
+ * 1. Check for a valid user session
+ * 2. Redirect to login if no session exists
+ * 3. Return the authenticated user
+ *
+ * Usage in server components:
+ * ```ts
+ * const user = await requireAuth();
+ * ```
+ */
+export async function requireAuth() {
+    const { user } = await getSession() || {};
+    if (!user) {
+        redirect('/api/auth/login');
+    }
+
+    // fetch db user
+    const dbUser = await getDbUserForAuthUser(user);
+    if (!dbUser) {
+        throw new Error('User not found');
+    }
+
+    return dbUser;
+}
 
 export async function getAgenticApiResponse(
     request: z.infer<typeof AgenticAPIChatRequest>,
