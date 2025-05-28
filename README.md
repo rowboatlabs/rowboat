@@ -3,6 +3,12 @@
 <h2 align="center">Let AI build multi-agent workflows for you in minutes</h2>
 <h5 align="center">
 
+<p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
+  <a href="https://trendshift.io/repositories/13609" target="blank">
+    <img src="https://trendshift.io/api/badge/repositories/13609" alt="rowboatlabs%2Frowboat | Trendshift" width="250" height="55"/>
+  </a>
+</p>
+
 [Quickstart](#quick-start) | [Docs](https://docs.rowboatlabs.com/) | [Discord](https://discord.gg/rxB8pzHxaS) | [Website](https://www.rowboatlabs.com/) | [Youtube](https://www.youtube.com/@RowBoatLabs) 
 
 </h5>
