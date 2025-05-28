@@ -153,8 +153,8 @@ async def run_turn_streamed(
         # Initialize agents and get external tools
 
         new_agents = get_agents(
-            agent_configs=agent_configs, 
-            tool_configs=tool_configs, 
+            agent_configs=agent_configs,
+            tool_configs=tool_configs,
             complete_request=complete_request
         )
         new_agents = add_child_transfer_related_instructions_to_agents(new_agents)
@@ -196,12 +196,15 @@ async def run_turn_streamed(
                     if event.type == "raw_response_event":
                         # Handle token usage counting
                         if hasattr(event.data, 'type') and event.data.type == "response.completed" and hasattr(event.data.response, 'usage'):
-                            tokens_used["total"] += event.data.response.usage.total_tokens
-                            tokens_used["prompt"] += event.data.response.usage.input_tokens
-                            tokens_used["completion"] += event.data.response.usage.output_tokens
-                            print('-'*50)
-                            print(f"Found usage information. Updated cumulative tokens: {tokens_used}")
-                            print('-'*50)
+                            try:
+                                tokens_used["total"] += event.data.response.usage.total_tokens
+                                tokens_used["prompt"] += event.data.response.usage.input_tokens
+                                tokens_used["completion"] += event.data.response.usage.output_tokens
+                                print('-'*50)
+                                print(f"Found usage information. Updated cumulative tokens: {tokens_used}")
+                                print('-'*50)
+                            except Exception as e:
+                                print(f"Warning: Tokens used is likely not available for your chosen model: {e}")
 
                         web_search_messages = handle_web_search_event(event, current_agent)
                         for message in web_search_messages:

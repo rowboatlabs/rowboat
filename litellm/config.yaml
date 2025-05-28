@@ -1,0 +1,70 @@
+model_list:
+  - model_name: "gpt-4.1"
+    litellm_params:
+      model: "gpt-4.1-2025-04-14"
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: "gpt-4o"
+    litellm_params:
+      model: "gpt-4o-mini-2024-07-18"
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: "gpt-3.5-turbo"
+    litellm_params:
+      model: "gpt-3.5-turbo"
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: ollama/gemma3:12b
+    litellm_params:
+      model: ollama/gemma3:12b
+      api_base: http://192.168.1.53:11434
+
+  - model_name: ollama/DeepSeek-R1:14b
+    litellm_params:
+      model: ollama/DeepSeek-R1:14b
+      api_base: http://192.168.1.53:11434
+
+  - model_name: "modal/llama3.3"
+    litellm_params:
+      model: "modal/llama3.3:70b"
+      api_base: "https://stevef1uk--ollama-api-api.modal.run"
+      provider: "modal"
+
+  - model_name: "modal/llama4"
+    litellm_params:
+      model: "modal/llama4"
+      api_base: "https://stevef1uk--ollama-api-api.modal.run"
+      provider: "modal"
+
+  - model_name: groq-llama-3.3-70b-versatile
+    litellm_params:
+      model: groq/llama-3.3-70b-versatile
+      api_key: "os.environ/GROQ_API_KEY"
+
+# Optional: Set default model for unspecified requests
+default_model: gpt-4o
+
+proxy_server_requires_api_key: false
+
+# Server configurations
+server:
+  port: 4000
+  host: 0.0.0.0
+
+# General settings for pass-through endpoints
+general_settings:
+  pass_through_endpoints:
+    - path: "/modal/tensorrt"
+      target: "https://stevef1uk--ollama-api-api.modal.run"
+      headers:
+        Modal-Key: os.environ/TOKEN_ID
+        Modal-Secret: os.environ/TOKEN_SECRET
+        content-type: application/json
+        accept: application/json
+      forward_headers: true  # Forward all headers from the incoming request
+
+# Register custom provider
+litellm_settings:
+  custom_provider_map:
+    - provider: "modal"
+      custom_handler: "custom_handlers.custom_handler.modal_llm"

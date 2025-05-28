@@ -1,0 +1,40 @@
+# Ignore all __pycache__ directories
+/__pycache__/
+**/__pycache__/
+**/**/__pycache__/
+**/**/__pycache__/**
+
+# Ignore all .pyc files
+*.pyc
+**/*.pyc
+**/**/*.pyc
+
+# Ignore .DS_Store files
+.DS_Store
+**/.DS_Store
+**/**/.DS_Store
+
+# Ignore VSCode files
+.vscode/*
+**/.vscode/*
+**/**/.vscode/*
+
+# Environment files
+.env
+.env.local
+
+# Api keys
+**/*api_keys*
+
+# Ignore .out, .lock, .log files
+*.out
+**/*.out
+**/**/*.out
+*.log
+**/*.log
+**/**/*.log
+
+# Ignore tmp.json files
+**/*tmp.json
+**/**/*tmp.json
+**/**/**/*tmp.json

@@ -1,0 +1,110 @@
+{
+    "lastResponse": {
+        "messages": [
+            {
+                "content": "I have retrieved your last booking details for you. \n\n- **Booking ID:** BK123456789\n- **Destination:** Paris, France\n- **Departure Date:** February 15, 2025\n- **Return Date:** February 20, 2025\n- **Passenger Name:** John Doe\n- **Status:** Confirmed\n\nIs there anything specific you would like assistance with regarding this booking?",
+                "created_at": "2025-01-14T13:21:41.011210",
+                "current_turn": true,
+                "response_type": "internal",
+                "role": "assistant",
+                "sender": "Customer Support Hub Agent"
+            },
+            {
+                "content": "Here are your last booking details:\n\n- **Booking ID:** BK123456789\n- **Destination:** Paris, France\n- **Departure Date:** February 15, 2025\n- **Return Date:** February 20, 2025\n- **Passenger Name:** John Doe\n- **Status:** Confirmed\n\nIs there anything specific you need help with regarding this booking?",
+                "created_at": "2025-01-14T13:21:41.011210",
+                "current_turn": true,
+                "response_type": "external",
+                "role": "assistant",
+                "sender": "Customer Support Hub Agent >> Post process"
+            }
+        ],
+        "state": {
+            "agent_data": [
+                {
+                    "child_functions": [],
+                    "external_tools": [
+                        "fetch_user_info",
+                        "getArticleInfo"
+                    ],
+                    "history": [
+                        {
+                            "content": "Hello!",
+                            "current_turn": false,
+                            "role": "user"
+                        },
+                        {
+                            "content": "Hello! How can I assist you today?",
+                            "created_at": "2025-01-14T13:21:23.928202",
+                            "current_turn": false,
+                            "response_type": "internal",
+                            "role": "assistant",
+                            "sender": "Customer Support Hub Agent"
+                        },
+                        {
+                            "content": "Can you help me with my last booking ID?",
+                            "current_turn": true,
+                            "role": "user"
+                        },
+                        {
+                            "created_at": "2025-01-14T13:21:33.209215",
+                            "current_turn": true,
+                            "response_type": "internal",
+                            "role": "assistant",
+                            "sender": "Customer Support Hub Agent",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "arguments": "{\"user_id\":\"user-provided-or-contextual-id\"}",
+                                        "name": "fetch_user_info"
+                                    },
+                                    "id": "call_ysJNztzRa0kRsy4Z4hljVuQ9",
+                                    "type": "function"
+                                }
+                            ]
+                        },
+                        {
+                            "content": "\"{\\\"result\\\":{\\\"user_id\\\":\\\"user-provided-or-contextual-id\\\",\\\"last_booking_id\\\":\\\"BK123456789\\\",\\\"booking_date\\\":\\\"2025-01-10T15:30:00Z\\\",\\\"status\\\":\\\"confirmed\\\",\\\"details\\\":{\\\"destination\\\":\\\"Paris, France\\\",\\\"departure_date\\\":\\\"2025-02-15\\\",\\\"return_date\\\":\\\"2025-02-20\\\",\\\"passenger_name\\\":\\\"John Doe\\\"}}}\"",
+                            "role": "tool",
+                            "tool_call_id": "call_ysJNztzRa0kRsy4Z4hljVuQ9",
+                            "tool_name": "fetch_user_info"
+                        },
+                        {
+                            "content": "I have retrieved your last booking details for you. \n\n- **Booking ID:** BK123456789\n- **Destination:** Paris, France\n- **Departure Date:** February 15, 2025\n- **Return Date:** February 20, 2025\n- **Passenger Name:** John Doe\n- **Status:** Confirmed\n\nIs there anything specific you would like assistance with regarding this booking?",
+                            "created_at": "2025-01-14T13:21:41.011210",
+                            "current_turn": true,
+                            "response_type": "internal",
+                            "role": "assistant",
+                            "sender": "Customer Support Hub Agent"
+                        }
+                    ],
+                    "instructions": "## 🧑‍💼 Role:\nYou are responsible for directing customer support queries to the appropriate agents.\n\n---\n## ⚙️ Steps to Follow:\n1. Greet the user and ask how you can assist them today.\n2. Use the 'fetch_user_info' tool to retrieve user information in real time using the user ID provided or contextually available in the conversation.\n3. Analyze the user's request to determine if it needs escalation or can be handled by a specialized agent.\n4. Direct the query to the relevant agent for issue-specific queries or escalate to a human representative if needed.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Directing queries to suitable agents\n- Escalation when necessary\n\n❌ Out of Scope:\n- Handling detailed support or making assumptions about user issues\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Maintain a helpful and empathetic tone.\n- Ensure queries are directed promptly.\n🚫 Don'ts:\n- Resolve queries directly that require special handling.\n\nYou should be empathetic and helpful.\n\n----------------------------------------------------------------------------------------------------\n\n\n# Instructions about using the article retrieval tool\n- Where relevant, use the articles tool: getArticleInfo to fetch articles with knowledge relevant to the query and use its contents to respond to the user. \n- Do not send a separate message first asking the user to wait while you look up information. Immediately fetch the articles and respond to the user with the answer to their query. \n- Do not make up information. If the article's contents do not have the answer, give up control of the chat (or transfer to your parent agent, as per your transfer instructions). Do not say anything to the user.\n",
+                    "internal_tools": [],
+                    "most_recent_parent_name": "",
+                    "name": "Customer Support Hub Agent",
+                    "parent_function": null
+                },
+                {
+                    "child_functions": [],
+                    "external_tools": [],
+                    "history": [],
+                    "instructions": "Get the user's contact information and let them know that their request has been escalated.\n\n",
+                    "internal_tools": [],
+                    "most_recent_parent_name": "",
+                    "name": "Escalation",
+                    "parent_function": null
+                }
+            ],
+            "last_agent_name": "Customer Support Hub Agent"
+        },
+        "tokens_used": {
+            "openai/gpt-4o": {
+                "input_tokens": 569,
+                "output_tokens": 85
+            },
+            "openai/gpt-4o-mini": {
+                "input_tokens": 871,
+                "output_tokens": 79
+            }
+        }
+    }
+}

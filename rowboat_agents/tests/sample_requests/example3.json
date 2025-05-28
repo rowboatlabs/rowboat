@@ -1,0 +1,94 @@
+{
+  "lastRequest": {
+    "messages": [
+      {
+        "content": "please call the mocked tool",
+        "role": "user",
+        "sender": null,
+        "tool_calls": null,
+        "tool_call_id": null,
+        "tool_name": null
+      }
+    ],
+    "state": {
+      "last_agent_name": "Example Agent"
+    },
+    "agents": [
+      {
+        "name": "Example Agent",
+        "type": "conversation",
+        "description": "",
+        "instructions": "## 🧑‍ Role:\nYou are an helpful customer support assistant\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user what they would like help with\n2. Ask the user for their email address and let them know someone will contact them soon.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Asking the user their issue\n- Getting their email\n\n❌ Out of Scope:\n- Questions unrelated to customer support\n- If a question is out of scope, politely inform the user and avoid providing an answer.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- ask user their issue\n\n❌ Don'ts:\n- don't ask user any other detail than email\n\n",
+        "tools": [
+          "unmocked_tool",
+          "mocked_tool"
+        ],
+        "model": "gpt-4o-mini",
+        "hasRagSources": false,
+        "connectedAgents": [],
+        "controlType": "retain"
+      },
+      {
+        "name": "Guardrails",
+        "type": "guardrails",
+        "description": "",
+        "instructions": "Stick to the facts and do not make any assumptions.\n\n",
+        "tools": [],
+        "model": "gpt-4o-mini",
+        "hasRagSources": false,
+        "connectedAgents": [],
+        "controlType": "retain"
+      },
+      {
+        "name": "Post process",
+        "type": "post_process",
+        "description": "",
+        "instructions": "Ensure that the agent response is terse and to the point.\n\n",
+        "tools": [],
+        "model": "gpt-4o-mini",
+        "hasRagSources": false,
+        "connectedAgents": [],
+        "controlType": "retain"
+      },
+      {
+        "name": "Escalation",
+        "type": "escalation",
+        "description": "",
+        "instructions": "Get the user's contact information and let them know that their request has been escalated.\n\n",
+        "tools": [],
+        "model": "gpt-4o-mini",
+        "hasRagSources": false,
+        "connectedAgents": [],
+        "controlType": "retain"
+      }
+    ],
+    "tools": [
+      {
+        "name": "unmocked_tool",
+        "description": "",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      {
+        "name": "mocked_tool",
+        "description": "",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    ],
+    "prompts": [
+      {
+        "name": "Style prompt",
+        "type": "style_prompt",
+        "prompt": "You should be empathetic and helpful."
+      }
+    ],
+    "startAgent": "Example Agent"
+  }
+}

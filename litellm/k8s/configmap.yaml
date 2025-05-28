@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+data:
+  config.yaml: |
+    model_list:
+      - model_name: "gpt-4.1"
+        litellm_params:
+          model: "gpt-4.1-2025-04-14"
+          api_key: "os.environ/OPENAI_API_KEY"
+          timeout: 30000
+
+      - model_name: "gpt-4o"
+        litellm_params:
+          model: "gpt-4o"
+          api_key: "os.environ/OPENAI_API_KEY"
+          timeout: 30000
+
+      - model_name: "gpt-3.5-turbo"
+        litellm_params:
+          model: "gpt-3.5-turbo"
+          api_key: "os.environ/OPENAI_API_KEY"
+          timeout: 30000
+
+      - model_name: "modal/llama4"
+        litellm_params:
+          model: "modal/llama4"
+          api_base: "https://stevef1uk--ollama-api-api.modal.run"
+          provider: "modal"
+
+      - model_name: "modal/llama3.3"
+        litellm_params:
+          model: "modal/llama3.3:70b"
+          api_base: "https://stevef1uk--ollama-api-api.modal.run"
+          provider: "modal"
+
+      - model_name: "groq-llama-3.3-70b-versatile"
+        litellm_params:
+          model: "groq/llama-3.3-70b-versatile"
+          api_key: "os.environ/GROQ_API_KEY"
+
+    # Optional: Set default model for unspecified requests
+    default_model: gpt-4o
+
+    # Server configurations
+    server:
+      port: 4000
+      host: 0.0.0.0
+
+    # Authentication settings
+    proxy_server_requires_api_key: false
+    ui_username: "admin"
+    ui_password: "admin"
+    skip_auth_paths: ["/health"]
+    master_key: "os.environ/LITELLM_MASTER_KEY"
+
+    # General settings for pass-through endpoints
+    general_settings:
+      pass_through_endpoints:
+        - path: "/modal/tensorrt"
+          target: "https://stevef1uk--ollama-api-api.modal.run"
+          headers:
+            Modal-Key: "os.environ/TOKEN_ID"
+            Modal-Secret: "os.environ/TOKEN_SECRET"
+            content-type: application/json
+            accept: application/json
+          forward_headers: true
+
+    # Register custom provider
+    litellm_settings:
+      custom_provider_map:
+        - provider: "modal"
+          custom_handler: "custom_handlers.custom_handler.ModalLLM"
+      debug: true
+      timeout: 30000
+      track_cost: false
+      success_callback: []
+      failure_callback: []
+      cost_callback: [] 

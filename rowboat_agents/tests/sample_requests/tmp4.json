@@ -1,0 +1,200 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": ""
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-08T07:06:48.280Z",
+      "role": "assistant",
+      "content": "How can I help you today?",
+      "agenticSender": "Example Agent",
+      "agenticResponseType": "external"
+    },
+    {
+      "role": "user",
+      "content": "Tell me about article 1",
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-08T07:06:53.518Z"
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-08T07:06:55.690Z",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_uzRd4Y1CeBioJ9h26XeGhCvH",
+          "function": {
+            "name": "rag_search",
+            "arguments": "{\"query\":\"article 1\"}"
+          },
+          "type": "function"
+        }
+      ],
+      "agenticSender": "Example Agent",
+      "agenticResponseType": "internal"
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-08T07:06:55.690Z",
+      "role": "tool",
+      "content": "{\n  \"Information\": [\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 1.\",\n      \"docId\": \"681c50f17e7a18621c7215cd\",\n      \"sourceId\": \"681c50f17e7a18621c7215cc\"\n    },\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 2.\",\n      \"docId\": \"681c51067e7a18621c7215cf\",\n      \"sourceId\": \"681c51067e7a18621c7215ce\"\n    },\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 3.\",\n      \"docId\": \"681c51137e7a18621c7215d1\",\n      \"sourceId\": \"681c51137e7a18621c7215d0\"\n    }\n  ]\n}",
+      "tool_call_id": "call_uzRd4Y1CeBioJ9h26XeGhCvH",
+      "tool_name": ""
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-08T07:06:57.096Z",
+      "role": "assistant",
+      "content": "Article 1 states: \"This is article 1.\"\n\nIf you need more details or information about another article, please let me know!",
+      "agenticSender": "Example Agent",
+      "agenticResponseType": "external"
+    }
+  ],
+  "lastRequest": {
+    "projectId": "8e59c4b6-91d2-42e9-8990-41583f4105f1",
+    "messages": [
+      {
+        "content": "",
+        "role": "system",
+        "sender": null,
+        "tool_calls": null,
+        "tool_call_id": null,
+        "tool_name": null
+      },
+      {
+        "content": "How can I help you today?",
+        "role": "assistant",
+        "sender": "Example Agent",
+        "tool_calls": null,
+        "tool_call_id": null,
+        "tool_name": null,
+        "response_type": "external"
+      },
+      {
+        "content": "Tell me about article 1",
+        "role": "user",
+        "sender": null,
+        "tool_calls": null,
+        "tool_call_id": null,
+        "tool_name": null
+      }
+    ],
+    "state": {
+      "last_agent_name": "Example Agent",
+      "tokens": {
+        "total": 0,
+        "prompt": 0,
+        "completion": 0
+      }
+    },
+    "agents": [
+      {
+        "name": "Example Agent",
+        "type": "conversation",
+        "description": "An example agent that uses the rag_search tool to fetch information for customer support queries.",
+        "instructions": "## 🧑‍💼 Role:\nYou are a helpful customer support assistant who fetches information using the rag_search tool.\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user what they would like help with.\n2. If the user's query requires information or an answer, use the [@tool:rag_search] tool with the user's question as the query.\n3. Provide the user with an answer based on the information retrieved from the tool.\n4. If the user's issue is about follow-up or requires human support, ask for their email address and let them know someone will contact them soon.\n5. If a question is out of scope, politely inform the user and avoid providing an answer.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Answering customer support questions using information from articles.\n- Asking the user their issue and getting their email if needed.\n\n❌ Out of Scope:\n- Questions unrelated to customer support.\n- Providing answers without using the rag_search tool when information is needed.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Use [@tool:rag_search](#mention) to fetch accurate information for user queries.\n- Provide clear and concise answers based on the tool's results.\n- Ask for the user's email if the issue requires follow-up.\n\n🚫 Don'ts:\n- Do not provide answers without fetching information when required.\n- Do not ask for details other than the user's email.\n\n# Examples\n- **User** : What is your refund policy?\n - **Agent actions**: Call [@tool:rag_search](#mention)\n - **Agent response**: Our refund policy is as follows: <summary from rag_search results>\n\n- **User** : How can I change my password?\n - **Agent actions**: Call [@tool:rag_search](#mention)\n - **Agent response**: To change your password, follow these steps: <steps from rag_search results>\n\n- **User** : I need help with my order.\n - **Agent actions**: Call [@tool:rag_search](#mention)\n - **Agent response**: Can you please provide more details about your order issue? <additional info from rag_search results if relevant>\n\n- **User** : I want someone to contact me about a billing issue.\n - **Agent response**: Sure, could you please provide your email address so someone from our team can contact you soon?\n\n- **User** : Can you tell me about your subscription plans?\n - **Agent actions**: Call [@tool:rag_search](#mention)\n - **Agent response**: Here are our subscription plans: <details from rag_search results>",
+        "model": "gpt-4.1",
+        "controlType": "retain",
+        "ragDataSources": [
+          "681c50f17e7a18621c7215cc",
+          "681c51067e7a18621c7215ce",
+          "681c51137e7a18621c7215d0"
+        ],
+        "ragK": 1,
+        "ragReturnType": "chunks",
+        "tools": [
+          "rag_search"
+        ],
+        "prompts": [],
+        "connectedAgents": []
+      }
+    ],
+    "tools": [
+      {
+        "name": "web_search",
+        "description": "Fetch information from the web based on chat context",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        },
+        "isLibrary": true
+      },
+      {
+        "name": "rag_search",
+        "description": "Fetch articles with knowledge relevant to the query",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The query to retrieve articles for"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "isLibrary": true
+      }
+    ],
+    "prompts": [],
+    "startAgent": "Example Agent",
+    "mcpServers": [],
+    "toolWebhookUrl": ""
+  },
+  "lastResponse": {
+    "state": {
+      "last_agent_name": "Example Agent",
+      "tokens": {
+        "total": 1581,
+        "prompt": 1533,
+        "completion": 48
+      }
+    },
+    "messages": [
+      {
+        "version": "v1",
+        "chatId": "",
+        "createdAt": "2025-05-08T07:06:55.690Z",
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "call_uzRd4Y1CeBioJ9h26XeGhCvH",
+            "function": {
+              "name": "rag_search",
+              "arguments": "{\"query\":\"article 1\"}"
+            },
+            "type": "function"
+          }
+        ],
+        "agenticSender": "Example Agent",
+        "agenticResponseType": "internal"
+      },
+      {
+        "version": "v1",
+        "chatId": "",
+        "createdAt": "2025-05-08T07:06:55.690Z",
+        "role": "tool",
+        "content": "{\n  \"Information\": [\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 1.\",\n      \"docId\": \"681c50f17e7a18621c7215cd\",\n      \"sourceId\": \"681c50f17e7a18621c7215cc\"\n    },\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 2.\",\n      \"docId\": \"681c51067e7a18621c7215cf\",\n      \"sourceId\": \"681c51067e7a18621c7215ce\"\n    },\n    {\n      \"title\": \"text\",\n      \"name\": \"text\",\n      \"content\": \"This is article 3.\",\n      \"docId\": \"681c51137e7a18621c7215d1\",\n      \"sourceId\": \"681c51137e7a18621c7215d0\"\n    }\n  ]\n}",
+        "tool_call_id": "call_uzRd4Y1CeBioJ9h26XeGhCvH",
+        "tool_name": ""
+      },
+      {
+        "version": "v1",
+        "chatId": "",
+        "createdAt": "2025-05-08T07:06:57.096Z",
+        "role": "assistant",
+        "content": "Article 1 states: \"This is article 1.\"\n\nIf you need more details or information about another article, please let me know!",
+        "agenticSender": "Example Agent",
+        "agenticResponseType": "external"
+      }
+    ]
+  }
+}

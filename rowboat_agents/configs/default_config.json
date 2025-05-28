@@ -1,0 +1,11 @@
+{
+    "localize_history": true,
+    "return_diff_messages": true,
+    "start_turn_with_start_agent": false,
+    "children_aware_of_parent": false,
+    "parent_has_child_history": true,
+    "max_messages_per_turn": 20,
+    "max_messages_per_error_escalation_turn": 15,
+    "escalate_errors": true,
+    "max_overall_turns": 25
+}

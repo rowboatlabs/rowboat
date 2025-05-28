@@ -24,8 +24,8 @@ completions_client = None
 if PROVIDER_BASE_URL:
     print(f"Using provider {PROVIDER_BASE_URL}, for completions")
     completions_client = OpenAI(
-        base_url=PROVIDER_BASE_URL, 
-        api_key=PROVIDER_API_KEY
+        base_url=PROVIDER_BASE_URL,
+        default_headers={"Authorization": f"Bearer {PROVIDER_API_KEY}"}
     )
 else:
     print(f"Using OpenAI directly for completions")

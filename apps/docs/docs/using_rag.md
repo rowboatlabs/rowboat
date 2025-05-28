@@ -1,12 +1,12 @@
 # Using RAG in Rowboat
 
-Rowboat provides multiple ways to enhance your agents with Retrieval-Augmented Generation (RAG). This guide will help you set up and use each RAG feature.
+Rowboat provides multiple ways to enhance your agents' context with Retrieval-Augmented Generation (RAG). This guide will help you set up and use each RAG features.
 
 ## Quick Start
 
 Text RAG and local file uploads are enabled by default - no configuration needed! Just start using them right away.
 
-## Available RAG Features
+## RAG Features
 
 ### 1. Text RAG
 ✅ Enabled by default:
@@ -21,8 +21,28 @@ Text RAG and local file uploads are enabled by default - no configuration needed
 - Files are stored locally
 - No configuration required
 - Files are parsed using OpenAI by default
+- For larger files, we recommend using Gemini models - see section below.
 
-### 3. S3 File Uploads
+#### 2.1 Using Gemini for File Parsing
+To use Google's Gemini model for parsing uploaded PDFs, set the following variable:
+
+```bash
+# Enable Gemini for file parsing
+export USE_GEMINI_FILE_PARSING=true
+export GOOGLE_API_KEY=your_google_api_key
+```
+
+### 3. URL Scraping
+Rowboat uses Firecrawl for URL scraping. To enable URL scraping, set the following variables:
+
+```bash
+export USE_RAG_SCRAPING=true
+export FIRECRAWL_API_KEY=your_firecrawl_api_key
+```
+
+## Advanced RAG features
+
+### 1. File Uploads Backed by S3
 To enable S3 file uploads, set the following variables:
 
 ```bash
@@ -36,20 +56,8 @@ export RAG_UPLOADS_S3_BUCKET=your_bucket_name
 export RAG_UPLOADS_S3_REGION=your_region
 ```
 
-### 4. URL Scraping
-To enable URL scraping, set the following variables:
+### 2. Changing Default Parsing Model
 
-```bash
-# Enable URL scraping
-export USE_RAG_SCRAPING=true
-
-# Firecrawl API key for web scraping
-export FIRECRAWL_API_KEY=your_firecrawl_api_key
-```
-
-## File Parsing Options
-
-### Default Parsing (OpenAI)
 By default, uploaded PDF files are parsed using `gpt-4o`. You can customize this by setting the following:
 
 ```bash
@@ -64,16 +72,7 @@ export FILE_PARSING_PROVIDER_BASE_URL=your-provider-base-url
 export FILE_PARSING_PROVIDER_API_KEY=your-provider-api-key
 ```
 
-### Using Gemini for File Parsing
-To use Google's Gemini model for parsing uploaded PDFs, set the following variable:
-
-```bash
-# Enable Gemini for file parsing
-export USE_GEMINI_FILE_PARSING=true
-export GOOGLE_API_KEY=your_google_api_key
-```
-
-## Embedding Model options
+### 3. Embedding Model Options
 
 By default, Rowboat uses OpenAI's `text-embedding-3-small` model for generating embeddings. You can customize this by setting the following:
 

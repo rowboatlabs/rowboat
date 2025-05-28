@@ -25,7 +25,8 @@ spec:
                 - "true"
       containers:
       - name: rowboat-agents
-        image: stevef1uk/rowboat-agents:arm64
+        image: stevef1uk/rowboat_agents:arm64
+        imagePullPolicy: Always
         ports:
         - containerPort: 3001
         env:
@@ -39,10 +40,7 @@ spec:
               name: app-secrets
               key: OPENAI_API_KEY
         - name: PROVIDER_BASE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: PROVIDER_BASE_URL
+          value: "http://litellm-proxy:4000/v1"
         - name: PROVIDER_API_KEY
           valueFrom:
             secretKeyRef:
@@ -53,6 +51,25 @@ spec:
             configMapKeyRef:
               name: app-config
               key: PROVIDER_DEFAULT_MODEL
+        - name: PROVIDER_COPILOT_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PROVIDER_COPILOT_MODEL
+        - name: MAX_CALLS_PER_CHILD_AGENT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: MAX_CALLS_PER_CHILD_AGENT
+        - name: ENABLE_TRACING
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: ENABLE_TRACING
+        - name: MCP_SERVER_URL
+          value: "http://mcp-api-service:8000/sse"
+        - name: LITELLM_API_KEY
+          value: "Bearer sk-ZpzWhDlT-GZIqhnW8JcqHw"
         resources:
           requests:
             memory: "512Mi"

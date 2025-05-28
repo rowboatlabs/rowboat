@@ -26,64 +26,41 @@ spec:
       containers:
       - name: rowboat-agents
         image: stevef1uk/rowboat_agents:arm64
+        imagePullPolicy: Always
         ports:
         - containerPort: 3001
         env:
+        - name: NODE_ENV
+          value: "production"
         - name: PORT
           value: "3001"
-        - name: MONGODB_CONNECTION_STRING
-          value: "mongodb://admin:password@mongodb:27017/rowboat?authSource=admin"
-        - name: REDIS_URL
-          value: "redis://redis:6379"
-        - name: AUTH0_DOMAIN
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: AUTH0_DOMAIN
-        - name: AUTH0_AUDIENCE
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: AUTH0_AUDIENCE
-        - name: AUTH0_BASE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: AUTH0_BASE_URL
-        - name: AUTH0_ISSUER_BASE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: AUTH0_ISSUER_BASE_URL
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
-              name: openai-secret
-              key: api-key
-        - name: ENABLE_AGENT_SWITCHING
-          value: "false"
-        - name: DEFAULT_AGENT
-          value: "Example Agent"
-        - name: AGENT_CONFIGS
-          value: |
-            [{
-              "name": "Example Agent",
-              "type": "conversation",
-              "description": "An example agent",
-              "instructions": "## 🧑‍ Role:\nYou are an helpful customer support assistant\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user what they would like help with\n2. Ask the user for their email address and let them know someone will contact them soon.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Asking the user their issue\n- Getting their email\n\n❌ Out of Scope:\n- Questions unrelated to customer support\n- If a question is out of scope, politely inform the user and avoid providing an answer.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- ask user their issue\n\n❌ Don'ts:\n- don't ask user any other detail than email",
-              "model": "gpt-4o-2024-08-06",
-              "controlType": "retain",
-              "tools": []
-            }]
-        - name: AGENT_CONNECTIONS
-          value: '{}'
+              name: app-secrets
+              key: OPENAI_API_KEY
+        - name: PROVIDER_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PROVIDER_BASE_URL
+        - name: PROVIDER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: PROVIDER_API_KEY
+        - name: PROVIDER_DEFAULT_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PROVIDER_DEFAULT_MODEL
         resources:
-          limits:
-            cpu: "1"
-            memory: "1Gi"
           requests:
-            cpu: "500m"
             memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
 ---
 apiVersion: v1
 kind: Service

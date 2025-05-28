@@ -96,54 +96,104 @@ async def call_webhook(tool_name: str, args: str, webhook_url: str, signing_secr
 
 async def call_mcp(tool_name: str, args: str, mcp_server_url: str) -> str:
     try:
-        print(f"MCP tool called for: {tool_name}")
-        async with sse_client(url=mcp_server_url) as streams:
-            async with ClientSession(*streams) as session:
-                await session.initialize()
-                jargs = json.loads(args)
-                response = await session.call_tool(tool_name, arguments=jargs)
-                json_output = json.dumps([item.__dict__ for item in response.content], indent=2)
+        print(f"\n=== MCP Tool Call Details ===")
+        print(f"Tool Name: {tool_name}")
+        print(f"Arguments: {args}")
+        print(f"MCP Server URL: {mcp_server_url}")
 
-        return json_output
+        async with sse_client(url=mcp_server_url) as streams:
+            print("✓ SSE client created")
+            async with ClientSession(*streams) as session:
+                print("✓ Client session created")
+                await session.initialize()
+                print("✓ Session initialized")
+                jargs = json.loads(args)
+                print(f"Calling MCP tool with args: {json.dumps(jargs, indent=2)}")
+                response = await session.call_tool(tool_name, arguments=jargs)
+                print(f"✓ MCP response received: {response}")
+                json_output = json.dumps([item.__dict__ for item in response.content], indent=2)
+                print(f"Formatted response: {json_output}")
+                return json_output
     except Exception as e:
-        print(f"Error in call_mcp: {str(e)}")
+        print(f"ERROR in call_mcp: {str(e)}")
+        print(f"Stack trace:", exc_info=True)
         return f"Error: {str(e)}"
 
 async def catch_all(ctx: RunContextWrapper[Any], args: str, tool_name: str, tool_config: dict, complete_request: dict) -> str:
     try:
-        print(f"Catch all called for tool: {tool_name}")
-        print(f"Args: {args}")
-        print(f"Tool config: {tool_config}")
+        print(f"\n=== Catch All Function Called ===")
+        print(f"Tool Name: {tool_name}")
+        print(f"Raw Args: {args}")
+        print(f"Tool Config: {json.dumps(tool_config, indent=2)}")
+        print(f"Complete Request: {json.dumps(complete_request, indent=2)}")
 
         # Create event loop for async operations
         try:
             loop = asyncio.get_event_loop()
+            print("✓ Event loop obtained")
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            print("✓ New event loop created")
 
         response_content = None
         if tool_config.get("mockTool", False) or complete_request.get("testProfile", {}).get("mockTools", False):
-            # Call mock_tool to handle the response (it will decide whether to use mock instructions or generate a response)
+            print("Using mock tool")
+            # Call mock_tool to handle the response
             if complete_request.get("testProfile", {}).get("mockPrompt", ""):
                 response_content = await mock_tool(tool_name, args, tool_config.get("description", ""), complete_request.get("testProfile", {}).get("mockPrompt", ""))
             else:
                 response_content = await mock_tool(tool_name, args, tool_config.get("description", ""), tool_config.get("mockInstructions", ""))
-            print(response_content)
+            print(f"Mock tool response: {response_content}")
         elif tool_config.get("isMcp", False):
+            print("\n=== MCP Tool Processing ===")
             mcp_server_name = tool_config.get("mcpServerName", "")
-            mcp_servers = complete_request.get("mcpServers", {})
+            mcp_servers = complete_request.get("mcpServers", [])
+            print(f"MCP Server Name: {mcp_server_name}")
+            print(f"Available MCP Servers: {json.dumps(mcp_servers, indent=2)}")
             mcp_server_url = next((server.get("url", "") for server in mcp_servers if server.get("name") == mcp_server_name), "")
-            response_content = await call_mcp(tool_name, args, mcp_server_url)
+            print(f"Selected MCP Server URL: {mcp_server_url}")
+            
+            if not mcp_server_url:
+                print("❌ ERROR: MCP server URL not found")
+                return f"Error: MCP server {mcp_server_name} not found"
+            
+            # Parse the arguments
+            try:
+                print("\n=== Parsing Arguments ===")
+                if isinstance(args, str):
+                    print(f"Args is string, attempting to parse JSON")
+                    jargs = json.loads(args)
+                else:
+                    print(f"Args is already a dict/object")
+                    jargs = args
+                print(f"Successfully parsed arguments: {json.dumps(jargs, indent=2)}")
+                
+                # Call the MCP tool
+                print("\n=== Calling MCP Tool ===")
+                response_content = await call_mcp(tool_name, json.dumps(jargs), mcp_server_url)
+                print(f"✓ MCP tool response received: {response_content}")
+            except json.JSONDecodeError as e:
+                print(f"❌ Error parsing arguments: {e}")
+                print(f"Raw arguments: {args}")
+                return f"Error: Invalid arguments format - {str(e)}"
         else:
+            print("\n=== Webhook Processing ===")
             collection = db["projects"]
             doc = collection.find_one({"_id": complete_request.get("projectId", "")})
             signing_secret = doc.get("secret", "")
             webhook_url = complete_request.get("toolWebhookUrl", "")
+            print(f"Webhook URL: {webhook_url}")
+            print(f"Signing Secret: {'*' * len(signing_secret) if signing_secret else 'None'}")
             response_content = await call_webhook(tool_name, args, webhook_url, signing_secret)
+            print(f"✓ Webhook response: {response_content}")
+        
+        print(f"\n=== Final Response ===")
+        print(f"Response Content: {response_content}")
         return response_content
     except Exception as e:
-        print(f"Error in catch_all: {str(e)}")
+        print(f"❌ Error in catch_all: {str(e)}")
+        print(f"Stack trace:", exc_info=True)
         return f"Error: {str(e)}"
 
 
@@ -193,8 +243,9 @@ def get_agents(agent_configs, tool_configs, complete_request):
     new_agent_name_to_index = {}
     # Create Agent objects from config
     for agent_config in agent_configs:
-        print("="*100)
-        print(f"Processing config for agent: {agent_config['name']}")
+        print("\n=== Processing Agent Config ===")
+        print(f"Agent Name: {agent_config['name']}")
+        print(f"Agent Config: {json.dumps(agent_config, indent=2)}")
 
         # If hasRagSources, append the RAG tool to the agent's tools
         if agent_config.get("hasRagSources", False):
@@ -205,42 +256,49 @@ def get_agents(agent_configs, tool_configs, complete_request):
         # Prepare tool lists for this agent
         external_tools = []
 
+        print(f"\n=== Setting Up Tools ===")
         print(f"Agent {agent_config['name']} has {len(agent_config['tools'])} configured tools")
 
         new_tools = []
 
         for tool_name in agent_config["tools"]:
-
             tool_config = get_tool_config_by_name(tool_configs, tool_name)
 
             if tool_config:
+                print(f"\n=== Processing Tool: {tool_name} ===")
+                print(f"Tool Config: {json.dumps(tool_config, indent=2)}")
+                
                 external_tools.append({
                     "type": "function",
                     "function": tool_config
                 })
                 if tool_name == "web_search":
                     tool = WebSearchTool()
-
                 elif tool_name == "rag_search":
                     tool = get_rag_tool(agent_config, complete_request)
-
                 else:
+                    print(f"Creating custom tool: {tool_name}")
                     tool = FunctionTool(
                         name=tool_name,
                         description=tool_config["description"],
                         params_json_schema=tool_config["parameters"],
                         strict_json_schema=False,
-                    on_invoke_tool=lambda ctx, args, _tool_name=tool_name, _tool_config=tool_config, _complete_request=complete_request:
-                        catch_all(ctx, args, _tool_name, _tool_config, _complete_request)
+                        on_invoke_tool=lambda ctx, args, _tool_name=tool_name, _tool_config=tool_config, _complete_request=complete_request:
+                            catch_all(ctx, args, _tool_name, _tool_config, _complete_request)
                     )
                 if tool:
                     new_tools.append(tool)
-                    print(f"Added tool {tool_name} to agent {agent_config['name']}")
+                    print(f"✓ Added tool {tool_name} to agent {agent_config['name']}")
+                    if tool_config.get("isMcp", False):
+                        print(f"Tool {tool_name} is an MCP tool")
+                        print(f"MCP Server Name: {tool_config.get('mcpServerName', '')}")
+                        print(f"MCP Server URL: {next((server.get('url', '') for server in complete_request.get('mcpServers', []) if server.get('name') == tool_config.get('mcpServerName', '')), '')}")
             else:
-                print(f"WARNING: Tool {tool_name} not found in tool_configs")
+                print(f"❌ WARNING: Tool {tool_name} not found in tool_configs")
 
         # Create the agent object
-        print(f"Creating Agent object for {agent_config['name']}")
+        print(f"\n=== Creating Agent Object ===")
+        print(f"Agent Name: {agent_config['name']}")
 
         # add the name and description to the agent instructions
         agent_instructions = f"## Your Name\n{agent_config['name']}\n\n## Description\n{agent_config['description']}\n\n## Instructions\n{agent_config['instructions']}"
@@ -248,7 +306,37 @@ def get_agents(agent_configs, tool_configs, complete_request):
             # Identify the model
             model_name = agent_config["model"] if agent_config["model"] else PROVIDER_DEFAULT_MODEL
             print(f"Using model: {model_name}")
-            model=OpenAIChatCompletionsModel(model=model_name, openai_client=client) if client else agent_config["model"]
+            
+            # Initialize model based on type
+            if model_name == PROVIDER_DEFAULT_MODEL:
+                model = OpenAIChatCompletionsModel(model=model_name, openai_client=client) if client else agent_config["model"]
+            else:
+                # For non-GPT-4o models, use the model directly
+                if isinstance(agent_config["model"], str):
+                    # Use the model name as is since it's being routed through LiteLLM
+                    base_model = OpenAIChatCompletionsModel(model=agent_config["model"], openai_client=client)
+                    
+                    # Wrap the model to handle tool calls
+                    class ToolCallModel(OpenAIChatCompletionsModel):
+                        def __init__(self, base_model, tools):
+                            super().__init__(model=base_model.model, openai_client=base_model._client)
+                            self.base_model = base_model
+                            self.tools = tools
+                            print(f"\n=== ToolCallModel Initialized ===")
+                            print(f"Model: {self.model}")
+                            print(f"Available Tools: {[t.name for t in self.tools]}")
+                            print(f"Tool Details:")
+                            for tool in self.tools:
+                                print(f"- {tool.name}: {tool.__dict__}")
+                    
+                    # Create the ToolCallModel instance
+                    model = ToolCallModel(base_model, new_tools)
+                    print(f"\n=== Created ToolCallModel for {agent_config['name']} ===")
+                    print(f"Model: {model.model}")
+                    print(f"Tools: {[t.name for t in model.tools]}")
+                else:
+                    # If it's already a model object, use it directly
+                    model = agent_config["model"]
 
             # Create the agent object
             new_agent = NewAgent(
@@ -256,8 +344,8 @@ def get_agents(agent_configs, tool_configs, complete_request):
                 instructions=agent_instructions,
                 handoff_description=agent_config["description"],
                 tools=new_tools,
-                model = model,
-                model_settings=ModelSettings(temperature=0.0)
+                model = model,  # Pass the model directly
+                model_settings=ModelSettings(temperature=0.0)  # Use only temperature setting
             )
 
             # Set the max calls per parent agent
@@ -278,9 +366,158 @@ def get_agents(agent_configs, tool_configs, complete_request):
             new_agent_to_children[agent_config["name"]] = agent_config.get("connectedAgents", [])
             new_agent_name_to_index[agent_config["name"]] = len(new_agents)
             new_agents.append(new_agent)
-            print(f"Successfully created agent: {agent_config['name']}")
+            print(f"✓ Successfully created agent: {agent_config['name']}")
+
+            # Set up tool execution
+            if hasattr(new_agent, 'on_tool_call'):
+                original_on_tool_call = new_agent.on_tool_call
+                
+                async def on_tool_call_wrapper(tool_call):
+                    try:
+                        # Extract tool name and arguments
+                        tool_name = tool_call.function.name
+                        arguments = json.loads(tool_call.function.arguments)
+                        
+                        print(f"\n=== Tool Call Details ===")
+                        print(f"Tool Name: {tool_name}")
+                        print(f"Arguments: {json.dumps(arguments, indent=2)}")
+                        
+                        # Find the tool in new_tools
+                        tool = next((t for t in new_tools if t.name == tool_name), None)
+                        if tool:
+                            print(f"✓ Found tool: {tool.name}")
+                            print(f"Tool config: {tool.__dict__}")
+                            
+                            # Execute the tool
+                            print(f"Executing tool: {tool_name}")
+                            try:
+                                # Strip Python code block markers if present
+                                args = json.dumps(arguments)
+                                if args.startswith('<|python_start|>'):
+                                    args = args[len('<|python_start|>'):]
+                                if args.endswith('<|python_end|>'):
+                                    args = args[:-len('<|python_end|>')]
+                                
+                                result = await tool.on_invoke_tool(None, args)
+                                print(f"✓ Tool execution result: {result}")
+                                return result
+                            except Exception as e:
+                                print(f"❌ Error executing tool {tool_name}: {str(e)}")
+                                print(f"Stack trace:", exc_info=True)
+                                return f"Error executing tool {tool_name}: {str(e)}"
+                        else:
+                            print(f"❌ ERROR: Tool {tool_name} not found in available tools: {[t.name for t in new_tools]}")
+                            return f"Tool {tool_name} not found"
+                    except Exception as e:
+                        print(f"❌ ERROR in tool execution: {str(e)}")
+                        print(f"Stack trace:", exc_info=True)
+                        return f"Error: {str(e)}"
+                
+                new_agent.on_tool_call = on_tool_call_wrapper
+                print(f"✓ Set up tool call handler for agent {new_agent.name}")
+
+            # Set up tool call handling
+            if hasattr(new_agent, 'handle_tool_calls'):
+                original_handle_tool_calls = new_agent.handle_tool_calls
+                
+                async def handle_tool_calls_wrapper(tool_calls):
+                    try:
+                        if not tool_calls:
+                            print("No tool calls to handle")
+                            return None
+                        
+                        print(f"\n=== Handling Tool Calls ===")
+                        print(f"Number of tool calls: {len(tool_calls)}")
+                        
+                        results = []
+                        for tool_call in tool_calls:
+                            if hasattr(tool_call, 'function'):
+                                print(f"\nProcessing tool call: {tool_call.function.name}")
+                                result = await new_agent.on_tool_call(tool_call)
+                                print(f"✓ Tool call result: {result}")
+                                results.append(result)
+                            else:
+                                print(f"❌ Tool call missing function attribute: {tool_call}")
+                        
+                        return results
+                    except Exception as e:
+                        print(f"❌ ERROR in handle_tool_calls: {str(e)}")
+                        print(f"Stack trace:", exc_info=True)
+                        return None
+                
+                new_agent.handle_tool_calls = handle_tool_calls_wrapper
+                print(f"✓ Set up tool calls handler for agent {new_agent.name}")
+
+            # Set up response handling
+            if hasattr(new_agent, 'on_response'):
+                original_on_response = new_agent.on_response
+                
+                async def on_response_wrapper(response):
+                    try:
+                        # Check if response contains tool calls
+                        if isinstance(response, str) and '"tool_calls"' in response:
+                            try:
+                                print(f"\n=== Processing Response with Tool Calls ===")
+                                print(f"Raw response: {response}")
+                                
+                                # Extract the tool calls section
+                                tool_calls_start = response.find('"tool_calls"')
+                                if tool_calls_start >= 0:
+                                    # Find the start of the array
+                                    array_start = response.find('[', tool_calls_start)
+                                    if array_start >= 0:
+                                        # Count brackets to find the end of the array
+                                        bracket_count = 1
+                                        array_end = array_start + 1
+                                        while bracket_count > 0 and array_end < len(response):
+                                            if response[array_end] == '[':
+                                                bracket_count += 1
+                                            elif response[array_end] == ']':
+                                                bracket_count -= 1
+                                            array_end += 1
+                                        
+                                        if bracket_count == 0:
+                                            # Extract the tool calls array
+                                            tool_calls_str = response[array_start:array_end]
+                                            try:
+                                                tool_calls = json.loads(tool_calls_str)
+                                                print(f"Extracted tool calls: {json.dumps(tool_calls, indent=2)}")
+                                                
+                                                # Convert to tool call objects
+                                                tool_call_objects = []
+                                                for tc in tool_calls:
+                                                    if 'function' in tc:
+                                                        tool_call = type('ToolCall', (), {
+                                                            'function': type('Function', (), {
+                                                                'name': tc['function']['name'],
+                                                                'arguments': json.dumps(tc['function']['arguments'])
+                                                            })
+                                                        })
+                                                        tool_call_objects.append(tool_call)
+                                                
+                                                # Handle the tool calls
+                                                if tool_call_objects:
+                                                    print(f"Executing {len(tool_call_objects)} tool calls")
+                                                    results = await new_agent.handle_tool_calls(tool_call_objects)
+                                                    print(f"✓ Tool call results: {results}")
+                                                    return results
+                                            except json.JSONDecodeError as e:
+                                                print(f"❌ Failed to parse tool calls: {e}")
+                                                print(f"Tool calls string: {tool_calls_str}")
+                            except Exception as e:
+                                print(f"❌ Error extracting tool calls: {e}")
+                        
+                        # If no tool calls or parsing failed, use original handler
+                        return await original_on_response(response)
+                    except Exception as e:
+                        print(f"❌ ERROR in response handling: {str(e)}")
+                        print(f"Stack trace:", exc_info=True)
+                        return None
+                
+                new_agent.on_response = on_response_wrapper
+                print(f"✓ Set up response handler for agent {new_agent.name}")
         except Exception as e:
-            print(f"ERROR: Failed to create agent {agent_config['name']}: {str(e)}")
+            print(f"❌ ERROR: Failed to create agent {agent_config['name']}: {str(e)}")
             raise
 
     for new_agent in new_agents:
@@ -290,7 +527,8 @@ def get_agents(agent_configs, tool_configs, complete_request):
         # Look up the agent's children from the old agent and create a list called handoffs in new_agent with pointers to the children in new_agents
         new_agent.handoffs = [new_agents[new_agent_name_to_index[child]] for child in new_agent_to_children[new_agent.name]]
     
-    print("Returning created agents")
+    print("\n=== Returning Created Agents ===")
+    print(f"Number of agents: {len(new_agents)}")
     print("="*100)
     return new_agents
 
@@ -352,6 +590,99 @@ async def run_streamed(
                 with trace(f"Agent turn: {agent.name}") as trace_ctx:
                     try:
                         async for event in original_stream_events():
+                            # Check if event contains tool calls
+                            if hasattr(event, 'content') and event.content:
+                                # Try to find tool calls in the content
+                                if '"tool_calls"' in event.content:
+                                    print(f"\n=== Found Tool Calls in Stream ===")
+                                    print(f"Raw content: {event.content}")
+                                    
+                                    # Extract the tool calls section
+                                    tool_calls_start = event.content.find('"tool_calls"')
+                                    if tool_calls_start >= 0:
+                                        # Find the start of the array
+                                        array_start = event.content.find('[', tool_calls_start)
+                                        if array_start >= 0:
+                                            # Count brackets to find the end of the array
+                                            bracket_count = 1
+                                            array_end = array_start + 1
+                                            while bracket_count > 0 and array_end < len(event.content):
+                                                if event.content[array_end] == '[':
+                                                    bracket_count += 1
+                                                elif event.content[array_end] == ']':
+                                                    bracket_count -= 1
+                                                array_end += 1
+                                            
+                                            if bracket_count == 0:
+                                                # Extract the tool calls array
+                                                tool_calls_str = event.content[array_start:array_end]
+                                                try:
+                                                    tool_calls = json.loads(tool_calls_str)
+                                                    print(f"Extracted tool calls: {json.dumps(tool_calls, indent=2)}")
+                                                    
+                                                    # Convert to tool call objects
+                                                    tool_call_objects = []
+                                                    for tc in tool_calls:
+                                                        if 'function' in tc:
+                                                            tool_call = type('ToolCall', (), {
+                                                                'function': type('Function', (), {
+                                                                    'name': tc['function']['name'],
+                                                                    'arguments': json.dumps(tc['function']['arguments'])
+                                                                })
+                                                            })
+                                                            tool_call_objects.append(tool_call)
+                                                    
+                                                    # Handle the tool calls
+                                                    if tool_call_objects:
+                                                        print(f"Executing {len(tool_call_objects)} tool calls")
+                                                        results = []
+                                                        for tool_call in tool_call_objects:
+                                                            print(f"\n=== Processing Tool Call ===")
+                                                            print(f"Tool Name: {tool_call.function.name}")
+                                                            print(f"Arguments: {tool_call.function.arguments}")
+                                                            
+                                                            # Find the tool in the model's tools
+                                                            tool = next((t for t in self.tools if t.name == tool_call.function.name), None)
+                                                            if tool:
+                                                                print(f"Found tool: {tool.name}")
+                                                                print(f"Tool config: {tool.__dict__}")
+                                                                
+                                                                # Execute the tool
+                                                                try:
+                                                                    # Strip Python code block markers if present
+                                                                    args = tool_call.function.arguments
+                                                                    if args.startswith('<|python_start|>'):
+                                                                        args = args[len('<|python_start|>'):]
+                                                                    if args.endswith('<|python_end|>'):
+                                                                        args = args[:-len('<|python_end|>')]
+                                                                    
+                                                                    result = await tool.on_invoke_tool(None, args)
+                                                                    print(f"Tool execution result: {result}")
+                                                                    
+                                                                    # Create a new event with the tool result
+                                                                    event.content = result
+                                                                    event.tool_calls = [tool_call]
+                                                                    yield event
+                                                                    
+                                                                    results.append(result)
+                                                                except Exception as e:
+                                                                    print(f"Error executing tool {tool.name}: {str(e)}")
+                                                                    print(f"Stack trace:", exc_info=True)
+                                                                    error_msg = f"Error executing tool {tool.name}: {str(e)}"
+                                                                    event.content = error_msg
+                                                                    yield event
+                                                            else:
+                                                                print(f"ERROR: Tool {tool_call.function.name} not found in available tools: {[t.name for t in self.tools]}")
+                                                                error_msg = f"Tool {tool_call.function.name} not found"
+                                                                event.content = error_msg
+                                                                yield event
+                                                        
+                                                        print(f"Tool call results: {results}")
+                                                        # Don't create a new event here, we already yielded the results
+                                                        return
+                                                except json.JSONDecodeError as e:
+                                                    print(f"Failed to parse tool calls: {e}")
+                                                    print(f"Tool calls string: {tool_calls_str}")
                             yield event
                     except GeneratorExit:
                         # Handle generator exit gracefully

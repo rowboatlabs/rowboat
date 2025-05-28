@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm-proxy
+  labels:
+    app: litellm-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm-proxy
+  template:
+    metadata:
+      labels:
+        app: litellm-proxy
+    spec:
+      containers:
+      - name: litellm-proxy
+        image: stevef1uk/litellm-proxy:latest
+        env:
+        # Modal credentials
+        - name: TOKEN_ID
+          valueFrom:
+            secretKeyRef:
+              name: litellm-secrets
+              key: token-id
+        - name: TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: litellm-secrets
+              key: token-secret
+        # LiteLLM specific secrets
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm-secrets
+              key: openai-api-key
+        - name: GROQ_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm-secrets
+              key: groq-api-key
+        - name: LITELLM_MASTER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm-secrets
+              key: litellm-master-key
+        - name: LITELLM_SALT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm-secrets
+              key: litellm-salt-key
+        # UI credentials
+        - name: UI_USERNAME
+          value: "admin"
+        - name: UI_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: litellm-secrets
+              key: ui-password
+        # Database configuration
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: litellm-secrets
+              key: database-url
+        # Additional settings
+        - name: LITELLM_VERIFY_TOKEN
+          value: "false"
+        - name: LITELLM_TOKEN_DB_SYNC
+          value: "false"
+        - name: LITELLM_UI_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: litellm-secrets
+              key: ui-password
+        - name: LITELLM_UI_USERNAME
+          value: "admin"
+        - name: PRISMA_CLIENT_CONNECTION_TIMEOUT
+          value: "30000"
+        - name: PRISMA_CLIENT_QUERY_TIMEOUT
+          value: "30000"
+        # OpenAI specific settings
+        - name: OPENAI_API_BASE
+          value: "https://api.openai.com/v1"
+        - name: OPENAI_API_VERSION
+          value: "2024-02-15-preview"
+        - name: OPENAI_API_TYPE
+          value: "openai"
+        - name: OPENAI_API_TIMEOUT
+          value: "30000"
+        - name: LITELLM_TIMEOUT
+          value: "30000"
+        - name: LITELLM_DEBUG
+          value: "true"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+        ports:
+        - containerPort: 4000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 4000
+            httpHeaders:
+            - name: Authorization
+              value: Bearer sk-ZpzWhDlT-GZIqhnW8JcqHw
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: config-volume
+        configMap:
+          name: litellm-config 

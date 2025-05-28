@@ -40,10 +40,7 @@ spec:
               name: app-secrets
               key: COPILOT_API_KEY
         - name: PROVIDER_BASE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: PROVIDER_BASE_URL
+          value: "http://litellm-proxy:4000/v1"
         - name: PROVIDER_API_KEY
           valueFrom:
             secretKeyRef:
@@ -59,6 +56,8 @@ spec:
             configMapKeyRef:
               name: app-config
               key: PROVIDER_COPILOT_MODEL
+        - name: LITELLM_API_KEY
+          value: "Bearer sk-ZpzWhDlT-GZIqhnW8JcqHw"
         resources:
           requests:
             cpu: "500m"

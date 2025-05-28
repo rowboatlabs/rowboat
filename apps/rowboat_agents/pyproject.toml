@@ -6,7 +6,7 @@ authors = ["Akhilesh <akhilesh@rowboatlabs.com>"]
 license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/rowboatlabs/agents"
-package-mode = false
+packages = []
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
@@ -20,7 +20,7 @@ beautifulsoup4 = "^4.12.3"
 blinker = "^1.9.0"
 build = "1.2.2.post1"
 CacheControl = "^0.14.2"
-certifi = "^2024.12.14"
+certifi = ">=2023.7.22,<2024.0.0"
 cffi = "^1.17.1"
 charset-normalizer = "^3.4.1"
 cleo = "^2.1.0"
@@ -51,6 +51,7 @@ Jinja2 = "^3.1.5"
 jiter = "^0.6.1"
 jsonpath-python = "^1.0.6"
 keyring = "^25.6.0"
+litellm = "1.0.0"
 lxml = "^5.3.0"
 markdownify = "^0.13.1"
 MarkupSafe = "^3.0.2"

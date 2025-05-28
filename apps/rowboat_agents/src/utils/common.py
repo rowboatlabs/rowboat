@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 from dotenv import load_dotenv
-from openai import OpenAI
+from .model_provider import model_provider
 
 from src.utils.client import completions_client
 load_dotenv()
@@ -33,18 +33,18 @@ def setup_logger(name, log_file='./run.log', level=logging.INFO, log_to_file=Fal
 
     return logger
 
-common_logger = setup_logger('logger')
-logger = common_logger
+# Create a common logger instance
+common_logger = setup_logger('common')
 
 def read_json_from_file(file_name):
-    logger.info(f"Reading json from {file_name}")
+    common_logger.info(f"Reading json from {file_name}")
     try:
         with open(file_name, 'r') as file: 
             out = file.read()
             out = json.loads(out)
             return out
     except Exception as e:
-        logger.error(e)
+        common_logger.error(e)
         return None
 
 def get_api_key(key_name):
@@ -54,54 +54,52 @@ def get_api_key(key_name):
         raise ValueError(f"{key_name} not found. Did you set it in the .env file?")
     return api_key
 
-def generate_gpt4o_output_from_multi_turn_conv(messages, output_type='json', model="gpt-4o"):
-    return generate_openai_output(messages, output_type, model)
+async def generate_gpt4o_output_from_multi_turn_conv(messages, output_type='json', model="gpt-4o"):
+    return await generate_openai_output(messages, output_type, model)
 
-def generate_openai_output(messages, output_type='not_json', model="gpt-4o", return_completion=False):
-    print(f"In generate_openai_output, using client: {completions_client} and model: {model}")
+async def generate_openai_output(messages, output_type='not_json', model="gpt-4o", return_completion=False):
+    print(f"In generate_openai_output, using model: {model}")
     try:
-        if output_type == 'json':
-            chat_completion = completions_client.chat.completions.create(
-                model=model,
-                messages=messages,
-                response_format={"type": "json_object"}
-            )
-        else:
-            chat_completion = completions_client.chat.completions.create(
-                model=model,
-                messages=messages,
-            )
+        response = await model_provider.generate_output(
+            messages=messages,
+            model=model,
+            output_type=output_type
+        )
         
         if return_completion:
-            return chat_completion
-        return chat_completion.choices[0].message.content
+            return response
+        return response
 
     except Exception as e:
-        logger.error(e)
+        common_logger.error(e)
         return None
 
-def generate_llm_output(messages, model):
-    model_provider = None
-    if "gpt" in model:
-        model_provider = "openai"
-    else:
-        raise ValueError(f"Model {model} not supported")
-
-    if model_provider == "openai":
-        response = generate_openai_output(messages, output_type='text', model=model)
+async def generate_llm_output(messages, model):
+    try:
+        response = await model_provider.generate_output(
+            messages=messages,
+            model=model,
+            output_type='text'
+        )
         return response
-    
-def generate_gpt4o_output_from_multi_turn_conv_multithreaded(messages, retries=5, delay=1, output_type='json'):
+    except Exception as e:
+        common_logger.error(f"Error generating LLM output: {str(e)}")
+        return None
+
+async def generate_gpt4o_output_from_multi_turn_conv_multithreaded(messages, retries=5, delay=1, output_type='json'):
     while retries > 0:
         try:
             # Call GPT-4o API
-            output = generate_gpt4o_output_from_multi_turn_conv(messages, output_type='json')
+            output = await generate_gpt4o_output_from_multi_turn_conv(messages, output_type='json')
             return output  # If the request is successful, break out of the loop
-        except openai.RateLimitError:
-            print(f'Rate limit exceeded. Retrying in {delay} seconds...')
-            time.sleep(delay)
-            delay *= 2  # Exponential backoff
-            retries -= 1
+        except Exception as e:
+            if "rate_limit" in str(e).lower():
+                print(f'Rate limit exceeded. Retrying in {delay} seconds...')
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+                retries -= 1
+            else:
+                raise
 
     if retries == 0:
         print(f'Failed to process due to rate limit.')
@@ -131,14 +129,14 @@ def merge_defaultdicts(dict_parent, dict_child):
     return dict_parent
 
 def read_jsonl_from_file(file_name):
-    # logger.info(f"Reading jsonl from {file_name}")
+    # common_logger.info(f"Reading jsonl from {file_name}")
     try:
         with open(file_name, 'r') as file:
             lines = file.readlines()
             dataset = [json.loads(line.strip()) for line in lines]
         return dataset
     except Exception as e:
-        logger.error(e)
+        common_logger.error(e)
         return None
 
 def write_jsonl_to_file(list_dicts, file_name):
@@ -148,7 +146,7 @@ def write_jsonl_to_file(list_dicts, file_name):
                 file.write(json.dumps(d)+'\n')
         return True
     except Exception as e:
-        logger.error(e)
+        common_logger.error(e)
         return False
 
 def read_text_from_file(file_name):
@@ -157,7 +155,7 @@ def read_text_from_file(file_name):
             out = file.read()
         return out
     except Exception as e:
-        logger.error(e)
+        common_logger.error(e)
         return None
     
 def write_json_to_file(data, file_name):
@@ -166,7 +164,7 @@ def write_json_to_file(data, file_name):
             json.dump(data, file, indent=4)
         return True
     except Exception as e:
-        logger.error(e)
+        common_logger.error(e)
         return False
 
 

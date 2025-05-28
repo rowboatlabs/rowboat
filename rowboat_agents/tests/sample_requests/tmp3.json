@@ -1,0 +1,385 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": ""
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-06T07:17:21.052Z",
+      "role": "assistant",
+      "content": "How can I help you today?",
+      "agenticSender": "Credit Card Hub",
+      "agenticResponseType": "external"
+    },
+    {
+      "role": "user",
+      "content": "What is the process for applying for a card?",
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-06T07:17:31.404Z"
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-06T07:17:32.671Z",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "404dafe5-7b5b-4617-bd2f-ecac3119c928",
+          "function": {
+            "name": "transfer_to_agent",
+            "arguments": "{\"assistant\": \"Card Application Process\"}"
+          },
+          "type": "function"
+        }
+      ],
+      "agenticSender": "Credit Card Hub",
+      "agenticResponseType": "internal"
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-06T07:17:32.671Z",
+      "role": "tool",
+      "content": "{\"assistant\": \"Card Application Process\"}",
+      "tool_call_id": "404dafe5-7b5b-4617-bd2f-ecac3119c928",
+      "tool_name": "transfer_to_agent"
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-06T07:17:33.734Z",
+      "role": "assistant",
+      "content": "Which credit card are you interested in applying for?",
+      "agenticSender": "Card Application Process",
+      "agenticResponseType": "external"
+    },
+    {
+      "role": "user",
+      "content": "Amex centurion",
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-06T07:17:41.963Z"
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-06T07:17:55.790Z",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "ws_6819b79705a08192a819334a0c7900b6004e105788fca541",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"search_id\": \"ws_6819b79705a08192a819334a0c7900b6004e105788fca541\"}"
+          },
+          "type": "function"
+        }
+      ],
+      "agenticSender": "Card Application Process",
+      "agenticResponseType": "internal"
+    },
+    {
+      "version": "v1",
+      "chatId": "",
+      "createdAt": "2025-05-06T07:17:55.790Z",
+      "role": "assistant",
+      "content": "The American Express Centurion Card, commonly known as the \"Black Card,\" is an invitation-only charge card designed for high-net-worth individuals. To be considered for an invitation, you typically need to meet the following criteria:\n\n- **Existing American Express Relationship**: You should have an active American Express card account.\n\n- **High Annual Spending**: While American Express does not publicly disclose specific spending thresholds, reports suggest that spending between $250,000 and $500,000 annually on your American Express cards may increase your chances of receiving an invitation. ([nerdwallet.com](https://www.nerdwallet.com/article/travel/centurion-black-card?utm_source=openai))\n\n- **Luxury Spending Patterns**: Expenditures on luxury items, such as high-end travel, fine dining, and premium goods, are considered favorable. ([fool.com](https://www.fool.com/the-ascent/credit-cards/articles/your-guide-to-getting-an-amex-black-card/?utm_source=openai))\n\n- **Excellent Credit Score**: A credit score of 800 or higher is typically expected. ([finance.yahoo.com](https://finance.yahoo.com/personal-finance/american-express-centurion-card-213619679.html?utm_source=openai))\n\nIf you believe you meet these criteria, you can express your interest by visiting the official Centurion website and submitting a request for consideration. Please note that submitting a request does not guarantee an invitation, as American Express evaluates each request based on its internal criteria. ([thepointsguy.com](https://thepointsguy.com/news/you-can-now-request-an-invite-to-the-amex-centurion-card/?utm_source=openai))\n\nShould you receive an invitation and choose to accept it, be prepared for the following fees:\n\n- **Initiation Fee**: A one-time fee of $10,000.\n\n- **Annual Fee**: An ongoing annual fee of $5,000. ([forbes.com](https://www.forbes.com/advisor/credit-cards/reviews/centurion-from-american-express/?utm_source=openai))\n\nPlease be aware that the Centurion Card is designed for individuals with substantial financial resources and specific spending habits. If you do not meet these criteria, American Express offers a range of other premium cards that might better suit your needs. ",
+      "agenticSender": "Card Application Process",
+      "agenticResponseType": "external"
+    }
+  ],
+  "lastRequest": {
+    "projectId": "05d64a45-8468-4783-b5df-c9644d2d7ba5",
+    "messages": [
+      {
+        "content": "",
+        "role": "system",
+        "sender": null,
+        "tool_calls": null,
+        "tool_call_id": null,
+        "tool_name": null
+      },
+      {
+        "content": "How can I help you today?",
+        "role": "assistant",
+        "sender": "Credit Card Hub",
+        "tool_calls": null,
+        "tool_call_id": null,
+        "tool_name": null,
+        "response_type": "external"
+      },
+      {
+        "content": "What is the process for applying for a card?",
+        "role": "user",
+        "sender": null,
+        "tool_calls": null,
+        "tool_call_id": null,
+        "tool_name": null
+      },
+      {
+        "content": null,
+        "role": "assistant",
+        "sender": "Credit Card Hub",
+        "tool_calls": [
+          {
+            "id": "404dafe5-7b5b-4617-bd2f-ecac3119c928",
+            "function": {
+              "name": "transfer_to_agent",
+              "arguments": "{\"assistant\": \"Card Application Process\"}"
+            },
+            "type": "function"
+          }
+        ],
+        "tool_call_id": null,
+        "tool_name": null,
+        "response_type": "internal"
+      },
+      {
+        "content": "{\"assistant\": \"Card Application Process\"}",
+        "role": "tool",
+        "sender": null,
+        "tool_calls": null,
+        "tool_call_id": "404dafe5-7b5b-4617-bd2f-ecac3119c928",
+        "tool_name": "transfer_to_agent"
+      },
+      {
+        "content": "Which credit card are you interested in applying for?",
+        "role": "assistant",
+        "sender": "Card Application Process",
+        "tool_calls": null,
+        "tool_call_id": null,
+        "tool_name": null,
+        "response_type": "external"
+      },
+      {
+        "content": "Amex centurion",
+        "role": "user",
+        "sender": null,
+        "tool_calls": null,
+        "tool_call_id": null,
+        "tool_name": null
+      }
+    ],
+    "state": {
+      "last_agent_name": "Card Application Process",
+      "tokens": {
+        "total": 0,
+        "prompt": 0,
+        "completion": 0
+      },
+      "turn_messages": [
+        {
+          "content": "Sender agent: Card Application Process\nContent: Which credit card are you interested in applying for?",
+          "role": "assistant",
+          "sender": "Card Application Process",
+          "tool_calls": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "response_type": "external"
+        }
+      ]
+    },
+    "agents": [
+      {
+        "name": "Credit Card Hub",
+        "type": "conversation",
+        "description": "Hub agent to route credit card related queries to the appropriate sub-agent.",
+        "instructions": "## 🧑‍💼 Role:\nYou are the hub for all credit card related queries. Your job is to understand the user's intent and route them to the correct agent: recommendations, benefits, or application process.\n\n---\n## ⚙️ Steps to Follow:\n1. If the user wants card recommendations, call [@agent:Card Recommendation].\n2. If the user asks about card benefits or features, call [@agent:Card Benefits].\n3. If the user wants to know about the application process, call [@agent:Card Application Process].\n4. If the query is unclear, ask a clarifying question.\n5. If the query is out of scope, politely inform the user.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Routing queries about credit card recommendations, benefits, and application process.\n\n❌ Out of Scope:\n- Non-credit card related queries.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Be professional and friendly.\n- Ask clarifying questions if unsure.\n\n🚫 Don'ts:\n- Do not answer detailed questions yourself; always route to the correct agent.\n- Do not say 'connecting you to an agent'.\n\n\n# Examples\n- **User**: I want to know which credit card is best for travel.\n - **Agent actions**: Call [@agent:Card Recommendation](#mention)\n\n- **User**: What are the benefits of your platinum card?\n - **Agent actions**: Call [@agent:Card Benefits](#mention)\n\n- **User**: How do I apply for a credit card?\n - **Agent actions**: Call [@agent:Card Application Process](#mention)\n\n- **User**: Can you help me with my savings account?\n - **Agent response**: I'm sorry, I can only assist with credit card related queries.\n\n- **User**: Hi, I have a question.\n - **Agent response**: Hello! How can I help you with credit cards today?",
+        "model": "gpt-4o",
+        "controlType": "retain",
+        "ragK": 3,
+        "ragReturnType": "chunks",
+        "tools": [],
+        "prompts": [],
+        "connectedAgents": [
+          "Card Recommendation",
+          "Card Benefits",
+          "Card Application Process"
+        ]
+      },
+      {
+        "name": "Card Recommendation",
+        "type": "conversation",
+        "description": "Recommends suitable credit cards based on user preferences and needs.",
+        "instructions": "## 🧑‍💼 Role:\nHelp users find the best credit card for their needs by asking about their preferences and providing tailored recommendations.\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user about their preferences (e.g., travel, cashback, low interest, rewards). If they have already mentioned one of the categories, skip to the next step directly. \n2. Use [@tool:recommendation] to find suitable credit card matching their needs.\n3. If the request is out of scope, call [@agent:Credit Card Hub] \n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Recommending credit cards based on user needs.\n- Explaining why a card is recommended.\n\n❌ Out of Scope:\n- Detailed card benefits (refer to Card Benefits agent).\n- Application process (refer to Card Application Process agent).\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Be professional and friendly.\n- Tailor recommendations to user input.\n\n🚫 Don'ts:\n- Recommend cards without understanding user needs.\n\n\n\n\n# Examples\n- **User**: I want a card with good travel rewards.\n - **Agent actions**: Call [@tool:web_search]\n - **Agent response**: Based on your interest in travel rewards, here are some great options: 1. Travel Platinum Card – excellent for frequent flyers, 2. Explorer Rewards Card – great for international travel. Would you like more details on any of these?\n\n- **User**: Which card is best for cashback?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: For cashback, I recommend: 1. Cashback Plus Card – up to 5% cashback on groceries, 2. Everyday Saver Card – 2% cashback on all purchases. Would you like to know more?\n\n- **User**: I want a card with a low interest rate.\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: Here are some low interest rate cards: 1. Low Rate Advantage Card, 2. Simple Interest Card. Let me know if you want more information.\n\n- **User**: Can you recommend a card for students?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: For students, these cards are popular: 1. Student Starter Card, 2. Young Achiever Card. Would you like details on their features?\n\n- **User**: What if I want both travel and cashback?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: There are hybrid cards that offer both travel rewards and cashback. Here are two options: 1. Flexi Rewards Card, 2. Global Cashback Card. Would you like to compare them?",
+        "model": "gpt-4o",
+        "controlType": "retain",
+        "ragK": 3,
+        "ragReturnType": "chunks",
+        "outputVisibility": "user_facing",
+        "tools": [
+          "recommendation",
+          "web_search"
+        ],
+        "prompts": [],
+        "connectedAgents": [
+          "Credit Card Hub"
+        ]
+      },
+      {
+        "name": "Card Benefits",
+        "type": "conversation",
+        "description": "Provides detailed information about the benefits and features of specific credit cards.",
+        "instructions": "## 🧑‍💼 Role:\nAnswer user questions about the benefits, features, and perks of credit cards.\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user which card they want to know about if not specified.\n2. Use [@tool:web_search] to find up-to-date information about the card's benefits.\n3. Summarize the key benefits and features in a clear, friendly, and professional manner.\n4. Offer to answer follow-up questions or compare with other cards.\n5. If the request is out of scope, call [@agent:Credit Card Hub].\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Explaining card benefits, features, and perks.\n- Comparing benefits between cards.\n\n❌ Out of Scope:\n- Recommending cards (refer to Card Recommendation agent).\n- Application process (refer to Card Application Process agent).\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Be accurate, clear, and concise.\n- Use up-to-date information.\n\n🚫 Don'ts:\n- Speculate about benefits; always check with web_search.\n\n# Examples\n- **User**: What are the benefits of the Platinum Card?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: The Platinum Card offers benefits such as airport lounge access, travel insurance, and high reward points on travel spending. Would you like more details on any of these?\n\n- **User**: Does the Cashback Plus Card have purchase protection?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: Yes, the Cashback Plus Card includes purchase protection for eligible items. Would you like to know the coverage details?\n\n- **User**: Can you compare the benefits of the Student Starter Card and the Young Achiever Card?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: Here’s a comparison: Student Starter Card – no annual fee, basic rewards; Young Achiever Card – higher rewards, some travel perks. Would you like a detailed breakdown?\n\n- **User**: What perks come with the Explorer Rewards Card?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: The Explorer Rewards Card offers perks like complimentary travel insurance, bonus points on international purchases, and concierge service.\n\n- **User**: Tell me about the insurance benefits of the Low Rate Advantage Card.\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: The Low Rate Advantage Card includes travel accident insurance and extended warranty on purchases. Would you like more information?",
+        "model": "gpt-4o",
+        "controlType": "retain",
+        "ragK": 3,
+        "ragReturnType": "chunks",
+        "outputVisibility": "user_facing",
+        "tools": [
+          "web_search"
+        ],
+        "prompts": [],
+        "connectedAgents": [
+          "Credit Card Hub"
+        ]
+      },
+      {
+        "name": "Card Application Process",
+        "type": "conversation",
+        "description": "Guides users through the credit card application process, including eligibility and required documents.",
+        "instructions": "## 🧑‍💼 Role:\nGuide users through the process of applying for a credit card, including eligibility, required documents, and next steps.\n\n---\n## ⚙️ Steps to Follow:\n1. Ask the user which card they want to apply for - if they haven't already told you.\n2. Using [@tool:web_search], search the web for the needed information. You have to use the web_search tool without fail. You cannot make up information.\n3. If the request is out of scope, call [@agent:Credit Card Hub].\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Explaining application steps, eligibility, and required documents.\n- Guiding users through the process.\n\n❌ Out of Scope:\n- Recommending cards (refer to Card Recommendation agent).\n- Explaining card benefits (refer to Card Benefits agent).\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Be clear, step-by-step, and supportive.\n- Use up-to-date information.\n\n🚫 Don'ts:\n- Provide application links unless verified via web_search.\n\n\n# Examples\n- **User**: How do I apply for the Platinum Card?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: To apply for the Platinum Card, you’ll need to meet the eligibility criteria (e.g., minimum income, age) and provide documents like ID and proof of income. You can apply online or at a branch. Would you like a step-by-step guide?\n\n- **User**: What documents do I need to apply for a credit card?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: Typically, you’ll need a government-issued ID, proof of income, and address verification. Would you like details for a specific card?\n\n- **User**: Can I apply for a card as a student?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: Many banks offer student credit cards with relaxed eligibility. You’ll usually need proof of enrollment and a student ID. Would you like to see some options?\n\n- **User**: Is there an online application for the Cashback Plus Card?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: Yes, you can apply online for the Cashback Plus Card. I can guide you through the steps or provide the official link if you’d like.\n\n- **User**: What’s the minimum income for the Explorer Rewards Card?\n - **Agent actions**: Call [@tool:web_search](#mention)\n - **Agent response**: The minimum income requirement for the Explorer Rewards Card is typically $30,000 per year. Would you like more details on eligibility?",
+        "model": "gpt-4o",
+        "controlType": "retain",
+        "ragK": 3,
+        "ragReturnType": "chunks",
+        "outputVisibility": "user_facing",
+        "tools": [
+          "web_search"
+        ],
+        "prompts": [],
+        "connectedAgents": [
+          "Credit Card Hub"
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "name": "web_search",
+        "description": "Fetch information from the web based on chat context",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        },
+        "isLibrary": true
+      },
+      {
+        "name": "recommendation",
+        "description": "Recommends a card",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        },
+        "mockTool": true,
+        "mockInstructions": "Recommend a random credit card"
+      }
+    ],
+    "prompts": [],
+    "startAgent": "Credit Card Hub",
+    "mcpServers": [],
+    "toolWebhookUrl": ""
+  },
+  "lastResponse": {
+    "state": {
+      "last_agent_name": "Card Application Process",
+      "tokens": {
+        "total": 0,
+        "prompt": 0,
+        "completion": 0
+      },
+      "turn_messages": [
+        {
+          "content": "Sender agent: Card Application Process\nContent: None",
+          "role": "assistant",
+          "sender": "Card Application Process",
+          "tool_calls": [
+            {
+              "function": {
+                "name": "web_search",
+                "arguments": "{\"search_id\": \"ws_6819b79705a08192a819334a0c7900b6004e105788fca541\"}"
+              },
+              "id": "ws_6819b79705a08192a819334a0c7900b6004e105788fca541",
+              "type": "function"
+            }
+          ],
+          "tool_call_id": null,
+          "tool_name": null,
+          "response_type": "internal"
+        },
+        {
+          "content": "Sender agent: Card Application Process\nContent: The American Express Centurion Card, commonly known as the \"Black Card,\" is an invitation-only charge card designed for high-net-worth individuals. To be considered for an invitation, you typically need to meet the following criteria:\n\n- **Existing American Express Relationship**: You should have an active American Express card account.\n\n- **High Annual Spending**: While American Express does not publicly disclose specific spending thresholds, reports suggest that spending between $250,000 and $500,000 annually on your American Express cards may increase your chances of receiving an invitation. ([nerdwallet.com](https://www.nerdwallet.com/article/travel/centurion-black-card?utm_source=openai))\n\n- **Luxury Spending Patterns**: Expenditures on luxury items, such as high-end travel, fine dining, and premium goods, are considered favorable. ([fool.com](https://www.fool.com/the-ascent/credit-cards/articles/your-guide-to-getting-an-amex-black-card/?utm_source=openai))\n\n- **Excellent Credit Score**: A credit score of 800 or higher is typically expected. ([finance.yahoo.com](https://finance.yahoo.com/personal-finance/american-express-centurion-card-213619679.html?utm_source=openai))\n\nIf you believe you meet these criteria, you can express your interest by visiting the official Centurion website and submitting a request for consideration. Please note that submitting a request does not guarantee an invitation, as American Express evaluates each request based on its internal criteria. ([thepointsguy.com](https://thepointsguy.com/news/you-can-now-request-an-invite-to-the-amex-centurion-card/?utm_source=openai))\n\nShould you receive an invitation and choose to accept it, be prepared for the following fees:\n\n- **Initiation Fee**: A one-time fee of $10,000.\n\n- **Annual Fee**: An ongoing annual fee of $5,000. ([forbes.com](https://www.forbes.com/advisor/credit-cards/reviews/centurion-from-american-express/?utm_source=openai))\n\nPlease be aware that the Centurion Card is designed for individuals with substantial financial resources and specific spending habits. If you do not meet these criteria, American Express offers a range of other premium cards that might better suit your needs. ",
+          "role": "assistant",
+          "sender": "Card Application Process",
+          "tool_calls": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "response_type": "external",
+          "citations": [
+            {
+              "url": "https://www.nerdwallet.com/article/travel/centurion-black-card?utm_source=openai",
+              "title": "10 Things to Know About the AmEx Centurion Card - NerdWallet",
+              "start_index": 602,
+              "end_index": 702
+            },
+            {
+              "url": "https://www.fool.com/the-ascent/credit-cards/articles/your-guide-to-getting-an-amex-black-card/?utm_source=openai",
+              "title": "Your Guide to Getting an Amex Black Card",
+              "start_index": 849,
+              "end_index": 976
+            },
+            {
+              "url": "https://finance.yahoo.com/personal-finance/american-express-centurion-card-213619679.html?utm_source=openai",
+              "title": "Are you rich enough to score an Amex Centurion Card? (Spoiler: You're not)",
+              "start_index": 1063,
+              "end_index": 1193
+            },
+            {
+              "url": "https://thepointsguy.com/news/you-can-now-request-an-invite-to-the-amex-centurion-card/?utm_source=openai",
+              "title": "You can now request an invite to the Amex Centurion card - The Points Guy",
+              "start_index": 1499,
+              "end_index": 1626
+            },
+            {
+              "url": "https://www.forbes.com/advisor/credit-cards/reviews/centurion-from-american-express/?utm_source=openai",
+              "title": "American Express Centurion Black Card Review: What To Expect In 2025 – Forbes Advisor",
+              "start_index": 1824,
+              "end_index": 1942
+            }
+          ]
+        }
+      ]
+    },
+    "messages": [
+      {
+        "version": "v1",
+        "chatId": "",
+        "createdAt": "2025-05-06T07:17:55.790Z",
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "ws_6819b79705a08192a819334a0c7900b6004e105788fca541",
+            "function": {
+              "name": "web_search",
+              "arguments": "{\"search_id\": \"ws_6819b79705a08192a819334a0c7900b6004e105788fca541\"}"
+            },
+            "type": "function"
+          }
+        ],
+        "agenticSender": "Card Application Process",
+        "agenticResponseType": "internal"
+      },
+      {
+        "version": "v1",
+        "chatId": "",
+        "createdAt": "2025-05-06T07:17:55.790Z",
+        "role": "assistant",
+        "content": "The American Express Centurion Card, commonly known as the \"Black Card,\" is an invitation-only charge card designed for high-net-worth individuals. To be considered for an invitation, you typically need to meet the following criteria:\n\n- **Existing American Express Relationship**: You should have an active American Express card account.\n\n- **High Annual Spending**: While American Express does not publicly disclose specific spending thresholds, reports suggest that spending between $250,000 and $500,000 annually on your American Express cards may increase your chances of receiving an invitation. ([nerdwallet.com](https://www.nerdwallet.com/article/travel/centurion-black-card?utm_source=openai))\n\n- **Luxury Spending Patterns**: Expenditures on luxury items, such as high-end travel, fine dining, and premium goods, are considered favorable. ([fool.com](https://www.fool.com/the-ascent/credit-cards/articles/your-guide-to-getting-an-amex-black-card/?utm_source=openai))\n\n- **Excellent Credit Score**: A credit score of 800 or higher is typically expected. ([finance.yahoo.com](https://finance.yahoo.com/personal-finance/american-express-centurion-card-213619679.html?utm_source=openai))\n\nIf you believe you meet these criteria, you can express your interest by visiting the official Centurion website and submitting a request for consideration. Please note that submitting a request does not guarantee an invitation, as American Express evaluates each request based on its internal criteria. ([thepointsguy.com](https://thepointsguy.com/news/you-can-now-request-an-invite-to-the-amex-centurion-card/?utm_source=openai))\n\nShould you receive an invitation and choose to accept it, be prepared for the following fees:\n\n- **Initiation Fee**: A one-time fee of $10,000.\n\n- **Annual Fee**: An ongoing annual fee of $5,000. ([forbes.com](https://www.forbes.com/advisor/credit-cards/reviews/centurion-from-american-express/?utm_source=openai))\n\nPlease be aware that the Centurion Card is designed for individuals with substantial financial resources and specific spending habits. If you do not meet these criteria, American Express offers a range of other premium cards that might better suit your needs. ",
+        "agenticSender": "Card Application Process",
+        "agenticResponseType": "external"
+      }
+    ]
+  }
+}

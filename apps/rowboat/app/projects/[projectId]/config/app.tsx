@@ -305,7 +305,7 @@ function McpServersSection({
                             />
                             <Input
                                 label="SSE URL"
-                                placeholder="https://localhost:8000/sse"
+                                placeholder="http://host.docker.internal:8000/sse"
                                 value={newServer.url}
                                 onChange={(e) => {
                                     setNewServer({ ...newServer, url: e.target.value });

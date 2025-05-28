@@ -1,0 +1,17 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-py"
+  interface = "asyncio"
+}
+
+model LiteLLM_ManagedFileTable {
+  id        String   @id @default(uuid())
+  filename  String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+} 
