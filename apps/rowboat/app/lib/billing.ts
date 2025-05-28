@@ -221,11 +221,10 @@ export async function requireBillingCustomer(): Promise<WithStringId<z.infer<typ
     // fetch or create customer
     let customer: WithStringId<z.infer<typeof Customer>> | null;
     if (user.billingCustomerId) {
-        console.log(`fetching billing customer id ${user.billingCustomerId} for user id ${user._id}`);
         customer = await getBillingCustomer(user.billingCustomerId);
     } else {
-        console.log(`creating billing customer for user id ${user._id}`);
         customer = await createBillingCustomer(user._id, user.email);
+        console.log("created billing customer", JSON.stringify({ userId: user._id, customer }));
 
         // update customer id in db
         await usersCollection.updateOne({
