@@ -1,7 +1,7 @@
 import { PricingPage } from "./app";
 import { redirect } from "next/navigation";
 import { createStripePricingTableSession, getBillingCustomer } from "@/app/lib/billing";
-import { requireBillingCustomer } from '../utils';
+import { requireBillingCustomer } from '@/app/lib/billing';
 import { USE_BILLING } from "@/app/lib/feature_flags";
 
 export const dynamic = 'force-dynamic';

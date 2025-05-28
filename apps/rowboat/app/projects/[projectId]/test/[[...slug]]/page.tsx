@@ -4,7 +4,7 @@ import { SimulationsApp } from "./simulations_app";
 import { ProfilesApp } from "./profiles_app";
 import { RunsApp } from "./runs_app";
 import { TestingMenu } from "./testing_menu";
-import { requireActiveBillingSubscription } from '@/app/billing/utils';
+import { requireActiveBillingSubscription } from '@/app/lib/billing';
 
 export default async function TestPage({ params }: { params: { projectId: string; slug?: string[] } }) {
     await requireActiveBillingSubscription();

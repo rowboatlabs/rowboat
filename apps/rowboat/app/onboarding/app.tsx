@@ -1,10 +1,9 @@
 "use client";
-
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { FormStatusButton } from "@/app/lib/components/form-status-button";
 import { useRouter } from "next/navigation";
-import { createBillingProfile } from "@/app/actions/billing_actions";
+import { updateUserEmail } from "../actions/auth_actions";
 import { tokens } from "@/app/styles/design-tokens";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { HorizontalDivider } from "@/components/ui/horizontal-divider";
@@ -12,7 +11,6 @@ import clsx from 'clsx';
 
 export default function App() {
   const router = useRouter();
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
@@ -20,17 +18,17 @@ export default function App() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
-    if (!name.trim() || !email.trim()) {
-      setError("Please enter both name and email.");
+    if (!email.trim()) {
+      setError("Please enter your email.");
       return;
     }
     setSubmitted(true);
 
     try {
-      await createBillingProfile(name, email);
+      await updateUserEmail(email);
       router.push('/projects');
     } catch (error) {
-      setError("Failed to create billing profile.");
+      setError("Failed to update email.");
     }
   }
 
@@ -43,27 +41,19 @@ export default function App() {
           tokens.colors.light.text.primary,
           tokens.colors.dark.text.primary
         )}>
-          Set up billing
+          Complete your profile
         </h1>
       </div>
 
       <section className="card">
         <div className="px-4 pt-4 pb-6">
           <SectionHeading>
-            Your information
+            Complete your profile
           </SectionHeading>
         </div>
         <HorizontalDivider />
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="space-y-4">
-            <Input
-              label="Name"
-              type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="Your name"
-              required
-            />
             <Input
               label="Email"
               type="email"

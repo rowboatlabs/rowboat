@@ -1,4 +1,4 @@
-import { requireBillingCustomer } from './utils';
+import { requireBillingCustomer } from '../lib/billing';
 import { BillingPage } from './app';
 import { getUsage } from '../lib/billing';
 import { redirect } from 'next/navigation';

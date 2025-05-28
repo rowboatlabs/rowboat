@@ -3,9 +3,25 @@ import { z } from 'zod';
 import { Customer, PricingTableResponse, AuthorizeRequest, AuthorizeResponse, LogUsageRequest, UsageResponse, CustomerPortalSessionResponse } from './types/billing_types';
 import { ObjectId } from 'mongodb';
 import { projectsCollection, usersCollection } from './mongodb';
+import { getSession } from '@auth0/nextjs-auth0';
+import { redirect } from 'next/navigation';
+import { getUserFromSessionId, requireAuth } from './auth';
+import { USE_BILLING } from './feature_flags';
 
 const BILLING_API_URL = process.env.BILLING_API_URL || 'http://billing';
 const BILLING_API_KEY = process.env.BILLING_API_KEY || 'test';
+
+const GUEST_BILLING_CUSTOMER = {
+    _id: "guest-user",
+    userId: "guest-user",
+    name: "Guest",
+    email: "guest@rowboatlabs.com",
+    stripeCustomerId: "guest",
+    subscriptionPlan: "free" as const,
+    subscriptionActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+};
 
 export class BillingError extends Error {
     constructor(message: string) {
@@ -48,14 +64,14 @@ export async function getBillingCustomer(id: string): Promise<WithStringId<z.inf
     return parseResult.data;
 }
 
-export async function createBillingCustomer(userId: string, email: string, name: string): Promise<WithStringId<z.infer<typeof Customer>>> {
+async function createBillingCustomer(userId: string, email: string): Promise<WithStringId<z.infer<typeof Customer>>> {
     const response = await fetch(`${BILLING_API_URL}/api/customers`, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${BILLING_API_KEY}`,
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ userId, email, name })
+        body: JSON.stringify({ userId, email })
     });
     if (!response.ok) {
         throw new Error(`Failed to create billing customer: ${response.status} ${response.statusText} ${await response.text()}`);
@@ -173,3 +189,79 @@ export async function createCustomerPortalSession(customerId: string, returnUrl:
     }
     return parseResult.data.url;
 }
+
+/**
+ * This function should be used as an initial check in server page components to ensure
+ * the user has a valid billing customer record. It will:
+ * 1. Return a guest customer if billing is disabled
+ * 2. Verify user authentication
+ * 3. Create/update the user record if needed
+ * 4. Redirect to onboarding if no billing customer exists
+ *
+ * Usage in server components:
+ * ```ts
+ * const billingCustomer = await requireBillingCustomer();
+ * ```
+ */
+export async function requireBillingCustomer(): Promise<WithStringId<z.infer<typeof Customer>>> {
+    const user = await requireAuth();
+
+    if (!USE_BILLING) {
+        return {
+            ...GUEST_BILLING_CUSTOMER,
+            userId: user._id,
+        };
+    }
+
+    // if user does not have an email, redirect to onboarding
+    if (!user.email) {
+        redirect('/onboarding');
+    }
+
+    // fetch or create customer
+    let customer: WithStringId<z.infer<typeof Customer>> | null;
+    if (user.billingCustomerId) {
+        console.log(`fetching billing customer id ${user.billingCustomerId} for user id ${user._id}`);
+        customer = await getBillingCustomer(user.billingCustomerId);
+    } else {
+        console.log(`creating billing customer for user id ${user._id}`);
+        customer = await createBillingCustomer(user._id, user.email);
+
+        // update customer id in db
+        await usersCollection.updateOne({
+            _id: new ObjectId(user._id),
+        }, {
+            $set: {
+                billingCustomerId: customer._id,
+                updatedAt: new Date().toISOString(),
+            }
+        });
+    }
+    if (!customer) {
+        throw new Error("Failed to fetch or create billing customer");
+    }
+
+    return customer;
+}
+
+/**
+ * This function should be used in server page components to ensure the user has an active
+ * billing subscription. It will:
+ * 1. Return a guest customer if billing is disabled
+ * 2. Verify the user has a valid billing customer record
+ * 3. Redirect to checkout if the subscription is not active
+ *
+ * Usage in server components:
+ * ```ts
+ * const billingCustomer = await requireActiveBillingSubscription();
+ * ```
+ */
+export async function requireActiveBillingSubscription(): Promise<WithStringId<z.infer<typeof Customer>>> {
+    const billingCustomer = await requireBillingCustomer();
+
+    if (USE_BILLING && !billingCustomer?.subscriptionActive) {
+        redirect('/billing/checkout');
+    }
+    return billingCustomer;
+}
+

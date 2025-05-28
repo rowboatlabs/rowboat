@@ -1,7 +1,7 @@
 import { Metadata } from "next";
 import App from "./app";
 import { USE_CHAT_WIDGET } from "@/app/lib/feature_flags";
-import { requireActiveBillingSubscription } from '@/app/billing/utils';
+import { requireActiveBillingSubscription } from '@/app/lib/billing';
 
 export const metadata: Metadata = {
     title: "Project config",

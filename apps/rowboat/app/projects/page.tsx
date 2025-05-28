@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { requireActiveBillingSubscription } from '../billing/utils';
+import { requireActiveBillingSubscription } from '../lib/billing';
 
 export default async function Page() {
     await requireActiveBillingSubscription();

@@ -11,7 +11,6 @@ export const UsageType = z.enum([
 export const Customer = z.object({
     _id: z.string(),
     userId: z.string(),
-    name: z.string(),
     email: z.string(),
     stripeCustomerId: z.string(),
     subscriptionPlan: SubscriptionPlan.optional(),

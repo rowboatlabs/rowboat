@@ -1,6 +1,6 @@
 import { Metadata } from "next";
 import { SourcesList } from "./components/sources-list";
-import { requireActiveBillingSubscription } from '@/app/billing/utils';
+import { requireActiveBillingSubscription } from '@/app/lib/billing';
 
 export const metadata: Metadata = {
     title: "Data sources",
