@@ -223,7 +223,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                 }
                 router.push(`/projects/${response.id}/workflow`);
             } else {
-                setBillingError(`There was a billing error while creating your project: ${response.billingError}`);
+                setBillingError(response.billingError);
             }
         } catch (error) {
             console.error('Error creating project:', error);

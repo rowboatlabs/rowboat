@@ -104,6 +104,26 @@ export async function createStripePricingTableSession(customerId: string): Promi
     return parseResult.data as z.infer<typeof PricingTableResponse>;
 }
 
+export async function createStripeUpgradePricingTableSession(customerId: string): Promise<z.infer<typeof PricingTableResponse>> {
+    const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/stripe-upgrade-pricing-table-session`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${BILLING_API_KEY}`,
+            'Content-Type': 'application/json'
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to get stripe upgrade pricing table client secret: ${response.status} ${response.statusText} ${await response.text()}`);
+    }
+    const json = await response.json();
+    const parseResult = PricingTableResponse.safeParse(json);
+    if (!parseResult.success) {
+        throw new Error(`Failed to parse stripe upgrade pricing table session: ${JSON.stringify(parseResult.error)}`);
+    }
+    console.log('stripe upgrade pricing table session', json);
+    return parseResult.data as z.infer<typeof PricingTableResponse>;
+}
+
 export async function syncWithStripe(customerId: string): Promise<void> {
     const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/sync-with-stripe`, {
         method: 'POST',

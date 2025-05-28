@@ -1,27 +1,21 @@
 "use server";
-import { authorize, logUsage, getBillingCustomer, createCustomerPortalSession } from "../lib/billing";
+import { authorize, logUsage, getBillingCustomer, createCustomerPortalSession, createStripeUpgradePricingTableSession } from "../lib/billing";
 import { authCheck } from "./auth_actions";
 import { USE_BILLING } from "../lib/feature_flags";
-import { AuthorizeRequest, AuthorizeResponse, LogUsageRequest } from "../lib/types/billing_types";
+import { AuthorizeRequest, AuthorizeResponse, LogUsageRequest, PricingTableResponse, Customer } from "../lib/types/billing_types";
 import { z } from "zod";
-import { redirect } from "next/navigation";
-import { User } from "../lib/types/types";
+import { WithStringId } from "../lib/types/types";
 
-export async function requireBillingProfile(): Promise<z.infer<typeof User> & { billingCustomerId: string }> {
+async function getCustomer(): Promise<WithStringId<z.infer<typeof Customer>>> {
     const user = await authCheck();
-    if (!USE_BILLING) {
-        return {
-            ...user,
-            billingCustomerId: 'guest-user',
-        };
-    }
     if (!user.billingCustomerId) {
-        redirect('/billing/onboarding');
+        throw new Error("Customer not found");
     }
-    return {
-        ...user,
-        billingCustomerId: user.billingCustomerId,
-    };
+    const customer = await getBillingCustomer(user.billingCustomerId);
+    if (!customer) {
+        throw new Error("Customer not found");
+    }
+    return customer;
 }
 
 export async function authorizeUserAction(request: z.infer<typeof AuthorizeRequest>): Promise<z.infer<typeof AuthorizeResponse>> {
@@ -29,8 +23,8 @@ export async function authorizeUserAction(request: z.infer<typeof AuthorizeReque
         return { success: true };
     }
 
-    const user = await requireBillingProfile();
-    const response = await authorize(user.billingCustomerId, request);
+    const customer = await getCustomer();
+    const response = await authorize(customer._id, request);
     return response;
 }
 
@@ -39,20 +33,26 @@ export async function logBillingUsage(request: z.infer<typeof LogUsageRequest>) 
         return;
     }
 
-    const user = await requireBillingProfile();
-    await logUsage(user.billingCustomerId, request);
+    const customer = await getCustomer();
+    await logUsage(customer._id, request);
     return;
 }
 
 export async function getCustomerPortalUrl(returnUrl: string): Promise<string> {
     if (!USE_BILLING) {
-        return "";
+        throw new Error("Billing is not enabled")
     }
-    
-    const user = await requireBillingProfile();
-    const customer = await getBillingCustomer(user.billingCustomerId);
-    if (!customer) {
-        throw new Error("Customer not found");
-    }
+
+    const customer = await getCustomer();
     return await createCustomerPortalSession(customer._id, returnUrl);
+}
+
+export async function getUpgradePricingTableSession(): Promise<z.infer<typeof PricingTableResponse>> {
+    if (!USE_BILLING) {
+        throw new Error("Billing is not enabled");
+    }
+
+    const customer = await getCustomer();
+    const response = await createStripeUpgradePricingTableSession(customer._id);
+    return response;
 }
