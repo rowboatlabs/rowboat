@@ -15,6 +15,7 @@ import { fetchWorkflow } from "@/app/actions/workflow_actions";
 import { StructuredPanel, ActionButton } from "@/app/lib/components/structured-panel"
 import { DataTable } from "./components/table"
 import { isValidDate } from './utils/date';
+import { toast } from "sonner";
 
 function ViewRun({
     projectId,
@@ -81,6 +82,9 @@ function ViewRun({
             const result = await getSimulationResult(projectId, runId, simulationId);
             if (!result) {
                 console.error("No result found for simulation");
+                toast.error('Result not found:', {
+                    description: 'No simulation results available. Please run the simulation first.'
+                });
                 return;
             }
 
@@ -88,6 +92,9 @@ function ViewRun({
             const simulation = simulations.find(s => s._id === simulationId);
             if (!simulation) {
                 console.error("Simulation not found");
+                toast.error('Simulation not found:', {
+                    description: 'The requested simulation does not exist or has been deleted.'
+                });
                 return;
             }
 
@@ -118,6 +125,9 @@ function ViewRun({
             document.body.removeChild(a);
         } catch (error) {
             console.error("Failed to download result:", error);
+            toast.error('Download failed:', {
+                description: 'Unable to download results. Please try again.'
+            });
         }
     };
 

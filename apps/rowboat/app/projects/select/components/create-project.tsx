@@ -13,6 +13,7 @@ import { FolderOpenIcon, InformationCircleIcon } from "@heroicons/react/24/outli
 import { USE_MULTIPLE_PROJECTS } from "@/app/lib/feature_flags";
 import { HorizontalDivider } from "@/components/ui/horizontal-divider";
 import { Tooltip } from "@heroui/react";
+import { toast } from "sonner";
 
 // Add glow animation styles
 const glowStyles = `
@@ -226,6 +227,9 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
             router.push(`/projects/${response.id}/workflow`);
         } catch (error) {
             console.error('Error creating project:', error);
+            toast.error('Failed to create project:', {
+                description: 'Unable to create new project. Please try again.'
+            });
         }
     }
 

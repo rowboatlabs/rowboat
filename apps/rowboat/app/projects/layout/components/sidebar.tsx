@@ -4,10 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Tooltip } from "@heroui/react";
 import { UserButton } from "@/app/lib/components/user_button";
-import { 
-  DatabaseIcon, 
-  SettingsIcon, 
-  WorkflowIcon, 
+import {
+  DatabaseIcon,
+  SettingsIcon,
+  WorkflowIcon,
   PlayIcon,
   FolderOpenIcon,
   ChevronLeftIcon,
@@ -20,6 +20,7 @@ import { getProjectConfig } from "@/app/actions/project_actions";
 import { useTheme } from "@/app/providers/theme-provider";
 import { USE_TESTING_FEATURE, USE_PRODUCT_TOUR } from '@/app/lib/feature_flags';
 import { useHelpModal } from "@/app/providers/help-modal-provider";
+import { toast } from 'sonner';
 
 interface SidebarProps {
   projectId: string;
@@ -47,6 +48,9 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
           setProjectName(project.name);
         } catch (error) {
           console.error('Failed to fetch project name:', error);
+          toast.error('Failed to load project:', {
+            description: 'Unable to retrieve project information. Please refresh the page.'
+          });
           setProjectName("Select Project");
         }
       }
@@ -95,16 +99,16 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
               {/* Project Selector */}
               <div className="p-3 border-b border-zinc-100 dark:border-zinc-800">
                 <Tooltip content={collapsed ? projectName : "Change project"} showArrow placement="right">
-                  <Link 
+                  <Link
                     href="/projects"
                     className={`
                       flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all
                       ${collapsed ? 'justify-center py-4' : 'gap-3 px-4 py-2.5'}
                     `}
                   >
-                    <FolderOpenIcon 
-                      size={collapsed ? COLLAPSED_ICON_SIZE : EXPANDED_ICON_SIZE} 
-                      className="text-zinc-500 dark:text-zinc-400 transition-all duration-200" 
+                    <FolderOpenIcon
+                      size={collapsed ? COLLAPSED_ICON_SIZE : EXPANDED_ICON_SIZE}
+                      className="text-zinc-500 dark:text-zinc-400 transition-all duration-200"
                     />
                     {!collapsed && (
                       <span className="text-sm font-medium truncate">
@@ -122,25 +126,25 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
                   const fullPath = `/projects/${projectId}/${item.href}`;
                   const isActive = pathname.startsWith(fullPath);
                   const isDisabled = isProjectsRoute && item.requiresProject;
-                  
+
                   return (
-                    <Tooltip 
+                    <Tooltip
                       key={item.href}
                       content={collapsed ? item.label : ""}
-                      showArrow 
+                      showArrow
                       placement="right"
                     >
-                      <Link 
+                      <Link
                         href={isDisabled ? '#' : fullPath}
                         className={isDisabled ? 'pointer-events-none' : ''}
                       >
-                        <button 
+                        <button
                           className={`
                             relative w-full rounded-md flex items-center
                             text-[15px] font-medium transition-all duration-200
                             ${collapsed ? 'justify-center py-4' : 'px-4 py-4 gap-3'}
-                            ${isActive 
-                              ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-600 dark:border-indigo-400' 
+                            ${isActive
+                              ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-600 dark:border-indigo-400'
                               : isDisabled
                                 ? 'text-zinc-300 dark:text-zinc-600 cursor-not-allowed'
                                 : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300'
@@ -149,12 +153,12 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
                           disabled={isDisabled}
                           data-tour-target={item.href === 'config' ? 'settings' : item.href === 'sources' ? 'entity-data-sources' : undefined}
                         >
-                          <Icon 
-                            size={collapsed ? COLLAPSED_ICON_SIZE : EXPANDED_ICON_SIZE} 
+                          <Icon
+                            size={collapsed ? COLLAPSED_ICON_SIZE : EXPANDED_ICON_SIZE}
                             className={`
                               transition-all duration-200
-                              ${isDisabled 
-                                ? 'text-zinc-300 dark:text-zinc-600' 
+                              ${isDisabled
+                                ? 'text-zinc-300 dark:text-zinc-600'
                                 : isActive
                                   ? 'text-indigo-600 dark:text-indigo-400'
                                   : 'text-zinc-500 dark:text-zinc-400'
@@ -192,7 +196,7 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
           <div className="p-3 border-t border-zinc-100 dark:border-zinc-800 space-y-2">
             {USE_PRODUCT_TOUR && !isProjectsRoute && (
               <Tooltip content={collapsed ? "Help" : ""} showArrow placement="right">
-                <button 
+                <button
                   onClick={showHelpModal}
                   className={`
                     w-full rounded-md flex items-center
@@ -210,7 +214,7 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
             )}
 
             <Tooltip content={collapsed ? "Appearance" : ""} showArrow placement="right">
-              <button 
+              <button
                 onClick={toggleTheme}
                 className={`
                   w-full rounded-md flex items-center
@@ -220,14 +224,14 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
                   text-zinc-600 dark:text-zinc-400
                 `}
               >
-                { theme == "light" ? <Moon size={COLLAPSED_ICON_SIZE} /> : <Sun size={COLLAPSED_ICON_SIZE} /> }
+                {theme == "light" ? <Moon size={COLLAPSED_ICON_SIZE} /> : <Sun size={COLLAPSED_ICON_SIZE} />}
                 {!collapsed && <span>Appearance</span>}
               </button>
             </Tooltip>
 
             {useAuth && (
               <Tooltip content={collapsed ? "Account" : ""} showArrow placement="right">
-                <div 
+                <div
                   className={`
                     w-full rounded-md flex items-center
                     text-[15px] font-medium transition-all duration-200
