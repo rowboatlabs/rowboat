@@ -57,6 +57,7 @@
     "remark-gfm": "^4.0.0",
     "rowboat-shared": "github:rowboatlabs/shared",
     "sharp": "^0.33.4",
+    "sonner": "^2.0.3",
     "styled-components": "^5.3.11",
     "swr": "^2.2.5",
     "tailwind-merge": "^2.5.5",

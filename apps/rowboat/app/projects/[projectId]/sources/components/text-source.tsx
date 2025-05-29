@@ -8,6 +8,7 @@ import { FormStatusButton } from "../../../../lib/components/form-status-button"
 import { Spinner } from "@heroui/react";
 import { addDocsToDataSource, deleteDocsFromDataSource, listDocsInDataSource } from "../../../../actions/datasource_actions";
 import { Section } from "./section";
+import { toast } from "sonner";
 
 export function TextSource({
     projectId,
@@ -46,6 +47,9 @@ export function TextSource({
                 }
             } catch (error) {
                 console.error('Error fetching content:', error);
+                toast.error('Error fetching content:', {
+                    description: 'Unable to fetch content. Please try again.'
+                });
             } finally {
                 setIsLoading(false);
             }

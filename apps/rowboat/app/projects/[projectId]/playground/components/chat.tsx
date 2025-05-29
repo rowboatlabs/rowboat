@@ -15,6 +15,7 @@ import { TestProfile } from "@/app/lib/types/testing_types";
 import { WithStringId } from "@/app/lib/types/types";
 import { ProfileContextBox } from "./profile-context-box";
 import { USE_TESTING_FEATURE } from "@/app/lib/feature_flags";
+import { toast } from 'sonner'
 
 export function Chat({
     chat,
@@ -120,11 +121,11 @@ export function Chat({
         async function process() {
             setLoadingAssistantResponse(true);
             setFetchResponseError(null);
-            
+
             // Reset request/response state before making new request
             setLastAgenticRequest(null);
             setLastAgenticResponse(null);
-            
+
             const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow);
             const request: z.infer<typeof AgenticAPIChatRequest> = {
                 projectId,
@@ -144,7 +145,7 @@ export function Chat({
                 toolWebhookUrl: toolWebhookUrl,
                 testProfile: testProfile ?? undefined,
             };
-            
+
             // Store the full request object
             setLastAgenticRequest(request);
 
@@ -157,7 +158,17 @@ export function Chat({
                 streamId = response.streamId;
             } catch (err) {
                 if (!ignore) {
-                    setFetchResponseError(`Failed to get assistant response: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                    // setFetchResponseError(`Failed to get assistant response: ${err instanceof Error ? err.message : 'Unknown error'}`);
+
+                    if (err instanceof Error && err.message.includes('quota')) {
+                        toast.error('API Quota Exceeded', {
+                            description: 'Please check your billing settings or upgrade your plan.'
+                        });
+                    } else {
+                        toast.error('Failed to start conversation', {
+                            description: err instanceof Error ? err.message : 'Unknown error occurred'
+                        });
+                    }
                     setLoadingAssistantResponse(false);
                 }
             }
@@ -181,7 +192,9 @@ export function Chat({
                     setOptimisticMessages(prev => [...prev, parsedMsg]);
                 } catch (err) {
                     console.error('Failed to parse SSE message:', err);
-                    setFetchResponseError(`Failed to parse SSE message: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                    toast.error('Message Parse Error', {
+                        description: 'Received invalid message format from server'
+                    });
                     setOptimisticMessages(messages);
                 }
             });
@@ -193,13 +206,11 @@ export function Chat({
 
                 const parsed = JSON.parse(event.data);
                 setAgenticState(parsed.state);
-                
                 // Combine state and collected messages in the response
                 setLastAgenticResponse({
                     ...parsed,
                     messages: msgs
                 });
-                
                 setMessages([...messages, ...msgs]);
                 setLoadingAssistantResponse(false);
             });
@@ -211,8 +222,11 @@ export function Chat({
 
                 console.error('SSE Error:', event);
                 if (!ignore) {
+                    const errorData = JSON.parse(event.data);
+                    toast.error('Stream Error', {
+                        description: errorData.error || 'An error occurred during streaming'
+                    });
                     setLoadingAssistantResponse(false);
-                    setFetchResponseError('Error: ' + JSON.parse(event.data).error);
                     setOptimisticMessages(messages);
                 }
             });
@@ -221,7 +235,9 @@ export function Chat({
                 console.error('SSE Error:', error);
                 if (!ignore) {
                     setLoadingAssistantResponse(false);
-                    setFetchResponseError('Stream connection failed');
+                    toast.error('Connection Lost', {
+                        description: 'Stream connection failed. Please try sending your message again.'
+                    });
                     setOptimisticMessages(messages);
                 }
             };
@@ -270,7 +286,7 @@ export function Chat({
                 />
             )}
         </div>
-        
+
         <div className="flex-1 overflow-auto pr-1 
             [&::-webkit-scrollbar]{width:4px}
             [&::-webkit-scrollbar-track]{background:transparent}
@@ -306,7 +322,7 @@ export function Chat({
                     </Button>
                 </div>
             )}
-            
+
             <ComposeBoxPlayground
                 handleUserMessage={handleUserMessage}
                 messages={messages.filter(msg => msg.content !== undefined) as any}

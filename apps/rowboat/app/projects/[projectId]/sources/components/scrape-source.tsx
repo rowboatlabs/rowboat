@@ -11,6 +11,7 @@ import { FormStatusButton } from "../../../../lib/components/form-status-button"
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Section } from "./section";
+import { toast } from "sonner";
 
 function UrlListItem({ file, onDelete }: {
     file: WithStringId<z.infer<typeof DataSourceDoc>>,
@@ -76,6 +77,9 @@ function UrlList({ projectId, sourceId, onDelete }: {
                 }
             } catch (error) {
                 console.error('Error fetching files:', error);
+                toast.error('Error fetching files:', {
+                    description: 'Unable to load files. Please try again.'
+                });
             } finally {
                 setLoading(false);
             }

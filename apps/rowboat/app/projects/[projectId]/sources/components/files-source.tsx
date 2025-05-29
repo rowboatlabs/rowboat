@@ -9,6 +9,7 @@ import { RelativeTime } from "@primer/react";
 import { Pagination, Spinner } from "@heroui/react";
 import { DownloadIcon } from "lucide-react";
 import { Section } from "./section";
+import { toast } from "sonner";
 
 function FileListItem({
     projectId,
@@ -41,6 +42,9 @@ function FileListItem({
         } catch (error) {
             console.error('Download failed:', error);
             // TODO: Add error handling
+            toast.error('Download failed:', {
+                description: 'Connection interrupted. Please retry the download.'
+            });
         } finally {
             setIsDownloading(false);
         }
@@ -125,6 +129,9 @@ function PaginatedFileList({
                 }
             } catch (error) {
                 console.error('Error fetching files:', error);
+                toast.error('Error fetching files:', {
+                    description: 'Unable to load files. Please try again.'
+                });
             } finally {
                 setLoading(false);
             }
@@ -252,6 +259,9 @@ export function FilesSource({
         } catch (error) {
             console.error('Upload failed:', error);
             // TODO: Add error handling
+            toast.error('Upload failed:', {
+                description: 'Unable to upload file. Please try again.'
+            });
         } finally {
             setUploading(false);
         }

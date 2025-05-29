@@ -11,8 +11,8 @@ const EMBEDDING_VECTOR_SIZE = Number(process.env.EMBEDDING_VECTOR_SIZE) || 1536;
                 distance: 'Dot',
             },
         });
-        console.log(`Create qdrant collection 'embeddings' completed with result: ${result}`);
+        console.log(`Create qdrant collection 'embeddings' completed with result : ${result}`);
     } catch (error) {
-        console.error(`Unable to create qdrant collection 'embeddings': ${error}`);
+        console.error(`Unable to create qdrant collection 'embeddings ': ${error}`);
     }
 })();
