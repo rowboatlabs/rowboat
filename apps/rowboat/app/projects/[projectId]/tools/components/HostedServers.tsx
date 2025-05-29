@@ -199,15 +199,34 @@ export function HostedServers() {
   const handleToggleTool = async (server: McpServerType) => {
     try {
       const serverKey = server.name;
+      const isCurrentlyEnabled = enabledServers.has(serverKey);
+      const newState = !isCurrentlyEnabled;
+
+      // Immediately update UI state
+      setServers(prevServers => {
+        return prevServers.map(s => {
+          if (s.name === serverKey) {
+            return {
+              ...s,
+              isActive: newState,
+              // If turning off, reset these states
+              ...(newState ? {} : {
+                serverUrl: undefined,
+                tools: [],
+                isAuthenticated: false
+              })
+            };
+          }
+          return s;
+        });
+      });
+      
       setTogglingServers(prev => {
         const next = new Set(prev);
         next.add(serverKey);
         return next;
       });
       setToggleError(null);
-
-      const isCurrentlyEnabled = enabledServers.has(serverKey);
-      const newState = !isCurrentlyEnabled;
       
       setServerOperations(prev => {
         const next = new Map(prev);
@@ -250,22 +269,6 @@ export function HostedServers() {
             }
           }
         } else {
-          setServers(prevServers => {
-            return prevServers.map(s => {
-              if (s.name === serverKey) {
-                return {
-                  ...s,
-                  isActive: false,
-                  serverUrl: undefined,
-                  tools: [],
-                  availableTools: s.availableTools,
-                  isAuthenticated: false
-                };
-              }
-              return s;
-            });
-          });
-
           setServerToolCounts(prev => {
             const next = new Map(prev);
             next.set(serverKey, 0);
@@ -274,6 +277,25 @@ export function HostedServers() {
         }
       } catch (err) {
         console.error('Toggle failed:', { server: serverKey, error: err });
+        // Revert the UI state on error
+        setServers(prevServers => {
+          return prevServers.map(s => {
+            if (s.name === serverKey) {
+              return {
+                ...s,
+                isActive: isCurrentlyEnabled,
+                // Restore previous state if the toggle failed
+                ...(isCurrentlyEnabled ? {} : {
+                  serverUrl: undefined,
+                  tools: [],
+                  isAuthenticated: false
+                })
+              };
+            }
+            return s;
+          });
+        });
+        
         setEnabledServers(prev => {
           const next = new Set(prev);
           if (newState) {

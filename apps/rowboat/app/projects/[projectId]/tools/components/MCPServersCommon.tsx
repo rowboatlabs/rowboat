@@ -63,17 +63,40 @@ interface ServerOperationBannerProps {
 }
 
 export function ServerOperationBanner({ serverName, operation }: ServerOperationBannerProps) {
+  const getMessage = () => {
+    switch (operation) {
+      case 'setup':
+        return 'Setting up server (~10s)';
+      case 'delete':
+        return 'Removing server (~10s)';
+      case 'checking-auth':
+        return 'Checking authentication';
+      default:
+        return 'Processing';
+    }
+  };
+
+  const getMessageColor = () => {
+    switch (operation) {
+      case 'setup':
+        return 'text-emerald-600 dark:text-emerald-400';
+      case 'delete':
+        return 'text-red-600 dark:text-red-400';
+      default:
+        return 'text-gray-600 dark:text-gray-400';
+    }
+  };
+
   return (
-    <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 
-      border border-blue-100 dark:border-blue-800 rounded-lg p-2 text-center text-sm
-      text-blue-700 dark:text-blue-300 animate-fadeIn">
-      <div className="flex items-center justify-center gap-2">
-        <div className="animate-spin rounded-full h-4 w-4 border-2 border-b-transparent border-current" />
-        <span>
-          {operation === 'setup' ? 'Setting up server...' : 
-           operation === 'delete' ? 'Deleting server...' :
-           'Checking authentication...'}
-        </span>
+    <div className="mb-4 text-sm animate-fadeIn">
+      <div className="flex flex-col gap-1 bg-gray-50 dark:bg-gray-800/50 rounded-md p-3">
+        <div className="flex items-center gap-2">
+          <div className="animate-spin rounded-full h-3 w-3 border-2 border-b-transparent border-current" />
+          <span className={`font-medium ${getMessageColor()}`}>{getMessage()}</span>
+        </div>
+        <div className="text-gray-500 dark:text-gray-400 pl-5">
+          You can safely navigate away from this page
+        </div>
       </div>
     </div>
   );
