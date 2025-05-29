@@ -181,7 +181,15 @@ async function enrichToolsWithParameters(
 
         // Create a map of enriched tools for this server
         const enrichedToolMap = new Map(
-            enrichedTools.map((t: any) => [t.name, t as RawMcpTool])
+            enrichedTools.map(tool => [tool.name, {
+                name: tool.name,
+                description: tool.description,
+                parameters: {
+                    type: 'object' as const,
+                    properties: tool.parameters?.properties || {},
+                    required: tool.parameters?.required || []
+                }
+            }])
         );
 
         // Find tools that couldn't be enriched
@@ -200,34 +208,15 @@ async function enrichToolsWithParameters(
         const result = basicTools.map(basicTool => {
             const enrichedTool = enrichedToolMap.get(basicTool.name);
             
-            const parameters = {
-                type: 'object' as const,
-                properties: {} as Record<string, { description: string; type: string }>,
-                required: [] as string[]
-            };
-
-            if (enrichedTool?.inputSchema) {
-                try {
-                    // Parse inputSchema if it's a string
-                    const schema = typeof enrichedTool.inputSchema === 'string' 
-                        ? JSON.parse(enrichedTool.inputSchema)
-                        : enrichedTool.inputSchema;
-                    
-                    parameters.properties = schema.properties || {};
-                    if (schema.required) parameters.required = schema.required;
-                } catch (error) {
-                    console.error('[Klavis API] Error parsing inputSchema:', {
-                        toolName: basicTool.name,
-                        error: error instanceof Error ? error.message : 'Unknown error'
-                    });
-                }
-            }
-
             const tool: McpToolType = {
                 id: basicTool.name,
                 name: basicTool.name,
                 description: enrichedTool?.description || basicTool.description || '',
-                parameters
+                parameters: enrichedTool?.parameters || {
+                    type: 'object',
+                    properties: {},
+                    required: []
+                }
             };
             
             return tool;
@@ -236,7 +225,11 @@ async function enrichToolsWithParameters(
         console.log('[Klavis API] Tools processed:', {
             serverName,
             toolCount: result.length,
-            tools: result.map(t => t.name).join(', ')
+            tools: result.map(t => ({
+                name: t.name,
+                paramCount: Object.keys(t.parameters?.properties || {}).length,
+                hasParams: t.parameters && Object.keys(t.parameters.properties).length > 0
+            }))
         });
 
         return result;
@@ -628,15 +621,18 @@ export async function enableServer(
 
                 if (enrichedTools.length > 0) {
                     console.log(`[Klavis API] Writing ${enrichedTools.length} tools to DB for ${serverName}`);
+                    // First update availableTools
                     await projectsCollection.updateOne(
                         { _id: projectId, "mcpServers.name": serverName },
                         { 
                             $set: { 
-                                "mcpServers.$.availableTools": enrichedTools
+                                "mcpServers.$.availableTools": enrichedTools,
+                                "mcpServers.$.isReady": true // Mark server as ready after successful enrichment
                             }
                         }
                     );
 
+                    // Then write the tools
                     await batchAddTools(projectId, serverName, enrichedTools);
                     console.log(`[Klavis API] Successfully wrote tools for ${serverName}`);
                 }
