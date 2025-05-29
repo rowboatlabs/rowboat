@@ -19,6 +19,7 @@ import { BackIcon } from "../../../../lib/components/icons";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BillingErrorModal } from "@/components/common/billing-error-modal";
 
 export function SourcePage({
     sourceId,
@@ -30,11 +31,15 @@ export function SourcePage({
     const [source, setSource] = useState<WithStringId<z.infer<typeof DataSource>> | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+    const [billingError, setBillingError] = useState<string | null>(null);
 
     async function handleReload() {
         setIsLoading(true);
         const updatedSource = await getDataSource(projectId, sourceId);
         setSource(updatedSource);
+        if ("billingError" in updatedSource && updatedSource.billingError) {
+            setBillingError(updatedSource.billingError);
+        }
         setIsLoading(false);
     }
 
@@ -46,6 +51,9 @@ export function SourcePage({
             const source = await getDataSource(projectId, sourceId);
             if (!ignore) {
                 setSource(source);
+                if ("billingError" in source && source.billingError) {
+                    setBillingError(source.billingError);
+                }
                 setIsLoading(false);
             }
         }
@@ -75,6 +83,9 @@ export function SourcePage({
             const updatedSource = await getDataSource(projectId, sourceId);
             if (!ignore) {
                 setSource(updatedSource);
+                if ("billingError" in updatedSource && updatedSource.billingError) {
+                    setBillingError(updatedSource.billingError);
+                }
                 timeout = setTimeout(refresh, 15 * 1000);
             }
         }
@@ -210,12 +221,13 @@ export function SourcePage({
 
                                         {("billingError" in source) && source.billingError && <div className="flex flex-col gap-1 items-start mt-4">
                                             <div className="text-sm">{source.billingError}</div>
-                                            <Link
-                                                href={`/projects/${projectId}/settings/billing`}
-                                                className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 hover:text-yellow-700 dark:hover:text-yellow-300 text-sm p-2 rounded-md"
+                                            <Button
+                                                onClick={() => source.billingError ? setBillingError(source.billingError) : null}
+                                                variant="tertiary"
+                                                className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 hover:text-yellow-700 dark:hover:text-yellow-300 text-sm p-2"
                                             >
-                                                Update billing information
-                                            </Link>
+                                                Upgrade
+                                            </Button>
                                         </div>}
                                     </SectionContent>
                                 </SectionRow>
@@ -265,6 +277,11 @@ export function SourcePage({
                     </Section>
                 </div>
             </div >
+            <BillingErrorModal
+                isOpen={!!billingError}
+                onClose={() => setBillingError(null)}
+                errorMessage={billingError || ''}
+            />
         </Panel >
     );
 }
