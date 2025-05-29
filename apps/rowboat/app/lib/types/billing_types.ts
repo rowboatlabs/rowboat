@@ -73,3 +73,18 @@ export const CustomerPortalSessionRequest = z.object({
 export const CustomerPortalSessionResponse = z.object({
     url: z.string(),
 });
+
+export const PricesResponse = z.object({
+    prices: z.record(SubscriptionPlan, z.object({
+        monthly: z.number(),
+    })),
+});
+
+export const UpdateSubscriptionPlanRequest = z.object({
+    plan: SubscriptionPlan,
+    returnUrl: z.string(),
+});
+
+export const UpdateSubscriptionPlanResponse = z.object({
+    url: z.string(),
+});

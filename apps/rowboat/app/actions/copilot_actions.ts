@@ -15,7 +15,7 @@ import { check_query_limit } from "../lib/rate_limiting";
 import { QueryLimitError, validateConfigChanges } from "../lib/client_utils";
 import { projectAuthCheck } from "./project_actions";
 import { redisClient } from "../lib/redis";
-import { authorizeUserAction, logBillingUsage } from "./billing_actions";
+import { authorizeUserAction, logUsage } from "./billing_actions";
 import { USE_BILLING } from "../lib/feature_flags";
 
 export async function getCopilotResponse(
@@ -246,7 +246,7 @@ export async function getCopilotAgentInstructions(
 
     // log the billing usage
     if (USE_BILLING) {
-        await logBillingUsage({
+        await logUsage({
             type: 'copilot_requests',
             amount: 1,
         });

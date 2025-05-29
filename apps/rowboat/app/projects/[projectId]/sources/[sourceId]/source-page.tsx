@@ -19,7 +19,7 @@ import { BackIcon } from "../../../../lib/components/icons";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { BillingErrorModal } from "@/components/common/billing-error-modal";
+import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 
 export function SourcePage({
     sourceId,
@@ -277,7 +277,7 @@ export function SourcePage({
                     </Section>
                 </div>
             </div >
-            <BillingErrorModal
+            <BillingUpgradeModal
                 isOpen={!!billingError}
                 onClose={() => setBillingError(null)}
                 errorMessage={billingError || ''}

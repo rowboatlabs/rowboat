@@ -13,7 +13,7 @@ import { ComposeBoxCopilot } from "@/components/common/compose-box-copilot";
 import { Messages } from "./components/messages";
 import { CopyIcon, CheckIcon, PlusIcon, XIcon, InfoIcon } from "lucide-react";
 import { useCopilot } from "./use-copilot";
-import { BillingErrorModal } from "@/components/common/billing-error-modal";
+import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 
 const CopilotContext = createContext<{
     workflow: z.infer<typeof Workflow> | null;
@@ -207,7 +207,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                     />
                 </div>
             </div>
-            <BillingErrorModal
+            <BillingUpgradeModal
                 isOpen={!!billingError}
                 onClose={clearBillingError}
                 errorMessage={billingError || ''}

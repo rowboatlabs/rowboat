@@ -13,7 +13,7 @@ import { FolderOpenIcon, InformationCircleIcon } from "@heroicons/react/24/outli
 import { USE_MULTIPLE_PROJECTS } from "@/app/lib/feature_flags";
 import { HorizontalDivider } from "@/components/ui/horizontal-divider";
 import { Tooltip } from "@heroui/react";
-import { BillingErrorModal } from "@/components/common/billing-error-modal";
+import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 
 // Add glow animation styles
 const glowStyles = `
@@ -430,7 +430,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                     </form>
                 </section>
             </div>
-            <BillingErrorModal
+            <BillingUpgradeModal
                 isOpen={!!billingError}
                 onClose={() => setBillingError(null)}
                 errorMessage={billingError || ''}

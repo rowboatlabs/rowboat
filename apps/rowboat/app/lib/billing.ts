@@ -1,6 +1,6 @@
 import { WithStringId } from './types/types';
 import { z } from 'zod';
-import { Customer, PricingTableResponse, AuthorizeRequest, AuthorizeResponse, LogUsageRequest, UsageResponse, CustomerPortalSessionResponse } from './types/billing_types';
+import { Customer, PricingTableResponse, AuthorizeRequest, AuthorizeResponse, LogUsageRequest, UsageResponse, CustomerPortalSessionResponse, PricesResponse, SubscriptionPlan, UpdateSubscriptionPlanRequest, UpdateSubscriptionPlanResponse } from './types/billing_types';
 import { ObjectId } from 'mongodb';
 import { projectsCollection, usersCollection } from './mongodb';
 import { getSession } from '@auth0/nextjs-auth0';
@@ -206,6 +206,45 @@ export async function createCustomerPortalSession(customerId: string, returnUrl:
     const parseResult = CustomerPortalSessionResponse.safeParse(json);
     if (!parseResult.success) {
         throw new Error(`Failed to parse customer portal session response: ${JSON.stringify(parseResult.error)}`);
+    }
+    return parseResult.data.url;
+}
+
+export async function getPrices(): Promise<z.infer<typeof PricesResponse>> {
+    const response = await fetch(`${BILLING_API_URL}/api/prices`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${BILLING_API_KEY}`,
+            'Content-Type': 'application/json'
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to get prices: ${response.status} ${response.statusText} ${await response.text()}`);
+    }
+    const json = await response.json();
+    const parseResult = PricesResponse.safeParse(json);
+    if (!parseResult.success) {
+        throw new Error(`Failed to parse prices response: ${JSON.stringify(parseResult.error)}`);
+    }
+    return parseResult.data as z.infer<typeof PricesResponse>;
+}
+
+export async function updateSubscriptionPlan(customerId: string, request: z.infer<typeof UpdateSubscriptionPlanRequest>): Promise<string> {
+    const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/update-subscription-plan`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${BILLING_API_KEY}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(request)
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to update subscription plan: ${response.status} ${response.statusText} ${await response.text()}`);
+    }
+    const json = await response.json();
+    const parseResult = UpdateSubscriptionPlanResponse.safeParse(json);
+    if (!parseResult.success) {
+        throw new Error(`Failed to parse update subscription plan response: ${JSON.stringify(parseResult.error)}`);
     }
     return parseResult.data.url;
 }

@@ -15,7 +15,7 @@ import { TestProfile } from "@/app/lib/types/testing_types";
 import { WithStringId } from "@/app/lib/types/types";
 import { ProfileContextBox } from "./profile-context-box";
 import { USE_TESTING_FEATURE } from "@/app/lib/feature_flags";
-import { BillingErrorModal } from "@/components/common/billing-error-modal";
+import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 
 export function Chat({
     chat,
@@ -330,7 +330,7 @@ export function Chat({
         </div>
 
 
-        <BillingErrorModal
+        <BillingUpgradeModal
             isOpen={!!billingError}
             onClose={() => setBillingError(null)}
             errorMessage={billingError || ''}

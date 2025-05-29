@@ -23,7 +23,7 @@ import { USE_TRANSFER_CONTROL_OPTIONS } from "@/app/lib/feature_flags";
 import { Input } from "@/components/ui/input";
 import { Info } from "lucide-react";
 import { useCopilot } from "../copilot/use-copilot";
-import { BillingErrorModal } from "@/components/common/billing-error-modal";
+import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 
 // Common section header styles
 const sectionHeaderStyles = "text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400";
@@ -902,7 +902,7 @@ function GenerateInstructionsModal({
                     </ModalFooter>
                 </ModalContent>
             </Modal>
-            <BillingErrorModal
+            <BillingUpgradeModal
                 isOpen={!!billingError}
                 onClose={() => setBillingError(null)}
                 errorMessage={billingError || ''}

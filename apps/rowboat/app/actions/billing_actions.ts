@@ -1,12 +1,29 @@
 "use server";
-import { authorize, logUsage, getBillingCustomer, createCustomerPortalSession, createStripeUpgradePricingTableSession } from "../lib/billing";
+import {
+    authorize,
+    logUsage as libLogUsage,
+    getBillingCustomer,
+    createCustomerPortalSession,
+    createStripeUpgradePricingTableSession,
+    getPrices as libGetPrices,
+    updateSubscriptionPlan as libUpdateSubscriptionPlan
+} from "../lib/billing";
 import { authCheck } from "./auth_actions";
 import { USE_BILLING } from "../lib/feature_flags";
-import { AuthorizeRequest, AuthorizeResponse, LogUsageRequest, PricingTableResponse, Customer } from "../lib/types/billing_types";
+import {
+    AuthorizeRequest,
+    AuthorizeResponse,
+    LogUsageRequest,
+    PricingTableResponse,
+    Customer,
+    PricesResponse,
+    SubscriptionPlan,
+    UpdateSubscriptionPlanRequest
+} from "../lib/types/billing_types";
 import { z } from "zod";
 import { WithStringId } from "../lib/types/types";
 
-async function getCustomer(): Promise<WithStringId<z.infer<typeof Customer>>> {
+export async function getCustomer(): Promise<WithStringId<z.infer<typeof Customer>>> {
     const user = await authCheck();
     if (!user.billingCustomerId) {
         throw new Error("Customer not found");
@@ -28,13 +45,13 @@ export async function authorizeUserAction(request: z.infer<typeof AuthorizeReque
     return response;
 }
 
-export async function logBillingUsage(request: z.infer<typeof LogUsageRequest>) {
+export async function logUsage(request: z.infer<typeof LogUsageRequest>) {
     if (!USE_BILLING) {
         return;
     }
 
     const customer = await getCustomer();
-    await logUsage(customer._id, request);
+    await libLogUsage(customer._id, request);
     return;
 }
 
@@ -55,4 +72,24 @@ export async function getUpgradePricingTableSession(): Promise<z.infer<typeof Pr
     const customer = await getCustomer();
     const response = await createStripeUpgradePricingTableSession(customer._id);
     return response;
+}
+
+export async function getPrices(): Promise<z.infer<typeof PricesResponse>> {
+    if (!USE_BILLING) {
+        throw new Error("Billing is not enabled");
+    }
+
+    const response = await libGetPrices();
+    return response;
+}
+
+export async function updateSubscriptionPlan(plan: z.infer<typeof SubscriptionPlan>, returnUrl: string): Promise<string> {
+    if (!USE_BILLING) {
+        throw new Error("Billing is not enabled");
+    }
+
+    const customer = await getCustomer();
+    const request: z.infer<typeof UpdateSubscriptionPlanRequest> = { plan, returnUrl };
+    const url = await libUpdateSubscriptionPlan(customer._id, request);
+    return url;
 }
