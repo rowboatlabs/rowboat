@@ -194,13 +194,29 @@ export function convertMcpServerToolToWorkflowTool(
     mcpTool: z.infer<typeof McpServerTool>,
     mcpServer: z.infer<typeof MCPServer>
 ): z.infer<typeof WorkflowTool> {
+    // Parse the input schema, handling both string and object formats
+    let parsedSchema;
+    if (typeof mcpTool.inputSchema === 'string') {
+        try {
+            parsedSchema = JSON.parse(mcpTool.inputSchema);
+        } catch (e) {
+            console.error('Failed to parse inputSchema string:', e);
+            parsedSchema = {
+                type: 'object',
+                properties: {},
+                required: []
+            };
+        }
+    } else {
+        parsedSchema = mcpTool.inputSchema ?? {
+            type: 'object',
+            properties: {},
+            required: []
+        };
+    }
 
-    // Get the input schema with defaults
-    const inputSchema = McpToolInputSchema.parse(mcpTool.inputSchema ?? {
-        type: 'object',
-        properties: {},
-        required: [],
-    });
+    // Ensure the schema is valid
+    const inputSchema = McpToolInputSchema.parse(parsedSchema);
 
     const converted = {
         name: mcpTool.name,

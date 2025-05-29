@@ -9,6 +9,7 @@ import { Info, RefreshCw, RefreshCcw, Lock, Wrench } from 'lucide-react';
 import { clsx } from 'clsx';
 import { MCPServer, McpTool } from '@/app/lib/types/types';
 import type { z } from 'zod';
+import { TestToolModal } from './TestToolModal';
 
 type McpServerType = z.infer<typeof MCPServer>;
 type McpToolType = z.infer<typeof McpTool>;
@@ -108,6 +109,8 @@ interface ToolCardProps {
   isSelected?: boolean;
   onSelect?: (selected: boolean) => void;
   showCheckbox?: boolean;
+  onTest?: (tool: McpToolType) => void;
+  isServerReady?: boolean;
 }
 
 export function ToolCard({ 
@@ -115,7 +118,9 @@ export function ToolCard({
   server, 
   isSelected, 
   onSelect, 
-  showCheckbox = false 
+  showCheckbox = false,
+  onTest,
+  isServerReady = false
 }: ToolCardProps) {
   const toolCardStyles = {
     base: clsx(
@@ -139,12 +144,29 @@ export function ToolCard({
           />
         )}
         <div className="flex-1">
-          <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
-            {tool.name}
-          </h4>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {tool.description}
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
+                {tool.name}
+              </h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {tool.description}
+              </p>
+            </div>
+            {onTest && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => onTest(tool)}
+                disabled={!isServerReady}
+                className="shrink-0 bg-blue-50 dark:bg-blue-900/20 
+                  text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 
+                  hover:text-blue-800 dark:hover:text-blue-200"
+              >
+                Test
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -345,99 +367,114 @@ export function ToolManagementPanel({
   isSaving,
   isSyncing
 }: ToolManagementPanelProps) {
+  const [testingTool, setTestingTool] = useState<McpToolType | null>(null);
+  
   if (!server) return null;
 
   const isEligible = server.serverType === 'custom' || 
     (server.isActive && (!server.authNeeded || server.isAuthenticated));
 
   return (
-    <SlidePanel
-      isOpen={!!server}
-      onClose={() => {
-        if (hasChanges) {
-          if (window.confirm('You have unsaved changes. Are you sure you want to close?')) {
+    <>
+      <SlidePanel
+        isOpen={!!server}
+        onClose={() => {
+          if (hasChanges) {
+            if (window.confirm('You have unsaved changes. Are you sure you want to close?')) {
+              onClose();
+            }
+          } else {
             onClose();
           }
-        } else {
-          onClose();
-        }
-      }}
-      title={server.name}
-    >
-      <div className="space-y-6">
-        <div>
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Available Tools</h4>
-            </div>
-            {isEligible && (
-              <div className="flex items-center gap-2">
-                {onSyncTools && (
+        }}
+        title={server.name}
+      >
+        <div className="space-y-6">
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Available Tools</h4>
+              </div>
+              {isEligible && (
+                <div className="flex items-center gap-2">
+                  {onSyncTools && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={onSyncTools}
+                      disabled={isSyncing}
+                    >
+                      <div className="inline-flex items-center">
+                        <RefreshCcw className={clsx(
+                          "h-3.5 w-3.5",
+                          isSyncing && "animate-spin"
+                        )} />
+                        <span className="ml-1.5">
+                          {isSyncing ? 'Syncing...' : 'Sync'}
+                        </span>
+                      </div>
+                    </Button>
+                  )}
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={onSyncTools}
-                    disabled={isSyncing}
+                    onClick={() => {
+                      const allTools = new Set<string>(server.availableTools?.map((t: McpToolType) => t.id) || []);
+                      const shouldSelectAll = selectedTools.size !== allTools.size;
+                      Array.from(allTools).forEach((toolId: string) => {
+                        onToolSelectionChange(toolId, shouldSelectAll);
+                      });
+                    }}
                   >
-                    <div className="inline-flex items-center">
-                      <RefreshCcw className={clsx(
-                        "h-3.5 w-3.5",
-                        isSyncing && "animate-spin"
-                      )} />
-                      <span className="ml-1.5">
-                        {isSyncing ? 'Syncing...' : 'Sync'}
-                      </span>
-                    </div>
+                    {selectedTools.size === (server.availableTools || []).length ? 'Deselect All' : 'Select All'}
                   </Button>
-                )}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    const allTools = new Set<string>(server.availableTools?.map((t: McpToolType) => t.id) || []);
-                    const shouldSelectAll = selectedTools.size !== allTools.size;
-                    Array.from(allTools).forEach((toolId: string) => {
-                      onToolSelectionChange(toolId, shouldSelectAll);
-                    });
-                  }}
-                >
-                  {selectedTools.size === (server.availableTools || []).length ? 'Deselect All' : 'Select All'}
-                </Button>
-                {hasChanges && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={onSaveTools}
-                    disabled={isSaving}
-                  >
-                    {isSaving ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-b-transparent border-white mr-2" />
-                        Saving...
-                      </>
-                    ) : (
-                      'Save Changes'
-                    )}
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
+                  {hasChanges && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={onSaveTools}
+                      disabled={isSaving}
+                    >
+                      {isSaving ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-2 border-b-transparent border-white mr-2" />
+                          Saving...
+                        </>
+                      ) : (
+                        'Save Changes'
+                      )}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
 
-          <div className="space-y-4">
-            {(server.availableTools || []).map((tool: McpToolType) => (
-              <ToolCard
-                key={tool.id}
-                tool={tool}
-                server={server}
-                isSelected={selectedTools.has(tool.id)}
-                onSelect={(selected) => onToolSelectionChange(tool.id, selected)}
-                showCheckbox={isEligible}
-              />
-            ))}
+            <div className="space-y-4">
+              {(server.availableTools || []).map((tool: McpToolType) => (
+                <ToolCard
+                  key={tool.id}
+                  tool={tool}
+                  server={server}
+                  isSelected={selectedTools.has(tool.id)}
+                  onSelect={(selected) => onToolSelectionChange(tool.id, selected)}
+                  showCheckbox={isEligible}
+                  onTest={(tool) => setTestingTool(tool)}
+                  isServerReady={isEligible}
+                />
+              ))}
+            </div>
           </div>
         </div>
-      </div>
-    </SlidePanel>
+      </SlidePanel>
+
+      {testingTool && (
+        <TestToolModal
+          isOpen={!!testingTool}
+          onClose={() => setTestingTool(null)}
+          tool={testingTool}
+          server={server}
+        />
+      )}
+    </>
   );
 } 

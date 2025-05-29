@@ -360,3 +360,82 @@ export async function listProjectMcpTools(projectId: string): Promise<z.infer<ty
         return [];
     }
 }
+
+export async function testMcpTool(
+    projectId: string,
+    serverName: string, 
+    toolId: string,
+    parameters: Record<string, any>
+): Promise<any> {
+    await projectAuthCheck(projectId);
+
+    const project = await projectsCollection.findOne({
+        _id: projectId,
+    });
+
+    // Find the server by name in mcpServers array
+    const mcpServer = project?.mcpServers?.find(server => server.name === serverName);
+    if (!mcpServer) {
+        throw new Error(`Server ${serverName} not found`);
+    }
+
+    if (!mcpServer.isActive) {
+        throw new Error(`Server ${serverName} is not active`);
+    }
+
+    if (!mcpServer.serverUrl) {
+        throw new Error(`Server ${serverName} has no URL configured`);
+    }
+
+    try {
+        console.log('[MCP Test] Attempting to test tool:', {
+            serverName,
+            serverUrl: mcpServer.serverUrl,
+            toolId
+        });
+
+        const transport = new SSEClientTransport(new URL(mcpServer.serverUrl));
+        const client = new Client(
+            {
+                name: "rowboat-client",
+                version: "1.0.0"
+            },
+            {
+                capabilities: {
+                    prompts: {},
+                    resources: {},
+                    tools: {}
+                }
+            }
+        );
+
+        await client.connect(transport);
+        
+        console.log('[MCP Test] Connected to server, calling tool:', {
+            toolId,
+            parameters
+        });
+
+        // Execute the tool with the correct parameter format
+        const result = await client.callTool({
+            name: toolId,
+            arguments: parameters
+        });
+
+        console.log('[MCP Test] Tool execution completed:', {
+            toolId,
+            success: true
+        });
+
+        return result;
+
+    } catch (e) {
+        console.error(`[MCP Test] Error testing tool from ${mcpServer.name}:`, {
+            error: e instanceof Error ? e.message : 'Unknown error',
+            serverUrl: mcpServer.serverUrl,
+            toolId,
+            parameters
+        });
+        throw e;
+    }
+}
