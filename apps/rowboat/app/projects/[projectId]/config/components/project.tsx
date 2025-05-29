@@ -416,27 +416,36 @@ function ChatWidgetSection({ projectId, chatWidgetHost }: { projectId: string, c
 }
 
 function DeleteProjectSection({ projectId }: { projectId: string }) {
-    const [loading, setLoading] = useState(false);
+    const [loadingInitial, setLoadingInitial] = useState(false);
+    const [deletingProject, setDeletingProject] = useState(false);
     const { isOpen, onOpen, onClose } = useDisclosure();
     const [projectName, setProjectName] = useState("");
     const [projectNameInput, setProjectNameInput] = useState("");
     const [confirmationInput, setConfirmationInput] = useState("");
+    const [error, setError] = useState<string | null>(null);
     
     const isValid = projectNameInput === projectName && confirmationInput === "delete project";
 
     useEffect(() => {
-        setLoading(true);
+        setLoadingInitial(true);
         getProjectConfig(projectId).then((project) => {
             setProjectName(project.name);
-            setLoading(false);
+            setLoadingInitial(false);
         });
     }, [projectId]);
 
     const handleDelete = async () => {
         if (!isValid) return;
-        setLoading(true);
-        await deleteProject(projectId);
-        setLoading(false);
+        setError(null);
+        setDeletingProject(true);
+        try {
+            await deleteProject(projectId);
+        } catch (error) {
+            setError(error instanceof Error ? error.message : "Failed to delete project");
+            setDeletingProject(false);
+            return;
+        }
+        setDeletingProject(false);
     };
 
     return (
@@ -456,8 +465,7 @@ function DeleteProjectSection({ projectId }: { projectId: string }) {
                     variant="primary"
                     size="sm"
                     onClick={onOpen}
-                    disabled={loading}
-                    isLoading={loading}
+                    disabled={loadingInitial}
                     color="red"
                 >
                     Delete project
@@ -483,17 +491,27 @@ function DeleteProjectSection({ projectId }: { projectId: string }) {
                                     value={confirmationInput}
                                     onChange={(e) => setConfirmationInput(e.target.value)}
                                 />
+                                {error && (
+                                    <div className="p-4 text-sm text-red-700 bg-red-50 dark:bg-red-900/10 dark:text-red-400 rounded-lg">
+                                        {error}
+                                    </div>
+                                )}
                             </div>
                         </ModalBody>
                         <ModalFooter>
-                            <Button variant="secondary" onClick={onClose}>
+                            <Button 
+                                variant="secondary" 
+                                onClick={onClose}
+                                disabled={deletingProject}
+                            >
                                 Cancel
                             </Button>
                             <Button 
                                 variant="primary"
                                 color="danger"
                                 onClick={handleDelete}
-                                disabled={!isValid}
+                                disabled={!isValid || deletingProject}
+                                isLoading={deletingProject}
                             >
                                 Delete Project
                             </Button>
