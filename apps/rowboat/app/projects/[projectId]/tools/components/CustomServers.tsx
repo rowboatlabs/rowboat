@@ -315,21 +315,28 @@ export function CustomServers() {
             <span className="ml-2">Add Server</span>
           </div>
         </Button>
-        <div className="relative flex-1">
-          <div className="absolute inset-y-0 left-2 flex items-center pointer-events-none">
-            <Search className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+        <div className="flex-1 flex items-center gap-4">
+          <div className="relative flex-1">
+            <div className="absolute inset-y-0 left-2 flex items-center pointer-events-none">
+              <Search className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+            </div>
+            <input
+              type="text"
+              placeholder="Search servers or tools..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-4 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-md 
+                bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 
+                placeholder-gray-400 dark:placeholder-gray-500
+                focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400
+                hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
+            />
           </div>
-          <input
-            type="text"
-            placeholder="Search servers or tools..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-4 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-md 
-              bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 
-              placeholder-gray-400 dark:placeholder-gray-500
-              focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400
-              hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
-          />
+          <div className="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+            {filteredServers.length} {filteredServers.length === 1 ? 'server' : 'servers'} • {
+              filteredServers.reduce((total, server) => total + (server.availableTools?.length || 0), 0)
+            } tools
+          </div>
         </div>
       </div>
 

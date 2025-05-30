@@ -557,6 +557,11 @@ export function HostedServers() {
                   hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
               />
             </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              {filteredServers.length} {filteredServers.length === 1 ? 'server' : 'servers'} • {
+                filteredServers.reduce((total, server) => total + (server.availableTools?.length || 0), 0)
+              } tools
+            </div>
             <div className="flex items-center gap-8">
               <div className="group relative flex items-center gap-1">
                 <label className="flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300">
