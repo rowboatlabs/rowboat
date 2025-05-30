@@ -9,6 +9,8 @@ import { embeddingModel } from '../lib/embedding';
 import { qdrantClient } from '../lib/qdrant';
 import { PrefixLogger } from "../lib/utils";
 import crypto from 'crypto';
+import { USE_BILLING } from '../lib/feature_flags';
+import { authorize, BillingError, getCustomerIdForProject, logUsage } from '../lib/billing';
 
 const splitter = new RecursiveCharacterTextSplitter({
     separators: ['\n\n', '\n', '. ', '.', ''],
@@ -20,7 +22,7 @@ const second = 1000;
 const minute = 60 * second;
 const hour = 60 * minute;
 
-async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>>): Promise<void> {
+async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>>): Promise<number> {
     const logger = _logger
         .child(doc._id.toString())
         .child(doc.name);
@@ -35,7 +37,7 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
 
     // generate embeddings
     logger.log("Generating embeddings");
-    const { embeddings } = await embedMany({
+    const { embeddings, usage } = await embedMany({
         model: embeddingModel,
         values: splits.map((split) => split.pageContent)
     });
@@ -70,6 +72,8 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
             lastUpdatedAt: new Date().toISOString(),
         }
     });
+
+    return usage.tokens;
 }
 
 async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>>): Promise<void> {
@@ -220,10 +224,41 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
 
             logger.log(`Found ${pendingDocs.length} docs to process`);
 
+            // fetch project, user and billing data
+            let billingCustomerId: string | null = null;
+            if (USE_BILLING) {
+                try {
+                    billingCustomerId = await getCustomerIdForProject(job.projectId);
+                } catch (e) {
+                    logger.log("Unable to fetch billing customer id:", e);
+                    throw new Error("Unable to fetch billing customer id");
+                }
+            }
+
             // for each doc
             for (const doc of pendingDocs) {
+                // authorize with billing
+                if (USE_BILLING && billingCustomerId) {
+                    const authResponse = await authorize(billingCustomerId, {
+                        type: "process_rag",
+                        data: {}
+                    });
+
+                    if ('error' in authResponse) {
+                        throw new BillingError(authResponse.error || "Unknown billing error")
+                    }
+                }
+
                 try {
-                    await runProcessPipeline(logger, job, doc);
+                    const usedTokens = await runProcessPipeline(logger, job, doc);
+
+                    // log usage in billing
+                    if (USE_BILLING && billingCustomerId) {
+                        await logUsage(billingCustomerId, {
+                            type: "rag_tokens",
+                            amount: usedTokens,
+                        });
+                    }
                 } catch (e: any) {
                     errors = true;
                     logger.log("Error processing doc:", e);
@@ -265,8 +300,29 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                 }
             }
         } catch (e) {
+            if (e instanceof BillingError) {
+                logger.log("Billing error:", e.message);
+                await dataSourcesCollection.updateOne({
+                    _id: job._id,
+                    version: job.version,
+                }, {
+                    $set: {
+                        status: "error",
+                        billingError: e.message,
+                        lastUpdatedAt: new Date().toISOString(),
+                    }
+                });
+            }
             logger.log("Error processing job; will retry:", e);
-            await dataSourcesCollection.updateOne({ _id: job._id, version: job.version }, { $set: { status: "error" } });
+            await dataSourcesCollection.updateOne({
+                _id: job._id,
+                version: job.version,
+            }, {
+                $set: {
+                    status: "error",
+                    lastUpdatedAt: new Date().toISOString(),
+                }
+            });
             continue;
         }
 

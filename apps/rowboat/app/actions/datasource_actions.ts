@@ -105,6 +105,7 @@ export async function recrawlWebDataSource(projectId: string, sourceId: string) 
     }, {
         $set: {
             status: 'pending',
+            billingError: undefined,
             lastUpdatedAt: (new Date()).toISOString(),
             attempts: 0,
         },
@@ -124,6 +125,7 @@ export async function deleteDataSource(projectId: string, sourceId: string) {
     }, {
         $set: {
             status: 'deleted',
+            billingError: undefined,
             lastUpdatedAt: (new Date()).toISOString(),
             attempts: 0,
         },
@@ -189,6 +191,7 @@ export async function addDocsToDataSource({
             {
                 $set: {
                     status: 'pending',
+                    billingError: undefined,
                     attempts: 0,
                     lastUpdatedAt: new Date().toISOString(),
                 },
@@ -275,6 +278,7 @@ export async function deleteDocsFromDataSource({
     }, {
         $set: {
             status: 'pending',
+            billingError: undefined,
             attempts: 0,
             lastUpdatedAt: new Date().toISOString(),
         },

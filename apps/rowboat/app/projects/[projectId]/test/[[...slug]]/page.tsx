@@ -1,12 +1,13 @@
-'use client';
-
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { ScenariosApp } from "./scenarios_app";
 import { SimulationsApp } from "./simulations_app";
 import { ProfilesApp } from "./profiles_app";
 import { RunsApp } from "./runs_app";
 import { TestingMenu } from "./testing_menu";
-export default function TestPage({ params }: { params: { projectId: string; slug?: string[] } }) {
+import { requireActiveBillingSubscription } from '@/app/lib/billing';
+
+export default async function TestPage({ params }: { params: { projectId: string; slug?: string[] } }) {
+    await requireActiveBillingSubscription();
     const { projectId, slug = [] } = params;
     let app: "scenarios" | "simulations" | "profiles" | "runs" = "runs";
     

@@ -13,6 +13,7 @@ import { ComposeBoxCopilot } from "@/components/common/compose-box-copilot";
 import { Messages } from "./components/messages";
 import { CopyIcon, CheckIcon, PlusIcon, XIcon, InfoIcon } from "lucide-react";
 import { useCopilot } from "./use-copilot";
+import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 
 const CopilotContext = createContext<{
     workflow: z.infer<typeof Workflow> | null;
@@ -61,6 +62,9 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         streamingResponse,
         loading: loadingResponse,
         error: responseError,
+        clearError: clearResponseError,
+        billingError,
+        clearBillingError,
         start,
         cancel
     } = useCopilot({
@@ -108,6 +112,10 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     useEffect(() => {
         if (!messages.length || messages.at(-1)?.role !== 'user') return;
 
+        if (responseError) {
+            return;
+        }
+
         const currentStart = startRef.current;
         const currentCancel = cancelRef.current;
 
@@ -122,7 +130,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         });
 
         return () => currentCancel();
-    }, [messages]); // Only depend on messages
+    }, [messages, responseError]);
 
     const handleCopyChat = useCallback(() => {
         if (onCopyJson) {
@@ -157,7 +165,15 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                                 size="sm"
                                 color="danger"
                                 onClick={() => {
-                                    setMessages(prev => [...prev.slice(0, -1)]); // remove last assistant if needed
+                                    // remove the last assistant message, if any
+                                    setMessages(prev => {
+                                        const lastMessage = prev[prev.length - 1];
+                                        if (lastMessage?.role === 'assistant') {
+                                            return prev.slice(0, -1);
+                                        }
+                                        return prev;
+                                    });
+                                    clearResponseError();
                                 }}
                             >
                                 Retry
@@ -191,6 +207,11 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                     />
                 </div>
             </div>
+            <BillingUpgradeModal
+                isOpen={!!billingError}
+                onClose={clearBillingError}
+                errorMessage={billingError || ''}
+            />
         </CopilotContext.Provider>
     );
 });
@@ -215,6 +236,7 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     const [copilotKey, setCopilotKey] = useState(0);
     const [showCopySuccess, setShowCopySuccess] = useState(false);
     const [messages, setMessages] = useState<z.infer<typeof CopilotMessage>[]>([]);
+    const [billingError, setBillingError] = useState<string | null>(null);
     const appRef = useRef<{ handleCopyChat: () => void; handleUserMessage: (message: string) => void }>(null);
 
     function handleNewChat() {
@@ -242,64 +264,67 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     }), []);
 
     return (
-        <Panel variant="copilot"
-            tourTarget="copilot"
-            showWelcome={messages.length === 0}
-            title={
-                <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            COPILOT
+        <>
+            <Panel 
+                variant="copilot"
+                tourTarget="copilot"
+                showWelcome={messages.length === 0}
+                title={
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                COPILOT
+                            </div>
+                            <Tooltip content="Ask copilot to help you build and modify your workflow">
+                                <InfoIcon className="w-4 h-4 text-gray-400 cursor-help" />
+                            </Tooltip>
                         </div>
-                        <Tooltip content="Ask copilot to help you build and modify your workflow">
-                            <InfoIcon className="w-4 h-4 text-gray-400 cursor-help" />
-                        </Tooltip>
+                        <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={handleNewChat}
+                            className="bg-blue-50 text-blue-700 hover:bg-blue-100"
+                            showHoverContent={true}
+                            hoverContent="New chat"
+                        >
+                            <PlusIcon className="w-4 h-4" />
+                        </Button>
                     </div>
-                    <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={handleNewChat}
-                        className="bg-blue-50 text-blue-700 hover:bg-blue-100"
-                        showHoverContent={true}
-                        hoverContent="New chat"
-                    >
-                        <PlusIcon className="w-4 h-4" />
-                    </Button>
+                }
+                rightActions={
+                    <div className="flex items-center gap-3">
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => appRef.current?.handleCopyChat()}
+                            showHoverContent={true}
+                            hoverContent={showCopySuccess ? "Copied" : "Copy JSON"}
+                        >
+                            {showCopySuccess ? (
+                                <CheckIcon className="w-4 h-4" />
+                            ) : (
+                                <CopyIcon className="w-4 h-4" />
+                            )}
+                        </Button>
+                    </div>
+                }
+            >
+                <div className="h-full overflow-auto px-3 pt-4">
+                    <App
+                        key={copilotKey}
+                        ref={appRef}
+                        projectId={projectId}
+                        workflow={workflow}
+                        dispatch={dispatch}
+                        chatContext={chatContext}
+                        onCopyJson={handleCopyJson}
+                        onMessagesChange={setMessages}
+                        isInitialState={isInitialState}
+                        dataSources={dataSources}
+                    />
                 </div>
-            }
-            rightActions={
-                <div className="flex items-center gap-3">
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => appRef.current?.handleCopyChat()}
-                        showHoverContent={true}
-                        hoverContent={showCopySuccess ? "Copied" : "Copy JSON"}
-                    >
-                        {showCopySuccess ? (
-                            <CheckIcon className="w-4 h-4" />
-                        ) : (
-                            <CopyIcon className="w-4 h-4" />
-                        )}
-                    </Button>
-                </div>
-            }
-        >
-            <div className="h-full overflow-auto px-3 pt-4">
-                <App
-                    key={copilotKey}
-                    ref={appRef}
-                    projectId={projectId}
-                    workflow={workflow}
-                    dispatch={dispatch}
-                    chatContext={chatContext}
-                    onCopyJson={handleCopyJson}
-                    onMessagesChange={setMessages}
-                    isInitialState={isInitialState}
-                    dataSources={dataSources}
-                />
-            </div>
-        </Panel>
+            </Panel>
+        </>
     );
 });
 

@@ -1,34 +1,17 @@
 'use server';
-import { AgenticAPIInitStreamResponse, convertFromAgenticAPIChatMessages } from "../lib/types/agents_api_types";
+import { AgenticAPIInitStreamResponse } from "../lib/types/agents_api_types";
 import { AgenticAPIChatRequest } from "../lib/types/agents_api_types";
 import { WebpageCrawlResponse } from "../lib/types/tool_types";
 import { webpagesCollection } from "../lib/mongodb";
 import { z } from 'zod';
 import FirecrawlApp, { ScrapeResponse } from '@mendable/firecrawl-js';
-import { apiV1 } from "rowboat-shared";
-import { Claims, getSession } from "@auth0/nextjs-auth0";
-import { getAgenticApiResponse, getAgenticResponseStreamId } from "../lib/utils";
+import { getAgenticResponseStreamId } from "../lib/utils";
 import { check_query_limit } from "../lib/rate_limiting";
 import { QueryLimitError } from "../lib/client_utils";
 import { projectAuthCheck } from "./project_actions";
-import { USE_AUTH } from "../lib/feature_flags";
+import { authorizeUserAction } from "./billing_actions";
 
 const crawler = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY || '' });
-
-export async function authCheck(): Promise<Claims> {
-    if (!USE_AUTH) {
-        return {
-            email: 'guestuser@rowboatlabs.com',
-            email_verified: true,
-            sub: 'guest_user',
-        };
-    }
-    const { user } = await getSession() || {};
-    if (!user) {
-        throw new Error('User not authenticated');
-    }
-    return user;
-}
 
 export async function scrapeWebpage(url: string): Promise<z.infer<typeof WebpageCrawlResponse>> {
     const page = await webpagesCollection.findOne({
@@ -74,30 +57,19 @@ export async function scrapeWebpage(url: string): Promise<z.infer<typeof Webpage
     };
 }
 
-export async function getAssistantResponse(request: z.infer<typeof AgenticAPIChatRequest>): Promise<{
-    messages: z.infer<typeof apiV1.ChatMessage>[],
-    state: unknown,
-    rawRequest: unknown,
-    rawResponse: unknown,
-}> {
+export async function getAssistantResponseStreamId(request: z.infer<typeof AgenticAPIChatRequest>): Promise<z.infer<typeof AgenticAPIInitStreamResponse> | { billingError: string }> {
     await projectAuthCheck(request.projectId);
     if (!await check_query_limit(request.projectId)) {
         throw new QueryLimitError();
     }
 
-    const response = await getAgenticApiResponse(request);
-    return {
-        messages: convertFromAgenticAPIChatMessages(response.messages),
-        state: response.state,
-        rawRequest: request,
-        rawResponse: response.rawAPIResponse,
-    };
-}
-
-export async function getAssistantResponseStreamId(request: z.infer<typeof AgenticAPIChatRequest>): Promise<z.infer<typeof AgenticAPIInitStreamResponse>> {
-    await projectAuthCheck(request.projectId);
-    if (!await check_query_limit(request.projectId)) {
-        throw new QueryLimitError();
+    // Check billing authorization
+    const { success, error } = await authorizeUserAction({
+        type: 'agent_response',
+        data: {},
+    });
+    if (!success) {
+        return { billingError: error || 'Billing error' };
     }
 
     const response = await getAgenticResponseStreamId(request);

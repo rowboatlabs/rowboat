@@ -1,9 +1,9 @@
 import '../lib/loadenv';
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { z } from 'zod';
-import { dataSourceDocsCollection, dataSourcesCollection } from '../lib/mongodb';
+import { dataSourceDocsCollection, dataSourcesCollection, projectsCollection, usersCollection } from '../lib/mongodb';
 import { EmbeddingRecord, DataSourceDoc, DataSource } from "../lib/types/datasource_types";
-import { WithId } from 'mongodb';
+import { ObjectId, WithId } from 'mongodb';
 import { embedMany, generateText } from 'ai';
 import { embeddingModel } from '../lib/embedding';
 import { qdrantClient } from '../lib/qdrant';
@@ -15,7 +15,8 @@ import fs from 'fs/promises';
 import crypto from 'crypto';
 import path from 'path';
 import { createOpenAI } from '@ai-sdk/openai';
-import { USE_GEMINI_FILE_PARSING } from '../lib/feature_flags';
+import { USE_BILLING, USE_GEMINI_FILE_PARSING } from '../lib/feature_flags';
+import { authorize, BillingError, getCustomerIdForProject, logUsage } from '../lib/billing';
 
 const FILE_PARSING_PROVIDER_API_KEY = process.env.FILE_PARSING_PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const FILE_PARSING_PROVIDER_BASE_URL = process.env.FILE_PARSING_PROVIDER_BASE_URL || undefined;
@@ -73,7 +74,7 @@ async function retryable<T>(fn: () => Promise<T>, maxAttempts: number = 3): Prom
     }
 }
 
-async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>> & { data: { type: "file_local" | "file_s3" } }): Promise<void> {
+async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>> & { data: { type: "file_local" | "file_s3" } }): Promise<number> {
     const logger = _logger
         .child(doc._id.toString())
         .child(doc.name);
@@ -133,7 +134,7 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
 
     // generate embeddings
     logger.log("Generating embeddings");
-    const { embeddings } = await embedMany({
+    const { embeddings, usage } = await embedMany({
         model: embeddingModel,
         values: splits.map((split) => split.pageContent)
     });
@@ -168,6 +169,8 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
             lastUpdatedAt: new Date().toISOString(),
         }
     });
+
+    return usage.tokens;
 }
 
 async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>>): Promise<void> {
@@ -319,11 +322,42 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
 
             logger.log(`Found ${pendingDocs.length} docs to process`);
 
+            // fetch project, user and billing data
+            let billingCustomerId: string | null = null;
+            if (USE_BILLING) {
+                try {
+                    billingCustomerId = await getCustomerIdForProject(job.projectId);
+                } catch (e) {
+                    logger.log("Unable to fetch billing customer id:", e);
+                    throw new Error("Unable to fetch billing customer id");
+                }
+            }
+
             // for each doc
             for (const doc of pendingDocs) {
+                // authorize with billing
+                if (USE_BILLING && billingCustomerId) {
+                    const authResponse = await authorize(billingCustomerId, {
+                        type: "process_rag",
+                        data: {},
+                    });
+
+                    if ('error' in authResponse) {
+                        throw new BillingError(authResponse.error || "Unknown billing error")
+                    }
+                }
+
                 const ldoc = doc as WithId<z.infer<typeof DataSourceDoc>> & { data: { type: "file_local" | "file_s3" } };
                 try {
-                    await runProcessPipeline(logger, job, ldoc);
+                    const usedTokens = await runProcessPipeline(logger, job, ldoc);
+
+                    // log usage in billing
+                    if (USE_BILLING && billingCustomerId) {
+                        await logUsage(billingCustomerId, {
+                            type: "rag_tokens",
+                            amount: usedTokens,
+                        });
+                    }
                 } catch (e: any) {
                     errors = true;
                     logger.log("Error processing doc:", e);
@@ -365,8 +399,29 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                 }
             }
         } catch (e) {
+            if (e instanceof BillingError) {
+                logger.log("Billing error:", e.message);
+                await dataSourcesCollection.updateOne({
+                    _id: job._id,
+                    version: job.version,
+                }, {
+                    $set: {
+                        status: "error",
+                        billingError: e.message,
+                        lastUpdatedAt: new Date().toISOString(),
+                    }
+                });
+            }
             logger.log("Error processing job; will retry:", e);
-            await dataSourcesCollection.updateOne({ _id: job._id, version: job.version }, { $set: { status: "error" } });
+            await dataSourcesCollection.updateOne({
+                _id: job._id,
+                version: job.version,
+            }, {
+                $set: {
+                    status: "error",
+                    lastUpdatedAt: new Date().toISOString(),
+                }
+            });
             continue;
         }
 
@@ -379,6 +434,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
             $set: {
                 status: errors ? "error" : "ready",
                 ...(errors ? { error: "There were some errors processing this job" } : {}),
+                lastUpdatedAt: new Date().toISOString(),
             }
         });
     }

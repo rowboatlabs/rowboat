@@ -22,10 +22,10 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
 
     // Handle simple requests
     const response = NextResponse.next();
-    
+
     // Set CORS headers for all origins
     response.headers.set('Access-Control-Allow-Origin', '*');
-    
+
     Object.entries(corsOptions).forEach(([key, value]) => {
       response.headers.set(key, value);
     })
@@ -33,7 +33,9 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     return response;
   }
 
-  if (request.nextUrl.pathname.startsWith('/projects')) {
+  if (request.nextUrl.pathname.startsWith('/projects') ||
+    request.nextUrl.pathname.startsWith('/billing') ||
+    request.nextUrl.pathname.startsWith('/onboarding')) {
     // Skip auth check if USE_AUTH is not enabled
     if (process.env.USE_AUTH !== 'true') {
       return NextResponse.next();
@@ -45,5 +47,11 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
 }
 
 export const config = {
-  matcher: ['/projects/:path*', '/api/v1/:path*', '/api/widget/v1/:path*'],
+  matcher: [
+    '/projects/:path*',
+    '/billing/:path*',
+    // '/onboarding/:path*',
+    '/api/v1/:path*',
+    '/api/widget/v1/:path*',
+  ],
 };

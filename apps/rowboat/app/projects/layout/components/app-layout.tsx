@@ -7,16 +7,16 @@ interface AppLayoutProps {
   children: ReactNode;
   useRag?: boolean;
   useAuth?: boolean;
+  useBilling?: boolean;
 }
 
-export default function AppLayout({ children, useRag = false, useAuth = false }: AppLayoutProps) {
+export default function AppLayout({ children, useRag = false, useAuth = false, useBilling = false }: AppLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const pathname = usePathname();
-  const projectId = pathname.split('/')[2];
 
-  // For invalid projectId, return just the children
-  if (!projectId && !pathname.startsWith('/projects')) {
-    return children;
+  let projectId: string|null = null;
+  if (pathname.startsWith('/projects')) {
+    projectId = pathname.split('/')[2];
   }
 
   // Layout with sidebar for all routes
@@ -25,11 +25,12 @@ export default function AppLayout({ children, useRag = false, useAuth = false }:
       {/* Sidebar with improved shadow and blur */}
       <div className="overflow-hidden rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm">
         <Sidebar 
-          projectId={projectId} 
+          projectId={projectId ?? undefined} 
           useRag={useRag} 
           useAuth={useAuth}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          useBilling={useBilling}
         />
       </div>
       
