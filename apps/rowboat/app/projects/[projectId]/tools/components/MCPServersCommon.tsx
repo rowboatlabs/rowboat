@@ -242,6 +242,7 @@ export function ServerCard({
                     size="sm"
                     variant="secondary"
                     onClick={onRemove}
+                    disabled={isToggling}
                     className="ml-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
                   >
                     Remove
@@ -290,6 +291,7 @@ export function ServerCard({
                     size="sm"
                     variant="primary"
                     onClick={onAuth}
+                    disabled={isToggling}
                     className="text-xs shrink-0"
                   >
                     <div className="inline-flex items-center">
@@ -312,7 +314,7 @@ export function ServerCard({
                 size="sm"
                 variant="secondary"
                 onClick={onSync}
-                disabled={isSyncing}
+                disabled={isSyncing || isToggling}
                 className="text-xs shrink-0"
               >
                 <div className="inline-flex items-center">
@@ -330,6 +332,7 @@ export function ServerCard({
               size="sm"
               variant="secondary"
               onClick={onManageTools}
+              disabled={isToggling}
               className="text-xs shrink-0"
             >
               <div className="inline-flex items-center">
