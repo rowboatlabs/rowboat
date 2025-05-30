@@ -78,7 +78,8 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
       href: 'tools',
       label: 'Tools',
       icon: Wrench,
-      requiresProject: true
+      requiresProject: true,
+      beta: true
     },
     {
       href: 'config',
@@ -145,7 +146,7 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
                           className={`
                             relative w-full rounded-md flex items-center
                             text-[15px] font-medium transition-all duration-200
-                            ${collapsed ? 'justify-center py-4' : 'px-4 py-4 gap-3'}
+                            ${collapsed ? 'justify-center py-4' : 'px-2.5 py-3 gap-2.5'}
                             ${isActive 
                               ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-600 dark:border-indigo-400' 
                               : isDisabled
@@ -168,7 +169,16 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
                               }
                             `}
                           />
-                          {!collapsed && <span>{item.label}</span>}
+                          {!collapsed && (
+                            <>
+                              <span>{item.label}</span>
+                              {item.beta && (
+                                <span className="ml-1.5 leading-none px-1.5 py-[2px] text-[9px] font-medium bg-gradient-to-r from-pink-500 to-violet-500 text-white rounded-full">
+                                  BETA
+                                </span>
+                              )}
+                            </>
+                          )}
                         </button>
                       </Link>
                     </Tooltip>

@@ -23,7 +23,14 @@ export function ToolsConfig() {
         className="w-full"
         fullWidth
       >
-        <Tab key="hosted" title="Tools Library">
+        <Tab key="hosted" title={
+          <div className="flex items-center gap-2">
+            <span>Tools Library</span>
+            <span className="leading-none px-1.5 py-[2px] text-[9px] font-medium bg-gradient-to-r from-pink-500 to-violet-500 text-white rounded-full">
+              BETA
+            </span>
+          </div>
+        }>
           <div className="mt-4 p-6">
             <HostedServers />
           </div>
