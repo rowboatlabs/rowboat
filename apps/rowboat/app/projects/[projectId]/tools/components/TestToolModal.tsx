@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { MCPServer, McpTool } from '@/app/lib/types/types';
 import { testMcpTool } from '@/app/actions/mcp_actions';
-import { Copy, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { Copy, ChevronDown, ChevronRight, X, Trash2 } from 'lucide-react';
 import type { z } from 'zod';
 import clsx from 'clsx';
 
@@ -70,10 +70,49 @@ export function TestToolModal({ isOpen, onClose, tool, server }: TestToolModalPr
   };
 
   const handleParameterChange = (name: string, value: any) => {
-    setParameters(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    // Handle nested object updates
+    if (name.includes('.')) {
+      const parts = name.split('.');
+      const topLevel = parts[0];
+      const rest = parts.slice(1);
+      
+      setParameters(prev => {
+        const current = prev[topLevel] || {};
+        let temp = current;
+        for (let i = 0; i < rest.length - 1; i++) {
+          temp[rest[i]] = temp[rest[i]] || {};
+          temp = temp[rest[i]];
+        }
+        temp[rest[rest.length - 1]] = value;
+        
+        return {
+          ...prev,
+          [topLevel]: current
+        };
+      });
+    }
+    // Handle array index updates
+    else if (name.includes('[') && name.includes(']')) {
+      const matches = name.match(/^([^\[]+)\[(\d+)\]$/);
+      if (matches) {
+        const [_, arrayName, index] = matches;
+        setParameters(prev => {
+          const array = Array.isArray(prev[arrayName]) ? [...prev[arrayName]] : [];
+          array[parseInt(index, 10)] = value;
+          return {
+            ...prev,
+            [arrayName]: array
+          };
+        });
+      }
+    }
+    // Handle regular updates
+    else {
+      setParameters(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
     setValidationError(null);
   };
 
@@ -127,9 +166,115 @@ export function TestToolModal({ isOpen, onClose, tool, server }: TestToolModalPr
   };
 
   const renderParameterInput = (paramName: string, schema: any) => {
-    const value = parameters[paramName] ?? '';
+    const value = parameters[paramName] ?? (schema.type === 'array' ? [] : schema.type === 'object' ? {} : '');
     
     switch (schema.type) {
+      case 'array':
+        const arrayValue = Array.isArray(value) ? value : value ? [value] : [];
+        const itemSchema = schema.items || { type: 'string' };
+
+        const handleArrayItemChange = (index: number, itemValue: any) => {
+          const newArray = [...arrayValue];
+          newArray[index] = itemValue;
+          handleParameterChange(paramName, newArray);
+        };
+
+        return (
+          <div className="space-y-2">
+            {arrayValue.map((item: any, index: number) => (
+              <div key={index} className="flex gap-2 items-start">
+                <div className="text-sm text-gray-500 dark:text-gray-400 pt-2 min-w-[24px]">
+                  {index + 1}:
+                </div>
+                <div className="flex-1">
+                  {itemSchema.type === 'string' ? (
+                    <Input
+                      type="text"
+                      value={item || ''}
+                      onChange={(e) => handleArrayItemChange(index, e.target.value)}
+                      placeholder="Enter value"
+                      className="focus:ring-0 focus:ring-offset-0 !ring-0 !ring-offset-0 focus:outline-none"
+                    />
+                  ) : itemSchema.type === 'number' || itemSchema.type === 'integer' ? (
+                    <Input
+                      type="number"
+                      value={item || ''}
+                      step={itemSchema.type === 'integer' ? '1' : 'any'}
+                      min={itemSchema.minimum}
+                      max={itemSchema.maximum}
+                      onChange={(e) => {
+                        const val = itemSchema.type === 'integer' ? 
+                          parseInt(e.target.value, 10) : 
+                          parseFloat(e.target.value);
+                        handleArrayItemChange(index, isNaN(val) ? '' : val);
+                      }}
+                      placeholder="Enter value"
+                      className="focus:ring-0 focus:ring-offset-0 !ring-0 !ring-offset-0 focus:outline-none"
+                    />
+                  ) : itemSchema.type === 'boolean' ? (
+                    <div className="scale-75 origin-left">
+                      <Switch
+                        checked={!!item}
+                        onCheckedChange={(checked) => handleArrayItemChange(index, checked)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full">
+                      {renderParameterInput(paramName, {
+                        ...itemSchema,
+                        value: item,
+                        onChange: (newValue: any) => handleArrayItemChange(index, newValue)
+                      })}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const newArray = arrayValue.filter((_, i) => i !== index);
+                    handleParameterChange(paramName, newArray);
+                  }}
+                  className="px-2 h-9 hover:bg-transparent border-transparent"
+                >
+                  <Trash2 className="h-4 w-4 text-gray-500 hover:text-red-500 transition-colors" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const defaultValue = itemSchema.type === 'object' ? {} : 
+                                   itemSchema.type === 'array' ? [] : 
+                                   itemSchema.type === 'boolean' ? false : '';
+                handleParameterChange(paramName, [...arrayValue, defaultValue]);
+              }}
+              className="text-xs text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-transparent border-transparent"
+            >
+              Add item
+            </Button>
+          </div>
+        );
+
+      case 'object':
+        if (!schema.properties) return null;
+        const objectValue = typeof value === 'object' ? value : {};
+        return (
+          <div className="space-y-4 border-l-2 border-gray-200 dark:border-gray-700 pl-4 mt-2">
+            {Object.entries(schema.properties).map(([key, propSchema]: [string, any]) => (
+              <div key={key} className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {key}
+                  {schema.required?.includes(key) && <span className="text-red-500 ml-1">*</span>}
+                </label>
+                {renderParameterInput(
+                  `${paramName}.${key}`,
+                  propSchema
+                )}
+              </div>
+            ))}
+          </div>
+        );
+
       case 'string':
         if (schema.enum) {
           return (
@@ -148,6 +293,36 @@ export function TestToolModal({ isOpen, onClose, tool, server }: TestToolModalPr
             </select>
           );
         }
+        if (schema.format === 'date-time') {
+          return (
+            <Input
+              type="datetime-local"
+              value={value}
+              onChange={(e) => handleParameterChange(paramName, e.target.value)}
+              className="focus:ring-0 focus:ring-offset-0 !ring-0 !ring-offset-0 focus:outline-none"
+            />
+          );
+        }
+        if (schema.format === 'date') {
+          return (
+            <Input
+              type="date"
+              value={value}
+              onChange={(e) => handleParameterChange(paramName, e.target.value)}
+              className="focus:ring-0 focus:ring-offset-0 !ring-0 !ring-offset-0 focus:outline-none"
+            />
+          );
+        }
+        if (schema.format === 'time') {
+          return (
+            <Input
+              type="time"
+              value={value}
+              onChange={(e) => handleParameterChange(paramName, e.target.value)}
+              className="focus:ring-0 focus:ring-offset-0 !ring-0 !ring-offset-0 focus:outline-none"
+            />
+          );
+        }
         return (
           <Input
             type="text"
@@ -164,7 +339,15 @@ export function TestToolModal({ isOpen, onClose, tool, server }: TestToolModalPr
           <Input
             type="number"
             value={value}
-            onChange={(e) => handleParameterChange(paramName, Number(e.target.value))}
+            step={schema.type === 'integer' ? '1' : 'any'}
+            min={schema.minimum}
+            max={schema.maximum}
+            onChange={(e) => {
+              const val = schema.type === 'integer' ? 
+                parseInt(e.target.value, 10) : 
+                parseFloat(e.target.value);
+              handleParameterChange(paramName, isNaN(val) ? '' : val);
+            }}
             placeholder={`Enter ${paramName}`}
             className="focus:ring-0 focus:ring-offset-0 !ring-0 !ring-offset-0 focus:outline-none"
           />
@@ -174,12 +357,19 @@ export function TestToolModal({ isOpen, onClose, tool, server }: TestToolModalPr
         return (
           <div className="scale-75 origin-left">
             <Switch
-              checked={value}
+              checked={!!value}
               onCheckedChange={(checked) => handleParameterChange(paramName, checked)}
             />
           </div>
         );
       
+      case 'null':
+        return (
+          <div className="text-sm text-gray-500 dark:text-gray-400 italic">
+            Null value
+          </div>
+        );
+
       default:
         return (
           <Input
