@@ -122,6 +122,8 @@ export function ToolCard({
   onTest,
   isServerReady = false
 }: ToolCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
   const toolCardStyles = {
     base: clsx(
       "group p-4 rounded-lg transition-all duration-200",
@@ -149,9 +151,22 @@ export function ToolCard({
               <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
                 {tool.name}
               </h4>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {tool.description}
-              </p>
+              <div>
+                <p className={clsx(
+                  "text-sm text-gray-500 dark:text-gray-400",
+                  !isExpanded && "line-clamp-3"
+                )}>
+                  {tool.description}
+                </p>
+                {tool.description.length > 150 && (
+                  <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 mt-1"
+                  >
+                    {isExpanded ? 'Show less' : 'Show more'}
+                  </button>
+                )}
+              </div>
             </div>
             {onTest && (
               <Button
