@@ -727,6 +727,7 @@ const SERVER_URL_PARAMS: Record<string, string> = {
   'Google Drive': 'gdrive',
   'Google Docs': 'gdocs',
   'Google Sheets': 'gsheets',
+  'Gmail': 'gmail',
 };
 
 // Server name to environment variable mapping for client IDs
@@ -736,6 +737,7 @@ const SERVER_CLIENT_ID_MAP: Record<string, string | undefined> = {
   'Google Drive': process.env.KLAVIS_GOOGLE_CLIENT_ID,
   'Google Docs': process.env.KLAVIS_GOOGLE_CLIENT_ID,
   'Google Sheets': process.env.KLAVIS_GOOGLE_CLIENT_ID,
+  'Gmail': process.env.KLAVIS_GOOGLE_CLIENT_ID,
   'Slack': process.env.KLAVIS_SLACK_ID,
 };
 
