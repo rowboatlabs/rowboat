@@ -6,20 +6,40 @@
       "primary": "#6366f1"
     },
     "navigation": {
-      "pages": [
-        { "title": "Setup", "href": "setup.md" },
-        { "title": "Introduction", "href": "index.md" },
-        { "title": "Open Source License", "href": "license.md" },
-        { "title": "Create agents", "href": "create_agents.md" },
-        { "title": "Test chats in the playground", "href": "playground.md" },
-        { "title": "Add tools", "href": "add_tools.md" },
-        { "title": "Update agents", "href": "update_agents.md" },
-        { "title": "Using RAG", "href": "using_rag.md" },
-        { "title": "Using the API", "href": "using_the_api.md" },
-        { "title": "Using the SDK", "href": "using_the_sdk.md" },
-        { "title": "Agents", "href": "agents.md" },
-        { "title": "Tools", "href": "tools.md" },
-        { "title": "Prompts", "href": "prompts.md" }
+      "groups": [
+        {
+          "group": "Getting Started",
+          "pages": ["setup.md"]
+        },
+        {
+          "group": "Overview",
+          "pages": ["index.md", "license.md"]
+        },
+        {
+          "group": "Building in Studio",
+          "pages": [
+            "create_agents.md",
+            "playground.md",
+            "add_tools.md",
+            "update_agents.md",
+            "using_rag.md"
+          ]
+        },
+        {
+          "group": "API & SDK",
+          "pages": [
+            "using_the_api.md",
+            "using_the_sdk.md"
+          ]
+        },
+        {
+          "group": "Concepts",
+          "pages": [
+            "agents.md",
+            "tools.md",
+            "prompts.md"
+          ]
+        }
       ]
     }
   }
