@@ -1,7 +1,8 @@
 {
     "$schema": "https://mintlify.com/docs.json",
     "project": {
-      "name": "RowBoat Docs"
+      "name": "RowBoat Docs",
+      "theme": "mint"
     },
     "navigation": [
       {
