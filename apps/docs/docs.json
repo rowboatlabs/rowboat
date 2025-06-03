@@ -1,9 +1,9 @@
 {
     "$schema": "https://mintlify.com/docs.json",
     "project": {
-      "name": "RowBoat Docs",
-      "theme": "mint"
+      "name": "RowBoat Docs"
     },
+    "theme": "mint",
     "navigation": [
       {
         "group": "Getting Started",
