@@ -1,47 +1,33 @@
 {
-    "$schema": "https://mintlify.com/docs.json",
-    "project": {
-      "name": "RowBoat Docs"
-    },
+    "$schema": "https://mintlify.com/schema/docs.schema.json",
+    "name": "RowBoat Docs",
     "theme": "mint",
-    "navigation": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          { "title": "Setup", "href": "setup.md" }
-        ]
-      },
-      {
-        "group": "Overview",
-        "pages": [
-          { "title": "Introduction", "href": "index.md" },
-          { "title": "Open Source License", "href": "license.md" }
-        ]
-      },
-      {
-        "group": "Building in Studio",
-        "pages": [
-          { "title": "Create agents", "href": "create_agents.md" },
-          { "title": "Test chats in the playground", "href": "playground.md" },
-          { "title": "Add tools", "href": "add_tools.md" },
-          { "title": "Update agents", "href": "update_agents.md" },
-          { "title": "Using RAG", "href": "using_rag.md" }
-        ]
-      },
-      {
-        "group": "API & SDK",
-        "pages": [
-          { "title": "Using the API", "href": "using_the_api.md" },
-          { "title": "Using the SDK", "href": "using_the_sdk.md" }
-        ]
-      },
-      {
-        "group": "Concepts",
-        "pages": [
-          { "title": "Agents", "href": "agents.md" },
-          { "title": "Tools", "href": "tools.md" },
-          { "title": "Prompts", "href": "prompts.md" }
-        ]
-      }
-    ]
+    "colors": {
+      "accent": "#6366f1"
+    },
+    "navigation": {
+      "Getting Started": [
+        { "title": "Setup", "href": "setup.md" }
+      ],
+      "Overview": [
+        { "title": "Introduction", "href": "index.md" },
+        { "title": "Open Source License", "href": "license.md" }
+      ],
+      "Building in Studio": [
+        { "title": "Create agents", "href": "create_agents.md" },
+        { "title": "Test chats in the playground", "href": "playground.md" },
+        { "title": "Add tools", "href": "add_tools.md" },
+        { "title": "Update agents", "href": "update_agents.md" },
+        { "title": "Using RAG", "href": "using_rag.md" }
+      ],
+      "API & SDK": [
+        { "title": "Using the API", "href": "using_the_api.md" },
+        { "title": "Using the SDK", "href": "using_the_sdk.md" }
+      ],
+      "Concepts": [
+        { "title": "Agents", "href": "agents.md" },
+        { "title": "Tools", "href": "tools.md" },
+        { "title": "Prompts", "href": "prompts.md" }
+      ]
+    }
   }
