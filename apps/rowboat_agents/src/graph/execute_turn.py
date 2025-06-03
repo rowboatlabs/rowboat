@@ -176,7 +176,7 @@ def get_rag_tool(config: dict, complete_request: dict) -> FunctionTool:
         return tool
     else:
         return None
-    
+
 DEFAULT_MAX_CALLS_PER_PARENT_AGENT = 3
 
 def get_agents(agent_configs, tool_configs, complete_request):
@@ -256,8 +256,7 @@ def get_agents(agent_configs, tool_configs, complete_request):
                 instructions=agent_instructions,
                 handoff_description=agent_config["description"],
                 tools=new_tools,
-                model = model,
-                model_settings=ModelSettings(temperature=0.0)
+                model = model
             )
 
             # Set the max calls per parent agent
@@ -289,7 +288,7 @@ def get_agents(agent_configs, tool_configs, complete_request):
             new_agent.handoffs = []
         # Look up the agent's children from the old agent and create a list called handoffs in new_agent with pointers to the children in new_agents
         new_agent.handoffs = [new_agents[new_agent_name_to_index[child]] for child in new_agent_to_children[new_agent.name]]
-    
+
     print("Returning created agents")
     print("="*100)
     return new_agents
@@ -342,11 +341,11 @@ async def run_streamed(
 
         # Get the stream result without trace context first
         stream_result = Runner.run_streamed(agent, formatted_messages)
-        
+
         # If tracing is enabled, wrap the stream_events to handle tracing
         if enable_tracing:
             original_stream_events = stream_result.stream_events
-            
+
             async def wrapped_stream_events():
                 # Create trace context inside the async function
                 with trace(f"Agent turn: {agent.name}") as trace_ctx:
@@ -359,9 +358,9 @@ async def run_streamed(
                     except Exception as e:
                         print(f"Error in stream events: {str(e)}")
                         raise
-            
+
             stream_result.stream_events = wrapped_stream_events
-        
+
         return stream_result
     except Exception as e:
         print(f"Error during streaming run: {str(e)}")

@@ -123,7 +123,6 @@ User: {last_message.content}
     return completions_client.chat.completions.create(
         model=PROVIDER_COPILOT_MODEL,
         messages=updated_msgs,
-        temperature=0.0,
         stream=True
     )
 
@@ -198,4 +197,4 @@ def create_app():
 if __name__ == '__main__':
     app = create_app()
     print("Starting Flask server...")
-    app.run(port=3002, host='0.0.0.0', debug=True) 
+    app.run(port=3002, host='0.0.0.0', debug=True)

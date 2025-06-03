@@ -98,7 +98,6 @@ User: {last_message.content}
     response = completions_client.chat.completions.create(
         model=PROVIDER_COPILOT_MODEL,
         messages=updated_msgs,
-        temperature=0.0,
         response_format={"type": "json_object"}
     )
 
