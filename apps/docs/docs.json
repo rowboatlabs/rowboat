@@ -1,45 +1,91 @@
 {
-    "$schema": "https://mintlify.com/schema/docs.schema.json",
-    "name": "RowBoat Docs",
+    "$schema": "https://mintlify.com/docs.json",
     "theme": "mint",
+    "name": "Rowboat",
+    "description": "Rowboat is an open-source platform for building multi-agent systems. It helps you orchestrate tools, RAG, memory, and deployable agents with ease.",
     "colors": {
-      "primary": "#6366f1"
+      "primary": "#6366F1",
+      "light": "#F3F4F6",
+      "dark": "#111827"
     },
     "navigation": {
-      "groups": [
+      "anchors": [
         {
-          "group": "Getting Started",
-          "pages": ["docs/setup.md"]
-        },
-        {
-          "group": "Overview",
-          "pages": ["docs/index.md", "docs/license.md"]
-        },
-        {
-          "group": "Building in Studio",
-          "pages": [
-            "docs/create_agents.md",
-            "docs/playground.md",
-            "docs/add_tools.md",
-            "docs/update_agents.md",
-            "docs/using_rag.md"
+          "anchor": "Documentation",
+          "icon": "book-open",
+          "tabs": [
+            {
+              "tab": "Docs",
+              "groups": [
+                {
+                  "group": "Getting Started",
+                  "icon": "rocket",
+                  "pages": ["docs/setup"]
+                },
+                {
+                  "group": "Overview",
+                  "icon": "info-circle",
+                  "pages": ["docs/index", "docs/license"]
+                },
+                {
+                  "group": "Building in Studio",
+                  "icon": "toolbox",
+                  "pages": [
+                    "docs/create_agents",
+                    "docs/playground",
+                    "docs/add_tools",
+                    "docs/update_agents",
+                    "docs/using_rag"
+                  ]
+                },
+                {
+                  "group": "API & SDK",
+                  "icon": "code",
+                  "pages": ["docs/using_the_api", "docs/using_the_sdk"]
+                },
+                {
+                  "group": "Concepts",
+                  "icon": "lightbulb",
+                  "pages": ["docs/agents", "docs/tools", "docs/prompts"]
+                }
+              ]
+            }
           ]
         },
         {
-          "group": "API & SDK",
-          "pages": [
-            "docs/using_the_api.md",
-            "docs/using_the_sdk.md"
-          ]
+          "anchor": "Website",
+          "href": "https://www.rowboatlabs.com",
+          "icon": "window"
         },
         {
-          "group": "Concepts",
-          "pages": [
-            "docs/agents.md",
-            "docs/tools.md",
-            "docs/prompts.md"
-          ]
+          "anchor": "GitHub",
+          "href": "https://github.com/rowboatlabs/rowboat",
+          "icon": "github"
+        },
+        {
+          "anchor": "Discord",
+          "href": "https://discord.gg/YOUR_INVITE",
+          "icon": "discord"
         }
       ]
+    },
+    "background": {
+      "color": {
+        "light": "#FFFFFF",
+        "dark": "#0F172A"
+      }
+    },
+    "navbar": {
+      "primary": {
+        "type": "button",
+        "label": "Try Rowboat",
+        "href": "https://app.rowboatlabs.com"
+      }
+    },
+    "footer": {
+      "socials": {
+        "github": "https://github.com/rowboatlabs/rowboat",
+        "linkedin": "https://www.linkedin.com/company/rowboat-labs"
+      }
     }
   }
