@@ -5,23 +5,30 @@ Copilot can help you add tools to agents. You can (a) add a mock tool, (b) add a
 ### Adding mock tools
 You can mock any tool you have created by checking the 'Mock tool responses' option.
 
-
-![Example Tool](img/mock-tool.png)
+<Frame caption="Mocking tools">
+  <img src="img/mock-tool.png" />
+</Frame>
 
 ### Adding MCP tools
 
 You can add a running MCP server in Settings -> Tools.
 
-![Example Tool](img/add-mcp-server.png)
+<Frame caption="Add MCP server">
+  <img src="img/add-mcp-server.png" />
+</Frame>
 
 You can use [supergateway](https://github.com/supercorp-ai/supergateway) to expose any MCP stdio server as an SSE server.
 
 Now, you can import the tools from the MCP server in the Build view.
 
-![Example Tool](img/import-mcp-tools.png)
+<Frame caption="Import MCP tools">
+  <img src="img/import-mcp-tools.png" />
+</Frame>
 
 
 ### Debug tool calls in the playground
 When agents call tools during a chat in the playground, the tool call parameters and response are available for debugging real-time. For testing purposes, the platform can produce mock tool responses in the playground, without integrating actual tools.
 
-![Mock Tool Responses](img/mock-response.png)
+<Frame caption="Mock Tool Responses">
+  <img src="img/mock-response.png" />
+</Frame>
