@@ -630,6 +630,13 @@ export function WorkflowEditor({
         }
     }, [workflow._id, workflow.agents]);
 
+    useEffect(() => {
+        const savedStartAgent = localStorage.getItem(`workflow_${workflow._id}_startAgent`);
+        if (savedStartAgent && savedStartAgent !== workflow.startAgent) {
+            dispatch({ type: "set_main_agent", name: savedStartAgent });
+        }
+    }, [workflow._id, workflow.startAgent]);
+
     // Function to trigger copilot chat
     const triggerCopilotChat = useCallback((message: string) => {
         setShowCopilot(true);
@@ -740,6 +747,7 @@ export function WorkflowEditor({
 
     function handleSetMainAgent(name: string) {
         dispatch({ type: "set_main_agent", name });
+        localStorage.setItem(`workflow_${workflow._id}_startAgent`, name);
     }
 
     function handleReorderAgents(agents: z.infer<typeof WorkflowAgent>[]) {
@@ -974,25 +982,25 @@ export function WorkflowEditor({
             <ResizablePanel minSize={10} defaultSize={PANEL_RATIOS.entityList}>
                 <div className="flex flex-col h-full">
                     <EntityList
-                        agents={state.present.workflow.agents}
-                        tools={state.present.workflow.tools}
-                        projectTools={projectTools}
-                        prompts={state.present.workflow.prompts}
-                        selectedEntity={state.present.selection}
-                        startAgentName={state.present.workflow.startAgent}
-                        onSelectAgent={handleSelectAgent}
-                        onSelectTool={handleSelectTool}
-                        onSelectPrompt={handleSelectPrompt}
-                        onAddAgent={handleAddAgent}
-                        onAddTool={handleAddTool}
-                        onAddPrompt={handleAddPrompt}
-                        onToggleAgent={handleToggleAgent}
-                        onSetMainAgent={handleSetMainAgent}
-                        onDeleteAgent={handleDeleteAgent}
-                        onDeleteTool={handleDeleteTool}
-                        onDeletePrompt={handleDeletePrompt}
-                        projectId={state.present.workflow.projectId}
-                        onReorderAgents={handleReorderAgents}
+                    agents={state.present.workflow.agents}
+                    tools={state.present.workflow.tools}
+                    projectTools={projectTools}
+                    prompts={state.present.workflow.prompts}
+                    selectedEntity={state.present.selection}
+                    startAgentName={state.present.workflow.startAgent}
+                    onSelectAgent={handleSelectAgent}
+                    onSelectTool={handleSelectTool}
+                    onSelectPrompt={handleSelectPrompt}
+                    onAddAgent={handleAddAgent}
+                    onAddTool={handleAddTool}
+                    onAddPrompt={handleAddPrompt}
+                    onToggleAgent={handleToggleAgent}
+                    onSetMainAgent={handleSetMainAgent}
+                    onDeleteAgent={handleDeleteAgent}
+                    onDeleteTool={handleDeleteTool}
+                    onDeletePrompt={handleDeletePrompt}
+                    projectId={state.present.workflow.projectId}
+                    onReorderAgents={handleReorderAgents}
                     />
                 </div>
             </ResizablePanel>
