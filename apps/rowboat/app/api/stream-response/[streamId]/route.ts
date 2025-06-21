@@ -3,13 +3,13 @@ import { USE_BILLING } from "@/app/lib/feature_flags";
 import { redisClient } from "@/app/lib/redis";
 import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
 import { generateAgenticResponse } from "@/app/lib/agents";
+import { Message } from "@/app/lib/types/types";
 import { z } from "zod";
-import { apiV1 } from "rowboat-shared";
 
 const PayloadSchema = z.object({
   workflow: Workflow,
   projectTools: z.array(WorkflowTool),
-  messages: z.array(apiV1.ChatMessage),
+  messages: z.array(Message),
 });
 
 export async function GET(request: Request, { params }: { params: { streamId: string } }) {

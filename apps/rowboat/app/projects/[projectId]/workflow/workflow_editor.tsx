@@ -1,6 +1,6 @@
 "use client";
 import React, { useReducer, Reducer, useState, useCallback, useEffect, useRef, createContext, useContext } from "react";
-import { MCPServer, WithStringId } from "../../../lib/types/types";
+import { MCPServer, Message, WithStringId } from "../../../lib/types/types";
 import { Workflow, WorkflowTool, WorkflowPrompt, WorkflowAgent } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { produce, applyPatches, enablePatches, produceWithPatches, Patch } from 'immer';
@@ -20,7 +20,6 @@ import {
     ResizablePanelGroup,
 } from "@/components/ui/resizable"
 import { Copilot } from "../copilot/app";
-import { apiV1 } from "rowboat-shared";
 import { publishWorkflow, renameWorkflow, saveWorkflow } from "../../../actions/workflow_actions";
 import { PublishedBadge } from "./published_badge";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
@@ -597,8 +596,8 @@ export function WorkflowEditor({
             lastUpdatedAt: workflow.lastUpdatedAt,
         }
     });
-    const [chatMessages, setChatMessages] = useState<z.infer<typeof apiV1.ChatMessage>[]>([]);
-    const updateChatMessages = useCallback((messages: z.infer<typeof apiV1.ChatMessage>[]) => {
+    const [chatMessages, setChatMessages] = useState<z.infer<typeof Message>[]>([]);
+    const updateChatMessages = useCallback((messages: z.infer<typeof Message>[]) => {
         setChatMessages(messages);
     }, []);
     const saveQueue = useRef<z.infer<typeof Workflow>[]>([]);

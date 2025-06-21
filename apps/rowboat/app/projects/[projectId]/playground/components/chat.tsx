@@ -3,11 +3,10 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { getAssistantResponseStreamId } from "@/app/actions/actions";
 import { Messages } from "./messages";
 import z from "zod";
-import { MCPServer, PlaygroundChat } from "@/app/lib/types/types";
+import { MCPServer, Message, PlaygroundChat, ToolMessage } from "@/app/lib/types/types";
 import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
 import { ComposeBoxPlayground } from "@/components/common/compose-box-playground";
 import { Button } from "@heroui/react";
-import { apiV1 } from "rowboat-shared";
 import { TestProfile } from "@/app/lib/types/testing_types";
 import { WithStringId } from "@/app/lib/types/types";
 import { ProfileContextBox } from "./profile-context-box";
@@ -32,7 +31,7 @@ export function Chat({
     chat: z.infer<typeof PlaygroundChat>;
     projectId: string;
     workflow: z.infer<typeof Workflow>;
-    messageSubscriber?: (messages: z.infer<typeof apiV1.ChatMessage>[]) => void;
+    messageSubscriber?: (messages: z.infer<typeof Message>[]) => void;
     testProfile?: z.infer<typeof TestProfile> | null;
     onTestProfileChange: (profile: WithStringId<z.infer<typeof TestProfile>> | null) => void;
     systemMessage: string;
@@ -43,13 +42,13 @@ export function Chat({
     showDebugMessages?: boolean;
     projectTools: z.infer<typeof WorkflowTool>[];
 }) {
-    const [messages, setMessages] = useState<z.infer<typeof apiV1.ChatMessage>[]>(chat.messages);
+    const [messages, setMessages] = useState<z.infer<typeof Message>[]>(chat.messages);
     const [loadingAssistantResponse, setLoadingAssistantResponse] = useState<boolean>(false);
     const [fetchResponseError, setFetchResponseError] = useState<string | null>(null);
     const [billingError, setBillingError] = useState<string | null>(null);
     const [lastAgenticRequest, setLastAgenticRequest] = useState<unknown | null>(null);
     const [lastAgenticResponse, setLastAgenticResponse] = useState<unknown | null>(null);
-    const [optimisticMessages, setOptimisticMessages] = useState<z.infer<typeof apiV1.ChatMessage>[]>(chat.messages);
+    const [optimisticMessages, setOptimisticMessages] = useState<z.infer<typeof Message>[]>(chat.messages);
     const [isLastInteracted, setIsLastInteracted] = useState(false);
 
     const getCopyContent = useCallback(() => {
@@ -74,20 +73,17 @@ export function Chat({
     }, [messages]);
 
     // collect published tool call results
-    const toolCallResults: Record<string, z.infer<typeof apiV1.ToolMessage>> = {};
+    const toolCallResults: Record<string, z.infer<typeof ToolMessage>> = {};
     optimisticMessages
         .filter((message) => message.role == 'tool')
         .forEach((message) => {
-            toolCallResults[message.tool_call_id] = message;
+            toolCallResults[message.toolCallId] = message;
         });
 
     function handleUserMessage(prompt: string) {
-        const updatedMessages: z.infer<typeof apiV1.ChatMessage>[] = [...messages, {
+        const updatedMessages: z.infer<typeof Message>[] = [...messages, {
             role: 'user',
             content: prompt,
-            version: 'v1',
-            chatId: '',
-            createdAt: new Date().toISOString(),
         }];
         setMessages(updatedMessages);
         setFetchResponseError(null);
@@ -110,7 +106,7 @@ export function Chat({
     useEffect(() => {
         let ignore = false;
         let eventSource: EventSource | null = null;
-        let msgs: z.infer<typeof apiV1.ChatMessage>[] = [];
+        let msgs: z.infer<typeof Message>[] = [];
 
         async function process() {
             setLoadingAssistantResponse(true);
@@ -120,33 +116,6 @@ export function Chat({
             setLastAgenticRequest(null);
             setLastAgenticResponse(null);
             
-            // const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow, projectTools);
-            // const request: z.infer<typeof AgenticAPIChatRequest> = {
-            //     projectId,
-            //     messages: convertToAgenticAPIChatMessages([{
-            //         role: 'system',
-            //         content: systemMessage || '',
-            //         version: 'v1' as const,
-            //         chatId: '',
-            //         createdAt: new Date().toISOString(),
-            //     }, ...messages]),
-            //     state: agenticState,
-            //     agents,
-            //     tools,
-            //     prompts,
-            //     startAgent,
-            //     mcpServers: mcpServerUrls.map(server => ({
-            //         name: server.name,
-            //         serverUrl: server.serverUrl || '',
-            //         isReady: server.isReady
-            //     })),
-            //     toolWebhookUrl: toolWebhookUrl,
-            //     testProfile: testProfile ?? undefined,
-            // };
-
-            // // Store the full request object
-            // setLastAgenticRequest(request);
-
             let streamId: string | null = null;
             try {
                 const response = await getAssistantResponseStreamId(
@@ -156,9 +125,6 @@ export function Chat({
                         {
                             role: 'system',
                             content: systemMessage || '',
-                            version: 'v1' as const,
-                            chatId: '',
-                            createdAt: new Date().toISOString(),
                         },
                         ...messages,
                     ],
@@ -194,7 +160,7 @@ export function Chat({
 
                 try {
                     const data = JSON.parse(event.data);
-                    const parsedMsg = apiV1.ChatMessage.parse(data);
+                    const parsedMsg = Message.parse(data);
                     msgs.push(parsedMsg);
                     setOptimisticMessages(prev => [...prev, parsedMsg]);
                 } catch (err) {

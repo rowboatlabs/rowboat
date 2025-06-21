@@ -14,9 +14,9 @@ import { dataSourceDocsCollection, dataSourcesCollection } from "./mongodb";
 import { qdrantClient } from '../lib/qdrant';
 import { EmbeddingRecord } from "./types/datasource_types";
 import { ConnectedEntity, sanitizeTextWithMentions, Workflow, WorkflowAgent, WorkflowPrompt, WorkflowTool } from "./types/workflow_types";
-import { apiV1 } from "rowboat-shared";
 import { CHILD_TRANSFER_RELATED_INSTRUCTIONS } from "./agent_instructions";
 import { PrefixLogger } from "./utils";
+import { Message, AssistantMessageWithToolCalls, ToolMessage } from "./types/types";
 
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
@@ -331,56 +331,31 @@ function createAgentFromConfig(
     };
 }
 
-// function isAgentTransferMessage(msg: z.infer<typeof apiV1.ChatMessage>): boolean {
-//     if (msg.role === 'assistant' &&
-//         !msg.content &&
-//         'tool_calls' in msg &&
-//         msg.tool_calls.length > 0 &&
-//         msg.tool_calls[0].function.name === 'transfer_to_agent') {
-//         return true;
-//     }
-//     if (msg.role === 'tool' &&
-//         !msg.content &&
-//         'tool_call_id' in msg &&
-//         msg.tool_call_id === 'transfer_to_agent') {
-//         return true;
-//     }
-//     return false;
-// }
-
 // Convert messages to agent input items
-function convertMsgsInput(messages: z.infer<typeof apiV1.ChatMessage>[]): AgentInputItem[] {
+function convertMsgsInput(messages: z.infer<typeof Message>[]): AgentInputItem[] {
     const msgs: AgentInputItem[] = [];
 
     for (const msg of messages) {
-        if (msg.role === 'assistant') {
+        if (msg.role === 'assistant' && msg.content) {
             msgs.push({
                 role: 'assistant',
                 content: [{
                     type: 'output_text',
-                    text: msg.agenticSender ? `Sender agent: ${msg.agenticSender}\nContent: ${msg.content}` : msg.content || '',
+                    text: msg.content,
                 }],
                 status: 'completed',
             });
         } else if (msg.role === 'user') {
             msgs.push({
                 role: 'user',
-                content: msg.content || '',
+                content: msg.content,
             });
         } else if (msg.role === 'system') {
             msgs.push({
                 role: 'system',
-                content: msg.content || '',
+                content: msg.content,
             });
         }
-    }
-
-    // Ensure system message is set
-    if (msgs.length === 0 || ('role' in msgs[0] && msgs[0].role !== 'system')) {
-        msgs.unshift({
-            role: 'system',
-            content: 'You are a helpful assistant.',
-        });
     }
 
     return msgs;
@@ -426,8 +401,8 @@ function getNextAgentName(
 // Logs an event and then yields it
 async function* emitEvent(
     logger: PrefixLogger,
-    event: z.infer<typeof apiV1.ChatMessage> | z.infer<typeof Done>,
-): AsyncGenerator<z.infer<typeof apiV1.ChatMessage> | z.infer<typeof Done>> {
+    event: z.infer<typeof Message> | z.infer<typeof Done>,
+): AsyncGenerator<z.infer<typeof Message> | z.infer<typeof Done>> {
     logger.log(`-> emitting event: ${JSON.stringify(event)}`);
     yield event;
     return;
@@ -437,16 +412,12 @@ async function* emitEvent(
 function createTransferEvents(
     fromAgent: string,
     toAgent: string,
-): [z.infer<typeof apiV1.ChatMessage>, z.infer<typeof apiV1.ChatMessage>] {
+): [z.infer<typeof AssistantMessageWithToolCalls>, z.infer<typeof ToolMessage>] {
     const toolCallId = crypto.randomUUID();
-    const m1: z.infer<typeof apiV1.ChatMessage> = {
-        version: 'v1',
-        chatId: '',
-        createdAt: new Date().toISOString(),
+    const m1: z.infer<typeof Message> = {
         role: 'assistant',
-        agenticResponseType: 'internal',
-        agenticSender: fromAgent,
-        tool_calls: [{
+        content: null,
+        toolCalls: [{
             id: toolCallId,
             type: 'function',
             function: {
@@ -454,16 +425,14 @@ function createTransferEvents(
                 arguments: JSON.stringify({ assistant: toAgent }),
             },
         }],
+        agentName: fromAgent,
     };
 
-    const m2: z.infer<typeof apiV1.ChatMessage> = {
-        version: 'v1',
-        chatId: '',
-        createdAt: new Date().toISOString(),
+    const m2: z.infer<typeof Message> = {
         role: 'tool',
         content: JSON.stringify({ assistant: toAgent }),
-        tool_call_id: toolCallId,
-        tool_name: 'transfer_to_agent',
+        toolCallId: toolCallId,
+        toolName: 'transfer_to_agent',
     };
 
     return [m1, m2];
@@ -512,8 +481,8 @@ class UsageTracker {
 export async function* generateAgenticResponse(
     workflow: z.infer<typeof Workflow>,
     projectTools: z.infer<typeof WorkflowTool>[],
-    messages: z.infer<typeof apiV1.ChatMessage>[],
-): AsyncGenerator<z.infer<typeof apiV1.ChatMessage> | z.infer<typeof Done>> {
+    messages: z.infer<typeof Message>[],
+): AsyncGenerator<z.infer<typeof Message> | z.infer<typeof Done>> {
     // set up logging
     let logger = new PrefixLogger(`agent-loop`)
     logger.log('projectId', workflow.projectId);
@@ -525,18 +494,24 @@ export async function* generateAgenticResponse(
         logger.log(`updated system message: ${messages[0].content}`);
     }
 
+    // Ensure system message is set
+    if (messages.length && messages[0].role !== 'system') {
+        messages.unshift({
+            role: 'system',
+            content: 'You are a helpful assistant.',
+        });
+        logger.log(`added system message: ${messages[0].content}`);
+    }
+
     // If there is nothing but a system message, handle it as a greeting turn
     if (messages.length === 1 && messages[0].role === 'system') {
         const greetingPrompt = workflow.prompts.find(p => p.type === 'greeting')?.prompt || 'How can I help you today?';
         logger.log(`greeting turn: ${greetingPrompt}`);
         yield* emitEvent(logger, {
-            version: 'v1',
-            chatId: '',
-            createdAt: new Date().toISOString(),
             role: 'assistant',
             content: greetingPrompt,
-            agenticResponseType: 'external',
-            agenticSender: workflow.startAgent,
+            agentName: workflow.startAgent,
+            responseType: 'external',
         });
         yield* emitEvent(logger, new UsageTracker().asEvent());
         return;
@@ -562,8 +537,8 @@ export async function* generateAgenticResponse(
     // create agent call stack from messages
     const stack: string[] = [];
     for (const msg of messages) {
-        if (msg.role === 'assistant' && msg.agenticSender) {
-            stack.push(msg.agenticSender);
+        if (msg.role === 'assistant' && msg.content) {
+            stack.push(msg.agentName || workflow.startAgent);
         }
     }
 
@@ -619,7 +594,7 @@ export async function* generateAgenticResponse(
     // set up initial state for loop
     logger.log('@@ starting agent loop @@');
     let iter = 0;
-    const accumulatedMessages: z.infer<typeof apiV1.ChatMessage>[] = [...messages];
+    const accumulatedMessages: z.infer<typeof Message>[] = [...messages];
     let currentAgent = agents[nextAgentName];
     if (!currentAgent) {
         throw new Error(`Start agent ${nextAgentName} not found`);
@@ -651,12 +626,10 @@ export async function* generateAgenticResponse(
                         // emit tool call invocation
                         for (const output of outputs) {
                             if (output.type === 'function_call' && !output.name.startsWith('transfer_to')) {
-                                const m: z.infer<typeof apiV1.ChatMessage> = {
-                                    version: 'v1',
-                                    chatId: '',
-                                    createdAt: new Date().toISOString(),
+                                const m: z.infer<typeof Message> = {
                                     role: 'assistant',
-                                    tool_calls: [{
+                                    content: null,
+                                    toolCalls: [{
                                         id: output.callId,
                                         type: 'function',
                                         function: {
@@ -664,8 +637,7 @@ export async function* generateAgenticResponse(
                                             arguments: output.arguments || '',
                                         },
                                     }],
-                                    agenticResponseType: 'internal',
-                                    agenticSender: currentAgent.name,
+                                    agentName: currentAgent.name,
                                 };
                                 accumulatedMessages.push(m);
                                 yield* emitEvent(innerLoopLogger, m);
@@ -709,7 +681,7 @@ export async function* generateAgenticResponse(
                         }
                         accumulatedMessages.push(m2);
                         yield* emitEvent(innerLoopLogger, m1);
-                        yield* emitEvent(innerLoopLogger, m2);                        
+                        yield* emitEvent(innerLoopLogger, m2);
 
                         // switch to child
                         if (agentConfig[event.item.targetAgent.name].outputVisibility === 'internal') {
@@ -725,14 +697,11 @@ export async function* generateAgenticResponse(
                         event.item.rawItem.type === 'function_call_result' &&
                         event.item.rawItem.status === 'completed' &&
                         event.item.rawItem.output.type === 'text') {
-                        const m: z.infer<typeof apiV1.ChatMessage> = {
-                            version: 'v1',
-                            chatId: '',
-                            createdAt: new Date().toISOString(),
+                        const m: z.infer<typeof Message> = {
                             role: 'tool',
                             content: event.item.rawItem.output.text,
-                            tool_call_id: event.item.rawItem.callId,
-                            tool_name: event.item.rawItem.name,
+                            toolCallId: event.item.rawItem.callId,
+                            toolName: event.item.rawItem.name,
                         };
                         accumulatedMessages.push(m);
                         yield* emitEvent(innerLoopLogger, m);
@@ -748,14 +717,11 @@ export async function* generateAgenticResponse(
                         const isInternal = agentConfig[event.item.agent.name].outputVisibility === 'internal';
                         for (const content of event.item.rawItem.content) {
                             if (content.type === 'output_text') {
-                                const msg: z.infer<typeof apiV1.ChatMessage> = {
-                                    version: 'v1',
-                                    chatId: '',
-                                    createdAt: new Date().toISOString(),
+                                const msg: z.infer<typeof Message> = {
                                     role: 'assistant',
                                     content: content.text,
-                                    agenticResponseType: isInternal ? 'internal' : 'external',
-                                    agenticSender: event.item.agent.name,
+                                    agentName: event.item.agent.name,
+                                    responseType: isInternal ? 'internal' : 'external',
                                 };
                                 accumulatedMessages.push(msg);
                                 yield* emitEvent(innerLoopLogger, msg);
@@ -791,7 +757,7 @@ export async function* generateAgenticResponse(
         if (agentConfig[currentAgent.name].outputVisibility === 'user_facing' &&
             lastMessage.role === 'assistant' &&
             lastMessage.content &&
-            lastMessage.agenticSender === currentAgent.name
+            lastMessage.agentName === currentAgent.name
         ) {
             loopLogger.log(`last message was by a user_facing agent, breaking out of parent loop`);
             break;

@@ -1,13 +1,12 @@
 'use client';
 import { useState, useCallback, useRef } from "react";
 import { z } from "zod";
-import { MCPServer, PlaygroundChat } from "@/app/lib/types/types";
+import { MCPServer, Message, PlaygroundChat } from "@/app/lib/types/types";
 import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
 import { Chat } from "./components/chat";
 import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@heroui/react";
-import { apiV1 } from "rowboat-shared";
 import { TestProfile } from "@/app/lib/types/testing_types";
 import { WithStringId } from "@/app/lib/types/types";
 import { ProfileSelector } from "@/app/projects/[projectId]/test/[[...slug]]/components/selectors/profile-selector";
@@ -31,7 +30,7 @@ export function App({
     hidden?: boolean;
     projectId: string;
     workflow: z.infer<typeof Workflow>;
-    messageSubscriber?: (messages: z.infer<typeof apiV1.ChatMessage>[]) => void;
+    messageSubscriber?: (messages: z.infer<typeof Message>[]) => void;
     mcpServerUrls: Array<z.infer<typeof MCPServer>>;
     toolWebhookUrl: string;
     isInitialState?: boolean;

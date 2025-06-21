@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { Workflow } from "./workflow_types";
-import { apiV1 } from "rowboat-shared"
-import { AgenticAPIChatMessage } from "./agents_api_types";
-import { convertToAgenticAPIChatMessages } from "./agents_api_types";
 import { DataSource } from "./datasource_types";
+import { Message } from "./types";
 
 // Create a filtered version of DataSource for copilot
 export const CopilotDataSource = z.object({
@@ -70,7 +68,7 @@ export const CopilotApiMessage = z.object({
 export const CopilotChatContext = z.union([
     z.object({
         type: z.literal('chat'),
-        messages: z.array(apiV1.ChatMessage),
+        messages: z.array(Message),
     }),
     z.object({
         type: z.literal('agent'),
@@ -88,7 +86,7 @@ export const CopilotChatContext = z.union([
 export const CopilotApiChatContext = z.union([
     z.object({
         type: z.literal('chat'),
-        messages: z.array(AgenticAPIChatMessage),
+        messages: z.array(Message),
     }),
     z.object({
         type: z.literal('agent'),
@@ -124,7 +122,7 @@ export function convertToCopilotApiChatContext(context: z.infer<typeof CopilotCh
         case 'chat':
             return {
                 type: 'chat',
-                messages: convertToAgenticAPIChatMessages(context.messages),
+                messages: context.messages,
             };
         case 'agent':
             return {

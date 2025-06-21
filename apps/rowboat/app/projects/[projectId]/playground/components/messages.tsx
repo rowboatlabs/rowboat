@@ -5,10 +5,10 @@ import z from "zod";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { WorkflowTool } from "@/app/lib/types/workflow_types";
 import MarkdownContent from "@/app/lib/components/markdown-content";
-import { apiV1 } from "rowboat-shared";
 import { MessageSquareIcon, EllipsisIcon, CircleCheckIcon, ChevronRightIcon, ChevronDownIcon, ChevronUpIcon, XIcon, PlusIcon, CodeIcon, CheckCircleIcon, FileTextIcon } from "lucide-react";
 import { TestProfile } from "@/app/lib/types/testing_types";
 import { ProfileContextBox } from "./profile-context-box";
+import { Message, ToolMessage, AssistantMessageWithToolCalls } from "@/app/lib/types/types";
 
 function UserMessage({ content }: { content: string }) {
     return (
@@ -140,10 +140,10 @@ function ToolCalls({
     systemMessage,
     delta
 }: {
-    toolCalls: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'];
-    results: Record<string, z.infer<typeof apiV1.ToolMessage>>;
+    toolCalls: z.infer<typeof AssistantMessageWithToolCalls>['toolCalls'];
+    results: Record<string, z.infer<typeof ToolMessage>>;
     projectId: string;
-    messages: z.infer<typeof apiV1.ChatMessage>[];
+    messages: z.infer<typeof Message>[];
     sender: string | null | undefined;
     workflow: z.infer<typeof Workflow>;
     testProfile: z.infer<typeof TestProfile> | null;
@@ -171,8 +171,8 @@ function ToolCall({
     workflow,
     delta
 }: {
-    toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
-    result: z.infer<typeof apiV1.ToolMessage> | undefined;
+    toolCall: z.infer<typeof AssistantMessageWithToolCalls>['toolCalls'][number];
+    result: z.infer<typeof ToolMessage> | undefined;
     sender: string | null | undefined;
     workflow: z.infer<typeof Workflow>;
     delta: number;
@@ -206,7 +206,7 @@ function TransferToAgentToolCall({
     sender,
     delta
 }: {
-    result: z.infer<typeof apiV1.ToolMessage> | undefined;
+    result: z.infer<typeof ToolMessage> | undefined;
     sender: string | null | undefined;
     delta: number;
 }) {
@@ -238,8 +238,8 @@ function ClientToolCall({
     workflow,
     delta
 }: {
-    toolCall: z.infer<typeof apiV1.AssistantMessageWithToolCalls>['tool_calls'][number];
-    result: z.infer<typeof apiV1.ToolMessage> | undefined;
+    toolCall: z.infer<typeof AssistantMessageWithToolCalls>['toolCalls'][number];
+    result: z.infer<typeof ToolMessage> | undefined;
     sender: string | null | undefined;
     workflow: z.infer<typeof Workflow>;
     delta: number;
@@ -350,8 +350,8 @@ export function Messages({
     showDebugMessages = true,
 }: {
     projectId: string;
-    messages: z.infer<typeof apiV1.ChatMessage>[];
-    toolCallResults: Record<string, z.infer<typeof apiV1.ToolMessage>>;
+    messages: z.infer<typeof Message>[];
+    toolCallResults: Record<string, z.infer<typeof ToolMessage>>;
     loadingAssistantResponse: boolean;
     workflow: z.infer<typeof Workflow>;
     testProfile: z.infer<typeof TestProfile> | null;
@@ -368,28 +368,30 @@ export function Messages({
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages, loadingAssistantResponse]);
 
-    const renderMessage = (message: z.infer<typeof apiV1.ChatMessage>, index: number) => {
+    const renderMessage = (message: z.infer<typeof Message>, index: number) => {
         const isConsecutive = index > 0 && messages[index - 1].role === message.role;
 
         if (message.role === 'assistant') {
-            let latency = new Date(message.createdAt).getTime() - lastUserMessageTimestamp;
-            if (!userMessageSeen) {
-                latency = 0;
-            }
+            // TODO: add latency support
+            // let latency = new Date(message.createdAt).getTime() - lastUserMessageTimestamp;
+            // if (!userMessageSeen) {
+            //     latency = 0;
+            // }
+            let latency = 0;
 
             // First check for tool calls
-            if ('tool_calls' in message && message.tool_calls) {
+            if ('toolCalls' in message) {
                 // Skip tool calls if debug mode is off
                 if (!showDebugMessages) {
                     return null;
                 }
                 return (
                     <ToolCalls
-                        toolCalls={message.tool_calls}
+                        toolCalls={message.toolCalls}
                         results={toolCallResults}
                         projectId={projectId}
                         messages={messages}
-                        sender={message.agenticSender ?? ''}
+                        sender={message.agentName ?? ''}
                         workflow={workflow}
                         testProfile={testProfile}
                         systemMessage={systemMessage}
@@ -399,7 +401,7 @@ export function Messages({
             }
 
             // Then check for internal messages
-            if (message.agenticResponseType === 'internal') {
+            if (message.content && message.responseType === 'internal') {
                 // Skip internal messages if debug mode is off
                 if (!showDebugMessages) {
                     return null;
@@ -407,7 +409,7 @@ export function Messages({
                 return (
                     <InternalAssistantMessage
                         content={message.content ?? ''}
-                        sender={message.agenticSender ?? ''}
+                        sender={message.agentName ?? ''}
                         latency={latency}
                         delta={latency}
                     />
@@ -418,14 +420,15 @@ export function Messages({
             return (
                 <AssistantMessage
                     content={message.content ?? ''}
-                    sender={message.agenticSender ?? ''}
+                    sender={message.agentName ?? ''}
                     latency={latency}
                 />
             );
         }
 
-        if (message.role === 'user' && typeof message.content === 'string') {
-            lastUserMessageTimestamp = new Date(message.createdAt).getTime();
+        if (message.role === 'user') {
+            // TODO: add latency support
+            // lastUserMessageTimestamp = new Date(message.createdAt).getTime();
             userMessageSeen = true;
             return <UserMessage content={message.content} />;
         }
@@ -433,12 +436,12 @@ export function Messages({
         return null;
     };
 
-    const isAgentTransition = (message: z.infer<typeof apiV1.ChatMessage>) => {
-        return message.role === 'assistant' && 'tool_calls' in message && Array.isArray(message.tool_calls) && message.tool_calls.some(tc => tc.function.name.startsWith('transfer_to_'));
+    const isAgentTransition = (message: z.infer<typeof Message>) => {
+        return message.role === 'assistant' && 'toolCalls' in message && Array.isArray(message.toolCalls) && message.toolCalls.some(tc => tc.function.name.startsWith('transfer_to_'));
     };
 
-    const isAssistantMessage = (message: z.infer<typeof apiV1.ChatMessage>) => {
-        return message.role === 'assistant' && (!('tool_calls' in message) || !Array.isArray(message.tool_calls) || !message.tool_calls.some(tc => tc.function.name.startsWith('transfer_to_')));
+    const isAssistantMessage = (message: z.infer<typeof Message>) => {
+        return message.role === 'assistant' && (!('toolCalls' in message) || !Array.isArray(message.toolCalls) || !message.toolCalls.some(tc => tc.function.name.startsWith('transfer_to_')));
     };
 
     if (showSystemMessage) {
