@@ -213,8 +213,8 @@ export async function configureInboundCall(
             throw new Error(`Phone number ${phone_number} not found in Twilio account`);
         }
 
-        const phoneSid = incomingPhoneNumbers[0].sid;
-        const currentVoiceUrl = incomingPhoneNumbers[0].voiceUrl;
+        const phoneSid = incomingPhoneNumbers[0]!.sid;
+        const currentVoiceUrl = incomingPhoneNumbers[0]!.voiceUrl;
         const wasPreviouslyConfigured = Boolean(currentVoiceUrl);
 
         // Get base URL from environment - MUST be a public URL
@@ -234,7 +234,7 @@ export async function configureInboundCall(
             statusCallback: `${baseUrl}/call-status`,
             currentConfig: {
                 voiceUrl: currentVoiceUrl,
-                statusCallback: incomingPhoneNumbers[0].statusCallback
+                statusCallback: incomingPhoneNumbers[0]!.statusCallback
             }
         });
 

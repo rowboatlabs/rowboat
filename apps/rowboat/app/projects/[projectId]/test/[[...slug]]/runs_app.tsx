@@ -447,7 +447,7 @@ export function RunsApp({
     let runId: string | null = null;
     if (slug.length > 0) {
         selection = "view";
-        runId = slug[0];
+        runId = slug[0]!;
     }
 
     return <>

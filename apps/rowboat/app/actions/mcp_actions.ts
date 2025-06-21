@@ -251,7 +251,7 @@ export async function toggleMcpTool(
     const serverIndex = mcpServers.findIndex(s => s.serverName === serverName);
     if (serverIndex === -1) throw new Error("Server not found");
 
-    const server = mcpServers[serverIndex];
+    const server = mcpServers[serverIndex]!;
     
     if (shouldAdd) {
         // Add tool if it doesn't exist

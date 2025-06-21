@@ -38,7 +38,7 @@ export function TextSource({
                 console.log('got data', files);
 
                 if (!ignore && files.length > 0) {
-                    const doc = files[0];
+                    const doc = files[0]!;
                     if (doc.data.type === 'text') {
                         setContent(doc.data.content);
                         setDocId(doc._id);

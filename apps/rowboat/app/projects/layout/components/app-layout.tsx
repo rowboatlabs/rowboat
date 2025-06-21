@@ -21,7 +21,7 @@ export default function AppLayout({ children, useRag = false, useAuth = false, u
 
   let projectId: string | null = null;
   if (pathname.startsWith('/projects')) {
-    projectId = pathname.split('/')[2];
+    projectId = pathname.split('/')[2] ?? null;
   }
 
   useEffect(() => {

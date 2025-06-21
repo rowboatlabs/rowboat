@@ -1,4 +1,3 @@
-import { AgenticAPIChatResponse, AgenticAPIChatRequest, AgenticAPIChatMessage, AgenticAPIInitStreamResponse } from "./types/agents_api_types";
 import { z } from "zod";
 import { generateObject } from "ai";
 import { openai } from "@ai-sdk/openai";
@@ -6,42 +5,13 @@ import { redisClient } from "./redis";
 import { Workflow, WorkflowTool } from "./types/workflow_types";
 import { Message } from "./types/types";
 
-export async function getAgenticApiResponse(
-    request: z.infer<typeof AgenticAPIChatRequest>,
-): Promise<{
-    messages: z.infer<typeof AgenticAPIChatMessage>[],
-    state: unknown,
-    rawAPIResponse: unknown,
-}> {
-    // call agentic api
-    console.log(`sending agentic api request`, JSON.stringify(request));
-    const response = await fetch(process.env.AGENTS_API_URL + '/chat', {
-        method: 'POST',
-        body: JSON.stringify(request),
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.AGENTS_API_KEY || 'test'}`,
-        },
-    });
-    if (!response.ok) {
-        console.error('Failed to call agentic api', response);
-        throw new Error(`Failed to call agentic api: ${response.statusText}`);
-    }
-    const responseJson = await response.json();
-    console.log(`received agentic api response`, JSON.stringify(responseJson));
-    const result: z.infer<typeof AgenticAPIChatResponse> = responseJson;
-    return {
-        messages: result.messages,
-        state: result.state,
-        rawAPIResponse: result,
-    };
-}
-
 export async function getAgenticResponseStreamId(
     workflow: z.infer<typeof Workflow>,
     projectTools: z.infer<typeof WorkflowTool>[],
     messages: z.infer<typeof Message>[],
-): Promise<z.infer<typeof AgenticAPIInitStreamResponse>> {
+): Promise<{
+    streamId: string,
+}> {
     // serialize the request
     const payload = JSON.stringify({
         workflow,

@@ -4,14 +4,14 @@ import { z } from "zod";
 import { ObjectId } from "mongodb";
 import { authCheck } from "../../utils";
 import { ApiRequest, ApiResponse } from "../../../../lib/types/types";
-import { AgenticAPIChatRequest, convertFromAgenticApiToApiMessages, convertFromApiToAgenticApiMessages, convertWorkflowToAgenticAPI } from "../../../../lib/types/agents_api_types";
-import { getAgenticApiResponse } from "../../../../lib/utils";
 import { check_query_limit } from "../../../../lib/rate_limiting";
 import { PrefixLogger } from "../../../../lib/utils";
 import { TestProfile } from "@/app/lib/types/testing_types";
 import { fetchProjectMcpTools } from "@/app/lib/project_tools";
 import { authorize, getCustomerIdForProject, logUsage } from "@/app/lib/billing";
 import { USE_BILLING } from "@/app/lib/feature_flags";
+import { Message } from "@/app/lib/types/types";
+import { generateAgenticResponse } from "@/app/lib/agents";
 
 // get next turn / agent response
 export async function POST(
@@ -52,7 +52,6 @@ export async function POST(
             return Response.json({ error: `Invalid request body: ${result.error.message}` }, { status: 400 });
         }
         const reqMessages = result.data.messages;
-        const reqState = result.data.state;
 
         // fetch published workflow id
         const project = await projectsCollection.findOne({
@@ -112,34 +111,17 @@ export async function POST(
             }
         }
 
-        let currentState: unknown = reqState ?? { lastAgentName: workflow.agents[0].name };
-
         // get assistant response
-        const { agents, tools, prompts, startAgent } = convertWorkflowToAgenticAPI(workflow, projectTools);
-        const request: z.infer<typeof AgenticAPIChatRequest> = {
-            projectId,
-            messages: convertFromApiToAgenticApiMessages(reqMessages),
-            state: currentState,
-            agents,
-            tools,
-            prompts,
-            startAgent,
-            testProfile: testProfile ?? undefined,
-            mcpServers: (project.mcpServers ?? []).map(server => ({
-                name: server.name,
-                serverUrl: server.serverUrl ?? '',
-                isReady: server.isReady ?? false
-            })),
-            toolWebhookUrl: project.webhookUrl ?? '',
-        };
-
-        const { messages: agenticMessages, state } = await getAgenticApiResponse(request);
-        const newMessages = convertFromAgenticApiToApiMessages(agenticMessages);
-        const newState = state;
+        const responseMessages: z.infer<typeof Message>[] = [...reqMessages];
+        for await (const event of generateAgenticResponse(workflow, projectTools, responseMessages)) {
+            if ('role' in event) {
+                responseMessages.push(event);
+            }
+        }
 
         // log billing usage
         if (USE_BILLING && billingCustomerId) {
-            const agentMessageCount = newMessages.filter(m => m.role === 'assistant').length;
+            const agentMessageCount = responseMessages.filter(m => m.role === 'assistant').length;
             await logUsage(billingCustomerId, {
                 type: 'agent_messages',
                 amount: agentMessageCount,
@@ -147,8 +129,7 @@ export async function POST(
         }
 
         const responseBody: z.infer<typeof ApiResponse> = {
-            messages: newMessages,
-            state: newState,
+            messages: responseMessages,
         };
         return Response.json(responseBody);
     });

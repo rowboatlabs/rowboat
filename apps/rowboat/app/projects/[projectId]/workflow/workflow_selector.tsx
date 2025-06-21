@@ -81,7 +81,7 @@ export function WorkflowSelector({
                 setError(null);
 
                 if (autoSelectIfOnlyOneWorkflow && workflows.length === 1) {
-                    handleSelect(workflows[0]._id);
+                    handleSelect(workflows[0]!._id);
                 }
             } catch (e) {
                 setError('Failed to load workflows');

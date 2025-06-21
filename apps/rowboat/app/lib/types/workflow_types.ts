@@ -107,7 +107,7 @@ export function sanitizeTextWithMentions(
         .map(match => {
             return {
                 type: match[1] as 'tool' | 'prompt' | 'agent',
-                name: match[2],
+                name: match[2] as string,
             };
         })
         .filter(entity => {

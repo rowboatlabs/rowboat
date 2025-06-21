@@ -212,7 +212,7 @@ export function Chat({
 
         // if last message is not a user message, return
         if (messages.length > 0) {
-            const last = messages[messages.length - 1];
+            const last = messages[messages.length - 1]!;
             if (last.role !== 'user') {
                 return;
             }

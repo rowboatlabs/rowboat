@@ -201,7 +201,7 @@ export function FilesSource({
 
             // Upload files in parallel
             await Promise.all(acceptedFiles.map(async (file, index) => {
-                await fetch(urls[index].uploadUrl, {
+                await fetch(urls[index]!.uploadUrl, {
                     method: 'PUT',
                     body: file,
                     headers: {
@@ -218,19 +218,19 @@ export function FilesSource({
             }[] = [];
             if (type === 'files_s3') {
                 docData = acceptedFiles.map((file, index) => ({
-                    _id: urls[index].fileId,
+                    _id: urls[index]!.fileId,
                     name: file.name,
                     data: {
                         type: 'file_s3' as const,
                         name: file.name,
                         size: file.size,
                         mimeType: file.type,
-                        s3Key: urls[index].path,
+                        s3Key: urls[index]!.path,
                     },
                 }));
             } else {
                 docData = acceptedFiles.map((file, index) => ({
-                    _id: urls[index].fileId,
+                    _id: urls[index]!.fileId,
                     name: file.name,
                     data: {
                         type: 'file_local' as const,

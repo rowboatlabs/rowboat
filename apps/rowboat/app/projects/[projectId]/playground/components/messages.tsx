@@ -41,7 +41,7 @@ function InternalAssistantMessage({ content, sender, latency, delta }: { content
     );
 
     // Get first line preview
-    const firstLine = content.split('\n')[0].trim();
+    const firstLine = content.split('\n')[0]!.trim();
     const preview = firstLine.length > 50 ? firstLine.substring(0, 50) + '...' : firstLine;
 
     return (
@@ -369,8 +369,6 @@ export function Messages({
     }, [messages, loadingAssistantResponse]);
 
     const renderMessage = (message: z.infer<typeof Message>, index: number) => {
-        const isConsecutive = index > 0 && messages[index - 1].role === message.role;
-
         if (message.role === 'assistant') {
             // TODO: add latency support
             // let latency = new Date(message.createdAt).getTime() - lastUserMessageTimestamp;

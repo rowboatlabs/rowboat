@@ -148,7 +148,7 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
             projectId: job.projectId,
             sourceId: job._id.toString(),
             docId: doc._id.toString(),
-            content: splits[i].pageContent,
+            content: splits[i]!.pageContent,
             title: doc.name,
             name: doc.name,
         },

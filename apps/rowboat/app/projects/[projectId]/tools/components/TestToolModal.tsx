@@ -77,17 +77,17 @@ export function TestToolModal({ isOpen, onClose, tool, server }: TestToolModalPr
       const rest = parts.slice(1);
       
       setParameters(prev => {
-        const current = prev[topLevel] || {};
+        const current = prev[topLevel!] || {};
         let temp = current;
         for (let i = 0; i < rest.length - 1; i++) {
-          temp[rest[i]] = temp[rest[i]] || {};
-          temp = temp[rest[i]];
+          temp[rest[i]!] = temp[rest[i]!] || {};
+          temp = temp[rest[i]!];
         }
-        temp[rest[rest.length - 1]] = value;
+        temp[rest[rest.length - 1]!] = value;
         
         return {
           ...prev,
-          [topLevel]: current
+          [topLevel!]: current
         };
       });
     }
@@ -97,11 +97,11 @@ export function TestToolModal({ isOpen, onClose, tool, server }: TestToolModalPr
       if (matches) {
         const [_, arrayName, index] = matches;
         setParameters(prev => {
-          const array = Array.isArray(prev[arrayName]) ? [...prev[arrayName]] : [];
-          array[parseInt(index, 10)] = value;
+          const array = Array.isArray(prev[arrayName!]!) ? [...prev[arrayName!]!] : [];
+          array[parseInt(index!, 10)] = value;
           return {
             ...prev,
-            [arrayName]: array
+            [arrayName!]: array
           };
         });
       }

@@ -153,7 +153,7 @@ export function ProductTour({
         }
     }, []);
 
-    const currentTarget = TOUR_STEPS[currentStep].target;
+    const currentTarget = TOUR_STEPS[currentStep]!.target;
     const targetElement = document.querySelector(`[data-tour-target="${currentTarget}"]`);
 
     // Determine if the target is a panel that should have the hint on the side
@@ -209,9 +209,9 @@ export function ProductTour({
     if (!shouldShow) return null;
 
     // Get the actual placement after middleware calculations
-    const actualPlacement = middlewareData.flip?.overflows?.length ? 
-        middlewareData.flip?.overflows[0].placement : 
-        isPanelTarget ? 'right' : 'top';
+    // const actualPlacement = middlewareData.flip?.overflows?.length ? 
+    //     middlewareData.flip?.overflows[0].placement : 
+    //     isPanelTarget ? 'right' : 'top';
 
     return (
         <FloatingPortal>
@@ -235,10 +235,10 @@ export function ProductTour({
                     <XIcon size={16} />
                 </button>
                 <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                    {TOUR_STEPS[currentStep].title}
+                    {TOUR_STEPS[currentStep]!.title}
                 </div>
                 <div className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-3 whitespace-pre-line [&>a]:underline"
-                    dangerouslySetInnerHTML={{ __html: TOUR_STEPS[currentStep].content }}
+                    dangerouslySetInnerHTML={{ __html: TOUR_STEPS[currentStep]!.content }}
                 />
                 <div className="flex justify-between items-center">
                     <button

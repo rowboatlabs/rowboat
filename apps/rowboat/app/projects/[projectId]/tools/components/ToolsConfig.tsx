@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { Tabs, Tab } from '@/components/ui/tabs';
 import { HostedServers } from './HostedServers';
 import { CustomServers } from './CustomServers';
-import { WebhookConfig } from './WebhookConfig';
 import type { Key } from 'react';
 
 export function ToolsConfig() {
@@ -38,11 +37,6 @@ export function ToolsConfig() {
         <Tab key="custom" title="Custom MCP Servers">
           <div className="mt-4 p-6">
             <CustomServers />
-          </div>
-        </Tab>
-        <Tab key="webhook" title="Webhook">
-          <div className="mt-4 p-6">
-            <WebhookConfig />
           </div>
         </Tab>
       </Tabs>

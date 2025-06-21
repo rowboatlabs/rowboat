@@ -82,7 +82,7 @@ async function runScrapePipeline(_logger: PrefixLogger, job: WithId<z.infer<type
             projectId: job.projectId,
             sourceId: job._id.toString(),
             docId: doc._id.toString(),
-            content: splits[i].pageContent,
+            content: splits[i]!.pageContent,
             title: scrapeResult.metadata?.title || '',
             name: doc.name,
         },

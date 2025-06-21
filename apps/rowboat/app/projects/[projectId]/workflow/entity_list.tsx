@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { AgenticAPITool } from "../../../lib/types/agents_api_types";
 import { WorkflowPrompt, WorkflowAgent, WorkflowTool } from "../../../lib/types/workflow_types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
@@ -313,7 +312,7 @@ export function EntityList({
             
             const newAgents = [...agents];
             const [movedAgent] = newAgents.splice(oldIndex, 1);
-            newAgents.splice(newIndex, 0, movedAgent);
+            newAgents.splice(newIndex, 0, movedAgent!);
             
             // Update order numbers
             const updatedAgents = newAgents.map((agent, index) => ({
@@ -478,7 +477,7 @@ export function EntityList({
                                                         if (!acc[tool.mcpServerName]) {
                                                             acc[tool.mcpServerName] = [];
                                                         }
-                                                        acc[tool.mcpServerName].push(tool);
+                                                        acc[tool.mcpServerName]!.push(tool);
                                                     }
                                                     return acc;
                                                 }, {} as Record<string, typeof mergedTools>);

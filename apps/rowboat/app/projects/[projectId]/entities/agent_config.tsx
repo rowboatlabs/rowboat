@@ -1,6 +1,5 @@
 "use client";
 import { WithStringId } from "../../../lib/types/types";
-import { AgenticAPITool } from "../../../lib/types/agents_api_types";
 import { WorkflowPrompt, WorkflowAgent, Workflow, WorkflowTool } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { z } from "zod";
@@ -56,7 +55,7 @@ export function AgentConfig({
     agent: z.infer<typeof WorkflowAgent>,
     usedAgentNames: Set<string>,
     agents: z.infer<typeof WorkflowAgent>[],
-    tools: z.infer<typeof AgenticAPITool>[],
+    tools: z.infer<typeof WorkflowTool>[],
     projectTools: z.infer<typeof WorkflowTool>[],
     prompts: z.infer<typeof WorkflowPrompt>[],
     dataSources: WithStringId<z.infer<typeof DataSource>>[],

@@ -67,14 +67,14 @@ export default function MarkdownContent({
                         if (typeof text === 'string') {
                             const parts = text.split('@');
                             if (parts.length === 2) {
-                                label = parts[1];
+                                label = parts[1]!;
                             }
                         }
                     } else if (typeof children === 'string') {
                         // Fallback for direct string children
                         const parts = children.split('@');
                         if (parts.length === 2) {
-                            label = parts[1];
+                            label = parts[1]!;
                         }
                     }
 

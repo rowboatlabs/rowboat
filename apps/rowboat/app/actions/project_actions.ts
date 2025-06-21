@@ -90,7 +90,11 @@ export async function createProject(formData: FormData): Promise<{ id: string } 
     const projectId = response.id;
 
     // Add first workflow version with specified template
-    const { agents, prompts, tools, startAgent } = templates[templateKey];
+    const template = templates[templateKey];
+    if (!template) {
+        throw new Error(`Template ${templateKey} not found`);
+    }
+    const { agents, prompts, tools, startAgent } = template;
     await agentWorkflowsCollection.insertOne({
         projectId,
         agents,
@@ -297,7 +301,11 @@ export async function createProjectFromPrompt(formData: FormData): Promise<{ id:
     const projectId = response.id;
 
     // Add first workflow version with default template
-    const { agents, prompts, tools, startAgent } = templates['default'];
+    const template = templates['default'];
+    if (!template) {
+        throw new Error('Default template not found');
+    }
+    const { agents, prompts, tools, startAgent } = template;
     await agentWorkflowsCollection.insertOne({
         projectId,
         agents,

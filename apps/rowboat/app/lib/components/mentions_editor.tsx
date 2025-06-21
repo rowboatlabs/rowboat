@@ -143,9 +143,9 @@ export default function MentionEditor({
                                 const matches = [];
                                 for (let i = 0; i < atValues.length; i++) {
                                     if (
-                                        atValues[i].value.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1
+                                        atValues[i]!.value.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1
                                     ) {
-                                        matches.push(atValues[i]);
+                                        matches.push(atValues[i]!);
                                     }
                                 }
                                 renderList(matches, searchTerm);

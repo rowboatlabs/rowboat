@@ -465,7 +465,7 @@ export async function updateProjectServers(projectId: string, targetServerName?:
                 
                 // Update existing server
                 const updatedServer = {
-                    ...mcpServers[serverIndex],
+                    ...mcpServers[serverIndex]!,
                     isAuthenticated: serverInstance.isAuthenticated,
                     isReady
                 };

@@ -26,7 +26,11 @@ export async function createWorkflow(projectId: string): Promise<WithStringId<z.
     const nextWorkflowNumber = doc.nextWorkflowNumber;
 
     // create the workflow
-    const { agents, prompts, tools, startAgent } = templates['default'];
+    const template = templates['default'];
+    if (!template) {
+        throw new Error('Default template not found');
+    }
+    const { agents, prompts, tools, startAgent } = template;
     const workflow = {
         agents,
         prompts,

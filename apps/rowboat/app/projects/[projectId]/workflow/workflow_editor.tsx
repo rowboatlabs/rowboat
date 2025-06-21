@@ -158,7 +158,7 @@ function reducer(state: State, action: Action): State {
         case "undo": {
             if (state.currentIndex <= 0) return state;
             newState = produce(state, draft => {
-                const inverse = state.inversePatches[state.currentIndex - 1];
+                const inverse = state.inversePatches[state.currentIndex - 1]!;
                 draft.present = applyPatches(state.present, inverse);
                 draft.currentIndex--;
                 draft.present.pendingChanges = true;
@@ -169,7 +169,7 @@ function reducer(state: State, action: Action): State {
         case "redo": {
             if (state.currentIndex >= state.patches.length) return state;
             newState = produce(state, draft => {
-                const patch = state.patches[state.currentIndex];
+                const patch = state.patches[state.currentIndex]!;
                 draft.present = applyPatches(state.present, patch);
                 draft.currentIndex++;
                 draft.present.pendingChanges = true;
@@ -779,7 +779,7 @@ export function WorkflowEditor({
         if (saving.current || saveQueue.current.length === 0) return;
 
         saving.current = true;
-        const workflowToSave = saveQueue.current[saveQueue.current.length - 1];
+        const workflowToSave = saveQueue.current[saveQueue.current.length - 1]!;
         saveQueue.current = [];
 
         try {
