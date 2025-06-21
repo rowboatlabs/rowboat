@@ -297,7 +297,7 @@ function createAgentFromConfig(
 
     const { sanitized, entities } = sanitizeTextWithMentions(compiledInstructions, workflow, projectTools);
 
-    const agentTools = entities.filter(e => e.type === 'tool').map(e => tools[e.name]).filter(Boolean);
+    const agentTools = entities.filter(e => e.type === 'tool').map(e => tools[e.name]).filter(Boolean) as Tool[];
 
     // Add RAG tool if needed
     if (config.ragDataSources?.length) {
@@ -371,31 +371,32 @@ function getNextAgentName(
     logger = logger.child(`getNextAgentName`);
     logger.log(`stack: ${stack.join(', ')}`);
 
-    // if last agent isn't set, return start agent
-    if (!stack.length) {
-        logger.log(`no stack, returning start agent: ${workflow.startAgent}`);
-        return workflow.startAgent;
-    }
-
-    // if control type is retain, return last agent
+    // get the last agent from the stack
+    // if stack is empty, use the start agent
     const lastAgentName = stack.pop() || workflow.startAgent;
-    const lastAgentConfig = agentConfig[lastAgentName];
-    if (!lastAgentConfig) {
-        logger.log(`last agent ${lastAgentName} not found in agent config, returning start agent: ${workflow.startAgent}`);
-        return workflow.startAgent;
-    }
-    switch (lastAgentConfig.controlType) {
-        case 'retain':
-            logger.log(`last agent ${lastAgentName} control type is retain, returning last agent: ${lastAgentName}`);
-            return lastAgentName;
-        case 'relinquish_to_parent':
-            const parentAgentName = stack.pop() || workflow.startAgent;
-            logger.log(`last agent ${lastAgentName} control type is relinquish_to_parent, returning most recent parent: ${parentAgentName}`);
-            return parentAgentName;
-        case 'relinquish_to_start':
-            logger.log(`last agent ${lastAgentName} control type is relinquish_to_start, returning start agent: ${workflow.startAgent}`);
-            return workflow.startAgent;
-    }
+
+    return lastAgentName;
+
+    // TODO: control-type logic is being ignored for now
+    // if control type is retain, return last agent
+    // const lastAgentName = stack.pop() || workflow.startAgent;
+    // const lastAgentConfig = agentConfig[lastAgentName];
+    // if (!lastAgentConfig) {
+    //     logger.log(`last agent ${lastAgentName} not found in agent config, returning start agent: ${workflow.startAgent}`);
+    //     return workflow.startAgent;
+    // }
+    // switch (lastAgentConfig.controlType) {
+    //     case 'retain':
+    //         logger.log(`last agent ${lastAgentName} control type is retain, returning last agent: ${lastAgentName}`);
+    //         return lastAgentName;
+    //     case 'relinquish_to_parent':
+    //         const parentAgentName = stack.pop() || workflow.startAgent;
+    //         logger.log(`last agent ${lastAgentName} control type is relinquish_to_parent, returning most recent parent: ${parentAgentName}`);
+    //         return parentAgentName;
+    //     case 'relinquish_to_start':
+    //         logger.log(`last agent ${lastAgentName} control type is relinquish_to_start, returning start agent: ${workflow.startAgent}`);
+    //         return workflow.startAgent;
+    // }
 }
 
 // Logs an event and then yields it
@@ -438,7 +439,8 @@ function createTransferEvents(
     return [m1, m2];
 }
 
-class AgentToAgentCallCounter {
+// Tracks agent to agent transfer counts
+class AgentTransferCounter {
     private calls: Record<string, number> = {};
 
     increment(fromAgent: string, toAgent: string): void {
@@ -476,48 +478,30 @@ class UsageTracker {
     }
 }
 
-// Main function to generate an agentic response
-// using OpenAI Agents SDK
-export async function* generateAgenticResponse(
-    workflow: z.infer<typeof Workflow>,
-    projectTools: z.infer<typeof WorkflowTool>[],
-    messages: z.infer<typeof Message>[],
-): AsyncGenerator<z.infer<typeof Message> | z.infer<typeof Done>> {
-    // set up logging
-    let logger = new PrefixLogger(`agent-loop`)
-    logger.log('projectId', workflow.projectId);
-    logger.log('workflow', workflow.name);
+function ensureSystemMessage(logger: PrefixLogger, messages: z.infer<typeof Message>[]) {
+    logger = logger.child(`ensureSystemMessage`);
 
-    // Ensure that system message, if any, is not blank
-    if (messages.length > 0 && messages[0].role === 'system' && !messages[0].content) {
-        messages[0].content = 'You are a helpful assistant.';
-        logger.log(`updated system message: ${messages[0].content}`);
-    }
-
-    // Ensure system message is set
-    if (messages.length && messages[0].role !== 'system') {
+    // ensure that a system message is set
+    if (messages.length > 0 && messages[0]?.role !== 'system') {
         messages.unshift({
             role: 'system',
             content: 'You are a helpful assistant.',
         });
-        logger.log(`added system message: ${messages[0].content}`);
+        logger.log(`added system message: ${messages[0]?.content}`);
     }
 
-    // If there is nothing but a system message, handle it as a greeting turn
-    if (messages.length === 1 && messages[0].role === 'system') {
-        const greetingPrompt = workflow.prompts.find(p => p.type === 'greeting')?.prompt || 'How can I help you today?';
-        logger.log(`greeting turn: ${greetingPrompt}`);
-        yield* emitEvent(logger, {
-            role: 'assistant',
-            content: greetingPrompt,
-            agentName: workflow.startAgent,
-            responseType: 'external',
-        });
-        yield* emitEvent(logger, new UsageTracker().asEvent());
-        return;
+    // ensure that system message isn't blank
+    if (messages.length > 0 && messages[0]?.role === 'system' && !messages[0].content) {
+        messages[0].content = 'You are a helpful assistant.';
+        logger.log(`updated system message: ${messages[0].content}`);
     }
+}
 
-    // create map of agent, tool and prompt configs
+function mapConfig(workflow: z.infer<typeof Workflow>, projectTools: z.infer<typeof WorkflowTool>[]): {
+    agentConfig: Record<string, z.infer<typeof WorkflowAgent>>;
+    toolConfig: Record<string, z.infer<typeof WorkflowTool>>;
+    promptConfig: Record<string, z.infer<typeof WorkflowPrompt>>;
+} {
     const agentConfig: Record<string, z.infer<typeof WorkflowAgent>> = workflow.agents.reduce((acc, agent) => ({
         ...acc,
         [agent.name]: agent
@@ -533,16 +517,37 @@ export async function* generateAgenticResponse(
         ...acc,
         [prompt.name]: prompt
     }), {});
+    return { agentConfig, toolConfig, promptConfig };
+}
 
-    // create agent call stack from messages
+async function* emitGreetingTurn(logger: PrefixLogger, workflow: z.infer<typeof Workflow>): AsyncGenerator<z.infer<typeof Message> | z.infer<typeof Done>> {
+    // find the greeting prompt
+    const prompt = workflow.prompts.find(p => p.type === 'greeting')?.prompt || 'How can I help you today?';
+    logger.log(`greeting turn: ${prompt}`);
+
+    // emit greeting turn
+    yield* emitEvent(logger, {
+        role: 'assistant',
+        content: prompt,
+        agentName: workflow.startAgent,
+        responseType: 'external',
+    });
+
+    // emit final usage information
+    yield* emitEvent(logger, new UsageTracker().asEvent());
+}
+
+function createAgentCallStack(messages: z.infer<typeof Message>[]): string[] {
     const stack: string[] = [];
     for (const msg of messages) {
-        if (msg.role === 'assistant' && msg.content) {
-            stack.push(msg.agentName || workflow.startAgent);
+        if (msg.role === 'assistant' && msg.agentName) {
+            stack.push(msg.agentName);
         }
     }
+    return stack;
+}
 
-    // Create tools
+function createTools(logger: PrefixLogger, workflow: z.infer<typeof Workflow>, toolConfig: Record<string, z.infer<typeof WorkflowTool>>): Record<string, Tool> {
     const tools: Record<string, Tool> = {};
     for (const [toolName, config] of Object.entries(toolConfig)) {
         if (config.isMcp) {
@@ -555,12 +560,12 @@ export async function* generateAgenticResponse(
             logger.log(`unsupported tool type: ${toolName}`);
         }
     }
+    return tools;
+}
 
-    // extract mentions from agent instructions
-    const mentions: Record<string, z.infer<typeof ConnectedEntity>[]> = {};
-
-    // Create agents, record connections
+function createAgents(logger: PrefixLogger, workflow: z.infer<typeof Workflow>, agentConfig: Record<string, z.infer<typeof WorkflowAgent>>, tools: Record<string, Tool>, projectTools: z.infer<typeof WorkflowTool>[]): { agents: Record<string, Agent>, mentions: Record<string, z.infer<typeof ConnectedEntity>[]> } {
     const agents: Record<string, Agent> = {};
+    const mentions: Record<string, z.infer<typeof ConnectedEntity>[]> = {};
     for (const [agentName, config] of Object.entries(agentConfig)) {
         const { agent, entities } = createAgentFromConfig(
             logger,
@@ -573,58 +578,101 @@ export async function* generateAgenticResponse(
         mentions[agentName] = entities;
         logger.log(`created agent: ${agentName}`);
     }
+    return { agents, mentions };
+}
 
-    // Set up agent handoffs
+function setHandoffs(logger: PrefixLogger, agents: Record<string, Agent>, mentions: Record<string, z.infer<typeof ConnectedEntity>[]>): void {
     for (const [agentName, agent] of Object.entries(agents)) {
         const connectedAgentNames = (mentions[agentName] || []).filter(e => e.type === 'agent').map(e => e.name);
-        agent.handoffs = connectedAgentNames.map(e => agents[e]).filter(Boolean);
+        agent.handoffs = connectedAgentNames.map(e => agents[e]).filter(Boolean) as Agent[];
         logger.log(`set handoffs for ${agentName}: ${connectedAgentNames.join(',')}`);
     }
+}
 
-    // Track agent to agent calls
-    const a2aCounter = new AgentToAgentCallCounter();
+// Main function to generate an agentic response
+// using OpenAI Agents SDK
+export async function* generateAgenticResponse(
+    workflow: z.infer<typeof Workflow>,
+    projectTools: z.infer<typeof WorkflowTool>[],
+    messages: z.infer<typeof Message>[],
+): AsyncGenerator<z.infer<typeof Message> | z.infer<typeof Done>> {
+    // set up logging
+    let logger = new PrefixLogger(`agent-loop`)
+    logger.log('projectId', workflow.projectId);
+    logger.log('workflow', workflow.name);
 
-    // Track usage
+    // ensure valid system message
+    ensureSystemMessage(logger, messages);
+
+    // if there is only a system message, emit greeting turn and return
+    if (messages.length === 1 && messages[0]?.role === 'system') {
+        yield* emitGreetingTurn(logger, workflow);
+        return;
+    }
+
+    // create map of agent, tool and prompt configs
+    const { agentConfig, toolConfig, promptConfig } = mapConfig(workflow, projectTools);
+
+    // create agent call stack from input messages
+    const stack = createAgentCallStack(messages);
+
+    // create tools
+    const tools = createTools(logger, workflow, toolConfig);
+
+    // create agents, record connections
+    const { agents, mentions } = createAgents(logger, workflow, agentConfig, tools, projectTools);
+
+    // set up agent handoffs
+    setHandoffs(logger, agents, mentions);
+
+    // track agent to agent calls
+    const transferCounter = new AgentTransferCounter();
+
+    // track usage
     const usageTracker = new UsageTracker();
 
     // get next agent name
-    const nextAgentName = getNextAgentName(logger, stack, agentConfig, workflow);
-    logger.log(`next agent name: ${nextAgentName}`);
+    let agentName = getNextAgentName(logger, stack, agentConfig, workflow);
 
     // set up initial state for loop
-    logger.log('@@ starting agent loop @@');
+    logger.log('@@ starting agent turn @@');
     let iter = 0;
-    const accumulatedMessages: z.infer<typeof Message>[] = [...messages];
-    let currentAgent = agents[nextAgentName];
-    if (!currentAgent) {
-        throw new Error(`Start agent ${nextAgentName} not found`);
-    }
-    outerLoop: while (true) {
+    const turnMsgs: z.infer<typeof Message>[] = [...messages];
+
+    // loop indefinitely
+    turnLoop: while (true) {
         // increment loop counter
         iter++;
 
         // set up logging
         const loopLogger = logger.child(`iter-${iter}`);
-        loopLogger.log(`current agent: ${currentAgent.name}`);
-        loopLogger.log(`stack: ${stack.join(', ')}`);
 
-        // Run the agent
-        const agentInputs = convertMsgsInput(accumulatedMessages);
-        const result = await run(currentAgent, agentInputs, {
+        // log agent info
+        loopLogger.log(`agent name: ${agentName}`);
+        loopLogger.log(`stack: ${stack.join(', ')}`);
+        if (!agents[agentName]) {
+            throw new Error(`agent not found in agent config!`);
+        }
+        const agent: Agent = agents[agentName]!;
+
+        // convert messages to agents sdk compatible input
+        const inputs = convertMsgsInput(turnMsgs);
+
+        // run the agent
+        const result = await run(agent, inputs, {
             stream: true,
         });
 
+        // handle streaming events
         for await (const event of result) {
-            const innerLoopLogger = loopLogger.child(event.type);
+            const eventLogger = loopLogger.child(event.type);
 
-            // count tokens
             switch (event.type) {
                 case 'raw_model_stream_event':
-                    // if response is done
                     if (event.data.type === 'response_done') {
-                        const outputs = event.data.response.output;
-                        // emit tool call invocation
-                        for (const output of outputs) {
+                        for (const output of event.data.response.output) {
+                            // handle tool call invocation
+                            // except for transfer_to_* tool calls
                             if (output.type === 'function_call' && !output.name.startsWith('transfer_to')) {
                                 const m: z.infer<typeof Message> = {
                                     role: 'assistant',
@@ -633,14 +681,18 @@ export async function* generateAgenticResponse(
                                         id: output.callId,
                                         type: 'function',
                                         function: {
-                                            name: output.name || '',
-                                            arguments: output.arguments || '',
+                                            name: output.name,
+                                            arguments: output.arguments,
                                         },
                                     }],
-                                    agentName: currentAgent.name,
+                                    agentName: agentName,
                                 };
-                                accumulatedMessages.push(m);
-                                yield* emitEvent(innerLoopLogger, m);
+
+                                // add message to turn
+                                turnMsgs.push(m);
+
+                                // emit event
+                                yield* emitEvent(eventLogger, m);
                             }
                         }
 
@@ -650,46 +702,38 @@ export async function* generateAgenticResponse(
                             event.data.response.usage.inputTokens,
                             event.data.response.usage.outputTokens
                         );
-                        innerLoopLogger.log(`updated usage information: ${JSON.stringify(usageTracker.get())}`);
+                        eventLogger.log(`updated usage information: ${JSON.stringify(usageTracker.get())}`);
                     }
                     break;
                 case 'run_item_stream_event':
                     // handle handoff event
                     if (event.name === 'handoff_occurred' && event.item.type === 'handoff_output_item') {
                         // skip if its the same agent
-                        if (currentAgent.name === event.item.targetAgent.name) {
-                            innerLoopLogger.log(`current agent: ${currentAgent.name}`);
-                            innerLoopLogger.log(`target agent: ${event.item.targetAgent.name}`);
-                            innerLoopLogger.log(`skipping handoff to same agent: ${currentAgent.name}`);
-                            continue;
+                        if (agentName === event.item.targetAgent.name) {
+                            eventLogger.log(`skipping handoff to same agent: ${agentName}`);
+                            break;
                         }
 
                         // emit transfer tool call invocation
-                        const [m1, m2] = createTransferEvents(currentAgent.name, event.item.targetAgent.name);
-                        accumulatedMessages.push(m1);
-                        // skip if we've already called this child too many times
-                        const maxCalls = agentConfig[event.item.targetAgent.name]?.maxCallsPerParentAgent || 3;
-                        if (a2aCounter.get(currentAgent.name, event.item.targetAgent.name) >= maxCalls) {
-                            innerLoopLogger.log(`skipping handoff to child agent: ${event.item.targetAgent.name} (max calls reached)`);
-                            accumulatedMessages.push({
-                                ...m2,
-                                content: JSON.stringify({
-                                    error: `You've already called this child agent too many times. DO NOT ATTEMPT TO CALL IT AGAIN!.`,
-                                }),
-                            });
-                            continue outerLoop;
-                        }
-                        accumulatedMessages.push(m2);
-                        yield* emitEvent(innerLoopLogger, m1);
-                        yield* emitEvent(innerLoopLogger, m2);
+                        const [transferStart, transferComplete] = createTransferEvents(agentName, event.item.targetAgent.name);
 
-                        // switch to child
-                        if (agentConfig[event.item.targetAgent.name].outputVisibility === 'internal') {
-                            stack.push(currentAgent.name);
-                        }
-                        a2aCounter.increment(currentAgent.name, event.item.targetAgent.name);
-                        currentAgent = agents[event.item.targetAgent.name];
-                        break;
+                        // add messages to turn
+                        turnMsgs.push(transferStart);
+                        turnMsgs.push(transferComplete);
+
+                        // emit events
+                        yield* emitEvent(eventLogger, transferStart);
+                        yield* emitEvent(eventLogger, transferComplete);
+
+                        // update transfer counter
+                        transferCounter.increment(agentName, event.item.targetAgent.name);
+
+                        // add current agent to stack
+                        stack.push(agentName);
+
+                        // set this as the new agent name
+                        agentName = event.item.targetAgent.name;
+                        loopLogger.log(`switched to agent: ${agentName}`);
                     }
 
                     // handle tool call result
@@ -703,47 +747,66 @@ export async function* generateAgenticResponse(
                             toolCallId: event.item.rawItem.callId,
                             toolName: event.item.rawItem.name,
                         };
-                        accumulatedMessages.push(m);
-                        yield* emitEvent(innerLoopLogger, m);
-                        // get next event
-                        continue;
+
+                        // add message to turn
+                        turnMsgs.push(m);
+
+                        // emit event
+                        yield* emitEvent(eventLogger, m);
                     }
 
-                    // handle model ressage output
+                    // handle model response message output
                     if (event.item.type === 'message_output_item' &&
                         event.item.rawItem.type === 'message' &&
                         event.item.rawItem.status === 'completed') {
                         // check response visibility
-                        const isInternal = agentConfig[event.item.agent.name].outputVisibility === 'internal';
+                        const isInternal = agentConfig[agentName]?.outputVisibility === 'internal';
                         for (const content of event.item.rawItem.content) {
                             if (content.type === 'output_text') {
+                                // create message
                                 const msg: z.infer<typeof Message> = {
                                     role: 'assistant',
                                     content: content.text,
-                                    agentName: event.item.agent.name,
+                                    agentName: agentName,
                                     responseType: isInternal ? 'internal' : 'external',
                                 };
-                                accumulatedMessages.push(msg);
-                                yield* emitEvent(innerLoopLogger, msg);
+
+                                // add message to turn
+                                turnMsgs.push(msg);
+
+                                // emit event
+                                yield* emitEvent(eventLogger, msg);
                             }
                         }
 
-                        // if this is an internal agent
-                        // switch to parent / start agent and continue
+                        // if this is an internal agent, switch to previous agent
                         if (isInternal) {
                             const prevAgent = stack.pop() || workflow.startAgent;
-                            const [m1, m2] = createTransferEvents(event.item.agent.name, prevAgent);
-                            accumulatedMessages.push(m1);
-                            accumulatedMessages.push(m2);
-                            yield* emitEvent(innerLoopLogger, m1);
-                            yield* emitEvent(innerLoopLogger, m2);
-                            a2aCounter.increment(event.item.agent.name, prevAgent);
-                            currentAgent = agents[prevAgent];
-                            innerLoopLogger.log(`switched to parent agent: ${prevAgent}`);
-                            continue outerLoop;
-                        }
 
-                        // if external, break out of loop
+                            // emit transfer tool call invocation
+                            const [transferStart, transferComplete] = createTransferEvents(agentName, prevAgent);
+
+                            // add messages to turn
+                            turnMsgs.push(transferStart);
+                            turnMsgs.push(transferComplete);
+
+                            // emit events
+                            yield* emitEvent(eventLogger, transferStart);
+                            yield* emitEvent(eventLogger, transferComplete);
+
+                            // update transfer counter
+                            transferCounter.increment(agentName, prevAgent);
+
+                            // add current agent to stack
+                            stack.push(agentName);
+
+                            // set this as the new agent name
+                            agentName = prevAgent;
+                            loopLogger.log(`switched to agent (reason: internal agent put out a message): ${agentName}`);
+
+                            // run the turn from the previous agent
+                            continue turnLoop;
+                        }
                         break;
                     }
                     break;
@@ -752,15 +815,15 @@ export async function* generateAgenticResponse(
             }
         }
 
-        // if the last message was by a user_facing agent text message, break out of loop
-        const lastMessage = accumulatedMessages[accumulatedMessages.length - 1];
-        if (agentConfig[currentAgent.name].outputVisibility === 'user_facing' &&
-            lastMessage.role === 'assistant' &&
-            lastMessage.content &&
-            lastMessage.agentName === currentAgent.name
+        // if the last message was a text response by a user-facing agent, complete the turn
+        const lastMessage = turnMsgs[turnMsgs.length - 1];
+        if (agentConfig[agent.name]?.outputVisibility === 'user_facing' &&
+            lastMessage?.role === 'assistant' &&
+            lastMessage?.content !== null &&
+            lastMessage?.agentName === agent.name
         ) {
             loopLogger.log(`last message was by a user_facing agent, breaking out of parent loop`);
-            break;
+            break turnLoop;
         }
     }
 
