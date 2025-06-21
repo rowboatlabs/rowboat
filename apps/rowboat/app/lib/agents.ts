@@ -222,8 +222,8 @@ function createMockTool(
     config: z.infer<typeof WorkflowTool>,
 ): Tool {
     return tool({
-        name: "mock_tool",
-        description: "Mock tool",
+        name: config.name,
+        description: config.description,
         parameters: z.object({
             query: z.string().describe("The query to search for")
         }),
@@ -666,6 +666,7 @@ export async function* generateAgenticResponse(
         // handle streaming events
         for await (const event of result) {
             const eventLogger = loopLogger.child(event.type);
+            // eventLogger.log(`----------> event: ${JSON.stringify(event)}`);
 
             switch (event.type) {
                 case 'raw_model_stream_event':
@@ -816,11 +817,12 @@ export async function* generateAgenticResponse(
         }
 
         // if the last message was a text response by a user-facing agent, complete the turn
+        // loopLogger.log(`iter end, turnMsgs: ${JSON.stringify(turnMsgs)}, agentName: ${agentName}`);
         const lastMessage = turnMsgs[turnMsgs.length - 1];
-        if (agentConfig[agent.name]?.outputVisibility === 'user_facing' &&
+        if (agentConfig[agentName]?.outputVisibility === 'user_facing' &&
             lastMessage?.role === 'assistant' &&
             lastMessage?.content !== null &&
-            lastMessage?.agentName === agent.name
+            lastMessage?.agentName === agentName
         ) {
             loopLogger.log(`last message was by a user_facing agent, breaking out of parent loop`);
             break turnLoop;
