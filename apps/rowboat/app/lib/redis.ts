@@ -1,7 +1,3 @@
-import { createClient } from 'redis';
+import Redis from 'ioredis';
 
-export const redisClient = createClient({
-    url: process.env.REDIS_URL,
-});
-
-redisClient.connect();
+export const redisClient = new Redis(process.env.REDIS_URL || '');

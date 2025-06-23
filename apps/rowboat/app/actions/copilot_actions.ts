@@ -189,9 +189,7 @@ export async function getCopilotResponseStream(
     const streamId = crypto.randomUUID();
 
     // store payload in redis
-    await redisClient.set(`copilot-stream-${streamId}`, payload, {
-        EX: 60 * 10, // expire in 10 minutes
-    });
+    await redisClient.set(`copilot-stream-${streamId}`, payload, 'EX', 60 * 10); // expire in 10 minutes
 
     return {
         streamId,

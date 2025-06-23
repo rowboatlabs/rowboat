@@ -46,9 +46,7 @@ export async function getAgenticResponseStreamId(
     const streamId = crypto.randomUUID();
 
     // store payload in redis
-    await redisClient.set(`chat-stream-${streamId}`, payload, {
-        EX: 60 * 10, // expire in 10 minutes
-    });
+    await redisClient.set(`chat-stream-${streamId}`, payload, 'EX', 60 * 10); // expire in 10 minutes
 
     return {
         streamId,

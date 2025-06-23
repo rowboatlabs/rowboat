@@ -567,7 +567,7 @@ export async function enableServer(
 
             // set key in redis to indicate that a server is being enabled on this project
             // the key set should only succeed if the key does not already exist
-            const setResult = await redisClient.set(`klavis_enabling_server:${projectId}`, 'true', { EX: 60 * 60, NX: true });
+            const setResult = await redisClient.set(`klavis_enabling_server:${projectId}`, 'true', 'EX', 60 * 60, 'NX');
             console.log('[redis] Set result here:', setResult);
             if (setResult !== 'OK') {
               throw new Error("A server is already being enabled on this project");
