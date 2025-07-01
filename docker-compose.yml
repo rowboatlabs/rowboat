@@ -57,6 +57,8 @@ services:
     restart: unless-stopped
     volumes:
       - uploads:/app/uploads
+    networks:
+      - rowboat_net
 
   rowboat_agents:
     build:
@@ -77,6 +79,8 @@ services:
       - MAX_CALLS_PER_CHILD_AGENT=${MAX_CALLS_PER_CHILD_AGENT}
       - ENABLE_TRACING=${ENABLE_TRACING}
     restart: unless-stopped
+    networks:
+      - rowboat_net
 
   copilot:
     build:
@@ -92,6 +96,8 @@ services:
       - PROVIDER_DEFAULT_MODEL=${PROVIDER_DEFAULT_MODEL}
       - PROVIDER_COPILOT_MODEL=${PROVIDER_COPILOT_MODEL}
     restart: unless-stopped
+    networks:
+      - rowboat_net
 
   # tools_webhook:
   #   build:
@@ -127,6 +133,8 @@ services:
       - QDRANT_API_KEY=${QDRANT_API_KEY}
       - EMBEDDING_VECTOR_SIZE=${EMBEDDING_VECTOR_SIZE}
     restart: no
+    networks:
+      - rowboat_net
 
   delete_qdrant:
     build:
@@ -141,6 +149,8 @@ services:
       - QDRANT_URL=http://qdrant:6333
       - QDRANT_API_KEY=${QDRANT_API_KEY}
     restart: no
+    networks:
+      - rowboat_net
 
   rag_files_worker:
     build:
@@ -170,6 +180,8 @@ services:
     restart: unless-stopped
     volumes:
       - uploads:/app/uploads
+    networks:
+      - rowboat_net
 
   rag_urls_worker:
     build:
@@ -191,6 +203,8 @@ services:
       - BILLING_API_URL=${BILLING_API_URL}
       - BILLING_API_KEY=${BILLING_API_KEY}
     restart: unless-stopped
+    networks:
+      - rowboat_net
 
   rag_text_worker:
     build:
@@ -211,6 +225,8 @@ services:
       - BILLING_API_URL=${BILLING_API_URL}
       - BILLING_API_KEY=${BILLING_API_KEY}
     restart: unless-stopped
+    networks:
+      - rowboat_net
 
   # chat_widget:
   #   build:
@@ -233,12 +249,16 @@ services:
     attach: false
     volumes:
       - ./data/mongo:/data/db
+    networks:
+      - rowboat_net
 
   redis:
     image: redis:latest
     ports:
       - "6379:6379"
     restart: unless-stopped
+    networks:
+      - rowboat_net
 
   docs:
     build:
@@ -247,6 +267,8 @@ services:
     profiles: [ "docs" ]
     ports:
       - "8000:8000"
+    networks:
+      - rowboat_net
 
   # twilio_handler:
   #   build:
@@ -277,3 +299,8 @@ services:
       interval: 5s
       timeout: 10s
       retries: 3
+    networks:
+      - rowboat_net
+
+networks:
+  rowboat_net:
