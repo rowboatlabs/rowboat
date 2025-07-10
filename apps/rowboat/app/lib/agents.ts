@@ -1028,6 +1028,14 @@ export async function* streamResponse(
                             break;
                         }
 
+                        // check if we've already called the target agent too many times
+                        const maxCalls = agentConfig[event.item.targetAgent.name]?.maxCallsPerParentAgent || 3;
+                        const currentCalls = transferCounter.get(agentName, event.item.targetAgent.name);
+                        if (currentCalls >= maxCalls) {
+                            eventLogger.log(`skipping handoff to ${event.item.targetAgent.name} (max calls reached)`);
+                            continue;
+                        }
+
                         // inject give up control instructions if needed (parent handing off to child)
                         maybeInjectGiveUpControlInstructions(
                             agents,
