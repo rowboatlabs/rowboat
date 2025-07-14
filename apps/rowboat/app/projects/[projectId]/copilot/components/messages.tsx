@@ -2,13 +2,14 @@
 import { Spinner } from "@heroui/react";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { Workflow, WorkflowTool, WorkflowAgent, WorkflowPrompt } from "@/app/lib/types/workflow_types";
+import { Workflow} from "@/app/lib/types/workflow_types";
 import MarkdownContent from "@/app/lib/components/markdown-content";
-import { MessageSquareIcon, EllipsisIcon, XIcon } from "lucide-react";
+import { MessageSquareIcon, EllipsisIcon, XIcon, CheckCheckIcon, ChevronDown, ChevronUp } from "lucide-react";
 import { CopilotMessage, CopilotAssistantMessage, CopilotAssistantMessageActionPart } from "@/app/lib/types/copilot_types";
 import { Action, StreamingAction } from './actions';
 import { useParsedBlocks } from "../use-parsed-blocks";
 import { validateConfigChanges } from "@/app/lib/client_utils";
+import { PreviewModalProvider } from '../../workflow/preview-modal';
 
 const CopilotResponsePart = z.union([
     z.object({
@@ -152,21 +153,45 @@ function InternalAssistantMessage({ content }: { content: string }) {
     );
 }
 
+type ActionPanelBlock = {
+  part: {
+    type: 'action';
+    action: any;
+  } | {
+    type: 'streaming_action';
+    action: any;
+  };
+  actionIndex: number;
+};
 
+/**
+ * AssistantMessage component that renders copilot responses with action cards.
+ * 
+ * Features:
+ * - Renders text content with markdown support
+ * - Displays individual action cards for workflow changes
+ * - Shows "Apply All" button when there are action cards
+ * - Supports streaming responses with real-time apply all functionality
+ * - Action cards are in a collapsible panel with a ticker summary in collapsed state
+ */
 function AssistantMessage({
     content,
     workflow,
     dispatch,
     messageIndex,
-    loading
+    loading,
+    onStatusBarChange
 }: {
     content: z.infer<typeof CopilotAssistantMessage>['content'],
     workflow: z.infer<typeof Workflow>,
     dispatch: (action: any) => void,
     messageIndex: number,
-    loading: boolean
+    loading: boolean,
+    onStatusBarChange?: (status: any) => void
 }) {
     const blocks = useParsedBlocks(content);
+    const [appliedActions, setAppliedActions] = useState<Set<number>>(new Set());
+    // Remove autoApplyEnabled and useEffect for auto-apply
 
     // parse actions from parts
     let parsed: z.infer<typeof CopilotResponsePart>[] = [];
@@ -181,39 +206,267 @@ function AssistantMessage({
         }
     }
 
-    // split the content into parts 
+    // Only render text outside the panel
+    const textBlocks = parsed.filter(part => part.type === 'text');
+    // All cards (action and streaming_action) go inside the panel
+    const cardBlocks: ActionPanelBlock[] = parsed
+  .map((part, actionIndex) => ({ part, actionIndex }))
+  .filter(({ part }) => part.type === 'action' || part.type === 'streaming_action') as ActionPanelBlock[];
+    const hasCards = cardBlocks.length > 0;
+    const totalActions = cardBlocks.filter(({ part }) => part.type === 'action').length;
+    const appliedCount = Array.from(appliedActions).length;
+    const pendingCount = Math.max(0, totalActions - appliedCount);
+    const allApplied = pendingCount === 0 && totalActions > 0;
+
+    // Apply a single action
+    const applyAction = (action: any, actionIndex: number) => {
+        // Only apply, do not update appliedActions here
+        if (action.action === 'create_new') {
+            switch (action.config_type) {
+                case 'agent':
+                    dispatch({
+                        type: 'add_agent',
+                        agent: {
+                            name: action.name,
+                            ...action.config_changes
+                        }
+                    });
+                    break;
+                case 'tool':
+                    dispatch({
+                        type: 'add_tool',
+                        tool: {
+                            name: action.name,
+                            ...action.config_changes
+                        }
+                    });
+                    break;
+                case 'prompt':
+                    dispatch({
+                        type: 'add_prompt',
+                        prompt: {
+                            name: action.name,
+                            ...action.config_changes
+                        }
+                    });
+                    break;
+            }
+        } else if (action.action === 'edit') {
+            switch (action.config_type) {
+                case 'agent':
+                    dispatch({
+                        type: 'update_agent',
+                        name: action.name,
+                        agent: action.config_changes
+                    });
+                    break;
+                case 'tool':
+                    dispatch({
+                        type: 'update_tool',
+                        name: action.name,
+                        tool: action.config_changes
+                    });
+                    break;
+                case 'prompt':
+                    dispatch({
+                        type: 'update_prompt',
+                        name: action.name,
+                        prompt: action.config_changes
+                    });
+                    break;
+            }
+        }
+    };
+
+    // Apply All: batch apply all unapplied actions and update state once
+    const handleApplyAll = () => {
+        // Find all unapplied action indices
+        const unapplied = cardBlocks
+            .filter(({ part, actionIndex }) => part.type === 'action' && !appliedActions.has(actionIndex))
+            .map(({ part, actionIndex }) => ({ action: part.action, actionIndex }));
+
+        // Synchronously apply all unapplied actions
+        unapplied.forEach(({ action, actionIndex }) => {
+            applyAction(action, actionIndex);
+        });
+
+        // After all are applied, update the state in one go
+        setAppliedActions(prev => {
+            const next = new Set(prev);
+            unapplied.forEach(({ actionIndex }) => next.add(actionIndex));
+            return next;
+        });
+    };
+
+    // Manual single apply (from card)
+    const handleSingleApply = (action: any, actionIndex: number) => {
+        if (!appliedActions.has(actionIndex)) {
+            applyAction(action, actionIndex);
+            setAppliedActions(prev => new Set([...prev, actionIndex]));
+        }
+    };
+
+    useEffect(() => {
+        if (loading) {
+            // setAutoApplyEnabled(false); // Removed
+            setAppliedActions(new Set());
+            // setPanelOpen(false); // Removed
+        }
+    }, [loading]);
+
+    // Removed useEffect for auto-apply
+
+    // Find streaming/ongoing card and extract name
+    const streamingBlock = cardBlocks.find(({ part }) => part.type === 'streaming_action');
+    let streamingLine = '';
+    if (streamingBlock && streamingBlock.part.type === 'streaming_action' && streamingBlock.part.action && streamingBlock.part.action.name) {
+        streamingLine = `Generating ${streamingBlock.part.action.name}...`;
+    }
+
+    // Find the first card index
+    const firstCardIdx = parsed.findIndex(part => part.type === 'action' || part.type === 'streaming_action');
+    // Group blocks into: beforePanel, cardBlocks, afterPanel
+    const beforePanel = firstCardIdx === -1 ? parsed : parsed.slice(0, firstCardIdx);
+    const panelBlocks = firstCardIdx === -1 ? [] : parsed.slice(firstCardIdx).filter(part => part.type === 'action' || part.type === 'streaming_action');
+    // Find where the card blocks end (first non-card after first card)
+    let afterPanelStart = firstCardIdx;
+    if (firstCardIdx !== -1) {
+        for (let i = firstCardIdx; i < parsed.length; i++) {
+            if (parsed[i].type !== 'action' && parsed[i].type !== 'streaming_action') {
+                afterPanelStart = i;
+                break;
+            }
+        }
+    }
+    const afterPanel = (firstCardIdx !== -1 && afterPanelStart > firstCardIdx) ? parsed.slice(afterPanelStart) : [];
+
+    // Only show Apply All button if all cards are loaded (no streaming_action cards) and streaming is finished
+    const allCardsLoaded = !loading && panelBlocks.length > 0 && panelBlocks.every(part => part.type === 'action');
+    // When all cards are loaded, show summary of agents created/updated
+    let completedSummary = '';
+    if (allCardsLoaded && totalActions > 0) {
+        // Count how many are create vs edit
+        const createCount = cardBlocks.filter(({ part }) => part.type === 'action' && part.action.action === 'create_new').length;
+        const editCount = cardBlocks.filter(({ part }) => part.type === 'action' && part.action.action === 'edit').length;
+        const parts = [];
+        if (createCount > 0) parts.push(`${createCount} agent${createCount > 1 ? 's' : ''} created`);
+        if (editCount > 0) parts.push(`${editCount} agent${editCount > 1 ? 's' : ''} updated`);
+        completedSummary = parts.join(', ');
+    }
+
+    // Detect if any card has an error or is cancelled
+    const hasPanelWarning = cardBlocks.some(
+        ({ part }) =>
+            part.type === 'action' &&
+            part.action &&
+            (part.action.error || ('cancelled' in part.action && part.action.cancelled))
+    );
+
+    // Ticker summary for collapsed state (two lines)
+    const ticker = (
+        <div className="flex flex-col">
+            {allCardsLoaded && completedSummary ? (
+                <span className="font-medium text-xs sm:text-sm">{completedSummary}</span>
+            ) : streamingLine && (
+                <span className="font-medium text-xs sm:text-sm">{streamingLine}</span>
+            )}
+            <span className="font-medium text-xs sm:text-sm">{appliedCount} applied, {pendingCount} pending</span>
+        </div>
+    );
+
+    const applyAllButton = (
+        <button
+            onClick={handleApplyAll}
+            disabled={allApplied} // Changed to allApplied
+            className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium text-sm transition-colors duration-200
+                ${
+                    allApplied
+                        ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-200 dark:border-zinc-700 shadow-none'
+                        : 'bg-blue-100 dark:bg-zinc-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-zinc-800 border border-blue-200 dark:border-zinc-800 shadow-sm'
+                }
+            `}
+        >
+            {allApplied ? (
+                <>
+                    <CheckCheckIcon size={16} />
+                    All applied!
+                </>
+            ) : (
+                <>
+                    <CheckCheckIcon size={16} />
+                    Apply all
+                </>
+            )}
+        </button>
+    );
+
+    // Utility to filter out divider/empty markdown blocks
+    function isNonDividerMarkdown(content: string) {
+        const trimmed = content.trim();
+        return (
+            trimmed !== '' &&
+            !/^(-{3,}|_{3,}|\*{3,})$/.test(trimmed)
+        );
+    }
+
+    // Restore panelOpen state if missing
+    const [panelOpen, setPanelOpen] = useState(false); // collapsed by default
+
+    // At the end of the render, call onStatusBarChange with the current status bar props
+    useEffect(() => {
+        if (onStatusBarChange) {
+            onStatusBarChange({
+                allCardsLoaded,
+                allApplied,
+                appliedCount,
+                pendingCount,
+                streamingLine,
+                completedSummary,
+                hasPanelWarning,
+                handleApplyAll,
+            });
+        }
+    }, [allCardsLoaded, allApplied, appliedCount, pendingCount, streamingLine, completedSummary, hasPanelWarning]);
+
+    // Render all cards inline, not in a panel
     return (
         <div className="w-full">
             <div className="px-4 py-2.5 text-sm leading-relaxed text-gray-700 dark:text-gray-200">
-                <div className="flex flex-col gap-4">
-                    <div className="text-left flex flex-col gap-4">
-                        {parsed.map((part, actionIndex) => {
-                            if (part.type === 'text') {
-                                return <MarkdownContent
-                                    key={actionIndex}
-                                    content={part.content}
-                                />;
-                            }
-                            if (part.type === 'streaming_action') {
-                                return <StreamingAction
-                                    key={actionIndex}
-                                    action={part.action}
-                                    loading={loading}
-                                />;
-                            }
-                            if (part.type === 'action') {
-                                return <Action
-                                    key={actionIndex}
+                <div className="flex flex-col gap-2">
+                  <PreviewModalProvider>
+                    {/* Render markdown and cards inline in order */}
+                    {parsed.map((part, idx) => {
+                        if (part.type === 'text' && isNonDividerMarkdown(part.content)) {
+                            return <MarkdownContent key={`text-${idx}`} content={part.content} />;
+                        }
+                        if (part.type === 'action') {
+                            return (
+                                <Action
+                                    key={`action-${idx}`}
                                     msgIndex={messageIndex}
-                                    actionIndex={actionIndex}
+                                    actionIndex={idx}
                                     action={part.action}
                                     workflow={workflow}
                                     dispatch={dispatch}
                                     stale={false}
-                                />;
-                            }
-                        })}
-                    </div>
+                                    onApplied={() => handleSingleApply(part.action, idx)}
+                                    externallyApplied={appliedActions.has(idx)}
+                                    defaultExpanded={true}
+                                />
+                            );
+                        }
+                        if (part.type === 'streaming_action') {
+                            return (
+                                <StreamingAction
+                                    key={`streaming-${idx}`}
+                                    action={part.action}
+                                    loading={loading}
+                                />
+                            );
+                        }
+                        return null;
+                    })}
+                  </PreviewModalProvider>
                 </div>
             </div>
         </div>
@@ -245,13 +498,15 @@ export function Messages({
     streamingResponse,
     loadingResponse,
     workflow,
-    dispatch
+    dispatch,
+    onStatusBarChange
 }: {
     messages: z.infer<typeof CopilotMessage>[];
     streamingResponse: string;
     loadingResponse: boolean;
     workflow: z.infer<typeof Workflow>;
     dispatch: (action: any) => void;
+    onStatusBarChange?: (status: any) => void;
 }) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [displayMessages, setDisplayMessages] = useState(messages);
@@ -280,6 +535,9 @@ export function Messages({
         return () => clearTimeout(timeoutId);
     }, [messages, loadingResponse]);
 
+    // Track the latest status bar info
+    const latestStatusBar = useRef<any>(null);
+
     const renderMessage = (message: z.infer<typeof CopilotMessage>, messageIndex: number) => {
         if (message.role === 'assistant') {
             return (
@@ -290,6 +548,13 @@ export function Messages({
                     dispatch={dispatch}
                     messageIndex={messageIndex}
                     loading={loadingResponse}
+                    onStatusBarChange={status => {
+                        // Only update for the last assistant message
+                        if (messageIndex === displayMessages.length - 1) {
+                            latestStatusBar.current = status;
+                            onStatusBarChange?.(status);
+                        }
+                    }}
                 />
             );
         }

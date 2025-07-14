@@ -25,6 +25,9 @@ export function Action({
     workflow,
     dispatch,
     stale,
+    onApplied,
+    externallyApplied = false,
+    defaultExpanded = false,
 }: {
     msgIndex: number;
     actionIndex: number;
@@ -32,8 +35,12 @@ export function Action({
     workflow: z.infer<typeof Workflow>;
     dispatch: (action: any) => void;
     stale: boolean;
+    onApplied?: () => void;
+    externallyApplied?: boolean;
+    defaultExpanded?: boolean;
 }) {
-    const [expanded, setExpanded] = useState(false);
+    const { showPreview } = usePreviewModal();
+    const [expanded, setExpanded] = useState(defaultExpanded);
     const [appliedChanges, setAppliedChanges] = useState<Record<string, boolean>>({});
 
     if (!action || typeof action !== 'object') {
@@ -44,7 +51,7 @@ export function Action({
     const appliedFields = Object.keys(action.config_changes).filter(key => 
         appliedChanges[getAppliedChangeKey(msgIndex, actionIndex, key)]
     );
-    const allApplied = Object.keys(action.config_changes).every(key => 
+    const allApplied = externallyApplied || Object.keys(action.config_changes).every(key => 
         appliedFields.includes(key)
     );
 
@@ -76,10 +83,24 @@ export function Action({
                 break;
         }
 
-        setAppliedChanges(prev => ({
-            ...prev,
-            [getAppliedChangeKey(msgIndex, actionIndex, field)]: true
-        }));
+        setAppliedChanges(prev => {
+            const newApplied = {
+                ...prev,
+                [getAppliedChangeKey(msgIndex, actionIndex, field)]: true
+            };
+            
+            // Check if all fields are now applied
+            const allFieldsApplied = Object.keys(action.config_changes).every(key => 
+                newApplied[getAppliedChangeKey(msgIndex, actionIndex, key)]
+            );
+            
+            // If all fields are applied, notify parent
+            if (allFieldsApplied) {
+                onApplied?.();
+            }
+            
+            return newApplied;
+        });
     };
 
     // Handle applying all changes
@@ -149,56 +170,100 @@ export function Action({
             ...prev,
             ...appliedKeys
         }));
+
+        // Notify parent that this action has been applied
+        onApplied?.();
     };
 
-    return <div className={clsx('flex flex-col rounded-sm border border-t-4', {
-        'bg-gray-50 dark:bg-gray-800/50 border-gray-400 dark:border-gray-600 border-t-blue-500 shadow': !stale && !allApplied && action.action == 'create_new',
-        'bg-gray-50 dark:bg-gray-800/50 border-gray-400 dark:border-gray-600 border-t-orange-500 shadow': !stale && !allApplied && action.action == 'edit',
-        'bg-gray-100 dark:bg-gray-800/30 border-gray-400 dark:border-gray-600 border-t-gray-400': stale || allApplied || action.error,
-    })}>
+    // Helper to get the main field for diff
+    function getMainDiffField() {
+        if (action.config_type === 'agent' && 'instructions' in action.config_changes) return 'instructions';
+        if (action.config_type === 'tool' && 'description' in action.config_changes) return 'description';
+        if (action.config_type === 'prompt' && 'prompt' in action.config_changes) return 'prompt';
+        // fallback: first field
+        return Object.keys(action.config_changes)[0];
+    }
+
+    function handleViewDiff() {
+        const field = getMainDiffField();
+        if (!field) return;
+        const newValue = action.config_changes[field];
+        let oldValue = undefined;
+        if (action.action === 'edit') {
+            if (action.config_type === 'tool') {
+                const tool = workflow.tools.find(t => t.name === action.name);
+                if (tool) oldValue = (tool as any)[field];
+            } else if (action.config_type === 'agent') {
+                const agent = workflow.agents.find(a => a.name === action.name);
+                if (agent) oldValue = (agent as any)[field];
+            } else if (action.config_type === 'prompt') {
+                const prompt = workflow.prompts.find(p => p.name === action.name);
+                if (prompt) oldValue = (prompt as any)[field];
+            }
+        }
+        const markdown = (action.config_type === 'agent' && field === 'instructions') ||
+            (action.config_type === 'prompt' && field === 'prompt');
+        showPreview(
+            oldValue ? (typeof oldValue === 'string' ? oldValue : JSON.stringify(oldValue, null, 2)) : undefined,
+            typeof newValue === 'string' ? newValue : JSON.stringify(newValue, null, 2),
+            markdown,
+            `${action.name} - ${field}`,
+            'Review changes'
+        );
+    }
+
+    return <div className={clsx(
+        'flex flex-col rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xs',
+        'transition-shadow duration-150',
+        {
+            'border-l-2 border-l-blue-500': !stale && !allApplied && action.action == 'create_new',
+            'border-l-2 border-l-orange-500': !stale && !allApplied && action.action == 'edit',
+            'border-l-2 border-l-gray-400': stale || allApplied || action.error,
+        }
+    )}>
         <ActionContext.Provider value={{ msgIndex, actionIndex, action, workflow, appliedFields, stale }}>
-            <ActionHeader />
-            <ActionSummary />
-            {expanded && <PreviewModalProvider>
-                {action.error && <div className="flex flex-col gap-1 px-1 text-xs bg-red-50 dark:bg-red-900/20 rounded-sm">
-                    <div className="text-red-500 dark:text-red-400 font-medium text-xs">This configuration is invalid and cannot be applied:</div>
-                    <div className="text-xs font-mono dark:text-gray-300">{action.error}</div>
-                </div>}
-                <div className="flex flex-col gap-2 px-1">
-                    {Object.entries(action.config_changes).map(([key, value]) => {
-                        return <ActionField key={key} field={key} onApply={handleFieldChange} />
-                    })}
-                </div>
-            </PreviewModalProvider>}
-            <div className="flex items-center">
-                {action.error && <div className="grow rounded-l-sm bg-red-100 dark:bg-red-900/20 text-red-500 dark:text-red-400 flex flex-col items-center justify-center h-8">
-                    <div className="flex items-center gap-2 justify-center">
-                        <AlertTriangleIcon size={16} />
-                        <div className="font-medium text-xs">Error</div>
-                    </div>
-                </div>}
-                {!action.error && <button
-                    className="grow rounded-l-sm bg-blue-100 dark:bg-blue-900/20 text-blue-500 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/30 disabled:bg-gray-100 dark:disabled:bg-gray-800/30 disabled:text-gray-300 dark:disabled:text-gray-600 flex flex-col items-center justify-center h-8"
-                    onClick={handleApplyAll}
-                    disabled={stale || allApplied}
-                >
-                    <div className="flex items-center gap-2 justify-center">
-                        <CheckCheckIcon size={16} />
-                        <div className="font-medium text-xs">{allApplied ? 'Applied' : 'Apply'}</div>
-                    </div>
-                </button>}
-                <button
-                    className="w-10 shrink-0 flex flex-col items-center h-8 rounded-r-sm bg-gray-100 dark:bg-gray-800/50 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 justify-center"
-                    onClick={() => setExpanded(!expanded)}
-                >
-                    <div className="flex items-center gap-2 justify-center text-gray-400 dark:text-gray-500">
-                        {expanded ? (
-                            <ChevronsUpIcon size={16} />
-                        ) : (
-                            <ChevronsDownIcon size={16} />
+            <div className="flex items-center gap-2 px-2 py-1 border-b border-zinc-100 dark:border-zinc-800">
+                {/* Small colored icon for type */}
+                <span className={clsx(
+                    'inline-flex items-center justify-center rounded-full h-5 w-5 text-xs',
+                    {
+                        'bg-blue-100 text-blue-600': action.action == 'create_new',
+                        'bg-orange-100 text-orange-600': action.action == 'edit',
+                        'bg-gray-200 text-gray-600': stale || allApplied || action.error,
+                    }
+                )}>
+                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : '💬'}
+                </span>
+                <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 truncate flex-1">
+                    {action.action === 'create_new' ? 'Add' : 'Edit'} {action.config_type}: {action.name}
+                </span>
+                {/* Action buttons - compact, icon only, show text on hover */}
+                <div className="flex items-center gap-1">
+                    <button
+                        className={clsx(
+                            'flex items-center gap-1 rounded-full px-2 h-7 text-xs font-medium transition-colors bg-transparent',
+                            allApplied
+                                ? 'text-zinc-400 cursor-not-allowed'
+                                : 'text-green-600 hover:text-green-700'
                         )}
-                    </div>
-                </button>
+                        disabled={allApplied}
+                        onClick={() => handleApplyAll()}
+                    >
+                        <CheckIcon size={13} className={allApplied ? 'text-zinc-400' : 'text-green-600 group-hover:text-green-700'} />
+                        <span>{allApplied ? 'Applied' : 'Apply'}</span>
+                    </button>
+                    <button
+                        className="flex items-center gap-1 rounded-full px-2 h-7 text-xs font-medium bg-transparent text-indigo-600 hover:text-indigo-700 transition-colors"
+                        onClick={handleViewDiff}
+                    >
+                        <EyeIcon size={13} className="text-indigo-600 group-hover:text-indigo-700" />
+                        <span>View Diff</span>
+                    </button>
+                </div>
+            </div>
+            {/* Description of what happened */}
+            <div className="px-3 py-2 text-xs text-zinc-700 dark:text-zinc-200">
+                {action.change_description || 'No description provided.'}
             </div>
         </ActionContext.Provider>
     </div>;
@@ -251,19 +316,19 @@ export function ActionField({
             // Find the tool in the workflow
             const tool = workflow.tools.find(t => t.name === action.name);
             if (tool) {
-                oldValue = tool[field as keyof typeof tool];
+                oldValue = (tool as any)[field];
             }
         } else if (action.config_type === 'agent') {
             // Find the agent in the workflow
             const agent = workflow.agents.find(a => a.name === action.name);
             if (agent) {
-                oldValue = agent[field as keyof typeof agent];
+                oldValue = (agent as any)[field];
             }
         } else if (action.config_type === 'prompt') {
             // Find the prompt in the workflow
             const prompt = workflow.prompts.find(p => p.name === action.name);
             if (prompt) {
-                oldValue = prompt[field as keyof typeof prompt];
+                oldValue = (prompt as any)[field];
             }
         }
     }
@@ -333,23 +398,38 @@ export function StreamingAction({
     };
     loading: boolean;
 }) {
-    return <div className={clsx('flex flex-col rounded-sm border border-t-4', {
-        'bg-gray-50 dark:bg-gray-800/50 border-gray-400 dark:border-gray-600 border-t-blue-500 shadow': action.action == 'create_new',
-        'bg-gray-50 dark:bg-gray-800/50 border-gray-400 dark:border-gray-600 border-t-orange-500 shadow': action.action == 'edit',
-    })}>
-        <div className="flex gap-2 items-center py-1 px-1">
-            {action.action == 'create_new' && <PlusIcon size={16} />}
-            {action.action == 'edit' && <PencilIcon size={16} />}
-            <div className="text-sm truncate">
-                {action.config_type && `${action.action === 'create_new' ? 'Create' : 'Edit'} ${action.config_type}`}
-                {action.name && <span className="font-medium ml-1">{action.name}</span>}
+    // Use the same card container and header style as Action
+    return (
+        <div className={clsx(
+            'flex flex-col rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xs',
+            'transition-shadow duration-150',
+            {
+                'border-l-2 border-l-blue-500': action.action == 'create_new',
+                'border-l-2 border-l-orange-500': action.action == 'edit',
+                'border-l-2 border-l-gray-400': !action.action,
+            }
+        )}>
+            <div className="flex items-center gap-2 px-2 py-1 border-b border-zinc-100 dark:border-zinc-800">
+                {/* Small colored icon for type */}
+                <span className={clsx(
+                    'inline-flex items-center justify-center rounded-full h-5 w-5 text-xs',
+                    {
+                        'bg-blue-100 text-blue-600': action.action == 'create_new',
+                        'bg-orange-100 text-orange-600': action.action == 'edit',
+                        'bg-gray-200 text-gray-600': !action.action,
+                    }
+                )}>
+                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : '💬'}
+                </span>
+                <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 truncate flex-1">
+                    {action.action === 'create_new' ? 'Add' : 'Edit'} {action.config_type}: {action.name}
+                </span>
+            </div>
+            {/* Loading state body */}
+            <div className="px-3 py-4 text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2 min-h-[32px]">
+                <Spinner size="sm" />
+                <span>Loading...</span>
             </div>
         </div>
-        <div className="px-1 my-1">
-            <div className="bg-white dark:bg-gray-800 rounded-sm p-2 text-sm flex items-center gap-2">
-                {loading && <Spinner size="sm" />}
-                {!loading && <div className="text-gray-400">Canceled</div>}
-            </div>
-        </div>
-    </div>;
+    );
 }

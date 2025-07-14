@@ -52,6 +52,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     const workflowRef = useRef(workflow);
     const startRef = useRef<any>(null);
     const cancelRef = useRef<any>(null);
+    const [statusBar, setStatusBar] = useState<any>(null);
 
     // Keep workflow ref up to date
     workflowRef.current = workflow;
@@ -156,6 +157,11 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         loadingResponse={loadingResponse}
                         workflow={workflowRef.current}
                         dispatch={dispatch}
+                        onStatusBarChange={status => setStatusBar({
+                            ...status,
+                            context: effectiveContext,
+                            onCloseContext: () => setDiscardContext(true)
+                        })}
                     />
                 </div>
                 <div className="shrink-0 px-1 pb-6">
@@ -181,40 +187,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                             </Button>
                         </div>
                     )}
-                    {effectiveContext && (
-                        <div className="flex items-start mb-2">
-                            <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50/70 dark:bg-zinc-800/40 shadow-sm text-sm font-medium text-zinc-700 dark:text-zinc-200 transition-all">
-                                {/* Context icon (no background) */}
-                                {effectiveContext.type === 'chat' && (
-                                    <svg className="w-4 h-4 text-blue-500 dark:text-blue-300 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M18 10c0 3.866-3.582 7-8 7a8.96 8.96 0 01-4.39-1.11L2 17l1.11-2.61A8.96 8.96 0 012 10c0-3.866 3.582-7 8-7s8 3.134 8 7z" /></svg>
-                                )}
-                                {effectiveContext.type === 'agent' && (
-                                    <svg className="w-4 h-4 text-green-500 dark:text-green-300 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a6 6 0 016 6c0 2.21-1.343 4.09-3.25 5.25A4.992 4.992 0 0110 18a4.992 4.992 0 01-2.75-4.75C5.343 12.09 4 10.21 4 8a6 6 0 016-6z" /></svg>
-                                )}
-                                {effectiveContext.type === 'tool' && (
-                                    <svg className="w-4 h-4 text-yellow-500 dark:text-yellow-300 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M13.293 2.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-8.5 8.5a1 1 0 01-.293.207l-4 2a1 1 0 01-1.316-1.316l2-4a1 1 0 01.207-.293l8.5-8.5z" /></svg>
-                                )}
-                                {effectiveContext.type === 'prompt' && (
-                                    <svg className="w-4 h-4 text-purple-500 dark:text-purple-300 mr-1" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" /></svg>
-                                )}
-                                {/* Context label */}
-                                <span>
-                                    {effectiveContext.type === 'chat' && "Chat"}
-                                    {effectiveContext.type === 'agent' && `Agent: ${effectiveContext.name}`}
-                                    {effectiveContext.type === 'tool' && `Tool: ${effectiveContext.name}`}
-                                    {effectiveContext.type === 'prompt' && `Prompt: ${effectiveContext.name}`}
-                                </span>
-                                {/* Close button */}
-                                <button
-                                    className="ml-2 text-zinc-400 hover:text-zinc-600 dark:text-zinc-400 dark:hover:text-zinc-100 transition-colors duration-150 rounded-full p-1 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                    onClick={() => setDiscardContext(true)}
-                                    aria-label="Close context"
-                                >
-                                    <XIcon size={16} />
-                                </button>
-                            </div>
-                        </div>
-                    )}
+                    {/* Remove the separate context label here */}
                     <ComposeBoxCopilot
                         handleUserMessage={handleUserMessage}
                         messages={messages}
@@ -223,6 +196,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         shouldAutoFocus={isLastInteracted}
                         onFocus={() => setIsLastInteracted(true)}
                         onCancel={cancel}
+                        statusBar={statusBar || { context: effectiveContext, onCloseContext: () => setDiscardContext(true) }}
                     />
                 </div>
             </div>

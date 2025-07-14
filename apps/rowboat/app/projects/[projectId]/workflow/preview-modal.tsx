@@ -3,7 +3,7 @@ import clsx from "clsx";
 import MarkdownContent from "../../../lib/components/markdown-content";
 import React, { PureComponent } from 'react';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
-import { XIcon } from "lucide-react";
+import { XIcon, EyeIcon } from "lucide-react";
 import { Button } from "@heroui/react";
 
 // Create the context type
@@ -99,43 +99,52 @@ function PreviewModal({
 }) {
     const buttonLabel = oldValue === undefined ? 'Preview' : 'Diff';
     const [view, setView] = useState<'preview' | 'markdown'>('preview');
-    console.log(oldValue, newValue);
 
-    return <div className="fixed left-0 top-0 w-full h-full bg-gray-500/50 backdrop-blur-sm flex justify-center items-center z-50">
-        <div className="bg-white rounded-md p-2 flex flex-col w-[90%] gap-4 h-[90%] max-w-7xl max-h-[800px]">
-            <button className="self-end text-gray-500 hover:text-gray-700 flex items-center gap-1"
-                onClick={onClose}
-            >
-                <XIcon className="w-4 h-4" />
-            </button>
-            <div className="flex items-center justify-between gap-2">
-                <div className="flex flex-col gap-2">
-                    <div className="text-md font-semibold">{title}</div>
-                    {message && <div className="text-sm text-gray-600">{message}</div>}
-                </div>
-                {onApply && <Button
-                    variant="solid"
-                    color="primary"
-                    onPress={() => {
-                        onApply();
-                        onClose();
-                    }}
-                >
-                    Apply changes
-                </Button>}
-            </div>
-            <div className="bg-gray-100 rounded-md p-2 flex flex-col overflow-auto">
-                <div className="flex items-center gap-2 justify-end">
-                    <div className="flex items-center">
-                        <button className={clsx("text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded-t-md", {
-                            'bg-white': view === 'preview',
-                        })} onClick={() => setView('preview')}>{buttonLabel}</button>
-                        {markdown && <button className={clsx("text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded-t-md", {
-                            'bg-white': view === 'markdown',
-                        })} onClick={() => setView('markdown')}>Markdown</button>}
+    return (
+        <div className="fixed left-0 top-0 w-full h-full bg-gray-500/50 backdrop-blur-sm flex justify-center items-center z-50">
+            <div className="relative bg-gradient-to-br from-white to-zinc-50 dark:from-zinc-900 dark:to-zinc-800 rounded-lg shadow-2xl p-6 w-[98vw] max-w-7xl max-h-[90vh] flex flex-col gap-6">
+                {/* Close button */}
+                <button className="absolute top-4 right-4 rounded-full p-2 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors" onClick={onClose}>
+                    <XIcon className="w-5 h-5 text-zinc-500" />
+                </button>
+                {/* Header */}
+                <div>
+                    <div className="flex items-center gap-2 mb-1">
+                        <EyeIcon className="text-indigo-500 w-5 h-5" />
+                        <span className="text-lg font-bold text-zinc-900 dark:text-zinc-100">{title}</span>
                     </div>
+                    {message && <div className="text-sm text-zinc-500 dark:text-zinc-400 mb-2">{message}</div>}
+                    <div className="border-b border-zinc-100 dark:border-zinc-800 mb-4" />
                 </div>
-                <div className="bg-white rounded-md grow overflow-auto">
+                {/* Tabs */}
+                <div className="flex gap-2 mb-2">
+                    <button
+                        className={clsx(
+                            "px-4 py-1 rounded-full text-sm font-medium transition-colors",
+                            view === 'preview'
+                                ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200 shadow'
+                                : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                        )}
+                        onClick={() => setView('preview')}
+                    >
+                        {buttonLabel}
+                    </button>
+                    {markdown && (
+                        <button
+                            className={clsx(
+                                "px-4 py-1 rounded-full text-sm font-medium transition-colors",
+                                view === 'markdown'
+                                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200 shadow'
+                                    : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                            )}
+                            onClick={() => setView('markdown')}
+                        >
+                            Markdown
+                        </button>
+                    )}
+                </div>
+                {/* Diff/Markdown content */}
+                <div className="bg-white dark:bg-zinc-900 rounded-md grow overflow-auto border border-zinc-100 dark:border-zinc-800">
                     <div className="h-full flex flex-col overflow-auto">
                         {view === 'preview' && <div className="flex gap-1 overflow-auto text-sm">
                             {oldValue !== undefined && <ReactDiffViewer
@@ -147,8 +156,8 @@ function PreviewModal({
                             {oldValue === undefined && <pre className="p-2 overflow-auto">{newValue}</pre>}
                         </div>}
                         {view === 'markdown' && <div className="flex gap-1">
-                            {oldValue !== undefined && <div className="w-1/2 flex flex-col border-r-2 border-gray-200 overflow-auto">
-                                <div className="text-gray-800 font-semibold italic text-sm px-2 py-1 border-b border-gray-200">Old</div>
+                            {oldValue !== undefined && <div className="w-1/2 flex flex-col border-r-2 border-gray-200 dark:border-zinc-800 overflow-auto">
+                                <div className="text-gray-800 dark:text-gray-200 font-semibold italic text-sm px-2 py-1 border-b border-gray-200 dark:border-zinc-800">Old</div>
                                 <div className="p-2 overflow-auto">
                                     <MarkdownContent
                                         content={oldValue}
@@ -158,7 +167,7 @@ function PreviewModal({
                             <div className={clsx("flex flex-col", {
                                 'w-1/2': oldValue !== undefined
                             })}>
-                                {oldValue !== undefined && <div className="text-gray-800 font-semibold italic text-sm px-2 py-1 border-b border-gray-200">New</div>}
+                                {oldValue !== undefined && <div className="text-gray-800 dark:text-gray-200 font-semibold italic text-sm px-2 py-1 border-b border-gray-200 dark:border-zinc-800">New</div>}
                                 <div className="p-2 overflow-auto">
                                     <MarkdownContent
                                         content={newValue}
@@ -168,7 +177,23 @@ function PreviewModal({
                         </div>}
                     </div>
                 </div>
+                {/* Footer */}
+                {onApply && (
+                    <div className="flex justify-end pt-2 border-t border-zinc-100 dark:border-zinc-800 sticky bottom-0 bg-gradient-to-t from-white/90 to-transparent dark:from-zinc-900/90">
+                        <Button
+                            variant="solid"
+                            color="primary"
+                            onPress={() => {
+                                onApply();
+                                onClose();
+                            }}
+                            className="rounded-full px-6 py-2 shadow"
+                        >
+                            Apply changes
+                        </Button>
+                    </div>
+                )}
             </div>
         </div>
-    </div>;
+    );
 } 
