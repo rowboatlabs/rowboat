@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Spinner } from "@heroui/react";
+import { Button, Spinner, Tooltip } from "@heroui/react";
 import { useRef, useState, useEffect } from "react";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -250,7 +250,23 @@ function CopilotStatusBar({
     };
     // Apply All button
     const renderApplyAll = () => {
-        if (!allCardsLoaded) return null;
+        // Show disabled button with tooltip while streaming
+        if (!allCardsLoaded) {
+            return (
+                <Tooltip content="Apply all will be available when all changes are ready" placement="top">
+                    <div className="inline-block">
+                        <button
+                            disabled
+                            className="flex items-center gap-2 px-3 py-1 rounded-full font-medium text-xs transition-colors duration-200 bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-200 dark:border-zinc-700 shadow-none"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 12l2 2l4 -4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                            Apply all
+                        </button>
+                    </div>
+                </Tooltip>
+            );
+        }
+        // Show real button when ready
         return (
             <button
                 onClick={handleApplyAll}
