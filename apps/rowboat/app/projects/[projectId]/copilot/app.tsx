@@ -108,7 +108,8 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         setDiscardContext(false);
     }, [chatContext]);
 
-    function handleUserMessage(prompt: string) {
+    // Memoized handleUserMessage for useImperativeHandle and hooks
+    const handleUserMessage = useCallback((prompt: string) => {
         // Before starting streaming, lock the context to the current pendingContext
         setLockedContext(pendingContext);
         setMessages(currentMessages => [...currentMessages, {
@@ -116,7 +117,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
             content: prompt
         }]);
         setIsLastInteracted(true);
-    }
+    }, [setMessages, setIsLastInteracted, pendingContext, setLockedContext]);
 
     // Effect for getting copilot response
     useEffect(() => {
@@ -181,7 +182,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     useImperativeHandle(ref, () => ({
         handleCopyChat,
         handleUserMessage
-    }), [handleCopyChat]);
+    }), [handleCopyChat, handleUserMessage]);
 
     return (
         <CopilotContext.Provider value={{ workflow: workflowRef.current, dispatch }}>

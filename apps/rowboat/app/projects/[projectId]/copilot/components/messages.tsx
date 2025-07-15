@@ -1,6 +1,6 @@
 'use client';
 import { Spinner } from "@heroui/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { z } from "zod";
 import { Workflow} from "@/app/lib/types/workflow_types";
 import MarkdownContent from "@/app/lib/components/markdown-content";
@@ -218,8 +218,8 @@ function AssistantMessage({
     const pendingCount = Math.max(0, totalActions - appliedCount);
     const allApplied = pendingCount === 0 && totalActions > 0;
 
-    // Apply a single action
-    const applyAction = (action: any, actionIndex: number) => {
+    // Memoized applyAction for useCallback dependencies
+    const applyAction = useCallback((action: any, actionIndex: number) => {
         // Only apply, do not update appliedActions here
         if (action.action === 'create_new') {
             switch (action.config_type) {
@@ -276,10 +276,10 @@ function AssistantMessage({
                     break;
             }
         }
-    };
+    }, [dispatch]);
 
-    // Apply All: batch apply all unapplied actions and update state once
-    const handleApplyAll = () => {
+    // Memoized handleApplyAll for useEffect dependencies
+    const handleApplyAll = useCallback(() => {
         // Find all unapplied action indices
         const unapplied = cardBlocks
             .filter(({ part, actionIndex }) => part.type === 'action' && !appliedActions.has(actionIndex))
@@ -296,7 +296,7 @@ function AssistantMessage({
             unapplied.forEach(({ actionIndex }) => next.add(actionIndex));
             return next;
         });
-    };
+    }, [cardBlocks, appliedActions, setAppliedActions, applyAction]);
 
     // Manual single apply (from card)
     const handleSingleApply = (action: any, actionIndex: number) => {
@@ -426,7 +426,7 @@ function AssistantMessage({
                 handleApplyAll,
             });
         }
-    }, [allCardsLoaded, allApplied, appliedCount, pendingCount, streamingLine, completedSummary, hasPanelWarning]);
+    }, [allCardsLoaded, allApplied, appliedCount, pendingCount, streamingLine, completedSummary, hasPanelWarning, handleApplyAll, onStatusBarChange]);
 
     // Render all cards inline, not in a panel
     return (
