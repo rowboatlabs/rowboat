@@ -54,12 +54,18 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     const cancelRef = useRef<any>(null);
     const [statusBar, setStatusBar] = useState<any>(null);
 
+    // Always use effectiveContext for the user's current selection
+    const effectiveContext = discardContext ? null : chatContext;
+
+    // Context locking state
+    const [lockedContext, setLockedContext] = useState<any>(effectiveContext);
+    const [pendingContext, setPendingContext] = useState<any>(effectiveContext);
+    const [isStreaming, setIsStreaming] = useState(false);
+
     // Keep workflow ref up to date
     workflowRef.current = workflow;
 
-    // Get the effective context based on user preference
-    const effectiveContext = discardContext ? null : chatContext;
-
+    // Copilot streaming state
     const {
         streamingResponse,
         loading: loadingResponse,
@@ -103,6 +109,8 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     }, [chatContext]);
 
     function handleUserMessage(prompt: string) {
+        // Before starting streaming, lock the context to the current pendingContext
+        setLockedContext(pendingContext);
         setMessages(currentMessages => [...currentMessages, {
             role: 'user',
             content: prompt
@@ -134,6 +142,34 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         return () => currentCancel();
     }, [messages, responseError]);
 
+    // --- CONTEXT LOCKING LOGIC ---
+    // Always update pendingContext to the latest effectiveContext
+    useEffect(() => {
+        setPendingContext(effectiveContext);
+    }, [effectiveContext]);
+
+    // Lock/unlock context based on streaming state
+    useEffect(() => {
+        if (loadingResponse) {
+            // Streaming started: lock context to the value at the start
+            setIsStreaming(true);
+            setLockedContext((prev: any) => prev ?? pendingContext); // lock to previous if already set, else to pending
+        } else {
+            // Streaming ended: update lockedContext to the last pendingContext
+            setIsStreaming(false);
+            setLockedContext(pendingContext);
+        }
+    }, [loadingResponse, pendingContext]);
+
+    // After streaming ends, update lockedContext live as effectiveContext changes
+    useEffect(() => {
+        if (!isStreaming) {
+            setLockedContext(effectiveContext);
+        }
+        // If streaming, do not update lockedContext
+    }, [effectiveContext, isStreaming]);
+    // --- END CONTEXT LOCKING LOGIC ---
+
     const handleCopyChat = useCallback(() => {
         if (onCopyJson) {
             onCopyJson({
@@ -159,8 +195,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         dispatch={dispatch}
                         onStatusBarChange={status => setStatusBar({
                             ...status,
-                            context: effectiveContext,
-                            onCloseContext: () => setDiscardContext(true)
+                            context: lockedContext,
                         })}
                     />
                 </div>
@@ -187,7 +222,6 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                             </Button>
                         </div>
                     )}
-                    {/* Remove the separate context label here */}
                     <ComposeBoxCopilot
                         handleUserMessage={handleUserMessage}
                         messages={messages}
@@ -196,7 +230,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         shouldAutoFocus={isLastInteracted}
                         onFocus={() => setIsLastInteracted(true)}
                         onCancel={cancel}
-                        statusBar={statusBar || { context: effectiveContext, onCloseContext: () => setDiscardContext(true) }}
+                        statusBar={statusBar || { context: lockedContext }}
                     />
                 </div>
             </div>
