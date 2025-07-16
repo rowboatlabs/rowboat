@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { WorkflowPrompt, WorkflowAgent, WorkflowTool } from "../../../lib/types/workflow_types";
+import { Project } from "../../../lib/types/project_types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
-import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, Eye } from "lucide-react";
+import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon } from "lucide-react";
 import { DndContext, DragEndEvent, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -14,6 +15,8 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/componen
 import { ServerLogo } from '../tools/components/MCPServersCommon';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/react";
 import { ComposioToolsModal } from './components/ComposioToolsModal';
+import { ToolkitAuthModal } from '../tools/components/ToolkitAuthModal';
+import { deleteConnectedAccount } from '@/app/actions/composio_actions';
 
 // Reduced gap size to match Cursor's UI
 const GAP_SIZE = 4; // 1 unit * 4px (tailwind's default spacing unit)
@@ -54,6 +57,7 @@ interface EntityListProps {
     onDeletePrompt: (name: string) => void;
     onShowVisualise: (name: string) => void;
     onProjectToolsUpdated?: () => void;
+    projectConfig?: z.infer<typeof Project>;
 }
 
 interface EmptyStateProps {
@@ -236,6 +240,7 @@ export function EntityList({
     onDeletePrompt,
     onProjectToolsUpdated,
     projectId,
+    projectConfig,
     onReorderAgents,
     onShowVisualise,
 }: EntityListProps & { 
@@ -560,6 +565,9 @@ export function EntityList({
                                                                 onSelectTool={handleToolSelection}
                                                                 onDeleteTool={onDeleteTool}
                                                                 selectedRef={selectedRef}
+                                                                projectConfig={projectConfig}
+                                                                projectId={projectId}
+                                                                onProjectToolsUpdated={onProjectToolsUpdated}
                                                             />
                                                         ))}
 
@@ -789,6 +797,9 @@ interface ComposioCardProps {
     onSelectTool: (name: string) => void;
     onDeleteTool: (name: string) => void;
     selectedRef: React.RefObject<HTMLButtonElement | null>;
+    projectConfig?: z.infer<typeof Project>;
+    projectId: string;
+    onProjectToolsUpdated?: () => void;
 }
 
 const ComposioCard = ({
@@ -797,35 +808,102 @@ const ComposioCard = ({
     onSelectTool,
     onDeleteTool,
     selectedRef,
+    projectConfig,
+    projectId,
+    onProjectToolsUpdated,
 }: ComposioCardProps) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [showAuthModal, setShowAuthModal] = useState(false);
+    const [isProcessingAuth, setIsProcessingAuth] = useState(false);
+
+    // Check if the toolkit requires authentication
+    const hasToolkitWithAuth = card.tools.some(tool => tool.composioData && !tool.composioData.noAuth);
+    
+    // Check if toolkit is connected
+    const isToolkitConnected = !hasToolkitWithAuth || projectConfig?.composioConnectedAccounts?.[card.slug]?.status === 'ACTIVE';
+
+    const handleConnect = () => {
+        setShowAuthModal(true);
+    };
+
+    const handleDisconnect = async () => {
+        const connectedAccountId = projectConfig?.composioConnectedAccounts?.[card.slug]?.id;
+        
+        setIsProcessingAuth(true);
+        try {
+            if (connectedAccountId) {
+                await deleteConnectedAccount(projectId, card.slug, connectedAccountId);
+                onProjectToolsUpdated?.();
+            }
+        } catch (err: any) {
+            console.error('Disconnect failed:', err);
+        } finally {
+            setIsProcessingAuth(false);
+        }
+    };
+
+    const handleAuthComplete = () => {
+        setShowAuthModal(false);
+        onProjectToolsUpdated?.();
+    };
 
     return (
-        <div className="mb-2">
-            <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md text-sm text-left"
-            >
-                {isExpanded ? (
-                    <ChevronDown className="w-4 h-4 text-gray-500" />
-                ) : (
-                    <ChevronRight className="w-4 h-4 text-gray-500" />
-                )}
-                <div className="flex items-center gap-1">
-                    {card.logo ? (
-                        <div className="relative w-4 h-4">
-                            <PictureImg
-                                src={card.logo}
-                                alt={`${card.name} logo`}
-                                className="w-full h-full object-contain rounded"
-                            />
+        <>
+            <div className="mb-2">
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className="flex-1 flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md text-sm text-left"
+                    >
+                        {isExpanded ? (
+                            <ChevronDown className="w-4 h-4 text-gray-500" />
+                        ) : (
+                            <ChevronRight className="w-4 h-4 text-gray-500" />
+                        )}
+                        <div className="flex items-center gap-1">
+                            {card.logo ? (
+                                <div className="relative w-4 h-4">
+                                    <PictureImg
+                                        src={card.logo}
+                                        alt={`${card.name} logo`}
+                                        className="w-full h-full object-contain rounded"
+                                    />
+                                </div>
+                            ) : (
+                                <ImportIcon className="w-4 h-4 text-blue-600 dark:text-blue-500" />
+                            )}
+                            <span>{card.name}</span>
                         </div>
-                    ) : (
-                        <ImportIcon className="w-4 h-4 text-blue-600 dark:text-blue-500" />
+                    </button>
+                    
+                    {/* Authentication Button */}
+                    {hasToolkitWithAuth && (
+                        <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${
+                                isToolkitConnected ? 'bg-emerald-500' : 'bg-orange-500'
+                            }`}></div>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={isToolkitConnected ? handleDisconnect : handleConnect}
+                                disabled={isProcessingAuth}
+                                className="text-xs min-w-0 px-2"
+                            >
+                                {isProcessingAuth ? (
+                                    <div className="flex items-center gap-1">
+                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
+                                        {isToolkitConnected ? 'Disconnecting...' : 'Connecting...'}
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-1">
+                                        {isToolkitConnected ? <UnlinkIcon className="h-3 w-3" /> : <LinkIcon className="h-3 w-3" />}
+                                        {isToolkitConnected ? 'Disconnect' : 'Connect'}
+                                    </div>
+                                )}
+                            </Button>
+                        </div>
                     )}
-                    <span>{card.name}</span>
                 </div>
-            </button>
             {isExpanded && (
                 <div className="ml-6 mt-1 space-y-1">
                     {card.tools.map((tool, index) => (
@@ -860,7 +938,20 @@ const ComposioCard = ({
                     ))}
                 </div>
             )}
-        </div>
+            </div>
+            
+            {/* Auth Modal */}
+            {hasToolkitWithAuth && (
+                <ToolkitAuthModal
+                    key={card.slug}
+                    isOpen={showAuthModal}
+                    onClose={() => setShowAuthModal(false)}
+                    toolkitSlug={card.slug}
+                    projectId={projectId}
+                    onComplete={handleAuthComplete}
+                />
+            )}
+        </>
     );
 };
 

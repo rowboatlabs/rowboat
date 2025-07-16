@@ -3,6 +3,7 @@ import React, { useReducer, Reducer, useState, useCallback, useEffect, useRef, c
 import { MCPServer, Message, WithStringId } from "../../../lib/types/types";
 import { Workflow, WorkflowTool, WorkflowPrompt, WorkflowAgent } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
+import { Project } from "../../../lib/types/project_types";
 import { produce, applyPatches, enablePatches, produceWithPatches, Patch } from 'immer';
 import { AgentConfig } from "../entities/agent_config";
 import { ToolConfig } from "../entities/tool_config";
@@ -579,6 +580,7 @@ export function WorkflowEditor({
     toolWebhookUrl,
     defaultModel,
     projectTools,
+    projectConfig,
     eligibleModels,
     isLive,
     onChangeMode,
@@ -593,6 +595,7 @@ export function WorkflowEditor({
     toolWebhookUrl: string;
     defaultModel: string;
     projectTools: z.infer<typeof WorkflowTool>[];
+    projectConfig: z.infer<typeof Project>;
     eligibleModels: z.infer<typeof ModelsResponse> | "*";
     isLive: boolean;
     onChangeMode: (mode: 'draft' | 'live') => void;
@@ -1005,6 +1008,7 @@ export function WorkflowEditor({
                                 onShowVisualise={handleShowVisualise}
                                 projectId={projectId}
                                 onProjectToolsUpdated={onProjectToolsUpdated}
+                                projectConfig={projectConfig}
                                 onReorderAgents={handleReorderAgents}
                             />
                         </div>

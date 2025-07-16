@@ -1,6 +1,7 @@
 "use client";
 import { WithStringId } from "../../../lib/types/types";
 import { DataSource } from "../../../lib/types/datasource_types";
+import { Project } from "../../../lib/types/project_types";
 import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
 import { WorkflowEditor } from "./workflow_editor";
@@ -26,6 +27,7 @@ export function App({
     const [project, setProject] = useState<WithStringId<z.infer<typeof Project>> | null>(null);
     const [dataSources, setDataSources] = useState<WithStringId<z.infer<typeof DataSource>>[] | null>(null);
     const [projectTools, setProjectTools] = useState<z.infer<typeof WorkflowTool>[] | null>(null);
+    const [projectConfig, setProjectConfig] = useState<z.infer<typeof Project> | null>(null);
     const [loading, setLoading] = useState(false);
     const [eligibleModels, setEligibleModels] = useState<z.infer<typeof ModelsResponse> | "*">("*");
 
@@ -57,7 +59,11 @@ export function App({
     }, [projectId]);
 
     const handleProjectToolsUpdate = useCallback(async () => {
-        const freshProjectTools = await collectProjectTools(projectId);
+        const [freshProjectConfig, freshProjectTools] = await Promise.all([
+            getProjectConfig(projectId),
+            collectProjectTools(projectId)
+        ]);
+        setProjectConfig(freshProjectConfig);
         setProjectTools(freshProjectTools);
     }, [projectId]);
     // Add this useEffect for initial load
@@ -90,6 +96,7 @@ export function App({
             workflow={workflow}
             dataSources={dataSources}
             projectTools={projectTools}
+            projectConfig={project}
             useRag={useRag}
             mcpServerUrls={project.mcpServers || []}
             toolWebhookUrl={project.webhookUrl || ''}
