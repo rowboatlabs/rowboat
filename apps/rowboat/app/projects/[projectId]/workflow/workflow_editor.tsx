@@ -578,6 +578,7 @@ export function WorkflowEditor({
     defaultModel,
     projectTools,
     eligibleModels,
+    onProjectToolsUpdated,
 }: {
     dataSources: WithStringId<z.infer<typeof DataSource>>[];
     workflow: WithStringId<z.infer<typeof Workflow>>;
@@ -590,6 +591,7 @@ export function WorkflowEditor({
     defaultModel: string;
     projectTools: z.infer<typeof WorkflowTool>[];
     eligibleModels: z.infer<typeof ModelsResponse> | "*";
+    onProjectToolsUpdated?: () => void;
 }) {
 
     const [state, dispatch] = useReducer(reducer, {
@@ -1006,6 +1008,7 @@ export function WorkflowEditor({
                                 onDeleteAgent={handleDeleteAgent}
                                 onDeleteTool={handleDeleteTool}
                                 onDeletePrompt={handleDeletePrompt}
+                                onProjectToolsUpdated={onProjectToolsUpdated}
                                 projectId={state.present.workflow.projectId}
                                 onReorderAgents={handleReorderAgents}
                             />

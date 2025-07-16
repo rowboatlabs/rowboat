@@ -68,6 +68,11 @@ export function App({
         setLoading(false);
     }, [projectId]);
 
+    const handleProjectToolsUpdate = useCallback(async () => {
+        const freshProjectTools = await collectProjectTools(projectId);
+        setProjectTools(freshProjectTools);
+    }, [projectId]);
+
     function handleShowSelector() {
         // clear the last workflow id from local storage
         localStorage.removeItem(`lastWorkflowId_${projectId}`);
@@ -144,6 +149,7 @@ export function App({
             toolWebhookUrl={toolWebhookUrl}
             defaultModel={defaultModel}
             eligibleModels={eligibleModels}
+            onProjectToolsUpdated={handleProjectToolsUpdate}
         />}
     </>
 }

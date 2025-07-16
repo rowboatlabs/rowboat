@@ -13,6 +13,7 @@ import { clsx } from "clsx";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { ServerLogo } from '../tools/components/MCPServersCommon';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/react";
+import { ComposioToolsModal } from './components/ComposioToolsModal';
 
 // Reduced gap size to match Cursor's UI
 const GAP_SIZE = 4; // 1 unit * 4px (tailwind's default spacing unit)
@@ -51,6 +52,7 @@ interface EntityListProps {
     onDeleteAgent: (name: string) => void;
     onDeleteTool: (name: string) => void;
     onDeletePrompt: (name: string) => void;
+    onProjectToolsUpdated?: () => void;
 }
 
 interface EmptyStateProps {
@@ -231,6 +233,7 @@ export function EntityList({
     onDeleteAgent,
     onDeleteTool,
     onDeletePrompt,
+    onProjectToolsUpdated,
     projectId,
     onReorderAgents,
 }: EntityListProps & { 
@@ -238,6 +241,7 @@ export function EntityList({
     onReorderAgents: (agents: z.infer<typeof WorkflowAgent>[]) => void 
 }) {
     const [showAgentTypeModal, setShowAgentTypeModal] = useState(false);
+    const [showComposioToolsModal, setShowComposioToolsModal] = useState(false);
 
     const handleAddAgentWithType = (agentType: 'internal' | 'user_facing') => {
         onAddAgent({
@@ -476,20 +480,36 @@ export function EntityList({
                                     <Wrench className="w-4 h-4" />
                                     <span>Tools</span>
                                 </div>
-                                <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setExpandedPanels(prev => ({ ...prev, tools: true }));
-                                        onAddTool({});
-                                    }}
-                                    className={`group ${buttonClasses}`}
-                                    showHoverContent={true}
-                                    hoverContent="Add Tool"
-                                >
-                                    <PlusIcon className="w-4 h-4" />
-                                </Button>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedPanels(prev => ({ ...prev, tools: true }));
+                                            setShowComposioToolsModal(true);
+                                        }}
+                                        className={`group ${buttonClasses}`}
+                                        showHoverContent={true}
+                                        hoverContent="Composio Tools"
+                                    >
+                                        <Component className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedPanels(prev => ({ ...prev, tools: true }));
+                                            onAddTool({});
+                                        }}
+                                        className={`group ${buttonClasses}`}
+                                        showHoverContent={true}
+                                        hoverContent="Add Tool"
+                                    >
+                                        <PlusIcon className="w-4 h-4" />
+                                    </Button>
+                                </div>
                             </button>
                         }
                     >
@@ -661,6 +681,12 @@ export function EntityList({
                 isOpen={showAgentTypeModal}
                 onClose={() => setShowAgentTypeModal(false)}
                 onConfirm={handleAddAgentWithType}
+            />
+            <ComposioToolsModal
+                isOpen={showComposioToolsModal}
+                onClose={() => setShowComposioToolsModal(false)}
+                projectId={projectId}
+                onToolsUpdated={onProjectToolsUpdated}
             />
         </div>
     );

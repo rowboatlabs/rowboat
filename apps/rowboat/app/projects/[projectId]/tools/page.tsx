@@ -16,7 +16,7 @@ export default async function ToolsPage() {
       <div className="flex-1 p-6">
         <Suspense fallback={<div>Loading...</div>}>
           <ToolsConfig
-            useComposioTools={USE_COMPOSIO_TOOLS}
+            useComposioTools={false}
             useKlavisTools={USE_KLAVIS_TOOLS}
           />
         </Suspense>
