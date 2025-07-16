@@ -19,7 +19,7 @@ import {
     ZAuthScheme,
     ZCredentials,
 } from "@/app/lib/composio/composio";
-import { ComposioConnectedAccount } from "@/app/lib/types/project_types";
+import { ComposioConnectedAccount, ComposioMockToolkitState } from "@/app/lib/types/project_types";
 import { getProjectConfig, projectAuthCheck } from "./project_actions";
 import { projectsCollection } from "../lib/mongodb";
 
@@ -223,4 +223,45 @@ export async function updateComposioSelectedTools(projectId: string, tools: z.in
 
     // update project with new selected tools
     await projectsCollection.updateOne({ _id: projectId }, { $set: { composioSelectedTools: tools } });
+}
+
+export async function toggleMockToolkitState(projectId: string, toolkitSlug: string, isMocked: boolean, mockInstructions?: string): Promise<void> {
+    await projectAuthCheck(projectId);
+    
+    const now = new Date().toISOString();
+    const key = `composioMockToolkitStates.${toolkitSlug}`;
+    
+    if (isMocked) {
+        // Enable mock mode
+        const mockState = {
+            toolkitSlug,
+            isMocked: true,
+            mockInstructions: mockInstructions || 'Mock responses using GPT-4.1 based on tool descriptions.',
+            autoSubmitMockedResponse: false,
+            createdAt: now,
+            lastUpdatedAt: now,
+        };
+        
+        await projectsCollection.updateOne({ _id: projectId }, { $set: { [key]: mockState } });
+    } else {
+        // Disable mock mode
+        await projectsCollection.updateOne({ _id: projectId }, { $unset: { [key]: "" } });
+    }
+}
+
+export async function updateMockToolkitInstructions(projectId: string, toolkitSlug: string, mockInstructions: string): Promise<void> {
+    await projectAuthCheck(projectId);
+    
+    const now = new Date().toISOString();
+    const key = `composioMockToolkitStates.${toolkitSlug}`;
+    
+    await projectsCollection.updateOne(
+        { _id: projectId, [`${key}.toolkitSlug`]: toolkitSlug },
+        { 
+            $set: { 
+                [`${key}.mockInstructions`]: mockInstructions,
+                [`${key}.lastUpdatedAt`]: now
+            }
+        }
+    );
 }

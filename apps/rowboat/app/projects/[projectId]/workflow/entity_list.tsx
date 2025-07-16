@@ -3,7 +3,7 @@ import { WorkflowPrompt, WorkflowAgent, WorkflowTool } from "../../../lib/types/
 import { Project } from "../../../lib/types/project_types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
-import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon } from "lucide-react";
+import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, TestTube, Play } from "lucide-react";
 import { DndContext, DragEndEvent, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -16,7 +16,7 @@ import { ServerLogo } from '../tools/components/MCPServersCommon';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/react";
 import { ComposioToolsModal } from './components/ComposioToolsModal';
 import { ToolkitAuthModal } from '../tools/components/ToolkitAuthModal';
-import { deleteConnectedAccount } from '@/app/actions/composio_actions';
+import { deleteConnectedAccount, toggleMockToolkitState } from '@/app/actions/composio_actions';
 
 // Reduced gap size to match Cursor's UI
 const GAP_SIZE = 4; // 1 unit * 4px (tailwind's default spacing unit)
@@ -801,12 +801,16 @@ const ComposioCard = ({
     const [isExpanded, setIsExpanded] = useState(false);
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [isProcessingAuth, setIsProcessingAuth] = useState(false);
+    const [isProcessingMock, setIsProcessingMock] = useState(false);
 
     // Check if the toolkit requires authentication
     const hasToolkitWithAuth = card.tools.some(tool => tool.composioData && !tool.composioData.noAuth);
     
     // Check if toolkit is connected
     const isToolkitConnected = !hasToolkitWithAuth || projectConfig?.composioConnectedAccounts?.[card.slug]?.status === 'ACTIVE';
+    
+    // Check if toolkit is mocked
+    const isToolkitMocked = projectConfig?.composioMockToolkitStates?.[card.slug]?.isMocked || false;
 
     const handleConnect = () => {
         setShowAuthModal(true);
@@ -831,6 +835,18 @@ const ComposioCard = ({
     const handleAuthComplete = () => {
         setShowAuthModal(false);
         onProjectToolsUpdated?.();
+    };
+
+    const handleToggleMock = async () => {
+        setIsProcessingMock(true);
+        try {
+            await toggleMockToolkitState(projectId, card.slug, !isToolkitMocked);
+            onProjectToolsUpdated?.();
+        } catch (err: any) {
+            console.error('Mock toggle failed:', err);
+        } finally {
+            setIsProcessingMock(false);
+        }
     };
 
     return (
@@ -862,33 +878,82 @@ const ComposioCard = ({
                         </div>
                     </button>
                     
-                    {/* Authentication Button */}
-                    {hasToolkitWithAuth && (
-                        <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${
-                                isToolkitConnected ? 'bg-emerald-500' : 'bg-orange-500'
-                            }`}></div>
+                    {/* Status and Action Buttons */}
+                    <div className="flex items-center gap-2">
+                        {/* Status Indicators */}
+                        <div className="flex items-center gap-1">
+                            {/* Mock Status */}
+                            {isToolkitMocked && (
+                                <div className="flex items-center gap-1">
+                                    <TestTube className="h-3 w-3 text-purple-500" />
+                                    <span className="text-xs text-purple-600 dark:text-purple-400">Mock</span>
+                                </div>
+                            )}
+                            
+                            {/* Auth Status */}
+                            {hasToolkitWithAuth && (
+                                <div className="flex items-center gap-1">
+                                    <div className={`w-2 h-2 rounded-full ${
+                                        isToolkitConnected ? 'bg-emerald-500' : 'bg-orange-500'
+                                    }`}></div>
+                                    <span className="text-xs text-gray-600 dark:text-gray-400">
+                                        {isToolkitConnected ? 'Connected' : 'Disconnected'}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                        
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-1">
+                            {/* Mock Button */}
                             <Button
                                 variant="secondary"
                                 size="sm"
-                                onClick={isToolkitConnected ? handleDisconnect : handleConnect}
-                                disabled={isProcessingAuth}
-                                className="text-xs min-w-0 px-2"
+                                onClick={handleToggleMock}
+                                disabled={isProcessingMock}
+                                className={`text-xs min-w-0 px-2 ${
+                                    isToolkitMocked 
+                                        ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 dark:bg-purple-900/20 dark:text-purple-300 dark:border-purple-800' 
+                                        : ''
+                                }`}
                             >
-                                {isProcessingAuth ? (
+                                {isProcessingMock ? (
                                     <div className="flex items-center gap-1">
                                         <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
-                                        {isToolkitConnected ? 'Disconnecting...' : 'Connecting...'}
+                                        {isToolkitMocked ? 'Disabling...' : 'Enabling...'}
                                     </div>
                                 ) : (
                                     <div className="flex items-center gap-1">
-                                        {isToolkitConnected ? <UnlinkIcon className="h-3 w-3" /> : <LinkIcon className="h-3 w-3" />}
-                                        {isToolkitConnected ? 'Disconnect' : 'Connect'}
+                                        {isToolkitMocked ? <Play className="h-3 w-3" /> : <TestTube className="h-3 w-3" />}
+                                        {isToolkitMocked ? 'Disable Mock' : 'Mock'}
                                     </div>
                                 )}
                             </Button>
+                            
+                            {/* Authentication Button */}
+                            {hasToolkitWithAuth && (
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={isToolkitConnected ? handleDisconnect : handleConnect}
+                                    disabled={isProcessingAuth}
+                                    className="text-xs min-w-0 px-2"
+                                >
+                                    {isProcessingAuth ? (
+                                        <div className="flex items-center gap-1">
+                                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
+                                            {isToolkitConnected ? 'Disconnecting...' : 'Connecting...'}
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1">
+                                            {isToolkitConnected ? <UnlinkIcon className="h-3 w-3" /> : <LinkIcon className="h-3 w-3" />}
+                                            {isToolkitConnected ? 'Disconnect' : 'Connect'}
+                                        </div>
+                                    )}
+                                </Button>
+                            )}
                         </div>
-                    )}
+                    </div>
                 </div>
             {isExpanded && (
                 <div className="ml-6 mt-1 space-y-1">
