@@ -583,6 +583,7 @@ export function WorkflowEditor({
     isLive,
     onChangeMode,
     onRevertToLive,
+    onProjectToolsUpdated,
 }: {
     projectId: string;
     dataSources: WithStringId<z.infer<typeof DataSource>>[];
@@ -596,6 +597,7 @@ export function WorkflowEditor({
     isLive: boolean;
     onChangeMode: (mode: 'draft' | 'live') => void;
     onRevertToLive: () => void;
+    onProjectToolsUpdated?: () => void;
 }) {
 
     const [state, dispatch] = useReducer(reducer, {
@@ -1002,6 +1004,7 @@ export function WorkflowEditor({
                                 onDeletePrompt={handleDeletePrompt}
                                 onShowVisualise={handleShowVisualise}
                                 projectId={projectId}
+                                onProjectToolsUpdated={onProjectToolsUpdated}
                                 onReorderAgents={handleReorderAgents}
                             />
                         </div>

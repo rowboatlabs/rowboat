@@ -56,6 +56,10 @@ export function App({
         setLoading(false);
     }, [projectId]);
 
+    const handleProjectToolsUpdate = useCallback(async () => {
+        const freshProjectTools = await collectProjectTools(projectId);
+        setProjectTools(freshProjectTools);
+    }, [projectId]);
     // Add this useEffect for initial load
     useEffect(() => {
         loadData();
@@ -93,6 +97,7 @@ export function App({
             eligibleModels={eligibleModels}
             onChangeMode={handleSetMode}
             onRevertToLive={handleRevertToLive}
+            onProjectToolsUpdated={handleProjectToolsUpdate}
         />}
     </>
 }
