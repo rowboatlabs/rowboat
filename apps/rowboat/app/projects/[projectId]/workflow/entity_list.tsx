@@ -3,7 +3,7 @@ import { WorkflowPrompt, WorkflowAgent, WorkflowTool } from "../../../lib/types/
 import { Project } from "../../../lib/types/project_types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
-import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, TestTube, Play } from "lucide-react";
+import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, TestTube, Play, MoreVertical } from "lucide-react";
 import { DndContext, DragEndEvent, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -878,81 +878,101 @@ const ComposioCard = ({
                         </div>
                     </button>
                     
-                    {/* Status and Action Buttons */}
+                    {/* Status and Actions */}
                     <div className="flex items-center gap-2">
-                        {/* Status Indicators */}
+                        {/* Single Status Indicator */}
                         <div className="flex items-center gap-1">
-                            {/* Mock Status */}
-                            {isToolkitMocked && (
-                                <div className="flex items-center gap-1">
-                                    <TestTube className="h-3 w-3 text-purple-500" />
-                                    <span className="text-xs text-purple-600 dark:text-purple-400">Mock</span>
-                                </div>
-                            )}
-                            
-                            {/* Auth Status */}
-                            {hasToolkitWithAuth && (
-                                <div className="flex items-center gap-1">
-                                    <div className={`w-2 h-2 rounded-full ${
-                                        isToolkitConnected ? 'bg-emerald-500' : 'bg-orange-500'
-                                    }`}></div>
-                                    <span className="text-xs text-gray-600 dark:text-gray-400">
-                                        {isToolkitConnected ? 'Connected' : 'Disconnected'}
-                                    </span>
-                                </div>
-                            )}
+                            <div className={`w-2 h-2 rounded-full ${
+                                isToolkitMocked 
+                                    ? 'bg-purple-500' 
+                                    : isToolkitConnected 
+                                        ? 'bg-emerald-500' 
+                                        : 'bg-orange-500'
+                            }`}></div>
+                            <span className={`text-xs ${
+                                isToolkitMocked 
+                                    ? 'text-purple-600 dark:text-purple-400' 
+                                    : isToolkitConnected 
+                                        ? 'text-emerald-600 dark:text-emerald-400' 
+                                        : 'text-orange-600 dark:text-orange-400'
+                            }`}>
+                                {isToolkitMocked ? 'Mock Mode' : isToolkitConnected ? 'Connected' : 'Disconnected'}
+                            </span>
                         </div>
                         
-                        {/* Action Buttons */}
-                        <div className="flex items-center gap-1">
-                            {/* Mock Button */}
-                            <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={handleToggleMock}
-                                disabled={isProcessingMock}
-                                className={`text-xs min-w-0 px-2 ${
-                                    isToolkitMocked 
-                                        ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 dark:bg-purple-900/20 dark:text-purple-300 dark:border-purple-800' 
-                                        : ''
-                                }`}
+                        {/* Actions Dropdown */}
+                        <Dropdown>
+                            <DropdownTrigger>
+                                <button className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors">
+                                    <MoreVertical className="h-4 w-4 text-gray-500" />
+                                </button>
+                            </DropdownTrigger>
+                            <DropdownMenu
+                                onAction={(key) => {
+                                    switch (key) {
+                                        case 'mock':
+                                            handleToggleMock();
+                                            break;
+                                        case 'connect':
+                                            handleConnect();
+                                            break;
+                                        case 'disconnect':
+                                            handleDisconnect();
+                                            break;
+                                    }
+                                }}
+                                disabledKeys={[
+                                    ...(isProcessingMock ? ['mock'] : []),
+                                    ...(isProcessingAuth ? ['connect', 'disconnect'] : []),
+                                    ...(hasToolkitWithAuth && !isToolkitMocked && isToolkitConnected ? [] : ['disconnect']),
+                                    ...(hasToolkitWithAuth && !isToolkitConnected ? [] : ['connect'])
+                                ]}
                             >
-                                {isProcessingMock ? (
-                                    <div className="flex items-center gap-1">
-                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
-                                        {isToolkitMocked ? 'Disabling...' : 'Enabling...'}
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center gap-1">
-                                        {isToolkitMocked ? <Play className="h-3 w-3" /> : <TestTube className="h-3 w-3" />}
-                                        {isToolkitMocked ? 'Disable Mock' : 'Mock'}
-                                    </div>
-                                )}
-                            </Button>
-                            
-                            {/* Authentication Button */}
-                            {hasToolkitWithAuth && (
-                                <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={isToolkitConnected ? handleDisconnect : handleConnect}
-                                    disabled={isProcessingAuth}
-                                    className="text-xs min-w-0 px-2"
-                                >
-                                    {isProcessingAuth ? (
-                                        <div className="flex items-center gap-1">
+                                <DropdownItem
+                                    key="mock"
+                                    startContent={
+                                        isProcessingMock ? (
                                             <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
-                                            {isToolkitConnected ? 'Disconnecting...' : 'Connecting...'}
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center gap-1">
-                                            {isToolkitConnected ? <UnlinkIcon className="h-3 w-3" /> : <LinkIcon className="h-3 w-3" />}
-                                            {isToolkitConnected ? 'Disconnect' : 'Connect'}
-                                        </div>
-                                    )}
-                                </Button>
-                            )}
-                        </div>
+                                        ) : isToolkitMocked ? (
+                                            <Play className="h-3 w-3" />
+                                        ) : (
+                                            <TestTube className="h-3 w-3" />
+                                        )
+                                    }
+                                >
+                                    {isProcessingMock 
+                                        ? (isToolkitMocked ? 'Disabling Mock...' : 'Enabling Mock...') 
+                                        : (isToolkitMocked ? 'Switch to Real Mode' : 'Switch to Mock Mode')
+                                    }
+                                </DropdownItem>
+                                
+                                <DropdownItem
+                                    key="disconnect"
+                                    startContent={
+                                        isProcessingAuth ? (
+                                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
+                                        ) : (
+                                            <UnlinkIcon className="h-3 w-3" />
+                                        )
+                                    }
+                                >
+                                    {isProcessingAuth ? 'Disconnecting...' : 'Disconnect'}
+                                </DropdownItem>
+                                
+                                <DropdownItem
+                                    key="connect"
+                                    startContent={
+                                        isProcessingAuth ? (
+                                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
+                                        ) : (
+                                            <LinkIcon className="h-3 w-3" />
+                                        )
+                                    }
+                                >
+                                    {isProcessingAuth ? 'Connecting...' : 'Connect'}
+                                </DropdownItem>
+                            </DropdownMenu>
+                        </Dropdown>
                     </div>
                 </div>
             {isExpanded && (
