@@ -1,10 +1,14 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tabs, Tab } from '@/components/ui/tabs';
 import { Composio } from '../../tools/components/Composio';
 import { ComposioWithCallback } from './ComposioWithCallback';
+import { CustomServers } from '../../tools/components/CustomServers';
+import { WebhookConfig } from '../../tools/components/WebhookConfig';
+import type { Key } from 'react';
 
 interface ComposioToolsModalProps {
   isOpen: boolean;
@@ -14,6 +18,12 @@ interface ComposioToolsModalProps {
 }
 
 export function ComposioToolsModal({ isOpen, onClose, projectId, onToolsUpdated }: ComposioToolsModalProps) {
+  const [activeTab, setActiveTab] = useState('composio');
+
+  const handleTabChange = (key: Key) => {
+    setActiveTab(key.toString());
+  };
+
   // Close on escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -49,7 +59,7 @@ export function ComposioToolsModal({ isOpen, onClose, projectId, onToolsUpdated 
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            Composio Tools
+            Tools
           </h3>
           <Button
             variant="secondary"
@@ -62,8 +72,30 @@ export function ComposioToolsModal({ isOpen, onClose, projectId, onToolsUpdated 
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <ComposioWithCallback onToolsUpdated={onToolsUpdated} />
+        <div className="flex-1 overflow-y-auto">
+          <Tabs 
+            selectedKey={activeTab}
+            onSelectionChange={handleTabChange}
+            aria-label="Tool configuration options"
+            className="w-full h-full"
+            fullWidth
+          >
+            <Tab key="composio" title="Composio">
+              <div className="p-6">
+                <ComposioWithCallback onToolsUpdated={onToolsUpdated} />
+              </div>
+            </Tab>
+            <Tab key="custom" title="Custom MCP Servers">
+              <div className="p-6">
+                <CustomServers />
+              </div>
+            </Tab>
+            <Tab key="webhook" title="Webhook">
+              <div className="p-6">
+                <WebhookConfig />
+              </div>
+            </Tab>
+          </Tabs>
         </div>
       </div>
     </div>
