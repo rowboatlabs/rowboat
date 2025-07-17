@@ -55,7 +55,7 @@ export function ComposioToolsModal({ isOpen, onClose, projectId, onToolsUpdated 
       {/* Modal */}
       <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl 
         w-full max-w-6xl mx-4 animate-in fade-in zoom-in duration-200 
-        max-h-[80vh] flex flex-col">
+        h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -77,7 +77,7 @@ export function ComposioToolsModal({ isOpen, onClose, projectId, onToolsUpdated 
             selectedKey={activeTab}
             onSelectionChange={handleTabChange}
             aria-label="Tool configuration options"
-            className="w-full h-full"
+            className="w-full"
             fullWidth
           >
             <Tab key="composio" title="Composio">
