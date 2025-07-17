@@ -24,7 +24,7 @@ import { Modal } from '@/components/ui/modal';
 type McpServerType = z.infer<typeof MCPServer>;
 type McpToolType = z.infer<typeof MCPServer>['tools'][number];
 
-export function CustomServers() {
+export function CustomServers({ onToolsUpdated }: { onToolsUpdated?: () => void }) {
   const params = useParams();
   const projectId = typeof params.projectId === 'string' ? params.projectId : params.projectId?.[0];
   if (!projectId) throw new Error('Project ID is required');
@@ -92,6 +92,9 @@ export function CustomServers() {
           return s;
         });
       });
+      
+      // Notify parent component about tool updates
+      onToolsUpdated?.();
     } catch (err) {
       console.error('Toggle failed:', { server: server.name, error: err });
     } finally {
@@ -161,6 +164,9 @@ export function CustomServers() {
         // Update selectedTools to include all tools for the custom server
         setSelectedTools(new Set(updatedAvailableTools.map(tool => tool.id)));
       }
+
+      // Notify parent component about tool updates
+      onToolsUpdated?.();
     } finally {
       setSyncingServers(prev => {
         const next = new Set(prev);
@@ -207,6 +213,9 @@ export function CustomServers() {
 
       // Fetch tools for the new server using the formatted URL
       await handleSyncServer(formattedServer);
+      
+      // Notify parent component about tool updates
+      onToolsUpdated?.();
     } catch (err) {
       console.error('Error adding server:', err);
       setError('Failed to add server. Please try again.');
@@ -229,6 +238,9 @@ export function CustomServers() {
       if (selectedServer?.name === server.name) {
         setSelectedServer(null);
       }
+      
+      // Notify parent component about tool updates
+      onToolsUpdated?.();
     } catch (err) {
       console.error('Error removing server:', err);
       setError('Failed to remove server. Please try again.');
@@ -271,6 +283,9 @@ export function CustomServers() {
       });
       
       setHasToolChanges(false);
+      
+      // Notify parent component about tool updates
+      onToolsUpdated?.();
     } catch (error) {
       console.error('Error saving tool selection:', error);
     } finally {

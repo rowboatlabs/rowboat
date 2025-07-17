@@ -87,7 +87,7 @@ export function ComposioToolsModal({ isOpen, onClose, projectId, onToolsUpdated 
             </Tab>
             <Tab key="custom" title="Custom MCP Servers">
               <div className="p-6">
-                <CustomServers />
+                <CustomServers onToolsUpdated={onToolsUpdated} />
               </div>
             </Tab>
             <Tab key="webhook" title="Webhook">
