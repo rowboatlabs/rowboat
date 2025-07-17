@@ -4,6 +4,7 @@ import { Project } from "../../../lib/types/project_types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
 import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, TestTube, Play, MoreVertical } from "lucide-react";
+import { Tooltip } from "@heroui/react";
 import { DndContext, DragEndEvent, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -98,7 +99,7 @@ const ListItemWithMenu = ({
 }) => {
     return (
         <div className={clsx(
-            "group flex items-center gap-2 px-2 py-1.5 rounded-md",
+            "group flex items-center gap-2 px-2 py-0.5 rounded-md min-h-[24px]",
             {
                 "bg-indigo-50 dark:bg-indigo-950/30": isSelected,
                 "hover:bg-zinc-50 dark:hover:bg-zinc-800": !isSelected
@@ -119,22 +120,20 @@ const ListItemWithMenu = ({
                 }}
                 disabled={disabled}
             >
-                <div className={clsx("shrink-0 flex items-center justify-center w-4 h-4", iconClassName)}>
+                <div className={clsx("shrink-0 flex items-center justify-center w-3 h-3", iconClassName)}>
                     {mcpServerName ? (
                         <ServerLogo 
                             serverName={mcpServerName} 
-                            className="h-4 w-4" 
-                            fallback={<ImportIcon className="w-4 h-4 text-blue-600 dark:text-blue-500" />} 
+                            className="h-3 w-3" 
+                            fallback={<ImportIcon className="w-3 h-3 text-blue-600 dark:text-blue-500" />} 
                         />
                     ) : icon}
                 </div>
-                {name}
+                <span className="text-xs">{name}</span>
             </button>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
                 {statusLabel}
-                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                    {menuContent}
-                </div>
+                {menuContent}
             </div>
         </div>
     );
@@ -169,43 +168,62 @@ const ServerCard = ({
     const [isExpanded, setIsExpanded] = useState(false);
 
     return (
-        <div className="mb-2">
-            <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md text-sm text-left"
-            >
-                {isExpanded ? (
-                    <ChevronDown className="w-4 h-4 text-gray-500" />
-                ) : (
-                    <ChevronRight className="w-4 h-4 text-gray-500" />
-                )}
-                <div className="flex items-center gap-1">
-                    <ServerLogo 
-                        serverName={serverName} 
-                        className="h-4 w-4" 
-                        fallback={<ImportIcon className="w-4 h-4 text-blue-600 dark:text-blue-500" />}
-                    />
-                    <span>{serverName}</span>
-                </div>
-            </button>
-            {isExpanded && (
-                <div className="ml-6 mt-1 space-y-1">
-                    {tools.map((tool, index) => (
-                        <ListItemWithMenu
-                            key={`tool-${index}`}
-                            name={tool.name}
-                            isSelected={selectedEntity?.type === "tool" && selectedEntity.name === tool.name}
-                            onClick={() => onSelectTool(tool.name)}
-                            selectedRef={selectedEntity?.type === "tool" && selectedEntity.name === tool.name ? selectedRef : undefined}
-                            mcpServerName={serverName}
-                            menuContent={
-                                <EntityDropdown 
-                                    name={tool.name} 
-                                    onDelete={onDeleteTool}
-                                    isLocked={tool.isMcp || tool.isLibrary}
-                                />
-                            }
+        <div className="mb-1 group">
+            <div className="flex items-center gap-2 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors">
+                <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="flex-1 flex items-center gap-2 text-sm text-left min-h-[28px]"
+                >
+                    {/* Chevron - only show when has tools and on hover */}
+                    <div className={`w-4 h-4 flex items-center justify-center transition-opacity ${
+                        tools.length > 0 ? 'group-hover:opacity-100 opacity-60' : 'opacity-0'
+                    }`}>
+                        {tools.length > 0 && (isExpanded ? (
+                            <ChevronDown className="w-3 h-3 text-gray-500" />
+                        ) : (
+                            <ChevronRight className="w-3 h-3 text-gray-500" />
+                        ))}
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                        <ServerLogo 
+                            serverName={serverName} 
+                            className="h-4 w-4" 
+                            fallback={<ImportIcon className="w-4 h-4 text-blue-600 dark:text-blue-500" />}
                         />
+                        <span className="text-sm">{serverName}</span>
+                    </div>
+                </button>
+                
+                {/* Tool count badge */}
+                {tools.length > 0 && (
+                    <div className="w-5 h-5 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                        <span className="text-xs text-gray-600 dark:text-gray-400">{tools.length}</span>
+                    </div>
+                )}
+            </div>
+            
+            {isExpanded && (
+                <div className="ml-6 mt-0.5 space-y-0.5 border-l border-gray-200 dark:border-gray-700 pl-3">
+                    {tools.map((tool, index) => (
+                        <div key={`tool-${index}`} className="group/tool">
+                            <ListItemWithMenu
+                                name={tool.name}
+                                isSelected={selectedEntity?.type === "tool" && selectedEntity.name === tool.name}
+                                onClick={() => onSelectTool(tool.name)}
+                                selectedRef={selectedEntity?.type === "tool" && selectedEntity.name === tool.name ? selectedRef : undefined}
+                                mcpServerName={serverName}
+                                menuContent={
+                                    <div className="opacity-0 group-hover/tool:opacity-100 transition-opacity">
+                                        <EntityDropdown 
+                                            name={tool.name} 
+                                            onDelete={onDeleteTool}
+                                            isLocked={tool.isMcp || tool.isLibrary}
+                                        />
+                                    </div>
+                                }
+                            />
+                        </div>
                     ))}
                 </div>
             )}
@@ -556,20 +574,36 @@ export function EntityList({
 
                                                 return (
                                                     <>
-                                                        {/* Show composio cards */}
-                                                        {Object.values(composioTools).map((card) => (
-                                                            <ComposioCard 
-                                                                key={card.slug} 
-                                                                card={card}
-                                                                selectedEntity={selectedEntity}
-                                                                onSelectTool={handleToolSelection}
-                                                                onDeleteTool={onDeleteTool}
-                                                                selectedRef={selectedRef}
-                                                                projectConfig={projectConfig}
-                                                                projectId={projectId}
-                                                                onProjectToolsUpdated={onProjectToolsUpdated}
-                                                            />
-                                                        ))}
+                                                        {/* Show composio cards - ordered by status */}
+                                                        {Object.values(composioTools)
+                                                            .sort((a, b) => {
+                                                                // Helper function to get toolkit status priority
+                                                                const getStatusPriority = (toolkit: ComposioToolkit) => {
+                                                                    const hasAuth = toolkit.tools.some(tool => tool.composioData && !tool.composioData.noAuth);
+                                                                    const isConnected = !hasAuth || projectConfig?.composioConnectedAccounts?.[toolkit.slug]?.status === 'ACTIVE';
+                                                                    const isMocked = projectConfig?.composioMockToolkitStates?.[toolkit.slug]?.isMocked || false;
+                                                                    
+                                                                    // Priority: Connected (1) > Mock (2) > Disconnected (3)
+                                                                    if (isMocked) return 2;
+                                                                    if (isConnected) return 1;
+                                                                    return 3;
+                                                                };
+                                                                
+                                                                return getStatusPriority(a) - getStatusPriority(b);
+                                                            })
+                                                            .map((card) => (
+                                                                <ComposioCard 
+                                                                    key={card.slug} 
+                                                                    card={card}
+                                                                    selectedEntity={selectedEntity}
+                                                                    onSelectTool={handleToolSelection}
+                                                                    onDeleteTool={onDeleteTool}
+                                                                    selectedRef={selectedRef}
+                                                                    projectConfig={projectConfig}
+                                                                    projectId={projectId}
+                                                                    onProjectToolsUpdated={onProjectToolsUpdated}
+                                                                />
+                                                            ))}
 
                                                         {/* Show MCP server cards */}
                                                         {Object.entries(serverTools).map(([serverName, tools]) => (
@@ -865,18 +899,24 @@ const ComposioCard = ({
 
     return (
         <>
-            <div className="mb-2">
-                <div className="flex items-center gap-2">
+            <div className="mb-1 group">
+                <div className="flex items-center gap-2 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors">
                     <button
                         onClick={() => setIsExpanded(!isExpanded)}
-                        className="flex-1 flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md text-sm text-left"
+                        className="flex-1 flex items-center gap-2 text-sm text-left min-h-[28px]"
                     >
-                        {isExpanded ? (
-                            <ChevronDown className="w-4 h-4 text-gray-500" />
-                        ) : (
-                            <ChevronRight className="w-4 h-4 text-gray-500" />
-                        )}
-                        <div className="flex items-center gap-1">
+                        {/* Chevron - only show on hover or when has tools */}
+                        <div className={`w-4 h-4 flex items-center justify-center transition-opacity ${
+                            card.tools.length > 0 ? 'group-hover:opacity-100 opacity-60' : 'opacity-0'
+                        }`}>
+                            {card.tools.length > 0 && (isExpanded ? (
+                                <ChevronDown className="w-3 h-3 text-gray-500" />
+                            ) : (
+                                <ChevronRight className="w-3 h-3 text-gray-500" />
+                            ))}
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
                             {card.logo ? (
                                 <div className="relative w-4 h-4">
                                     <PictureImg
@@ -888,37 +928,33 @@ const ComposioCard = ({
                             ) : (
                                 <ImportIcon className="w-4 h-4 text-blue-600 dark:text-blue-500" />
                             )}
-                            <span>{card.name}</span>
+                            <span className="text-sm">{card.name}</span>
                         </div>
                     </button>
                     
-                    {/* Status and Actions */}
-                    <div className="flex items-center gap-2">
-                        {/* Single Status Indicator */}
-                        <div className="flex items-center gap-1">
-                            <div className={`w-2 h-2 rounded-full ${
-                                isToolkitMocked 
-                                    ? 'bg-purple-500' 
-                                    : isToolkitConnected 
-                                        ? 'bg-emerald-500' 
-                                        : 'bg-orange-500'
-                            }`}></div>
-                            <span className={`text-xs ${
-                                isToolkitMocked 
-                                    ? 'text-purple-600 dark:text-purple-400' 
-                                    : isToolkitConnected 
-                                        ? 'text-emerald-600 dark:text-emerald-400' 
-                                        : 'text-orange-600 dark:text-orange-400'
-                            }`}>
-                                {isToolkitMocked ? 'Mock Mode' : isToolkitConnected ? 'Connected' : 'Disconnected'}
-                            </span>
+                    {/* Compact Status Badge */}
+                    <Tooltip 
+                        content={isToolkitMocked ? 'Mocked' : isToolkitConnected ? 'Connected' : 'Disconnected'}
+                        size="sm"
+                        delay={500}
+                    >
+                        <div className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium text-white ${
+                            isToolkitMocked 
+                                ? 'bg-purple-500' 
+                                : isToolkitConnected 
+                                    ? 'bg-emerald-500' 
+                                    : 'bg-orange-500'
+                        }`}>
+                            {isToolkitMocked ? 'M' : isToolkitConnected ? '●' : '○'}
                         </div>
-                        
-                        {/* Actions Dropdown */}
+                    </Tooltip>
+                    
+                    {/* Actions Dropdown - only show on hover */}
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                         <Dropdown>
                             <DropdownTrigger>
-                                <button className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors">
-                                    <MoreVertical className="h-4 w-4 text-gray-500" />
+                                <button className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors">
+                                    <MoreVertical className="h-3 w-3 text-gray-500" />
                                 </button>
                             </DropdownTrigger>
                             <DropdownMenu
@@ -990,36 +1026,29 @@ const ComposioCard = ({
                     </div>
                 </div>
             {isExpanded && (
-                <div className="ml-6 mt-1 space-y-1">
+                <div className="ml-6 mt-0.5 space-y-0.5 border-l border-gray-200 dark:border-gray-700 pl-3">
                     {card.tools.map((tool, index) => (
-                        <ListItemWithMenu
-                            key={`composio-tool-${index}`}
-                            name={tool.name}
-                            isSelected={selectedEntity?.type === "tool" && selectedEntity.name === tool.name}
-                            onClick={() => onSelectTool(tool.name)}
-                            disabled={tool.isLibrary}
-                            selectedRef={selectedEntity?.type === "tool" && selectedEntity.name === tool.name ? selectedRef : undefined}
-                            icon={
-                                card.logo ? (
-                                    <div className="relative w-4 h-4">
-                                        <PictureImg
-                                            src={card.logo}
-                                            alt={`${card.name} logo`}
-                                            className="w-full h-full object-contain rounded"
+                        <div key={`composio-tool-${index}`} className="group/tool">
+                            <ListItemWithMenu
+                                name={tool.name}
+                                isSelected={selectedEntity?.type === "tool" && selectedEntity.name === tool.name}
+                                onClick={() => onSelectTool(tool.name)}
+                                disabled={tool.isLibrary}
+                                selectedRef={selectedEntity?.type === "tool" && selectedEntity.name === tool.name ? selectedRef : undefined}
+                                icon={
+                                    <div className="w-3 h-3 rounded-full bg-gray-300 dark:bg-gray-600"></div>
+                                }
+                                menuContent={
+                                    <div className="opacity-0 group-hover/tool:opacity-100 transition-opacity">
+                                        <EntityDropdown 
+                                            name={tool.name} 
+                                            onDelete={onDeleteTool}
+                                            isLocked={tool.isComposio}
                                         />
                                     </div>
-                                ) : (
-                                    <ImportIcon className="w-4 h-4 text-blue-600 dark:text-blue-500" />
-                                )
-                            }
-                            menuContent={
-                                <EntityDropdown 
-                                    name={tool.name} 
-                                    onDelete={onDeleteTool}
-                                    isLocked={tool.isComposio}
-                                />
-                            }
-                        />
+                                }
+                            />
+                        </div>
                     ))}
                 </div>
             )}
