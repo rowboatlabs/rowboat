@@ -2,6 +2,7 @@
 import { MCPServer, WithStringId } from "../../../lib/types/types";
 import { Workflow } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
+import { Project } from "../../../lib/types/project_types";
 import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
 import { WorkflowEditor } from "./workflow_editor";
@@ -30,6 +31,7 @@ export function App({
     const [publishedWorkflowId, setPublishedWorkflowId] = useState<string | null>(null);
     const [dataSources, setDataSources] = useState<WithStringId<z.infer<typeof DataSource>>[] | null>(null);
     const [projectTools, setProjectTools] = useState<z.infer<typeof WorkflowTool>[] | null>(null);
+    const [projectConfig, setProjectConfig] = useState<z.infer<typeof Project> | null>(null);
     const [loading, setLoading] = useState(false);
     const [autoSelectIfOnlyOneWorkflow, setAutoSelectIfOnlyOneWorkflow] = useState(true);
     const [mcpServerUrls, setMcpServerUrls] = useState<Array<z.infer<typeof MCPServer>>>([]);
@@ -63,9 +65,19 @@ export function App({
         setDataSources(dataSources);
         setMcpServerUrls(mcpServers);
         setToolWebhookUrl(projectConfig.webhookUrl ?? '');
+        setProjectConfig(projectConfig);
         setProjectTools(projectTools);
         setEligibleModels(eligibleModels);
         setLoading(false);
+    }, [projectId]);
+
+    const handleProjectToolsUpdate = useCallback(async () => {
+        const [freshProjectConfig, freshProjectTools] = await Promise.all([
+            getProjectConfig(projectId),
+            collectProjectTools(projectId)
+        ]);
+        setProjectConfig(freshProjectConfig);
+        setProjectTools(freshProjectTools);
     }, [projectId]);
 
     function handleShowSelector() {
@@ -131,11 +143,12 @@ export function App({
             handleCreateNewVersion={handleCreateNewVersion}
             autoSelectIfOnlyOneWorkflow={autoSelectIfOnlyOneWorkflow}
         />}
-        {!loading && workflow && (dataSources !== null) && (projectTools !== null) && <WorkflowEditor
+        {!loading && workflow && (dataSources !== null) && (projectTools !== null) && (projectConfig !== null) && <WorkflowEditor
             key={workflow._id}
             workflow={workflow}
             dataSources={dataSources}
             projectTools={projectTools}
+            projectConfig={projectConfig}
             publishedWorkflowId={publishedWorkflowId}
             handleShowSelector={handleShowSelector}
             handleCloneVersion={handleCloneVersion}
@@ -144,6 +157,7 @@ export function App({
             toolWebhookUrl={toolWebhookUrl}
             defaultModel={defaultModel}
             eligibleModels={eligibleModels}
+            onProjectToolsUpdated={handleProjectToolsUpdate}
         />}
     </>
 }

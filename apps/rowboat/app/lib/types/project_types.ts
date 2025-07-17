@@ -15,6 +15,15 @@ export const ComposioConnectedAccount = z.object({
     lastUpdatedAt: z.string().datetime(),
 });
 
+export const ComposioMockToolkitState = z.object({
+    toolkitSlug: z.string(),
+    isMocked: z.boolean(),
+    mockInstructions: z.string().optional(),
+    autoSubmitMockedResponse: z.boolean().default(false),
+    createdAt: z.string().datetime(),
+    lastUpdatedAt: z.string().datetime(),
+});
+
 export const Project = z.object({
     _id: z.string().uuid(),
     name: z.string(),
@@ -30,6 +39,7 @@ export const Project = z.object({
     mcpServers: z.array(MCPServer).optional(),
     composioConnectedAccounts: z.record(z.string(), ComposioConnectedAccount).optional(),
     composioSelectedTools: z.array(ZTool).optional(),
+    composioMockToolkitStates: z.record(z.string(), ComposioMockToolkitState).optional(),
 });
 
 export const ProjectMember = z.object({

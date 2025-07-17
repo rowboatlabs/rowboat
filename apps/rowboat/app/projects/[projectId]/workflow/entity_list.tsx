@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { WorkflowPrompt, WorkflowAgent, WorkflowTool } from "../../../lib/types/workflow_types";
+import { Project } from "../../../lib/types/project_types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
-import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2 } from "lucide-react";
+import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, TestTube, Play, MoreVertical } from "lucide-react";
 import { DndContext, DragEndEvent, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -13,6 +14,9 @@ import { clsx } from "clsx";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { ServerLogo } from '../tools/components/MCPServersCommon';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/react";
+import { ComposioToolsModal } from './components/ComposioToolsModal';
+import { ToolkitAuthModal } from '../tools/components/ToolkitAuthModal';
+import { deleteConnectedAccount, toggleMockToolkitState } from '@/app/actions/composio_actions';
 
 // Reduced gap size to match Cursor's UI
 const GAP_SIZE = 4; // 1 unit * 4px (tailwind's default spacing unit)
@@ -51,6 +55,8 @@ interface EntityListProps {
     onDeleteAgent: (name: string) => void;
     onDeleteTool: (name: string) => void;
     onDeletePrompt: (name: string) => void;
+    onProjectToolsUpdated?: () => void;
+    projectConfig?: z.infer<typeof Project>;
 }
 
 interface EmptyStateProps {
@@ -231,13 +237,16 @@ export function EntityList({
     onDeleteAgent,
     onDeleteTool,
     onDeletePrompt,
+    onProjectToolsUpdated,
     projectId,
+    projectConfig,
     onReorderAgents,
 }: EntityListProps & { 
     projectId: string,
     onReorderAgents: (agents: z.infer<typeof WorkflowAgent>[]) => void 
 }) {
     const [showAgentTypeModal, setShowAgentTypeModal] = useState(false);
+    const [showComposioToolsModal, setShowComposioToolsModal] = useState(false);
 
     const handleAddAgentWithType = (agentType: 'internal' | 'user_facing') => {
         onAddAgent({
@@ -476,20 +485,36 @@ export function EntityList({
                                     <Wrench className="w-4 h-4" />
                                     <span>Tools</span>
                                 </div>
-                                <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setExpandedPanels(prev => ({ ...prev, tools: true }));
-                                        onAddTool({});
-                                    }}
-                                    className={`group ${buttonClasses}`}
-                                    showHoverContent={true}
-                                    hoverContent="Add Tool"
-                                >
-                                    <PlusIcon className="w-4 h-4" />
-                                </Button>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedPanels(prev => ({ ...prev, tools: true }));
+                                            setShowComposioToolsModal(true);
+                                        }}
+                                        className={`group ${buttonClasses}`}
+                                        showHoverContent={true}
+                                        hoverContent="Composio Tools"
+                                    >
+                                        <Component className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedPanels(prev => ({ ...prev, tools: true }));
+                                            onAddTool({});
+                                        }}
+                                        className={`group ${buttonClasses}`}
+                                        showHoverContent={true}
+                                        hoverContent="Add Tool"
+                                    >
+                                        <PlusIcon className="w-4 h-4" />
+                                    </Button>
+                                </div>
                             </button>
                         }
                     >
@@ -525,6 +550,9 @@ export function EntityList({
                                                                 onSelectTool={handleToolSelection}
                                                                 onDeleteTool={onDeleteTool}
                                                                 selectedRef={selectedRef}
+                                                                projectConfig={projectConfig}
+                                                                projectId={projectId}
+                                                                onProjectToolsUpdated={onProjectToolsUpdated}
                                                             />
                                                         ))}
 
@@ -662,6 +690,12 @@ export function EntityList({
                 onClose={() => setShowAgentTypeModal(false)}
                 onConfirm={handleAddAgentWithType}
             />
+            <ComposioToolsModal
+                isOpen={showComposioToolsModal}
+                onClose={() => setShowComposioToolsModal(false)}
+                projectId={projectId}
+                onToolsUpdated={onProjectToolsUpdated}
+            />
         </div>
     );
 }
@@ -749,6 +783,9 @@ interface ComposioCardProps {
     onSelectTool: (name: string) => void;
     onDeleteTool: (name: string) => void;
     selectedRef: React.RefObject<HTMLButtonElement | null>;
+    projectConfig?: z.infer<typeof Project>;
+    projectId: string;
+    onProjectToolsUpdated?: () => void;
 }
 
 const ComposioCard = ({
@@ -757,35 +794,187 @@ const ComposioCard = ({
     onSelectTool,
     onDeleteTool,
     selectedRef,
+    projectConfig,
+    projectId,
+    onProjectToolsUpdated,
 }: ComposioCardProps) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [showAuthModal, setShowAuthModal] = useState(false);
+    const [isProcessingAuth, setIsProcessingAuth] = useState(false);
+    const [isProcessingMock, setIsProcessingMock] = useState(false);
+
+    // Check if the toolkit requires authentication
+    const hasToolkitWithAuth = card.tools.some(tool => tool.composioData && !tool.composioData.noAuth);
+    
+    // Check if toolkit is connected
+    const isToolkitConnected = !hasToolkitWithAuth || projectConfig?.composioConnectedAccounts?.[card.slug]?.status === 'ACTIVE';
+    
+    // Check if toolkit is mocked
+    const isToolkitMocked = projectConfig?.composioMockToolkitStates?.[card.slug]?.isMocked || false;
+
+    const handleConnect = () => {
+        setShowAuthModal(true);
+    };
+
+    const handleDisconnect = async () => {
+        const connectedAccountId = projectConfig?.composioConnectedAccounts?.[card.slug]?.id;
+        
+        setIsProcessingAuth(true);
+        try {
+            if (connectedAccountId) {
+                await deleteConnectedAccount(projectId, card.slug, connectedAccountId);
+                onProjectToolsUpdated?.();
+            }
+        } catch (err: any) {
+            console.error('Disconnect failed:', err);
+        } finally {
+            setIsProcessingAuth(false);
+        }
+    };
+
+    const handleAuthComplete = () => {
+        setShowAuthModal(false);
+        onProjectToolsUpdated?.();
+    };
+
+    const handleToggleMock = async () => {
+        setIsProcessingMock(true);
+        try {
+            await toggleMockToolkitState(projectId, card.slug, !isToolkitMocked);
+            onProjectToolsUpdated?.();
+        } catch (err: any) {
+            console.error('Mock toggle failed:', err);
+        } finally {
+            setIsProcessingMock(false);
+        }
+    };
 
     return (
-        <div className="mb-2">
-            <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md text-sm text-left"
-            >
-                {isExpanded ? (
-                    <ChevronDown className="w-4 h-4 text-gray-500" />
-                ) : (
-                    <ChevronRight className="w-4 h-4 text-gray-500" />
-                )}
-                <div className="flex items-center gap-1">
-                    {card.logo ? (
-                        <div className="relative w-4 h-4">
-                            <PictureImg
-                                src={card.logo}
-                                alt={`${card.name} logo`}
-                                className="w-full h-full object-contain rounded"
-                            />
+        <>
+            <div className="mb-2">
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className="flex-1 flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md text-sm text-left"
+                    >
+                        {isExpanded ? (
+                            <ChevronDown className="w-4 h-4 text-gray-500" />
+                        ) : (
+                            <ChevronRight className="w-4 h-4 text-gray-500" />
+                        )}
+                        <div className="flex items-center gap-1">
+                            {card.logo ? (
+                                <div className="relative w-4 h-4">
+                                    <PictureImg
+                                        src={card.logo}
+                                        alt={`${card.name} logo`}
+                                        className="w-full h-full object-contain rounded"
+                                    />
+                                </div>
+                            ) : (
+                                <ImportIcon className="w-4 h-4 text-blue-600 dark:text-blue-500" />
+                            )}
+                            <span>{card.name}</span>
                         </div>
-                    ) : (
-                        <ImportIcon className="w-4 h-4 text-blue-600 dark:text-blue-500" />
-                    )}
-                    <span>{card.name}</span>
+                    </button>
+                    
+                    {/* Status and Actions */}
+                    <div className="flex items-center gap-2">
+                        {/* Single Status Indicator */}
+                        <div className="flex items-center gap-1">
+                            <div className={`w-2 h-2 rounded-full ${
+                                isToolkitMocked 
+                                    ? 'bg-purple-500' 
+                                    : isToolkitConnected 
+                                        ? 'bg-emerald-500' 
+                                        : 'bg-orange-500'
+                            }`}></div>
+                            <span className={`text-xs ${
+                                isToolkitMocked 
+                                    ? 'text-purple-600 dark:text-purple-400' 
+                                    : isToolkitConnected 
+                                        ? 'text-emerald-600 dark:text-emerald-400' 
+                                        : 'text-orange-600 dark:text-orange-400'
+                            }`}>
+                                {isToolkitMocked ? 'Mock Mode' : isToolkitConnected ? 'Connected' : 'Disconnected'}
+                            </span>
+                        </div>
+                        
+                        {/* Actions Dropdown */}
+                        <Dropdown>
+                            <DropdownTrigger>
+                                <button className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors">
+                                    <MoreVertical className="h-4 w-4 text-gray-500" />
+                                </button>
+                            </DropdownTrigger>
+                            <DropdownMenu
+                                onAction={(key) => {
+                                    switch (key) {
+                                        case 'mock':
+                                            handleToggleMock();
+                                            break;
+                                        case 'connect':
+                                            handleConnect();
+                                            break;
+                                        case 'disconnect':
+                                            handleDisconnect();
+                                            break;
+                                    }
+                                }}
+                                disabledKeys={[
+                                    ...(isProcessingMock ? ['mock'] : []),
+                                    ...(isProcessingAuth ? ['connect', 'disconnect'] : []),
+                                    ...(hasToolkitWithAuth && !isToolkitMocked && isToolkitConnected ? [] : ['disconnect']),
+                                    ...(hasToolkitWithAuth && !isToolkitConnected ? [] : ['connect'])
+                                ]}
+                            >
+                                <DropdownItem
+                                    key="mock"
+                                    startContent={
+                                        isProcessingMock ? (
+                                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
+                                        ) : isToolkitMocked ? (
+                                            <Play className="h-3 w-3" />
+                                        ) : (
+                                            <TestTube className="h-3 w-3" />
+                                        )
+                                    }
+                                >
+                                    {isProcessingMock 
+                                        ? (isToolkitMocked ? 'Disabling Mock...' : 'Enabling Mock...') 
+                                        : (isToolkitMocked ? 'Switch to Real Mode' : 'Switch to Mock Mode')
+                                    }
+                                </DropdownItem>
+                                
+                                <DropdownItem
+                                    key="disconnect"
+                                    startContent={
+                                        isProcessingAuth ? (
+                                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
+                                        ) : (
+                                            <UnlinkIcon className="h-3 w-3" />
+                                        )
+                                    }
+                                >
+                                    {isProcessingAuth ? 'Disconnecting...' : 'Disconnect'}
+                                </DropdownItem>
+                                
+                                <DropdownItem
+                                    key="connect"
+                                    startContent={
+                                        isProcessingAuth ? (
+                                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
+                                        ) : (
+                                            <LinkIcon className="h-3 w-3" />
+                                        )
+                                    }
+                                >
+                                    {isProcessingAuth ? 'Connecting...' : 'Connect'}
+                                </DropdownItem>
+                            </DropdownMenu>
+                        </Dropdown>
+                    </div>
                 </div>
-            </button>
             {isExpanded && (
                 <div className="ml-6 mt-1 space-y-1">
                     {card.tools.map((tool, index) => (
@@ -820,7 +1009,20 @@ const ComposioCard = ({
                     ))}
                 </div>
             )}
-        </div>
+            </div>
+            
+            {/* Auth Modal */}
+            {hasToolkitWithAuth && (
+                <ToolkitAuthModal
+                    key={card.slug}
+                    isOpen={showAuthModal}
+                    onClose={() => setShowAuthModal(false)}
+                    toolkitSlug={card.slug}
+                    projectId={projectId}
+                    onComplete={handleAuthComplete}
+                />
+            )}
+        </>
     );
 };
 
