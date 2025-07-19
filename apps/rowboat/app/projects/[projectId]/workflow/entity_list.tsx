@@ -3,7 +3,7 @@ import { WorkflowPrompt, WorkflowAgent, WorkflowTool } from "../../../lib/types/
 import { Project } from "../../../lib/types/project_types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
-import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, TestTube, Play, MoreVertical } from "lucide-react";
+import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, TestTube, Play, MoreVertical, Eye } from "lucide-react";
 import { Tooltip } from "@heroui/react";
 import { DndContext, DragEndEvent, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -542,7 +542,7 @@ export function EntityList({
                                         <PlusIcon className="w-4 h-4" />
                                     </Button>
                                 </div>
-                            </button>
+                            </div>
                         }
                     >
                         {expandedPanels.tools && (

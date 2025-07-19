@@ -3,6 +3,9 @@ import { z } from "zod";
 import {
     listToolkits as libListToolkits,
     listTools as libListTools,
+    searchTools as libSearchTools,
+    getToolsByIds as libGetToolsByIds,
+    getTool as libGetTool,
     getConnectedAccount as libGetConnectedAccount,
     deleteConnectedAccount as libDeleteConnectedAccount,
     listAuthConfigs as libListAuthConfigs,
@@ -46,6 +49,24 @@ export async function listTools(projectId: string, toolkitSlug: string, cursor: 
     await projectAuthCheck(projectId);
     return await libListTools(toolkitSlug, cursor);
 }
+
+// New efficient search functions
+
+export async function searchTools(projectId: string, searchQuery: string, cursor: string | null = null, limit?: number): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTool>>>> {
+    await projectAuthCheck(projectId);
+    return await libSearchTools(searchQuery, cursor, limit);
+}
+
+export async function getToolsByIds(projectId: string, toolSlugs: string[], cursor: string | null = null): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTool>>>> {
+    await projectAuthCheck(projectId);
+    return await libGetToolsByIds(toolSlugs, cursor);
+}
+
+export async function getTool(projectId: string, toolSlug: string): Promise<z.infer<typeof ZTool>> {
+    await projectAuthCheck(projectId);
+    return await libGetTool(toolSlug);
+}
+
 
 export async function createComposioManagedOauth2ConnectedAccount(projectId: string, toolkitSlug: string, callbackUrl: string): Promise<z.infer<typeof ZCreateConnectedAccountResponse>> {
     await projectAuthCheck(projectId);

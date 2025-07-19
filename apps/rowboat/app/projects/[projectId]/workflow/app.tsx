@@ -12,7 +12,6 @@ import { getProjectConfig } from "@/app/actions/project_actions";
 import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
 import { getEligibleModels } from "@/app/actions/billing_actions";
 import { ModelsResponse } from "@/app/lib/types/billing_types";
-import { Project } from "@/app/lib/types/project_types";
 
 export function App({
     projectId,
@@ -63,6 +62,7 @@ export function App({
             getProjectConfig(projectId),
             collectProjectTools(projectId)
         ]);
+        setProject(freshProjectConfig);
         setProjectConfig(freshProjectConfig);
         setProjectTools(freshProjectTools);
     }, [projectId]);
@@ -96,10 +96,10 @@ export function App({
             workflow={workflow}
             dataSources={dataSources}
             projectTools={projectTools}
-            projectConfig={project}
+            projectConfig={projectConfig || project}
             useRag={useRag}
-            mcpServerUrls={project.mcpServers || []}
-            toolWebhookUrl={project.webhookUrl || ''}
+            mcpServerUrls={(projectConfig || project).mcpServers || []}
+            toolWebhookUrl={(projectConfig || project).webhookUrl || ''}
             defaultModel={defaultModel}
             eligibleModels={eligibleModels}
             onChangeMode={handleSetMode}
