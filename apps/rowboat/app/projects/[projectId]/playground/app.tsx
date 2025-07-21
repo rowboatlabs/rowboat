@@ -82,13 +82,10 @@ export function App({
         }
     }, []);
 
-    if (hidden) {
-        return <></>;
-    }
-
     return (
         <>
             <Panel 
+                className={`${hidden ? 'hidden' : 'block'}`}
                 variant="playground"
                 tourTarget="playground"
                 title={
