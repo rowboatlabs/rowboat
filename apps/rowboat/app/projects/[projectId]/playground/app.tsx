@@ -24,6 +24,14 @@ export function App({
     onPanelClick,
     projectTools,
     triggerCopilotChat,
+    chatMessages: externalChatMessages,
+    setChatMessages: externalSetChatMessages,
+    systemMessage: externalSystemMessage,
+    setSystemMessage: externalSetSystemMessage,
+    onNewChat: externalOnNewChat,
+    chatSessionCreatedAt,
+    configPanel,
+    isConfigPanelOpen = false,
 }: {
     hidden?: boolean;
     projectId: string;
@@ -35,11 +43,20 @@ export function App({
     onPanelClick?: () => void;
     projectTools: z.infer<typeof WorkflowTool>[];
     triggerCopilotChat?: (message: string) => void;
+    chatMessages?: z.infer<typeof Message>[];
+    setChatMessages?: (msgs: z.infer<typeof Message>[]) => void;
+    systemMessage?: string;
+    setSystemMessage?: (msg: string) => void;
+    onNewChat?: () => void;
+    chatSessionCreatedAt?: string;
+    configPanel?: React.ReactNode;
+    isConfigPanelOpen?: boolean;
 }) {
-    const [counter, setCounter] = useState<number>(0);
-    const [systemMessage, setSystemMessage] = useState<string>(defaultSystemMessage);
-    const [showDebugMessages, setShowDebugMessages] = useState<boolean>(true);
-    const [chat, setChat] = useState<z.infer<typeof PlaygroundChat>>({
+    // If external state is provided, use it; otherwise, use internal state
+    const [internalCounter, setInternalCounter] = useState<number>(0);
+    const [internalSystemMessage, setInternalSystemMessage] = useState<string>(defaultSystemMessage);
+    const [internalShowDebugMessages, setInternalShowDebugMessages] = useState<boolean>(true);
+    const [internalChat, setInternalChat] = useState<z.infer<typeof PlaygroundChat>>({
         projectId,
         createdAt: new Date().toISOString(),
         messages: [],
@@ -50,21 +67,35 @@ export function App({
     const [showCopySuccess, setShowCopySuccess] = useState(false);
     const getCopyContentRef = useRef<(() => string) | null>(null);
 
+    // Use external or internal state
+    const chatMessages = externalChatMessages !== undefined ? externalChatMessages : internalChat.messages;
+    const setChatMessages = externalSetChatMessages !== undefined ? externalSetChatMessages : (msgs: z.infer<typeof Message>[]) => setInternalChat((c) => ({ ...c, messages: msgs }));
+    const systemMessage = externalSystemMessage !== undefined ? externalSystemMessage : internalSystemMessage;
+    const setSystemMessage = externalSetSystemMessage !== undefined ? externalSetSystemMessage : setInternalSystemMessage;
+    const counter = externalChatMessages !== undefined ? chatMessages.length : internalCounter;
+    const showDebugMessages = internalShowDebugMessages;
+    const setShowDebugMessages = setInternalShowDebugMessages;
+    const createdAt = chatSessionCreatedAt || internalChat.createdAt;
+
     function handleSystemMessageChange(message: string) {
         setSystemMessage(message);
-        setCounter(counter + 1);
+        if (!externalSetChatMessages) setInternalCounter(internalCounter + 1);
     }
 
     function handleNewChatButtonClick() {
-        setCounter(counter + 1);
-        setChat({
-            projectId,
-            createdAt: new Date().toISOString(),
-            messages: [],
-            simulated: false,
-            systemMessage: defaultSystemMessage,
-        });
-        setSystemMessage(defaultSystemMessage);
+        if (externalOnNewChat) {
+            externalOnNewChat();
+        } else {
+            setInternalCounter(internalCounter + 1);
+            setInternalChat({
+                projectId,
+                createdAt: new Date().toISOString(),
+                messages: [],
+                simulated: false,
+                systemMessage: defaultSystemMessage,
+            });
+            setInternalSystemMessage(defaultSystemMessage);
+        }
     }
 
     const handleCopyJson = useCallback(() => {
@@ -81,10 +112,6 @@ export function App({
             }
         }
     }, []);
-
-    if (hidden) {
-        return <></>;
-    }
 
     return (
         <>
@@ -145,24 +172,46 @@ export function App({
                     </div>
                 }
                 onClick={onPanelClick}
+                className="relative"
             >
-                <div className="h-full overflow-auto px-4 py-4">
-                    <Chat
-                        key={`chat-${counter}`}
-                        chat={chat}
-                        projectId={projectId}
-                        workflow={workflow}
-                        messageSubscriber={messageSubscriber}
-                        systemMessage={systemMessage}
-                        onSystemMessageChange={handleSystemMessageChange}
-                        mcpServerUrls={mcpServerUrls}
-                        toolWebhookUrl={toolWebhookUrl}
-                        onCopyClick={(fn) => { getCopyContentRef.current = fn; }}
-                        showDebugMessages={showDebugMessages}
-                        projectTools={projectTools}
-                        triggerCopilotChat={triggerCopilotChat}
-                    />
+                <div className="h-full w-full">
+                    {/* Chat area */}
+                    <div
+                        aria-hidden={isConfigPanelOpen}
+                        style={isConfigPanelOpen ? { pointerEvents: 'none', filter: 'blur(0px)', opacity: 0.5 } : undefined}
+                        className="h-full w-full"
+                    >
+                        <div className="h-full overflow-auto px-4 py-4">
+                            <Chat
+                                key={createdAt}
+                                chat={{
+                                    projectId,
+                                    createdAt,
+                                    messages: chatMessages,
+                                    simulated: false,
+                                    systemMessage: systemMessage,
+                                }}
+                                projectId={projectId}
+                                workflow={workflow}
+                                messageSubscriber={messageSubscriber}
+                                systemMessage={systemMessage}
+                                onSystemMessageChange={handleSystemMessageChange}
+                                mcpServerUrls={mcpServerUrls}
+                                toolWebhookUrl={toolWebhookUrl}
+                                onCopyClick={(fn) => { getCopyContentRef.current = fn; }}
+                                showDebugMessages={showDebugMessages}
+                                projectTools={projectTools}
+                                triggerCopilotChat={triggerCopilotChat}
+                            />
+                        </div>
+                    </div>
                 </div>
+                {/* Overlay config panel - covers the entire panel, including header */}
+                {isConfigPanelOpen && (
+                    <div className="absolute inset-0 z-30 bg-white dark:bg-zinc-900 overflow-auto">
+                        {configPanel}
+                    </div>
+                )}
             </Panel>
         </>
     );

@@ -615,9 +615,20 @@ export function WorkflowEditor({
             isLive,
         }
     });
+    // Move chat state up here
     const [chatMessages, setChatMessages] = useState<z.infer<typeof Message>[]>([]);
+    const [systemMessage, setSystemMessage] = useState<string>("");
+    const [chatSessionCreatedAt, setChatSessionCreatedAt] = useState<string>(() => new Date().toISOString());
     const updateChatMessages = useCallback((messages: z.infer<typeof Message>[]) => {
         setChatMessages(messages);
+    }, []);
+    const handleSystemMessageChange = useCallback((msg: string) => {
+        setSystemMessage(msg);
+    }, []);
+    const handleNewChat = useCallback(() => {
+        setChatMessages([]);
+        setSystemMessage("");
+        setChatSessionCreatedAt(new Date().toISOString());
     }, []);
     const saveQueue = useRef<z.infer<typeof Workflow>[]>([]);
     const saving = useRef(false);
@@ -852,6 +863,90 @@ export function WorkflowEditor({
         setIsInitialState(false);
     }
 
+    function getConfigPanel() {
+        if (state.present.selection?.type === "agent") {
+            return (
+                <AgentConfig
+                    key={`agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}`}
+                    projectId={projectId}
+                    workflow={state.present.workflow}
+                    agent={state.present.workflow.agents.find((agent) => agent.name === state.present.selection!.name)!}
+                    usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
+                    agents={state.present.workflow.agents}
+                    tools={state.present.workflow.tools}
+                    projectTools={projectTools}
+                    prompts={state.present.workflow.prompts}
+                    dataSources={dataSources}
+                    handleUpdate={handleUpdateAgent.bind(null, state.present.selection.name)}
+                    handleClose={handleUnselectAgent}
+                    useRag={useRag}
+                    triggerCopilotChat={triggerCopilotChat}
+                    eligibleModels={eligibleModels === "*" ? "*" : eligibleModels.agentModels}
+                />
+            );
+        }
+        if (state.present.selection?.type === "tool") {
+            const selectedTool = state.present.workflow.tools.find(
+                (tool) => tool.name === state.present.selection!.name
+            ) || projectTools.find(
+                (tool) => tool.name === state.present.selection!.name
+            );
+            return (
+                <ToolConfig
+                    key={state.present.selection.name}
+                    tool={selectedTool!}
+                    usedToolNames={new Set([
+                        ...state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name),
+                        ...projectTools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name)
+                    ])}
+                    handleUpdate={handleUpdateTool.bind(null, state.present.selection.name)}
+                    handleClose={handleUnselectTool}
+                />
+            );
+        }
+        if (state.present.selection?.type === "prompt") {
+            return (
+                <PromptConfig
+                    key={state.present.selection.name}
+                    prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
+                    agents={state.present.workflow.agents}
+                    tools={state.present.workflow.tools}
+                    prompts={state.present.workflow.prompts}
+                    usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
+                    handleUpdate={handleUpdatePrompt.bind(null, state.present.selection.name)}
+                    handleClose={handleUnselectPrompt}
+                />
+            );
+        }
+        if (state.present.selection?.type === "visualise") {
+            return (
+                <Panel 
+                    title={
+                        <div className="flex items-center justify-between w-full">
+                            <div className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                                Agent Graph Visualizer
+                            </div>
+                            <CustomButton
+                                variant="secondary"
+                                size="sm"
+                                onClick={handleHideVisualise}
+                                showHoverContent={true}
+                                hoverContent="Close"
+                            >
+                                <XIcon className="w-4 h-4" />
+                            </CustomButton>
+                        </div>
+                    }
+                >
+                    <div className="h-full overflow-hidden">
+                        <AgentGraphVisualizer workflow={state.present.workflow} />
+                    </div>
+                </Panel>
+            );
+        }
+        return null;
+    }
+
     return (
         <EntitySelectionContext.Provider value={{
             onSelectAgent: handleSelectAgent,
@@ -1013,8 +1108,8 @@ export function WorkflowEditor({
                         className="overflow-auto"
                     >
                         <ChatApp
-                            key={'' + state.present.chatKey}
-                            hidden={state.present.selection !== null}
+                            key={chatSessionCreatedAt}
+                            hidden={false}
                             projectId={projectId}
                             workflow={state.present.workflow}
                             messageSubscriber={updateChatMessages}
@@ -1024,75 +1119,15 @@ export function WorkflowEditor({
                             onPanelClick={handlePlaygroundClick}
                             projectTools={projectTools}
                             triggerCopilotChat={triggerCopilotChat}
+                            chatMessages={chatMessages}
+                            setChatMessages={setChatMessages}
+                            systemMessage={systemMessage}
+                            setSystemMessage={setSystemMessage}
+                            onNewChat={handleNewChat}
+                            chatSessionCreatedAt={chatSessionCreatedAt}
+                            configPanel={getConfigPanel()}
+                            isConfigPanelOpen={!!state.present.selection}
                         />
-                        {state.present.selection?.type === "agent" && <AgentConfig
-                            key={`agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}`}
-                            projectId={projectId}
-                            workflow={state.present.workflow}
-                            agent={state.present.workflow.agents.find((agent) => agent.name === state.present.selection!.name)!}
-                            usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
-                            agents={state.present.workflow.agents}
-                            tools={state.present.workflow.tools}
-                            projectTools={projectTools}
-                            prompts={state.present.workflow.prompts}
-                            dataSources={dataSources}
-                            handleUpdate={handleUpdateAgent.bind(null, state.present.selection.name)}
-                            handleClose={handleUnselectAgent}
-                            useRag={useRag}
-                            triggerCopilotChat={triggerCopilotChat}
-                            eligibleModels={eligibleModels === "*" ? "*" : eligibleModels.agentModels}
-                        />}
-                        {state.present.selection?.type === "tool" && (() => {
-                            const selectedTool = state.present.workflow.tools.find(
-                                (tool) => tool.name === state.present.selection!.name
-                            ) || projectTools.find(
-                                (tool) => tool.name === state.present.selection!.name
-                            );
-                            return <ToolConfig
-                                key={state.present.selection.name}
-                                tool={selectedTool!}
-                                usedToolNames={new Set([
-                                    ...state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name),
-                                    ...projectTools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name)
-                                ])}
-                                handleUpdate={handleUpdateTool.bind(null, state.present.selection.name)}
-                                handleClose={handleUnselectTool}
-                            />;
-                        })()}
-                        {state.present.selection?.type === "prompt" && <PromptConfig
-                            key={state.present.selection.name}
-                            prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
-                            agents={state.present.workflow.agents}
-                            tools={state.present.workflow.tools}
-                            prompts={state.present.workflow.prompts}
-                            usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
-                            handleUpdate={handleUpdatePrompt.bind(null, state.present.selection.name)}
-                            handleClose={handleUnselectPrompt}
-                        />}
-                        {state.present.selection?.type === "visualise" && (
-                            <Panel 
-                                title={
-                                    <div className="flex items-center justify-between w-full">
-                                        <div className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                                            Agent Graph Visualizer
-                                        </div>
-                                        <CustomButton
-                                            variant="secondary"
-                                            size="sm"
-                                            onClick={handleHideVisualise}
-                                            showHoverContent={true}
-                                            hoverContent="Close"
-                                        >
-                                            <XIcon className="w-4 h-4" />
-                                        </CustomButton>
-                                    </div>
-                                }
-                            >
-                                <div className="h-full overflow-hidden">
-                                    <AgentGraphVisualizer workflow={state.present.workflow} />
-                                </div>
-                            </Panel>
-                        )}
                     </ResizablePanel>
                     {showCopilot && (
                         <>
