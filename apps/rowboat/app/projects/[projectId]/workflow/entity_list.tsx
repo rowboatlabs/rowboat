@@ -618,7 +618,7 @@ export function EntityList({
                                                                 <Boxes className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />
                                                                 <span className="flex-1 text-xs text-zinc-900 dark:text-zinc-100 whitespace-normal break-words">{tool.name}</span>
                                                                 {tool.mockTool && (
-                                                                    <span className="ml-2 px-1 py-0 rounded bg-purple-50 text-purple-400 dark:bg-purple-900/40 dark:text-purple-200 text-[11px] font-normal align-middle">Mocked</span>
+                                                                    <span className="ml-2 px-1 py-0 rounded bg-purple-50 text-purple-400 text-[11px] font-normal align-middle">Mocked</span>
                                                                 )}
                                                                 <Tooltip content="Remove tool" size="sm" delay={500}>
                                                                     <button
@@ -920,7 +920,7 @@ const ComposioCard = ({
         statusPill = (
             <Tooltip content="Toolkit needs to be connected" size="sm" delay={500}>
                 <button
-                    className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border border-yellow-300 bg-yellow-50 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200 dark:border-yellow-700 transition-colors cursor-pointer"
+                    className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-yellow-300 bg-yellow-50 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200 dark:border-yellow-700 transition-colors"
                     onClick={handleConnect}
                 >
                     <AlertTriangle className="w-3 h-3 text-yellow-500" />
@@ -1070,7 +1070,7 @@ const ComposioCard = ({
                                     <span className="whitespace-normal break-words text-xs">{tool.name}</span>
                                 </button>
                                 {tool.mockTool && (
-                                    <span className="ml-2 px-1 py-0 rounded bg-purple-50 text-purple-400 dark:bg-purple-900/40 dark:text-purple-200 text-[11px] font-normal align-middle">Mocked</span>
+                                    <span className="ml-2 px-1 py-0 rounded bg-purple-50 text-purple-400 text-[11px] font-normal align-middle">Mocked</span>
                                 )}
                                 <Tooltip content="Remove tool" size="sm" delay={500}>
                                     <button
