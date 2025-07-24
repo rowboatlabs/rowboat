@@ -12,6 +12,7 @@ interface ToolsModalProps {
   projectId: string;
   tools: z.infer<typeof Workflow.shape.tools>;
   onAddTool: (tool: Partial<z.infer<typeof WorkflowTool>>) => void;
+  initialToolkitSlug?: string | null;
 }
 
 export function ToolsModal({
@@ -19,7 +20,8 @@ export function ToolsModal({
   onClose,
   projectId,
   tools,
-  onAddTool
+  onAddTool,
+  initialToolkitSlug
 }: ToolsModalProps) {
   function handleAddTool(tool: Partial<z.infer<typeof WorkflowTool>>) {
     onAddTool(tool);
@@ -45,6 +47,7 @@ export function ToolsModal({
             projectId={projectId}
             tools={tools}
             onAddTool={handleAddTool}
+            initialToolkitSlug={initialToolkitSlug}
           />
         </ModalBody>
       </ModalContent>

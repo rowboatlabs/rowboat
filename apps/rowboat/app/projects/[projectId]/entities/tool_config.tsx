@@ -14,6 +14,7 @@ import { ToolParamCard } from "@/components/common/tool-param-card";
 import { UserIcon, Settings, Settings2 } from "lucide-react";
 import { EditableField } from "@/app/lib/components/editable-field";
 import Link from "next/link";
+import { Tooltip } from "@heroui/react";
 
 // Update textarea styles with improved states
 const textareaStyles = "rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-gray-400 dark:placeholder:text-gray-500";
@@ -446,13 +447,15 @@ export function ToolConfig({
                 {/* Mock Section */}
                 <SectionCard
                     icon={<Settings className="w-5 h-5 text-indigo-500" />}
-                    title="Mock responses"
-                    labelWidth="md:w-64"
+                    title={<span className="whitespace-nowrap">Mock responses</span>}
+                    labelWidth="md:w-32"
                     className="mb-1"
+                    singleColumnFields={true}
                 >
                     <div className="flex flex-col gap-4">
-                        <div className="flex flex-col gap-2">
-                            <div className="flex items-center gap-3">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 mb-1">Mock tool responses</label>
+                            <div className="flex items-center gap-2 mb-1">
                                 <Switch
                                     isSelected={tool.mockTool}
                                     onValueChange={(value) => handleUpdate({
@@ -462,16 +465,13 @@ export function ToolConfig({
                                     size="sm"
                                     color="primary"
                                 />
-                                <label className="text-sm font-semibold text-gray-600 dark:text-gray-300">
-                                    Mock tool responses
-                                </label>
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                    When enabled, this tool will be mocked.
+                                </span>
                             </div>
-                            <span className="text-xs text-gray-500 dark:text-gray-400 ml-12">
-                                When enabled, this tool will be mocked.
-                            </span>
                         </div>
                         {tool.mockTool && (
-                            <div className="flex flex-col gap-2 ml-12">
+                            <div className="flex flex-col gap-1 mt-4">
                                 <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 mb-1">Mock Response Instructions</label>
                                 <span className="text-xs text-gray-500 dark:text-gray-400 mb-1">Describe the response the mock tool should return. This will be shown in the chat when the tool is called.</span>
                                 <EditableField

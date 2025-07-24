@@ -318,7 +318,7 @@ export function ToolkitAuthModal({
     <Modal 
       isOpen={isOpen} 
       onOpenChange={onClose}
-      size="md"
+      size="lg"
       classNames={{
         base: "bg-white dark:bg-gray-900",
         header: "border-b border-gray-200 dark:border-gray-800",
@@ -415,15 +415,15 @@ export function ToolkitAuthModal({
             ) : (
               // Auth options view
               <div className="space-y-4">
-                <div className="text-sm text-gray-600 dark:text-gray-400">
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-4 mt-2">
                   Choose how you&apos;d like to authenticate with this toolkit:
                 </div>
                 
-                <div className="space-y-3">
+                <div className="space-y-6">
                   {/* OAuth2 Composio Managed */}
                   {toolkit.composio_managed_auth_schemes.includes('OAUTH2') && (
                     <HeroButton
-                      className="w-full justify-start gap-3 h-auto py-4 px-4"
+                      className="w-full justify-start gap-3 h-auto py-5 px-5 border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                       variant="bordered"
                       onPress={handleComposioOAuth2}
                       isDisabled={processing}
@@ -432,8 +432,11 @@ export function ToolkitAuthModal({
                       <div className="bg-green-100 dark:bg-green-900/20 p-2 rounded-lg">
                         <Shield className="h-5 w-5 text-green-600 dark:text-green-400" />
                       </div>
-                      <div className="text-left">
-                        <div className="font-medium">Connect using OAuth2</div>
+                      <div className="text-left flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <div className="font-medium text-base">Connect using OAuth2</div>
+                          <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-blue-500 text-white font-semibold">Most popular</span>
+                        </div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">
                           Secure authentication managed by Composio
                         </div>
@@ -446,7 +449,7 @@ export function ToolkitAuthModal({
                   {(toolkit.composio_managed_auth_schemes.includes('OAUTH2') || 
                     toolkit.auth_config_details?.some(config => config.mode === 'OAUTH2')) && (
                     <HeroButton
-                      className="w-full justify-start gap-3 h-auto py-4 px-4"
+                      className="w-full justify-start gap-3 h-auto py-5 px-5"
                       variant="bordered"
                       onPress={() => handleCustomAuth('OAUTH2')}
                       isDisabled={processing}
@@ -456,7 +459,7 @@ export function ToolkitAuthModal({
                         <Shield className="h-5 w-5 text-orange-600 dark:text-orange-400" />
                       </div>
                       <div className="text-left">
-                        <div className="font-medium">Connect using custom OAuth2 app</div>
+                        <div className="font-medium text-base">Connect using custom OAuth2 app</div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">
                           Use your own OAuth2 configuration
                         </div>
@@ -468,7 +471,7 @@ export function ToolkitAuthModal({
                   {toolkit.auth_config_details?.filter(config => config.mode !== 'OAUTH2').map(config => (
                     <HeroButton
                       key={config.mode}
-                      className="w-full justify-start gap-3 h-auto py-4 px-4"
+                      className="w-full justify-start gap-3 h-auto py-5 px-5"
                       variant="bordered"
                       onPress={() => handleCustomAuth(config.mode)}
                       isDisabled={processing}
@@ -478,7 +481,7 @@ export function ToolkitAuthModal({
                         {getAuthMethodIcon(config.mode)}
                       </div>
                       <div className="text-left">
-                        <div className="font-medium">Connect using {getAuthMethodName(config.mode)}</div>
+                        <div className="font-medium text-base">Connect using {getAuthMethodName(config.mode)}</div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">
                           Enter your credentials
                         </div>

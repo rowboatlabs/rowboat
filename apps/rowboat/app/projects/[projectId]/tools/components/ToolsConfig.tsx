@@ -9,17 +9,21 @@ import type { Key } from 'react';
 import { Workflow, WorkflowTool } from '@/app/lib/types/workflow_types';
 import { z } from 'zod';
 
+interface ToolsConfigProps {
+  projectId: string;
+  useComposioTools: boolean;
+  tools: z.infer<typeof Workflow.shape.tools>;
+  onAddTool: (tool: Partial<z.infer<typeof WorkflowTool>>) => void;
+  initialToolkitSlug?: string | null;
+}
+
 export function ToolsConfig({
   projectId,
   useComposioTools,
   tools,
   onAddTool,
-}: {
-  projectId: string;
-  useComposioTools: boolean;
-  tools: z.infer<typeof Workflow.shape.tools>;
-  onAddTool: (tool: Partial<z.infer<typeof WorkflowTool>>) => void;
-}) {
+  initialToolkitSlug
+}: ToolsConfigProps) {
   let defaultActiveTab = 'mcp';
   if (useComposioTools) {
     defaultActiveTab = 'composio';
@@ -46,6 +50,7 @@ export function ToolsConfig({
                 projectId={projectId}
                 tools={tools}
                 onAddTool={onAddTool}
+                initialToolkitSlug={initialToolkitSlug}
               />
             </div>
           </Tab>

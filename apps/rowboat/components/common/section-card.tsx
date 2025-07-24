@@ -9,6 +9,11 @@ interface SectionCardProps {
   className?: string;
   style?: React.CSSProperties;
   chevronSize?: string;
+  /**
+   * If true, all fields are single column. If string[], only those fields are single column (by label).
+   * If not provided, all fields use the default two-column layout.
+   */
+  singleColumnFields?: string[] | boolean;
 }
 
 export function SectionCard({ icon, title, children, labelWidth = 'md:w-32', className = '', style, chevronSize = 'w-4 h-4' }: SectionCardProps) {

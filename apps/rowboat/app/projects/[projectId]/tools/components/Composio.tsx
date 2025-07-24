@@ -18,15 +18,19 @@ type ToolkitType = z.infer<typeof ZToolkit>;
 type ToolkitListResponse = z.infer<ReturnType<typeof ZListResponse<typeof ZToolkit>>>;
 type ProjectType = z.infer<typeof Project>;
 
-export function Composio({
-  projectId,
-  tools,
-  onAddTool
-}: {
+interface ComposioProps {
   projectId: string;
   tools: z.infer<typeof Workflow.shape.tools>;
   onAddTool: (tool: z.infer<typeof WorkflowTool>) => void;
-}) {
+  initialToolkitSlug?: string | null;
+}
+
+export function Composio({
+  projectId,
+  tools,
+  onAddTool,
+  initialToolkitSlug
+}: ComposioProps) {
   const [toolkits, setToolkits] = useState<ToolkitType[]>([]);
   const [projectConfig, setProjectConfig] = useState<ProjectType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -96,6 +100,17 @@ export function Composio({
   useEffect(() => {
     loadAllToolkits();
   }, [loadAllToolkits]);
+
+  // Auto-select toolkit if initialToolkitSlug is provided
+  useEffect(() => {
+    if (initialToolkitSlug && toolkits.length > 0) {
+      const toolkit = toolkits.find(t => t.slug === initialToolkitSlug);
+      if (toolkit) {
+        setSelectedToolkit(toolkit);
+        setIsToolsPanelOpen(true);
+      }
+    }
+  }, [initialToolkitSlug, toolkits]);
 
   const filteredToolkits = toolkits.filter(toolkit => {
     const searchLower = searchQuery.toLowerCase();
