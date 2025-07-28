@@ -2,14 +2,18 @@
 import { WithStringId } from "../../../lib/types/types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { z } from "zod";
-import { XIcon, FileIcon, FilesIcon, FileTextIcon, GlobeIcon, AlertTriangle, CheckCircle, Clock, Circle } from "lucide-react";
+import { XIcon, FileIcon, FilesIcon, FileTextIcon, GlobeIcon, AlertTriangle, CheckCircle, Clock, Circle, ExternalLinkIcon } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
 import clsx from "clsx";
 import { DataSourceIcon } from "@/app/lib/components/datasource-icon";
 import { Tooltip } from "@heroui/react";
-import { getDataSource } from "@/app/actions/datasource_actions";
+import { getDataSource, listDocsInDataSource, deleteDocsFromDataSource, getDownloadUrlForFile } from "@/app/actions/datasource_actions";
+import { DataSourceDoc } from "../../../lib/types/datasource_types";
+import { DownloadIcon, Trash2 } from "lucide-react";
+import { RelativeTime } from "@primer/react";
+import { Pagination, Spinner } from "@heroui/react";
 
 export function DataSourceConfig({
     dataSourceId,
@@ -21,6 +25,13 @@ export function DataSourceConfig({
     const [dataSource, setDataSource] = useState<WithStringId<z.infer<typeof DataSource>> | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    
+    // Files-related state
+    const [files, setFiles] = useState<WithStringId<z.infer<typeof DataSourceDoc>>[]>([]);
+    const [filesLoading, setFilesLoading] = useState(false);
+    const [filesPage, setFilesPage] = useState(1);
+    const [filesTotal, setFilesTotal] = useState(0);
+    const [projectId, setProjectId] = useState<string>('');
 
     useEffect(() => {
         async function loadDataSource() {
@@ -28,10 +39,21 @@ export function DataSourceConfig({
                 setLoading(true);
                 // Extract projectId from the current URL
                 const pathParts = window.location.pathname.split('/');
-                const projectId = pathParts[2]; // /projects/[projectId]/workflow
+                const currentProjectId = pathParts[2]; // /projects/[projectId]/workflow
+                setProjectId(currentProjectId);
                 
-                const ds = await getDataSource(projectId, dataSourceId);
+                const ds = await getDataSource(currentProjectId, dataSourceId);
                 setDataSource(ds);
+                
+                // Load files if it's a files data source
+                if (ds.data.type === 'files_local' || ds.data.type === 'files_s3') {
+                    await loadFiles(currentProjectId, dataSourceId, 1);
+                }
+                
+                // Load URLs if it's a URLs data source
+                if (ds.data.type === 'urls') {
+                    await loadUrls(currentProjectId, dataSourceId, 1);
+                }
             } catch (err) {
                 console.error('Failed to load data source:', err);
                 setError('Failed to load data source details');
@@ -42,6 +64,106 @@ export function DataSourceConfig({
 
         loadDataSource();
     }, [dataSourceId]);
+
+    // Load files function
+    const loadFiles = async (projectId: string, sourceId: string, page: number) => {
+        try {
+            setFilesLoading(true);
+            const { files, total } = await listDocsInDataSource({
+                projectId,
+                sourceId,
+                page,
+                limit: 10,
+            });
+            setFiles(files);
+            setFilesTotal(total);
+            setFilesPage(page);
+        } catch (err) {
+            console.error('Failed to load files:', err);
+        } finally {
+            setFilesLoading(false);
+        }
+    };
+
+    // URLs-related state
+    const [urls, setUrls] = useState<WithStringId<z.infer<typeof DataSourceDoc>>[]>([]);
+    const [urlsLoading, setUrlsLoading] = useState(false);
+    const [urlsPage, setUrlsPage] = useState(1);
+    const [urlsTotal, setUrlsTotal] = useState(0);
+
+    // Load URLs function
+    const loadUrls = async (projectId: string, sourceId: string, page: number) => {
+        try {
+            setUrlsLoading(true);
+            const { files, total } = await listDocsInDataSource({
+                projectId,
+                sourceId,
+                page,
+                limit: 10,
+            });
+            setUrls(files);
+            setUrlsTotal(total);
+            setUrlsPage(page);
+        } catch (err) {
+            console.error('Failed to load URLs:', err);
+        } finally {
+            setUrlsLoading(false);
+        }
+    };
+
+    // Handle file deletion
+    const handleDeleteFile = async (fileId: string) => {
+        if (!window.confirm('Are you sure you want to delete this file?')) return;
+        
+        try {
+            await deleteDocsFromDataSource({
+                projectId,
+                sourceId: dataSourceId,
+                docIds: [fileId],
+            });
+            // Reload files
+            await loadFiles(projectId, dataSourceId, filesPage);
+        } catch (err) {
+            console.error('Failed to delete file:', err);
+        }
+    };
+
+    // Handle file download
+    const handleDownloadFile = async (fileId: string) => {
+        try {
+            const url = await getDownloadUrlForFile(projectId, dataSourceId, fileId);
+            window.open(url, '_blank');
+        } catch (err) {
+            console.error('Failed to download file:', err);
+        }
+    };
+
+    // Handle page change
+    const handlePageChange = (page: number) => {
+        loadFiles(projectId, dataSourceId, page);
+    };
+
+    // Handle URL deletion
+    const handleDeleteUrl = async (urlId: string) => {
+        if (!window.confirm('Are you sure you want to delete this URL?')) return;
+        
+        try {
+            await deleteDocsFromDataSource({
+                projectId,
+                sourceId: dataSourceId,
+                docIds: [urlId],
+            });
+            // Reload URLs
+            await loadUrls(projectId, dataSourceId, urlsPage);
+        } catch (err) {
+            console.error('Failed to delete URL:', err);
+        }
+    };
+
+    // Handle URL page change
+    const handleUrlPageChange = (page: number) => {
+        loadUrls(projectId, dataSourceId, page);
+    };
 
     if (loading) {
         return (
@@ -232,6 +354,158 @@ export function DataSourceConfig({
                             <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-3 rounded-md">
                                 {dataSource.description}
                             </p>
+                        </div>
+                    )}
+
+                    {/* Files Section (for file-type data sources) */}
+                    {(dataSource.data.type === 'files_local' || dataSource.data.type === 'files_s3') && (
+                        <div className="space-y-3">
+                            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                Uploaded Files ({filesTotal})
+                            </h3>
+                            
+                            {filesLoading ? (
+                                <div className="flex items-center justify-center gap-2 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                                    <Spinner size="sm" />
+                                    <p className="text-gray-600 dark:text-gray-300">Loading files...</p>
+                                </div>
+                            ) : files.length === 0 ? (
+                                <div className="text-center p-8 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                                    <FileIcon className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                                    <p className="text-gray-500 dark:text-gray-400">No files uploaded yet</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {files.map((file) => (
+                                        <div
+                                            key={file._id}
+                                            className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border"
+                                        >
+                                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                <FileIcon className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                                                        {file.name}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                        <RelativeTime date={new Date(file.createdAt)} />
+                                                        {file.data.type === 'file_local' && ' • Local'}
+                                                        {file.data.type === 'file_s3' && ' • S3'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                {(file.data.type === 'file_local' || file.data.type === 'file_s3') && (
+                                                    <Tooltip content="Download file">
+                                                        <button
+                                                            onClick={() => handleDownloadFile(file._id)}
+                                                            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                                                        >
+                                                            <DownloadIcon className="w-4 h-4 text-gray-500" />
+                                                        </button>
+                                                    </Tooltip>
+                                                )}
+                                                <Tooltip content="Delete file">
+                                                    <button
+                                                        onClick={() => handleDeleteFile(file._id)}
+                                                        className="p-1 hover:bg-red-100 dark:hover:bg-red-900/20 rounded transition-colors"
+                                                    >
+                                                        <Trash2 className="w-4 h-4 text-red-500" />
+                                                    </button>
+                                                </Tooltip>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    
+                                    {/* Pagination */}
+                                    {filesTotal > 10 && (
+                                        <div className="flex justify-center pt-4">
+                                            <Pagination
+                                                total={Math.ceil(filesTotal / 10)}
+                                                page={filesPage}
+                                                onChange={handlePageChange}
+                                                size="sm"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* URLs Section (for URL-type data sources) */}
+                    {dataSource.data.type === 'urls' && (
+                        <div className="space-y-3">
+                            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                Scraped URLs ({urlsTotal})
+                            </h3>
+                            
+                            {urlsLoading ? (
+                                <div className="flex items-center justify-center gap-2 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                                    <Spinner size="sm" />
+                                    <p className="text-gray-600 dark:text-gray-300">Loading URLs...</p>
+                                </div>
+                            ) : urls.length === 0 ? (
+                                <div className="text-center p-8 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                                    <GlobeIcon className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                                    <p className="text-gray-500 dark:text-gray-400">No URLs added yet</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {urls.map((url) => (
+                                        <div
+                                            key={url._id}
+                                            className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border"
+                                        >
+                                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                <GlobeIcon className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                                                            {url.name}
+                                                        </p>
+                                                        {url.data.type === 'url' && (
+                                                            <a 
+                                                                href={url.data.url} 
+                                                                target="_blank" 
+                                                                rel="noopener noreferrer"
+                                                                className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
+                                                            >
+                                                                <ExternalLinkIcon className="w-3.5 h-3.5" />
+                                                            </a>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                        <RelativeTime date={new Date(url.createdAt)} />
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <Tooltip content="Delete URL">
+                                                    <button
+                                                        onClick={() => handleDeleteUrl(url._id)}
+                                                        className="p-1 hover:bg-red-100 dark:hover:bg-red-900/20 rounded transition-colors"
+                                                    >
+                                                        <Trash2 className="w-4 h-4 text-red-500" />
+                                                    </button>
+                                                </Tooltip>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    
+                                    {/* Pagination */}
+                                    {urlsTotal > 10 && (
+                                        <div className="flex justify-center pt-4">
+                                            <Pagination
+                                                total={Math.ceil(urlsTotal / 10)}
+                                                page={urlsPage}
+                                                onChange={handleUrlPageChange}
+                                                size="sm"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     )}
 
