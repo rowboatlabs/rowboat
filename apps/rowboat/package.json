@@ -38,6 +38,7 @@
     "@primer/react": "^37.27.0",
     "@qdrant/js-client-rest": "^1.13.0",
     "ai": "^4.3.13",
+    "awilix": "^12.0.5",
     "cheerio": "^1.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

@@ -16,7 +16,8 @@ import crypto from 'crypto';
 import path from 'path';
 import { createOpenAI } from '@ai-sdk/openai';
 import { USE_BILLING, USE_GEMINI_FILE_PARSING } from '../lib/feature_flags';
-import { authorize, BillingError, getCustomerIdForProject, logUsage } from '../lib/billing';
+import { authorize, getCustomerIdForProject, logUsage } from '../lib/billing';
+import { BillingError } from '@/src/entities/errors/common';
 
 const FILE_PARSING_PROVIDER_API_KEY = process.env.FILE_PARSING_PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const FILE_PARSING_PROVIDER_BASE_URL = process.env.FILE_PARSING_PROVIDER_BASE_URL || undefined;

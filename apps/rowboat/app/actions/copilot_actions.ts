@@ -8,7 +8,7 @@ import {
 import { DataSource } from "../lib/types/datasource_types";
 import { z } from 'zod';
 import { check_query_limit } from "../lib/rate_limiting";
-import { QueryLimitError } from "../lib/client_utils";
+import { QueryLimitError } from "@/src/entities/errors/common";
 import { projectAuthCheck } from "./project_actions";
 import { redisClient } from "../lib/redis";
 import { authorizeUserAction, logUsage } from "./billing_actions";

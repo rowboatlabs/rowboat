@@ -11,7 +11,8 @@ import { qdrantClient } from '../lib/qdrant';
 import { PrefixLogger } from "../lib/utils";
 import crypto from 'crypto';
 import { USE_BILLING } from '../lib/feature_flags';
-import { authorize, BillingError, getCustomerIdForProject, logUsage } from '../lib/billing';
+import { authorize, getCustomerIdForProject, logUsage } from '../lib/billing';
+import { BillingError } from '@/src/entities/errors/common';
 
 const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
 
