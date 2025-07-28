@@ -71,6 +71,12 @@ export function App({
             setProjectMcpServers(projectConfig.mcpServers);
         }
     }, [projectId]);
+
+    const handleDataSourcesUpdate = useCallback(async () => {
+        // Refresh data sources
+        const updatedDataSources = await listDataSources(projectId);
+        setDataSources(updatedDataSources);
+    }, [projectId]);
     // Add this useEffect for initial load
     useEffect(() => {
         loadData();
@@ -107,6 +113,7 @@ export function App({
             onChangeMode={handleSetMode}
             onRevertToLive={handleRevertToLive}
             onProjectToolsUpdated={handleProjectToolsUpdate}
+            onDataSourcesUpdated={handleDataSourcesUpdate}
         />}
     </>
 }

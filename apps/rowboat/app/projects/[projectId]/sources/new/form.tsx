@@ -15,11 +15,15 @@ export function Form({
     useRagUploads,
     useRagS3Uploads,
     useRagScraping,
+    onSuccess,
+    hidePanel = false,
 }: {
     projectId: string;
     useRagUploads: boolean;
     useRagS3Uploads: boolean;
     useRagScraping: boolean;
+    onSuccess?: (sourceId: string) => void;
+    hidePanel?: boolean;
 }) {
     const [sourceType, setSourceType] = useState("");
     const router = useRouter();
@@ -79,7 +83,11 @@ export function Form({
                 },
             })),
         });
-        router.push(`/projects/${projectId}/sources/${source._id}`);
+        if (onSuccess) {
+            onSuccess(source._id);
+        } else {
+            router.push(`/projects/${projectId}/sources/${source._id}`);
+        }
     }
 
     async function createFilesDataSource(formData: FormData) {
@@ -92,7 +100,11 @@ export function Form({
             },
         });
 
-        router.push(`/projects/${projectId}/sources/${source._id}`);
+        if (onSuccess) {
+            onSuccess(source._id);
+        } else {
+            router.push(`/projects/${projectId}/sources/${source._id}`);
+        }
     }
 
     async function createTextDataSource(formData: FormData) {
@@ -119,21 +131,16 @@ export function Form({
             }],
         });
 
-        router.push(`/projects/${projectId}/sources/${source._id}`);
+        if (onSuccess) {
+            onSuccess(source._id);
+        } else {
+            router.push(`/projects/${projectId}/sources/${source._id}`);
+        }
     }
 
-    return (
-        <Panel
-            title={
-                <div className="flex items-center gap-3">
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        NEW DATA SOURCE
-                    </div>
-                </div>
-            }
-        >
-            <div className="h-full overflow-auto px-4 py-4">
-                <div className="max-w-[768px] mx-auto flex flex-col gap-4">
+    const formContent = (
+        <div className={hidePanel ? "flex flex-col gap-4" : "h-full overflow-auto px-4 py-4"}>
+            <div className={hidePanel ? "flex flex-col gap-4" : "max-w-[768px] mx-auto flex flex-col gap-4"}>
                     <div className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-200 dark:border-blue-800">
                         <div className="flex items-start gap-3">
                             <svg 
@@ -345,8 +352,25 @@ export function Form({
                             }}
                         />
                     </form>}
-                </div>
             </div>
+        </div>
+    );
+
+    if (hidePanel) {
+        return formContent;
+    }
+
+    return (
+        <Panel
+            title={
+                <div className="flex items-center gap-3">
+                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        NEW DATA SOURCE
+                    </div>
+                </div>
+            }
+        >
+            {formContent}
         </Panel>
     );
 }

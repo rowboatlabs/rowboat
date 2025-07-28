@@ -2,9 +2,11 @@ import React from "react";
 import { z } from "zod";
 import { WorkflowPrompt, WorkflowAgent, WorkflowTool, Workflow } from "../../../lib/types/workflow_types";
 import { Project } from "../../../lib/types/project_types";
+import { DataSource } from "../../../lib/types/datasource_types";
+import { WithStringId } from "../../../lib/types/types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
-import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, MoreVertical, Eye, Trash2, AlertTriangle, Circle } from "lucide-react";
+import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, MoreVertical, Eye, Trash2, AlertTriangle, Circle, Database } from "lucide-react";
 import { Tooltip } from "@heroui/react";
 import { DndContext, DragEndEvent, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -17,6 +19,9 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/componen
 import { ServerLogo } from '../tools/components/MCPServersCommon';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/react";
 import { ToolsModal } from './components/ToolsModal';
+import { DataSourcesModal } from './components/DataSourcesModal';
+import { DataSourceIcon } from '../../../lib/components/datasource-icon';
+import { deleteDataSource } from '../../../actions/datasource_actions';
 import { ToolkitAuthModal } from '../tools/components/ToolkitAuthModal';
 import { deleteConnectedAccount } from '@/app/actions/composio_actions';
 import { ProjectWideChangeConfirmationModal } from '@/components/common/project-wide-change-confirmation-modal';
@@ -41,15 +46,17 @@ interface EntityListProps {
     agents: z.infer<typeof WorkflowAgent>[];
     tools: z.infer<typeof WorkflowTool>[];
     prompts: z.infer<typeof WorkflowPrompt>[];
+    dataSources: WithStringId<z.infer<typeof DataSource>>[];
     workflow: z.infer<typeof Workflow>;
     selectedEntity: {
-        type: "agent" | "tool" | "prompt" | "visualise";
+        type: "agent" | "tool" | "prompt" | "datasource" | "visualise";
         name: string;
     } | null;
     startAgentName: string | null;
     onSelectAgent: (name: string) => void;
     onSelectTool: (name: string) => void;
     onSelectPrompt: (name: string) => void;
+    onSelectDataSource?: (id: string) => void;
     onAddAgent: (agent: Partial<z.infer<typeof WorkflowAgent>>) => void;
     onAddTool: (tool: Partial<z.infer<typeof WorkflowTool>>) => void;
     onAddPrompt: (prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
@@ -60,6 +67,7 @@ interface EntityListProps {
     onDeletePrompt: (name: string) => void;
     onShowVisualise: (name: string) => void;
     onProjectToolsUpdated?: () => void;
+    onDataSourcesUpdated?: () => void;
     projectConfig?: z.infer<typeof Project>;
 }
 
@@ -163,7 +171,7 @@ interface ServerCardProps {
     serverName: string;
     tools: z.infer<typeof WorkflowTool>[];
     selectedEntity: {
-        type: "agent" | "tool" | "prompt" | "visualise";
+        type: "agent" | "tool" | "prompt" | "datasource" | "visualise";
         name: string;
     } | null;
     onSelectTool: (name: string) => void;
@@ -251,12 +259,14 @@ export function EntityList({
     agents,
     tools,
     prompts,
+    dataSources,
     workflow,
     selectedEntity,
     startAgentName,
     onSelectAgent,
     onSelectTool,
     onSelectPrompt,
+    onSelectDataSource,
     onAddAgent,
     onAddTool,
     onAddPrompt,
@@ -266,6 +276,7 @@ export function EntityList({
     onDeleteTool,
     onDeletePrompt,
     onProjectToolsUpdated,
+    onDataSourcesUpdated,
     projectId,
     projectConfig,
     onReorderAgents,
@@ -276,6 +287,7 @@ export function EntityList({
 }) {
     const [showAgentTypeModal, setShowAgentTypeModal] = useState(false);
     const [showToolsModal, setShowToolsModal] = useState(false);
+    const [showDataSourcesModal, setShowDataSourcesModal] = useState(false);
     // State to track which toolkit's tools panel to open
     const [selectedToolkitSlug, setSelectedToolkitSlug] = useState<string | null>(null);
 
@@ -308,18 +320,20 @@ export function EntityList({
     const [expandedPanels, setExpandedPanels] = useState({
         agents: true,
         tools: true,
+        data: true,
         prompts: false
     });
 
     // Default sizes when panels are expanded
     const DEFAULT_SIZES = {
-        agents: 40,
-        tools: 40,
+        agents: 30,
+        tools: 30,
+        data: 20,
         prompts: 20
     };
 
     // Calculate panel sizes based on expanded state
-    const getPanelSize = (panelName: 'agents' | 'tools' | 'prompts') => {
+    const getPanelSize = (panelName: 'agents' | 'tools' | 'data' | 'prompts') => {
         if (!expandedPanels[panelName]) {
             return 8; // Collapsed height (53px equivalent)
         }
@@ -332,11 +346,21 @@ export function EntityList({
             if (!expandedPanels.tools) {
                 size += DEFAULT_SIZES.tools;
             }
+            if (!expandedPanels.data) {
+                size += DEFAULT_SIZES.data;
+            }
             if (!expandedPanels.prompts) {
                 size += DEFAULT_SIZES.prompts;
             }
         } else if (panelName === 'tools') {
+            if (!expandedPanels.data && expandedPanels.agents) {
+                size += DEFAULT_SIZES.data;
+            }
             if (!expandedPanels.prompts && expandedPanels.agents) {
+                size += DEFAULT_SIZES.prompts;
+            }
+        } else if (panelName === 'data') {
+            if (!expandedPanels.prompts && (expandedPanels.agents || expandedPanels.tools)) {
                 size += DEFAULT_SIZES.prompts;
             }
         }
@@ -650,6 +674,155 @@ export function EntityList({
 
                 <ResizableHandle withHandle className="w-[3px] bg-transparent" />
 
+                {/* Data Panel */}
+                <ResizablePanel 
+                    defaultSize={getPanelSize('data')}
+                    minSize={expandedPanels.data ? 20 : 8}
+                    maxSize={100}
+                    className="flex flex-col min-h-0 h-full"
+                >
+                    <Panel 
+                        variant="entity-list"
+                        tourTarget="entity-data"
+                        className={clsx(
+                            "flex flex-col min-h-0 h-full overflow-hidden",
+                            !expandedPanels.data && "h-[53px]!"
+                        )}
+                        title={
+                            <div className={`${headerClasses} rounded-md transition-colors h-full`}>
+                                <div className="flex items-center gap-2 h-full">
+                                    <button onClick={() => setExpandedPanels(prev => ({ ...prev, data: !prev.data }))}>
+                                        {expandedPanels.data ? (
+                                            <ChevronDown className="w-4 h-4" />
+                                        ) : (
+                                            <ChevronRight className="w-4 h-4" />
+                                        )}
+                                    </button>
+                                    <Database className="w-4 h-4" />
+                                    <span>Data</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedPanels(prev => ({ ...prev, data: true }));
+                                            setShowDataSourcesModal(true);
+                                        }}
+                                        className={`group ${buttonClasses}`}
+                                        showHoverContent={true}
+                                        hoverContent="Add Data Source"
+                                    >
+                                        <PlusIcon className="w-4 h-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                        }
+                    >
+                        {expandedPanels.data && (
+                            <div className="h-[calc(100%-53px)] overflow-y-auto">
+                                <div className="p-2">
+                                    {dataSources.length > 0 ? (
+                                        <div className="space-y-1">
+                                            {dataSources.map((dataSource, index) => {
+                                                // Determine data source status
+                                                const isActive = dataSource.active && dataSource.status === 'ready';
+                                                const isPending = dataSource.status === 'pending';
+                                                const isError = dataSource.status === 'error';
+                                                
+                                                let statusPill = null;
+                                                if (isPending) {
+                                                    statusPill = (
+                                                        <Tooltip content="Processing" size="sm" delay={500}>
+                                                            <span className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border border-yellow-300 bg-yellow-50 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200 dark:border-yellow-700">
+                                                                <Circle className="w-2 h-2 animate-pulse" fill="currentColor" />
+                                                                <span>Processing</span>
+                                                            </span>
+                                                        </Tooltip>
+                                                    );
+                                                } else if (isError) {
+                                                    statusPill = (
+                                                        <Tooltip content={dataSource.error || "Error"} size="sm" delay={500}>
+                                                            <span className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border border-red-300 bg-red-50 text-red-700 dark:bg-red-900 dark:text-red-200 dark:border-red-700">
+                                                                <Circle className="w-2 h-2" fill="currentColor" />
+                                                                <span>Error</span>
+                                                            </span>
+                                                        </Tooltip>
+                                                    );
+                                                } else if (isActive) {
+                                                    statusPill = (
+                                                        <Tooltip content="Active" size="sm" delay={500}>
+                                                            <span className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border border-green-300 bg-green-50 text-green-700 dark:bg-green-900 dark:text-green-200 dark:border-green-700">
+                                                                <Circle className="w-2 h-2" fill="currentColor" />
+                                                                <span>Active</span>
+                                                            </span>
+                                                        </Tooltip>
+                                                    );
+                                                } else {
+                                                    statusPill = (
+                                                        <Tooltip content="Inactive" size="sm" delay={500}>
+                                                            <span className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border border-gray-300 bg-gray-50 text-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:border-gray-700">
+                                                                <Circle className="w-2 h-2" fill="currentColor" />
+                                                                <span>Inactive</span>
+                                                            </span>
+                                                        </Tooltip>
+                                                    );
+                                                }
+
+                                                return (
+                                                    <div key={`datasource-${index}`} className="group/datasource">
+                                                        <div className={clsx(
+                                                            "flex items-center gap-2 px-3 py-2 rounded-md min-h-[24px] cursor-pointer",
+                                                            {
+                                                                "bg-indigo-50 dark:bg-indigo-950/30": selectedEntity?.type === "datasource" && selectedEntity.name === dataSource._id,
+                                                                "hover:bg-zinc-50 dark:hover:bg-zinc-800": !(selectedEntity?.type === "datasource" && selectedEntity.name === dataSource._id)
+                                                            }
+                                                        )}>
+                                                            <button
+                                                                ref={selectedEntity?.type === "datasource" && selectedEntity.name === dataSource._id ? selectedRef : undefined}
+                                                                className="flex-1 flex items-center gap-2 text-sm text-left"
+                                                                onClick={() => onSelectDataSource?.(dataSource._id)}
+                                                            >
+                                                                <div className="shrink-0 flex items-center justify-center w-3 h-3">
+                                                                    <DataSourceIcon type={
+                                                                        dataSource.data.type === 'files_local' || dataSource.data.type === 'files_s3' 
+                                                                            ? 'files' 
+                                                                            : dataSource.data.type
+                                                                    } />
+                                                                </div>
+                                                                <span className="text-xs flex-1">{dataSource.name}</span>
+                                                            </button>
+                                                            <div className="flex items-center gap-1">
+                                                                {statusPill}
+                                                                <div className="opacity-0 group-hover/datasource:opacity-100 transition-opacity">
+                                                                    <EntityDropdown 
+                                                                        name={dataSource.name} 
+                                                                        onDelete={async () => {
+                                                                            if (window.confirm(`Are you sure you want to delete the data source "${dataSource.name}"?`)) {
+                                                                                await deleteDataSource(projectId, dataSource._id);
+                                                                                onDataSourcesUpdated?.();
+                                                                            }
+                                                                        }} 
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <EmptyState entity="data sources" hasFilteredItems={false} />
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </Panel>
+                </ResizablePanel>
+
+                <ResizableHandle withHandle className="w-[3px] bg-transparent" />
+
                 {/* Prompts Panel */}
                 <ResizablePanel 
                     defaultSize={getPanelSize('prompts')}
@@ -742,6 +915,12 @@ export function EntityList({
                 onAddTool={onAddTool}
                 initialToolkitSlug={selectedToolkitSlug}
             />
+            <DataSourcesModal
+                isOpen={showDataSourcesModal}
+                onClose={() => setShowDataSourcesModal(false)}
+                projectId={projectId}
+                onDataSourceAdded={onDataSourcesUpdated}
+            />
         </div>
     );
 }
@@ -823,7 +1002,7 @@ function EntityDropdown({
 interface ComposioCardProps {
     card: ComposioToolkit;
     selectedEntity: {
-        type: "agent" | "tool" | "prompt" | "visualise";
+        type: "agent" | "tool" | "prompt" | "datasource" | "visualise";
         name: string;
     } | null;
     onSelectTool: (name: string) => void;
