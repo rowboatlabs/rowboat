@@ -69,6 +69,9 @@ interface EntityListProps {
     onProjectToolsUpdated?: () => void;
     onDataSourcesUpdated?: () => void;
     projectConfig?: z.infer<typeof Project>;
+    useRagUploads: boolean;
+    useRagS3Uploads: boolean;
+    useRagScraping: boolean;
 }
 
 interface EmptyStateProps {
@@ -281,6 +284,9 @@ export function EntityList({
     projectConfig,
     onReorderAgents,
     onShowVisualise,
+    useRagUploads,
+    useRagS3Uploads,
+    useRagScraping,
 }: EntityListProps & { 
     projectId: string,
     onReorderAgents: (agents: z.infer<typeof WorkflowAgent>[]) => void 
@@ -920,6 +926,9 @@ export function EntityList({
                 onClose={() => setShowDataSourcesModal(false)}
                 projectId={projectId}
                 onDataSourceAdded={onDataSourcesUpdated}
+                useRagUploads={useRagUploads}
+                useRagS3Uploads={useRagS3Uploads}
+                useRagScraping={useRagScraping}
             />
         </div>
     );

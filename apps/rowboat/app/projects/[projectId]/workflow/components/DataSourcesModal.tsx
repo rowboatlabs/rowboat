@@ -3,20 +3,25 @@
 import React from 'react';
 import { Modal, ModalContent, ModalHeader, ModalBody } from '@heroui/react';
 import { Form } from '../../sources/new/form';
-import { USE_RAG_UPLOADS, USE_RAG_S3_UPLOADS, USE_RAG_SCRAPING } from '@/app/lib/feature_flags';
 
 interface DataSourcesModalProps {
   isOpen: boolean;
   onClose: () => void;
   projectId: string;
   onDataSourceAdded?: () => void;
+  useRagUploads: boolean;
+  useRagS3Uploads: boolean;
+  useRagScraping: boolean;
 }
 
 export function DataSourcesModal({
   isOpen,
   onClose,
   projectId,
-  onDataSourceAdded
+  onDataSourceAdded,
+  useRagUploads,
+  useRagS3Uploads,
+  useRagScraping
 }: DataSourcesModalProps) {
   const handleDataSourceCreated = (sourceId: string) => {
     onDataSourceAdded?.();
@@ -39,9 +44,9 @@ export function DataSourcesModal({
         <ModalBody>
           <Form
             projectId={projectId}
-            useRagUploads={USE_RAG_UPLOADS}
-            useRagS3Uploads={USE_RAG_S3_UPLOADS}
-            useRagScraping={USE_RAG_SCRAPING}
+            useRagUploads={useRagUploads}
+            useRagS3Uploads={useRagS3Uploads}
+            useRagScraping={useRagScraping}
             onSuccess={handleDataSourceCreated}
             hidePanel={true}
           />

@@ -1,6 +1,6 @@
 import { Metadata } from "next";
 import { App } from "./app";
-import { USE_RAG } from "@/app/lib/feature_flags";
+import { USE_RAG, USE_RAG_UPLOADS, USE_RAG_S3_UPLOADS, USE_RAG_SCRAPING } from "@/app/lib/feature_flags";
 import { projectsCollection } from "@/app/lib/mongodb";
 import { notFound } from "next/navigation";
 import { requireActiveBillingSubscription } from '@/app/lib/billing';
@@ -38,6 +38,9 @@ export default async function Page(
         <App
             projectId={params.projectId}
             useRag={USE_RAG}
+            useRagUploads={USE_RAG_UPLOADS}
+            useRagS3Uploads={USE_RAG_S3_UPLOADS}
+            useRagScraping={USE_RAG_SCRAPING}
             defaultModel={DEFAULT_MODEL}
         />
     );

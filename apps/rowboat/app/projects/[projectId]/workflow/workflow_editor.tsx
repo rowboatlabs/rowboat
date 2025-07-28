@@ -588,6 +588,9 @@ export function WorkflowEditor({
     dataSources,
     workflow,
     useRag,
+    useRagUploads,
+    useRagS3Uploads,
+    useRagScraping,
     mcpServerUrls,
     defaultModel,
     projectConfig,
@@ -602,6 +605,9 @@ export function WorkflowEditor({
     dataSources: WithStringId<z.infer<typeof DataSource>>[];
     workflow: z.infer<typeof Workflow>;
     useRag: boolean;
+    useRagUploads: boolean;
+    useRagS3Uploads: boolean;
+    useRagScraping: boolean;
     mcpServerUrls: Array<z.infer<typeof MCPServer>>;
     defaultModel: string;
     projectConfig: z.infer<typeof Project>;
@@ -1027,6 +1033,9 @@ export function WorkflowEditor({
                                 onDataSourcesUpdated={onDataSourcesUpdated}
                                 projectConfig={projectConfig}
                                 onReorderAgents={handleReorderAgents}
+                                useRagUploads={useRagUploads}
+                                useRagS3Uploads={useRagS3Uploads}
+                                useRagScraping={useRagScraping}
                             />
                         </div>
                     </ResizablePanel>

@@ -16,10 +16,16 @@ import { ModelsResponse } from "@/app/lib/types/billing_types";
 export function App({
     projectId,
     useRag,
+    useRagUploads,
+    useRagS3Uploads,
+    useRagScraping,
     defaultModel,
 }: {
     projectId: string;
     useRag: boolean;
+    useRagUploads: boolean;
+    useRagS3Uploads: boolean;
+    useRagScraping: boolean;
     defaultModel: string;
 }) {
     const [mode, setMode] = useState<'draft' | 'live'>('draft');
@@ -107,6 +113,9 @@ export function App({
             dataSources={dataSources}
             projectConfig={projectConfig || project}
             useRag={useRag}
+            useRagUploads={useRagUploads}
+            useRagS3Uploads={useRagS3Uploads}
+            useRagScraping={useRagScraping}
             mcpServerUrls={projectMcpServers}
             defaultModel={defaultModel}
             eligibleModels={eligibleModels}
