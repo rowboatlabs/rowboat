@@ -2,20 +2,17 @@
 import { WithStringId } from "../../../lib/types/types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { z } from "zod";
-import { XIcon, FileIcon, FilesIcon, FileTextIcon, GlobeIcon, AlertTriangle, CheckCircle, Clock, Circle, ExternalLinkIcon, Type, PlusIcon, Edit3Icon } from "lucide-react";
-import { useState, useEffect } from "react";
+import { XIcon, FileIcon, GlobeIcon, AlertTriangle, CheckCircle, Circle, ExternalLinkIcon, Type, PlusIcon, Edit3Icon, DownloadIcon, Trash2 } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
-import clsx from "clsx";
 import { DataSourceIcon } from "@/app/lib/components/datasource-icon";
 import { Tooltip } from "@heroui/react";
 import { getDataSource, listDocsInDataSource, deleteDocsFromDataSource, getDownloadUrlForFile, addDocsToDataSource, getUploadUrlsForFilesDataSource, setDataSourcePending } from "@/app/actions/datasource_actions";
 import { DataSourceDoc } from "../../../lib/types/datasource_types";
-import { DownloadIcon, Trash2 } from "lucide-react";
 import { RelativeTime } from "@primer/react";
 import { Pagination, Spinner, Button as HeroButton, Textarea as HeroTextarea } from "@heroui/react";
 import { useDropzone } from "react-dropzone";
-import { useCallback } from "react";
 
 export function DataSourceConfig({
     dataSourceId,
@@ -121,10 +118,10 @@ export function DataSourceConfig({
                 clearTimeout(timeout);
             }
         };
-    }, [dataSource, projectId, dataSourceId]);
+    }, [dataSource, projectId, dataSourceId, onDataSourceUpdate]);
 
     // Helper function to update data source and notify parent
-    const updateDataSourceAndNotify = async () => {
+    const updateDataSourceAndNotify = useCallback(async () => {
         try {
             const updatedSource = await getDataSource(projectId, dataSourceId);
             setDataSource(updatedSource);
@@ -132,7 +129,7 @@ export function DataSourceConfig({
         } catch (err) {
             console.error('Failed to reload data source:', err);
         }
-    };
+    }, [projectId, dataSourceId, onDataSourceUpdate]);
 
     // Load files function
     const loadFiles = async (projectId: string, sourceId: string, page: number) => {
@@ -453,7 +450,7 @@ export function DataSourceConfig({
         } finally {
             setUploadingFiles(false);
         }
-    }, [projectId, dataSourceId, dataSource, filesPage]);
+    }, [projectId, dataSourceId, dataSource, filesPage, updateDataSourceAndNotify]);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop: onFileDrop,
