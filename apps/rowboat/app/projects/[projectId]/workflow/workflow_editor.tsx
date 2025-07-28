@@ -1100,6 +1100,7 @@ export function WorkflowEditor({
                             key={state.present.selection.name}
                             dataSourceId={state.present.selection.name}
                             handleClose={() => dispatch({ type: "unselect_datasource" })}
+                            onDataSourceUpdate={onDataSourcesUpdated}
                         />}
                         {state.present.selection?.type === "visualise" && (
                             <Panel 

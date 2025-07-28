@@ -19,10 +19,12 @@ import { useCallback } from "react";
 
 export function DataSourceConfig({
     dataSourceId,
-    handleClose
+    handleClose,
+    onDataSourceUpdate
 }: {
     dataSourceId: string,
-    handleClose: () => void
+    handleClose: () => void,
+    onDataSourceUpdate?: () => void
 }) {
     const [dataSource, setDataSource] = useState<WithStringId<z.infer<typeof DataSource>> | null>(null);
     const [loading, setLoading] = useState(true);
@@ -94,6 +96,7 @@ export function DataSourceConfig({
                 const updatedSource = await getDataSource(projectId, dataSourceId);
                 if (!ignore) {
                     setDataSource(updatedSource);
+                    onDataSourceUpdate?.(); // Notify parent of status change
                     
                     // Continue polling if still pending
                     if (updatedSource.status === 'pending') {
@@ -119,6 +122,17 @@ export function DataSourceConfig({
             }
         };
     }, [dataSource, projectId, dataSourceId]);
+
+    // Helper function to update data source and notify parent
+    const updateDataSourceAndNotify = async () => {
+        try {
+            const updatedSource = await getDataSource(projectId, dataSourceId);
+            setDataSource(updatedSource);
+            onDataSourceUpdate?.();
+        } catch (err) {
+            console.error('Failed to reload data source:', err);
+        }
+    };
 
     // Load files function
     const loadFiles = async (projectId: string, sourceId: string, page: number) => {
@@ -220,8 +234,7 @@ export function DataSourceConfig({
             await setDataSourcePending({ projectId, sourceId: dataSourceId });
             
             // Reload data source to get updated status
-            const updatedSource = await getDataSource(projectId, dataSourceId);
-            setDataSource(updatedSource);
+            await updateDataSourceAndNotify();
         } catch (err) {
             console.error('Failed to delete file:', err);
         }
@@ -259,8 +272,7 @@ export function DataSourceConfig({
             await setDataSourcePending({ projectId, sourceId: dataSourceId });
             
             // Reload data source to get updated status
-            const updatedSource = await getDataSource(projectId, dataSourceId);
-            setDataSource(updatedSource);
+            await updateDataSourceAndNotify();
         } catch (err) {
             console.error('Failed to delete URL:', err);
         }
@@ -321,8 +333,7 @@ export function DataSourceConfig({
             await setDataSourcePending({ projectId, sourceId: dataSourceId });
             
             // Reload data source to get updated status
-            const updatedSource = await getDataSource(projectId, dataSourceId);
-            setDataSource(updatedSource);
+            await updateDataSourceAndNotify();
         } catch (err) {
             console.error('Failed to save text:', err);
         } finally {
@@ -359,8 +370,7 @@ export function DataSourceConfig({
             await setDataSourcePending({ projectId, sourceId: dataSourceId });
             
             // Reload data source to get updated status
-            const updatedSource = await getDataSource(projectId, dataSourceId);
-            setDataSource(updatedSource);
+            await updateDataSourceAndNotify();
         } catch (err) {
             console.error('Failed to add URLs:', err);
         } finally {
@@ -437,8 +447,7 @@ export function DataSourceConfig({
             await setDataSourcePending({ projectId, sourceId: dataSourceId });
             
             // Reload data source to get updated status
-            const updatedSource = await getDataSource(projectId, dataSourceId);
-            setDataSource(updatedSource);
+            await updateDataSourceAndNotify();
         } catch (error) {
             console.error('Upload failed:', error);
         } finally {
