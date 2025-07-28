@@ -12,7 +12,7 @@ import clsx from "clsx";
 import { SectionCard } from "@/components/common/section-card";
 import { ToolParamCard } from "@/components/common/tool-param-card";
 import { UserIcon, Settings, Settings2 } from "lucide-react";
-import { EditableField } from "@/app/lib/components/editable-field";
+import { InputField } from "@/app/lib/components/input-field";
 import Link from "next/link";
 import { Tooltip } from "@heroui/react";
 
@@ -77,18 +77,13 @@ export function ParameterConfig({
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
                         Name
                     </label>
-                    <Textarea
+                    <InputField
+                        type="text"
                         value={localName}
-                        onChange={(e) => setLocalName(e.target.value)}
-                        onBlur={() => {
-                            if (localName && localName !== param.name) {
-                                handleRename(param.name, localName);
-                            }
-                        }}
+                        onChange={(value: string) => setLocalName(value)}
                         placeholder="Enter parameter name..."
-                        disabled={readOnly}
-                        className={textareaStyles}
-                        autoResize
+                        locked={readOnly}
+                        className="w-full"
                     />
                 </div>
 
@@ -182,6 +177,18 @@ export function ToolConfig({
     const isReadOnly = tool.isMcp || tool.isComposio;
     const isWebhookTool = !tool.isMcp && !tool.isComposio;
     const [nameError, setNameError] = useState<string | null>(null);
+    const [showSavedBanner, setShowSavedBanner] = useState(false);
+    const [localToolName, setLocalToolName] = useState(tool.name);
+
+    // Function to show saved banner
+    const showSavedMessage = () => {
+        setShowSavedBanner(true);
+        setTimeout(() => setShowSavedBanner(false), 2000);
+    };
+
+    useEffect(() => {
+        setLocalToolName(tool.name);
+    }, [tool.name]);
 
     // Log when parameters are being rendered
     useEffect(() => {
@@ -215,6 +222,7 @@ export function ToolConfig({
             ...tool,
             parameters: { ...tool.parameters!, properties: newProperties, required: newRequired }
         });
+        showSavedMessage();
     }
 
     function handleParamUpdate(name: string, data: {
@@ -243,6 +251,7 @@ export function ToolConfig({
                 required: newRequired,
             }
         });
+        showSavedMessage();
     }
 
     function handleParamDelete(paramName: string) {
@@ -260,16 +269,20 @@ export function ToolConfig({
                 required: newRequired,
             }
         });
+        showSavedMessage();
     }
 
     function validateToolName(value: string) {
         if (value.length === 0) {
-            return "Name cannot be empty";
+            setNameError("Name cannot be empty");
+            return false;
         }
         if (value !== tool.name && usedToolNames.has(value)) {
-            return "This name is already taken";
+            setNameError("This name is already taken");
+            return false;
         }
-        return null;
+        setNameError(null);
+        return true;
     }
 
     // Log parameter rendering in the actual parameter section
@@ -343,6 +356,15 @@ export function ToolConfig({
             }
         >
             <div className="flex flex-col gap-4 pb-4 pt-4 p-4">
+                {/* Saved Banner */}
+                {showSavedBanner && (
+                    <div className="absolute top-4 right-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span className="text-sm font-medium">Changes saved ✓</span>
+                    </div>
+                )}
                 {/* Tool Type Section */}
                 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
                     <div className="flex items-start gap-3">
@@ -405,25 +427,22 @@ export function ToolConfig({
                         <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                             <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Name</label>
                             <div className="flex-1">
-                                <EditableField
-                                    value={tool.name}
+                                <InputField
+                                    type="text"
+                                    value={localToolName}
                                     locked={isReadOnly}
-                                    onChange={(value) => {
-                                        setNameError(validateToolName(value));
-                                        if (!validateToolName(value)) {
+                                    onChange={(value: string) => {
+                                        setLocalToolName(value);
+                                        if (validateToolName(value)) {
                                             handleUpdate({
                                                 ...tool,
                                                 name: value
                                             });
                                         }
+                                        showSavedMessage();
                                     }}
-                                    validate={(value) => {
-                                        const error = validateToolName(value);
-                                        setNameError(error);
-                                        return { valid: !error, errorMessage: error || undefined };
-                                    }}
-                                    showSaveButton={true}
-                                    showDiscardButton={true}
+
+
                                     error={nameError}
                                     className="w-full"
                                 />
@@ -432,10 +451,14 @@ export function ToolConfig({
                         <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                             <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Description</label>
                             <div className="flex-1">
-                                <EditableField
+                                <InputField
+                                    type="text"
                                     locked={isReadOnly}
                                     value={tool.description || ""}
-                                    onChange={(value) => handleUpdate({ ...tool, description: value })}
+                                    onChange={(value: string) => {
+                                        handleUpdate({ ...tool, description: value });
+                                        showSavedMessage();
+                                    }}
                                     multiline={true}
                                     placeholder="Describe what this tool does..."
                                     className="w-full"
@@ -458,10 +481,13 @@ export function ToolConfig({
                             <div className="flex items-center gap-2 mb-1">
                                 <Switch
                                     isSelected={tool.mockTool}
-                                    onValueChange={(value) => handleUpdate({
-                                        ...tool,
-                                        mockTool: value,
-                                    })}
+                                    onValueChange={(value) => {
+                                        handleUpdate({
+                                            ...tool,
+                                            mockTool: value,
+                                        });
+                                        showSavedMessage();
+                                    }}
                                     size="sm"
                                     color="primary"
                                 />
@@ -474,12 +500,16 @@ export function ToolConfig({
                             <div className="flex flex-col gap-1 mt-4">
                                 <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 mb-1">Mock Response Instructions</label>
                                 <span className="text-xs text-gray-500 dark:text-gray-400 mb-1">Describe the response the mock tool should return. This will be shown in the chat when the tool is called.</span>
-                                <EditableField
+                                <InputField
+                                    type="text"
                                     value={tool.mockInstructions || ''}
-                                    onChange={(value) => handleUpdate({
-                                        ...tool,
-                                        mockInstructions: value
-                                    })}
+                                    onChange={(value: string) => {
+                                        handleUpdate({
+                                            ...tool,
+                                            mockInstructions: value
+                                        });
+                                        showSavedMessage();
+                                    }}
                                     multiline={true}
                                     placeholder="Mock response instructions..."
                                     className="w-full text-xs p-2 bg-white dark:bg-gray-900"
@@ -533,6 +563,7 @@ export function ToolConfig({
                                             required: [...(tool.parameters?.required || []), newParamName]
                                         }
                                     });
+                                    showSavedMessage();
                                 }}
                                 className="hover:bg-indigo-100 dark:hover:bg-indigo-900 hover:shadow-indigo-500/20 dark:hover:shadow-indigo-400/20 hover:shadow-lg transition-all mt-2"
                             >

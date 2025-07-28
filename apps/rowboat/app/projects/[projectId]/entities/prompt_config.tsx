@@ -32,6 +32,13 @@ export function PromptConfig({
     handleClose: () => void,
 }) {
     const [nameError, setNameError] = useState<string | null>(null);
+    const [showSavedBanner, setShowSavedBanner] = useState(false);
+
+    // Function to show saved banner
+    const showSavedMessage = () => {
+        setShowSavedBanner(true);
+        setTimeout(() => setShowSavedBanner(false), 2000);
+    };
 
     const atMentions = [
         ...agents.map(a => ({ id: `agent:${a.name}`, value: `agent:${a.name}` })),
@@ -70,6 +77,15 @@ export function PromptConfig({
             }
         >
             <div className="flex flex-col gap-6 p-4">
+                {/* Saved Banner */}
+                {showSavedBanner && (
+                    <div className="absolute top-4 right-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span className="text-sm font-medium">Changes saved ✓</span>
+                    </div>
+                )}
                 {prompt.type === "base_prompt" && (
                     <div className="space-y-4">
                         <div className="space-y-2">
@@ -96,6 +112,7 @@ export function PromptConfig({
                                             ...prompt,
                                             name: value
                                         });
+                                        showSavedMessage();
                                     }}
                                     placeholder="Enter prompt name..."
                                     className="w-full text-sm bg-transparent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors px-4 py-3"
@@ -120,6 +137,7 @@ export function PromptConfig({
                                 ...prompt,
                                 prompt: e.target.value
                             });
+                            showSavedMessage();
                         }}
                         placeholder="Edit prompt here..."
                         className={`${textareaStyles} min-h-[200px]`}

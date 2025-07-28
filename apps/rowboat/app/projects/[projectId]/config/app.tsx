@@ -5,7 +5,7 @@ import { Spinner, Textarea, Button, Dropdown, DropdownMenu, DropdownItem, Dropdo
 import { ReactNode, useEffect, useState } from "react";
 import { getProjectConfig, updateProjectName, updateWebhookUrl, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret } from "../../../actions/project_actions";
 import { CopyButton } from "../../../../components/common/copy-button";
-import { EditableField } from "../../../lib/components/editable-field";
+import { InputField } from "../../../lib/components/input-field";
 import { EyeIcon, EyeOffIcon, Settings, Plus, MoreVertical } from "lucide-react";
 import { WithStringId } from "../../../lib/types/types";
 import { ApiKey } from "../../../lib/types/project_types";
@@ -84,7 +84,7 @@ export function BasicSettingsSection({
     return <Section title="Basic settings">
         <FormSection label="Project name">
             {loading && <Spinner size="sm" />}
-            {!loading && <EditableField
+            {!loading && <InputField type="text"
                 value={projectName || ''}
                 onChange={updateName}
                 className="w-full"
@@ -374,7 +374,7 @@ export function WebhookUrlSection({
         <Divider />
         <FormSection label="Webhook URL">
             {loading && <Spinner size="sm" />}
-            {!loading && <EditableField
+            {!loading && <InputField type="text"
                 value={webhookUrl || ''}
                 onChange={update}
                 validate={validate}

@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectItem } from "@heroui/react";
 import { Checkbox } from "@heroui/react";
 import { Button } from "@/components/ui/button";
-import { EditableField } from "@/app/lib/components/editable-field";
+import { InputField } from "@/app/lib/components/input-field";
 
 export function ToolParamCard({
   param,
@@ -71,7 +71,7 @@ export function ToolParamCard({
               <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                 <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Name</label>
                 <div className="flex-1">
-                  <EditableField
+                  <InputField type="text"
                     value={localName}
                     onChange={(value: string) => {
                       setLocalName(value);
@@ -80,8 +80,7 @@ export function ToolParamCard({
                       }
                     }}
                     multiline={false}
-                    showSaveButton={true}
-                    showDiscardButton={true}
+
                     className="w-full"
                     locked={readOnly}
                   />
@@ -90,7 +89,8 @@ export function ToolParamCard({
               <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                 <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Description</label>
                 <div className="flex-1">
-                  <EditableField
+                  <InputField
+                    type="text"
                     value={param.description}
                     onChange={(value: string) => handleUpdate(param.name, {
                       ...param,

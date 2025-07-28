@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Panel } from "@/components/common/panel-common";
 import { Button as CustomButton } from "@/components/ui/button";
 import clsx from "clsx";
-import { EditableField } from "@/app/lib/components/editable-field";
+import { InputField } from "@/app/lib/components/input-field";
 import { USE_TRANSFER_CONTROL_OPTIONS } from "@/app/lib/feature_flags";
 import { Input } from "@/components/ui/input";
 import { Info } from "lucide-react";
@@ -76,6 +76,7 @@ export function AgentConfig({
     const [previousRagSources, setPreviousRagSources] = useState<string[]>([]);
     const [billingError, setBillingError] = useState<string | null>(null);
     const router = useRouter();
+    const [showSavedBanner, setShowSavedBanner] = useState(false);
 
     const {
         start: startCopilotChat,
@@ -85,6 +86,12 @@ export function AgentConfig({
         context: null,
         dataSources
     });
+
+    // Function to show saved banner
+    const showSavedMessage = () => {
+        setShowSavedBanner(true);
+        setTimeout(() => setShowSavedBanner(false), 2000);
+    };
 
     useEffect(() => {
         setLocalName(agent.name);
@@ -202,6 +209,16 @@ export function AgentConfig({
             }
         >
             <div className="flex flex-col gap-6 p-4 h-[calc(100vh-100px)] min-h-0 flex-1">
+                               {/* Saved Banner */}
+               {showSavedBanner && (
+                   <div className="absolute top-4 right-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
+                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                       </svg>
+                       <span className="text-sm font-medium">Changes saved</span>
+                   </div>
+               )}
+
                 {/* Tabs */}
                 <div className="flex border-b border-gray-200 dark:border-gray-700">
                     {(['instructions', 'configurations'] as TabType[]).map((tab) => (
@@ -227,6 +244,15 @@ export function AgentConfig({
                             {isInstructionsMaximized ? (
                                 <div className="fixed inset-0 z-50 bg-white dark:bg-gray-900">
                                     <div className="h-full flex flex-col">
+                                        {/* Saved Banner for maximized instructions */}
+                                        {showSavedBanner && (
+                                            <div className="absolute top-4 right-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                                <span className="text-sm font-medium">Changes saved</span>
+                                            </div>
+                                        )}
                                         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
                                             <div className="flex items-center gap-2">
                                                 <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{agent.name}</span>
@@ -243,7 +269,8 @@ export function AgentConfig({
                                             </button>
                                         </div>
                                         <div className="flex-1 overflow-hidden p-4">
-                                            <EditableField
+                                            <InputField
+                                                type="text"
                                                 key="instructions-maximized"
                                                 value={agent.instructions}
                                                 onChange={(value) => {
@@ -251,13 +278,12 @@ export function AgentConfig({
                                                         ...agent,
                                                         instructions: value
                                                     });
+                                                    showSavedMessage();
                                                 }}
                                                 markdown
                                                 multiline
                                                 mentions
                                                 mentionsAtValues={atMentions}
-                                                showSaveButton={true}
-                                                showDiscardButton={true}
                                                 className="h-full min-h-0 overflow-auto"
                                             />
                                         </div>
@@ -292,7 +318,13 @@ export function AgentConfig({
                                                 Generate
                                             </CustomButton>
                                         </div>
-                                        <EditableField
+                                        {!isInstructionsMaximized && (
+                                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                💡 Tip: Use the maximized view for a better editing experience
+                                            </div>
+                                        )}
+                                        <InputField
+                                            type="text"
                                             key="instructions"
                                             value={agent.instructions}
                                             onChange={(value) => {
@@ -300,20 +332,19 @@ export function AgentConfig({
                                                     ...agent,
                                                     instructions: value
                                                 });
+                                                showSavedMessage();
                                             }}
                                             markdown
                                             multiline
                                             mentions
                                             mentionsAtValues={atMentions}
-                                            showSaveButton={true}
-                                            showDiscardButton={true}
                                             className="h-full min-h-0 overflow-auto !mb-0 !mt-0"
                                         />
                                     </div>
                                     {/* Examples Section */}
                                     <div className="space-y-2 mb-6">
                                         <div className="flex items-center gap-2">
-                                            <label className={sectionHeaderStyles}>Examples</label>
+                                            <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Examples</label>
                                             <button
                                                 type="button"
                                                 className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -327,9 +358,23 @@ export function AgentConfig({
                                                 )}
                                             </button>
                                         </div>
+                                        {!isExamplesMaximized && (
+                                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                💡 Tip: Use the maximized view for a better editing experience
+                                            </div>
+                                        )}
                                         {isExamplesMaximized ? (
                                             <div className="fixed inset-0 z-50 bg-white dark:bg-gray-900">
                                                 <div className="h-full flex flex-col">
+                                                    {/* Saved Banner for maximized examples */}
+                                                    {showSavedBanner && (
+                                                        <div className="absolute top-4 right-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                            <span className="text-sm font-medium">Changes saved</span>
+                                                        </div>
+                                                    )}
                                                     <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
                                                         <div className="flex items-center gap-2">
                                                             <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{agent.name}</span>
@@ -346,7 +391,8 @@ export function AgentConfig({
                                                         </button>
                                                     </div>
                                                     <div className="flex-1 overflow-hidden p-4">
-                                                        <EditableField
+                                                        <InputField
+                                                            type="text"
                                                             key="examples-maximized"
                                                             value={agent.examples || ""}
                                                             onChange={(value) => {
@@ -354,21 +400,21 @@ export function AgentConfig({
                                                                     ...agent,
                                                                     examples: value
                                                                 });
+                                                                showSavedMessage();
                                                             }}
                                                             placeholder="Enter examples for this agent"
                                                             markdown
                                                             multiline
                                                             mentions
                                                             mentionsAtValues={atMentions}
-                                                            showSaveButton={true}
-                                                            showDiscardButton={true}
                                                             className="h-full min-h-0 overflow-auto !mb-0 !mt-0"
                                                         />
                                                     </div>
                                                 </div>
                                             </div>
                                         ) : (
-                                            <EditableField
+                                            <InputField
+                                                type="text"
                                                 key="examples"
                                                 value={agent.examples || ""}
                                                 onChange={(value) => {
@@ -376,14 +422,13 @@ export function AgentConfig({
                                                         ...agent,
                                                         examples: value
                                                     });
+                                                    showSavedMessage();
                                                 }}
                                                 placeholder="Enter examples for this agent"
                                                 markdown
                                                 multiline
                                                 mentions
                                                 mentionsAtValues={atMentions}
-                                                showSaveButton={true}
-                                                showDiscardButton={true}
                                                 className="h-full min-h-0 overflow-auto !mb-0 !mt-0"
                                             />
                                         )}
@@ -408,7 +453,8 @@ export function AgentConfig({
                                     <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                         <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Name</label>
                                         <div className="flex-1">
-                                            <EditableField
+                                            <InputField
+                                                type="text"
                                                 value={localName}
                                                 onChange={(value) => {
                                                     setLocalName(value);
@@ -418,10 +464,8 @@ export function AgentConfig({
                                                             name: value
                                                         });
                                                     }
+                                                    showSavedMessage();
                                                 }}
-                                                multiline={false}
-                                                showSaveButton={true}
-                                                showDiscardButton={true}
                                                 error={nameError}
                                                 className="w-full"
                                             />
@@ -430,9 +474,13 @@ export function AgentConfig({
                                     <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                         <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Description</label>
                                         <div className="flex-1">
-                                            <EditableField
+                                            <InputField
+                                                type="text"
                                                 value={agent.description || ""}
-                                                onChange={(value) => handleUpdate({ ...agent, description: value })}
+                                                onChange={(value: string) => {
+                                                    handleUpdate({ ...agent, description: value });
+                                                    showSavedMessage();
+                                                }}
                                                 multiline={true}
                                                 placeholder="Enter a description for this agent"
                                                 className="w-full"
@@ -458,10 +506,13 @@ export function AgentConfig({
                                                     { key: "user_facing", label: "Conversation Agent" },
                                                     { key: "internal", label: "Task Agent" }
                                                 ]}
-                                                onChange={(value) => handleUpdate({
-                                                    ...agent,
-                                                    outputVisibility: value as z.infer<typeof WorkflowAgent>["outputVisibility"]
-                                                })}
+                                                onChange={(value) => {
+                                                    handleUpdate({
+                                                        ...agent,
+                                                        outputVisibility: value as z.infer<typeof WorkflowAgent>["outputVisibility"]
+                                                    });
+                                                    showSavedMessage();
+                                                }}
                                             />
                                         </div>
                                     </div>
@@ -469,12 +520,16 @@ export function AgentConfig({
                                         <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Model</label>
                                         <div className="flex-1">
                                             {/* Model select/input logic unchanged */}
-                                            {eligibleModels === "*" && <Input
+                                            {eligibleModels === "*" && <InputField
+                                                type="text"
                                                 value={agent.model}
-                                                onChange={(e) => handleUpdate({
-                                                    ...agent,
-                                                    model: e.target.value as z.infer<typeof WorkflowAgent>["model"]
-                                                })}
+                                                onChange={(value: string) => {
+                                                    handleUpdate({
+                                                        ...agent,
+                                                        model: value as z.infer<typeof WorkflowAgent>["model"]
+                                                    });
+                                                    showSavedMessage();
+                                                }}
                                                 className="w-full max-w-64"
                                             />}
                                             {eligibleModels !== "*" && <Select
@@ -496,6 +551,7 @@ export function AgentConfig({
                                                         ...agent,
                                                         model: key as z.infer<typeof WorkflowAgent>["model"]
                                                     });
+                                                    showSavedMessage();
                                                 }}
                                             >
                                                 <SelectSection title="Available">
@@ -533,28 +589,31 @@ export function AgentConfig({
                                         <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                             <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Max Calls From Parent</label>
                                             <div className="flex-1">
-                                                <Input
+                                                <InputField
                                                     type="number"
-                                                    min="1"
                                                     value={maxCallsInput}
-                                                    onChange={(e) => {
-                                                        setMaxCallsInput(e.target.value);
+                                                    onChange={(value: string) => {
+                                                        setMaxCallsInput(value);
                                                         setMaxCallsError(null);
-                                                    }}
-                                                    onBlur={() => {
-                                                        const num = Number(maxCallsInput);
-                                                        if (!maxCallsInput || isNaN(num) || num < 1 || !Number.isInteger(num)) {
-                                                            setMaxCallsError("Must be an integer >= 1");
-                                                            return;
-                                                        }
-                                                        setMaxCallsError(null);
-                                                        if (num !== agent.maxCallsPerParentAgent) {
-                                                            handleUpdate({
-                                                                ...agent,
-                                                                maxCallsPerParentAgent: num
-                                                            });
+                                                        const num = Number(value);
+                                                        if (value && !isNaN(num) && num >= 1 && Number.isInteger(num)) {
+                                                            if (num !== agent.maxCallsPerParentAgent) {
+                                                                handleUpdate({
+                                                                    ...agent,
+                                                                    maxCallsPerParentAgent: num
+                                                                });
+                                                            }
                                                         }
                                                     }}
+                                                    validate={(value: string) => {
+                                                        const num = Number(value);
+                                                        if (!value || isNaN(num) || num < 1 || !Number.isInteger(num)) {
+                                                            return { valid: false, errorMessage: "Must be an integer >= 1" };
+                                                        }
+                                                        return { valid: true };
+                                                    }}
+                                                    error={maxCallsError}
+                                                    min={1}
                                                     className="w-full max-w-24"
                                                 />
                                                 {maxCallsError && (
@@ -581,10 +640,13 @@ export function AgentConfig({
                                                                 { key: "relinquish_to_start", label: "Relinquish to 'start' agent" }
                                                             ]
                                                     }
-                                                    onChange={(value) => handleUpdate({
-                                                        ...agent,
-                                                        controlType: value as z.infer<typeof WorkflowAgent>["controlType"]
-                                                    })}
+                                                    onChange={(value) => {
+                                                        handleUpdate({
+                                                            ...agent,
+                                                            controlType: value as z.infer<typeof WorkflowAgent>["controlType"]
+                                                        });
+                                                        showSavedMessage();
+                                                    }}
                                                 />
                                             </div>
                                         </div>
@@ -615,6 +677,7 @@ export function AgentConfig({
                                                             ragDataSources: [...(agent.ragDataSources || []), key]
                                                         });
                                                     }
+                                                    showSavedMessage();
                                                 }}
                                                 startContent={<PlusIcon className="w-4 h-4 text-gray-500" />}
                                             >
@@ -697,6 +760,7 @@ export function AgentConfig({
                                                                     ...agent,
                                                                     ragDataSources: newSources
                                                                 });
+                                                                showSavedMessage();
                                                             }}
                                                             startContent={<Trash2 className="w-4 h-4" />}
                                                         >
