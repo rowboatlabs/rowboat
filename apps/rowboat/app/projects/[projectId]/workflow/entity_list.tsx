@@ -21,7 +21,7 @@ import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@herou
 import { ToolsModal } from './components/ToolsModal';
 import { DataSourcesModal } from './components/DataSourcesModal';
 import { DataSourceIcon } from '../../../lib/components/datasource-icon';
-import { deleteDataSource } from '../../../actions/datasource_actions';
+import { deleteDataSourceFromBuildView } from '../../../actions/datasource_actions';
 import { ToolkitAuthModal } from '../tools/components/ToolkitAuthModal';
 import { deleteConnectedAccount } from '@/app/actions/composio_actions';
 import { ProjectWideChangeConfirmationModal } from '@/components/common/project-wide-change-confirmation-modal';
@@ -806,7 +806,7 @@ export function EntityList({
                                                                         name={dataSource.name} 
                                                                         onDelete={async () => {
                                                                             if (window.confirm(`Are you sure you want to delete the data source "${dataSource.name}"?`)) {
-                                                                                await deleteDataSource(projectId, dataSource._id);
+                                                                                await deleteDataSourceFromBuildView(projectId, dataSource._id);
                                                                                 onDataSourcesUpdated?.();
                                                                             }
                                                                         }} 

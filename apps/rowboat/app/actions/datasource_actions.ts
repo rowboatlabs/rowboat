@@ -136,6 +136,28 @@ export async function deleteDataSource(projectId: string, sourceId: string) {
     redirect(`/projects/${projectId}/sources`);
 }
 
+export async function deleteDataSourceFromBuildView(projectId: string, sourceId: string) {
+    await projectAuthCheck(projectId);
+    await getDataSource(projectId, sourceId);
+
+    // mark data source as deleted
+    await dataSourcesCollection.updateOne({
+        _id: new ObjectId(sourceId),
+    }, {
+        $set: {
+            status: 'deleted',
+            billingError: undefined,
+            lastUpdatedAt: (new Date()).toISOString(),
+            attempts: 0,
+        },
+        $inc: {
+            version: 1,
+        },
+    });
+
+    // No redirect - stay in build view
+}
+
 export async function toggleDataSource(projectId: string, sourceId: string, active: boolean) {
     await projectAuthCheck(projectId);
     await getDataSource(projectId, sourceId);
