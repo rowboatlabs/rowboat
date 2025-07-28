@@ -83,6 +83,27 @@ export function App({
         const updatedDataSources = await listDataSources(projectId);
         setDataSources(updatedDataSources);
     }, [projectId]);
+
+    // Auto-update data sources when there are pending ones
+    useEffect(() => {
+        if (!dataSources) return;
+        
+        const hasPendingSources = dataSources.some(ds => ds.status === 'pending');
+        if (!hasPendingSources) return;
+
+        const interval = setInterval(async () => {
+            const updatedDataSources = await listDataSources(projectId);
+            setDataSources(updatedDataSources);
+            
+            // Stop polling if no more pending sources
+            const stillHasPending = updatedDataSources.some(ds => ds.status === 'pending');
+            if (!stillHasPending) {
+                clearInterval(interval);
+            }
+        }, 3000); // Poll every 3 seconds
+
+        return () => clearInterval(interval);
+    }, [dataSources, projectId]);
     // Add this useEffect for initial load
     useEffect(() => {
         loadData();
