@@ -415,3 +415,28 @@ export async function updateDataSource({
         },
     });
 }
+
+export async function setDataSourcePending({
+    projectId,
+    sourceId,
+}: {
+    projectId: string,
+    sourceId: string,
+}) {
+    await projectAuthCheck(projectId);
+    await getDataSource(projectId, sourceId);
+
+    await dataSourcesCollection.updateOne({
+        _id: new ObjectId(sourceId),
+    }, {
+        $set: {
+            status: 'pending',
+            billingError: undefined,
+            attempts: 0,
+            lastUpdatedAt: new Date().toISOString(),
+        },
+        $inc: {
+            version: 1,
+        },
+    });
+}

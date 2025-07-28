@@ -2,18 +2,20 @@
 import { WithStringId } from "../../../lib/types/types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { z } from "zod";
-import { XIcon, FileIcon, FilesIcon, FileTextIcon, GlobeIcon, AlertTriangle, CheckCircle, Clock, Circle, ExternalLinkIcon, Type } from "lucide-react";
+import { XIcon, FileIcon, FilesIcon, FileTextIcon, GlobeIcon, AlertTriangle, CheckCircle, Clock, Circle, ExternalLinkIcon, Type, PlusIcon, Edit3Icon } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
 import clsx from "clsx";
 import { DataSourceIcon } from "@/app/lib/components/datasource-icon";
 import { Tooltip } from "@heroui/react";
-import { getDataSource, listDocsInDataSource, deleteDocsFromDataSource, getDownloadUrlForFile } from "@/app/actions/datasource_actions";
+import { getDataSource, listDocsInDataSource, deleteDocsFromDataSource, getDownloadUrlForFile, addDocsToDataSource, getUploadUrlsForFilesDataSource, setDataSourcePending } from "@/app/actions/datasource_actions";
 import { DataSourceDoc } from "../../../lib/types/datasource_types";
 import { DownloadIcon, Trash2 } from "lucide-react";
 import { RelativeTime } from "@primer/react";
-import { Pagination, Spinner } from "@heroui/react";
+import { Pagination, Spinner, Button as HeroButton, Textarea as HeroTextarea } from "@heroui/react";
+import { useDropzone } from "react-dropzone";
+import { useCallback } from "react";
 
 export function DataSourceConfig({
     dataSourceId,
@@ -70,6 +72,54 @@ export function DataSourceConfig({
         loadDataSource();
     }, [dataSourceId]);
 
+    // Auto-refresh data source status when it's pending
+    useEffect(() => {
+        let ignore = false;
+        let timeout: NodeJS.Timeout | null = null;
+
+        if (!dataSource || !projectId) {
+            return;
+        }
+        
+        if (dataSource.status !== 'pending') {
+            return;
+        }
+
+        async function refreshStatus() {
+            if (timeout) {
+                clearTimeout(timeout);
+            }
+            
+            try {
+                const updatedSource = await getDataSource(projectId, dataSourceId);
+                if (!ignore) {
+                    setDataSource(updatedSource);
+                    
+                    // Continue polling if still pending
+                    if (updatedSource.status === 'pending') {
+                        timeout = setTimeout(refreshStatus, 5000); // Poll every 5 seconds
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to refresh data source status:', err);
+                // Retry after a longer delay on error
+                if (!ignore) {
+                    timeout = setTimeout(refreshStatus, 10000);
+                }
+            }
+        }
+
+        // Start polling after a short delay
+        timeout = setTimeout(refreshStatus, 5000);
+
+        return () => {
+            ignore = true;
+            if (timeout) {
+                clearTimeout(timeout);
+            }
+        };
+    }, [dataSource, projectId, dataSourceId]);
+
     // Load files function
     const loadFiles = async (projectId: string, sourceId: string, page: number) => {
         try {
@@ -99,6 +149,16 @@ export function DataSourceConfig({
     // Text-related state
     const [textContent, setTextContent] = useState<string>('');
     const [textLoading, setTextLoading] = useState(false);
+    const [editingText, setEditingText] = useState(false);
+    const [editedTextContent, setEditedTextContent] = useState<string>('');
+    const [savingText, setSavingText] = useState(false);
+    
+    // URL form state
+    const [showAddUrlForm, setShowAddUrlForm] = useState(false);
+    const [addingUrls, setAddingUrls] = useState(false);
+    
+    // File upload state
+    const [uploadingFiles, setUploadingFiles] = useState(false);
 
     // Load URLs function
     const loadUrls = async (projectId: string, sourceId: string, page: number) => {
@@ -155,6 +215,13 @@ export function DataSourceConfig({
             });
             // Reload files
             await loadFiles(projectId, dataSourceId, filesPage);
+            
+            // Set data source to pending to trigger re-processing
+            await setDataSourcePending({ projectId, sourceId: dataSourceId });
+            
+            // Reload data source to get updated status
+            const updatedSource = await getDataSource(projectId, dataSourceId);
+            setDataSource(updatedSource);
         } catch (err) {
             console.error('Failed to delete file:', err);
         }
@@ -187,6 +254,13 @@ export function DataSourceConfig({
             });
             // Reload URLs
             await loadUrls(projectId, dataSourceId, urlsPage);
+            
+            // Set data source to pending to trigger re-processing
+            await setDataSourcePending({ projectId, sourceId: dataSourceId });
+            
+            // Reload data source to get updated status
+            const updatedSource = await getDataSource(projectId, dataSourceId);
+            setDataSource(updatedSource);
         } catch (err) {
             console.error('Failed to delete URL:', err);
         }
@@ -196,6 +270,189 @@ export function DataSourceConfig({
     const handleUrlPageChange = (page: number) => {
         loadUrls(projectId, dataSourceId, page);
     };
+
+    // Handle text editing
+    const handleEditText = () => {
+        setEditedTextContent(textContent);
+        setEditingText(true);
+    };
+
+    const handleCancelTextEdit = () => {
+        setEditingText(false);
+        setEditedTextContent('');
+    };
+
+    const handleSaveText = async () => {
+        setSavingText(true);
+        try {
+            // Delete existing text doc if it exists
+            const { files } = await listDocsInDataSource({
+                projectId,
+                sourceId: dataSourceId,
+                limit: 1,
+            });
+            
+            if (files.length > 0) {
+                await deleteDocsFromDataSource({
+                    projectId,
+                    sourceId: dataSourceId,
+                    docIds: [files[0]._id],
+                });
+            }
+
+            // Add new text doc
+            await addDocsToDataSource({
+                projectId,
+                sourceId: dataSourceId,
+                docData: [{
+                    name: 'text',
+                    data: {
+                        type: 'text',
+                        content: editedTextContent,
+                    },
+                }],
+            });
+
+            setTextContent(editedTextContent);
+            setEditingText(false);
+            setEditedTextContent('');
+            
+            // Set data source to pending to trigger re-processing
+            await setDataSourcePending({ projectId, sourceId: dataSourceId });
+            
+            // Reload data source to get updated status
+            const updatedSource = await getDataSource(projectId, dataSourceId);
+            setDataSource(updatedSource);
+        } catch (err) {
+            console.error('Failed to save text:', err);
+        } finally {
+            setSavingText(false);
+        }
+    };
+
+    // Handle URL addition
+    const handleAddUrls = async (formData: FormData) => {
+        setAddingUrls(true);
+        try {
+            const urls = formData.get('urls') as string;
+            const urlsArray = urls.split('\n')
+                .map(url => url.trim())
+                .filter(url => url.length > 0);
+            const first100Urls = urlsArray.slice(0, 100);
+            
+            await addDocsToDataSource({
+                projectId,
+                sourceId: dataSourceId,
+                docData: first100Urls.map(url => ({
+                    name: url,
+                    data: {
+                        type: 'url',
+                        url,
+                    },
+                })),
+            });
+            
+            setShowAddUrlForm(false);
+            await loadUrls(projectId, dataSourceId, urlsPage);
+            
+            // Set data source to pending to trigger re-processing
+            await setDataSourcePending({ projectId, sourceId: dataSourceId });
+            
+            // Reload data source to get updated status
+            const updatedSource = await getDataSource(projectId, dataSourceId);
+            setDataSource(updatedSource);
+        } catch (err) {
+            console.error('Failed to add URLs:', err);
+        } finally {
+            setAddingUrls(false);
+        }
+    };
+
+    // Handle file upload
+    const onFileDrop = useCallback(async (acceptedFiles: File[]) => {
+        if (!dataSource) return;
+        
+        setUploadingFiles(true);
+        try {
+            const urls = await getUploadUrlsForFilesDataSource(projectId, dataSourceId, acceptedFiles.map(file => ({
+                name: file.name,
+                type: file.type,
+                size: file.size,
+            })));
+
+            // Upload files in parallel
+            await Promise.all(acceptedFiles.map(async (file, index) => {
+                await fetch(urls[index].uploadUrl, {
+                    method: 'PUT',
+                    body: file,
+                    headers: {
+                        'Content-Type': file.type,
+                    },
+                });
+            }));
+
+            // After successful uploads, update the database with file information
+            let docData: {
+                _id: string,
+                name: string,
+                data: z.infer<typeof DataSourceDoc>['data']
+            }[] = [];
+            
+            const isS3 = dataSource.data.type === 'files_s3';
+            
+            if (isS3) {
+                docData = acceptedFiles.map((file, index) => ({
+                    _id: urls[index].fileId,
+                    name: file.name,
+                    data: {
+                        type: 'file_s3' as const,
+                        name: file.name,
+                        size: file.size,
+                        mimeType: file.type,
+                        s3Key: urls[index].path,
+                    },
+                }));
+            } else {
+                docData = acceptedFiles.map((file, index) => ({
+                    _id: urls[index].fileId,
+                    name: file.name,
+                    data: {
+                        type: 'file_local' as const,
+                        name: file.name,
+                        size: file.size,
+                        mimeType: file.type,
+                    },
+                }));
+            }
+
+            await addDocsToDataSource({
+                projectId,
+                sourceId: dataSourceId,
+                docData,
+            });
+
+            await loadFiles(projectId, dataSourceId, filesPage);
+            
+            // Set data source to pending to trigger re-processing
+            await setDataSourcePending({ projectId, sourceId: dataSourceId });
+            
+            // Reload data source to get updated status
+            const updatedSource = await getDataSource(projectId, dataSourceId);
+            setDataSource(updatedSource);
+        } catch (error) {
+            console.error('Upload failed:', error);
+        } finally {
+            setUploadingFiles(false);
+        }
+    }, [projectId, dataSourceId, dataSource, filesPage]);
+
+    const { getRootProps, getInputProps, isDragActive } = useDropzone({
+        onDrop: onFileDrop,
+        disabled: uploadingFiles,
+        accept: {
+            'application/pdf': ['.pdf'],
+        },
+    });
 
     if (loading) {
         return (
@@ -264,7 +521,7 @@ export function DataSourceConfig({
         if (isPending) {
             return (
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400">
-                    <Clock className="w-4 h-4" />
+                    <Spinner size="sm" color="warning" />
                     <span className="text-sm font-medium">Processing</span>
                 </div>
             );
@@ -358,6 +615,12 @@ export function DataSourceConfig({
                                 <span className="text-gray-500 dark:text-gray-400">Type:</span>
                                 <span className="text-gray-900 dark:text-gray-100">{getTypeDisplayName(dataSource.data.type)}</span>
                             </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-gray-500 dark:text-gray-400">Status:</span>
+                                <div className="flex items-center">
+                                    {statusIndicator()}
+                                </div>
+                            </div>
                             <div className="flex justify-between">
                                 <span className="text-gray-500 dark:text-gray-400">Created:</span>
                                 <span className="text-gray-900 dark:text-gray-100">
@@ -391,10 +654,39 @@ export function DataSourceConfig({
 
                     {/* Files Section (for file-type data sources) */}
                     {(dataSource.data.type === 'files_local' || dataSource.data.type === 'files_s3') && (
-                        <div className="space-y-3">
-                            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                Uploaded Files ({filesTotal})
-                            </h3>
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    Files ({filesTotal})
+                                </h3>
+                            </div>
+
+                            {/* File Upload Area */}
+                            <div
+                                {...getRootProps()}
+                                className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors
+                                    ${isDragActive ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/10' : 'border-gray-300 dark:border-gray-700'}`}
+                            >
+                                <input {...getInputProps()} />
+                                {uploadingFiles ? (
+                                    <div className="flex items-center justify-center gap-2">
+                                        <Spinner size="sm" />
+                                        <p className="text-sm">Uploading files...</p>
+                                    </div>
+                                ) : isDragActive ? (
+                                    <p className="text-sm">Drop the files here...</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-center gap-2">
+                                            <PlusIcon className="w-4 h-4" />
+                                            <p className="text-sm">Drag and drop files here, or click to select files</p>
+                                        </div>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            Only PDF files are supported for now.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
                             
                             {filesLoading ? (
                                 <div className="flex items-center justify-center gap-2 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
@@ -467,10 +759,63 @@ export function DataSourceConfig({
 
                     {/* URLs Section (for URL-type data sources) */}
                     {dataSource.data.type === 'urls' && (
-                        <div className="space-y-3">
-                            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                Scraped URLs ({urlsTotal})
-                            </h3>
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    URLs ({urlsTotal})
+                                </h3>
+                            </div>
+
+                            {/* Add URLs Button/Form */}
+                            {!showAddUrlForm ? (
+                                <HeroButton
+                                    onClick={() => setShowAddUrlForm(true)}
+                                    variant="bordered"
+                                    size="sm"
+                                    startContent={<PlusIcon className="w-4 h-4" />}
+                                >
+                                    Add URLs
+                                </HeroButton>
+                            ) : (
+                                <form 
+                                    action={handleAddUrls}
+                                    className="space-y-3 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border"
+                                >
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                            Add URLs (one per line)
+                                        </label>
+                                        <HeroTextarea
+                                            required
+                                            name="urls"
+                                            minRows={5}
+                                            placeholder="https://example.com"
+                                            className="w-full"
+                                        />
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <HeroButton
+                                            type="submit"
+                                            color="primary"
+                                            size="sm"
+                                            isDisabled={addingUrls}
+                                            isLoading={addingUrls}
+                                            startContent={!addingUrls ? <PlusIcon className="w-4 h-4" /> : undefined}
+                                        >
+                                            {addingUrls ? 'Adding...' : 'Add URLs'}
+                                        </HeroButton>
+                                        <HeroButton
+                                            type="button"
+                                            variant="bordered"
+                                            size="sm"
+                                            onClick={() => setShowAddUrlForm(false)}
+                                            isDisabled={addingUrls}
+                                        >
+                                            Cancel
+                                        </HeroButton>
+                                    </div>
+                                </form>
+                            )}
                             
                             {urlsLoading ? (
                                 <div className="flex items-center justify-center gap-2 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
@@ -543,15 +888,61 @@ export function DataSourceConfig({
 
                     {/* Text Content Section (for text-type data sources) */}
                     {dataSource.data.type === 'text' && (
-                        <div className="space-y-3">
-                            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                Text Content
-                            </h3>
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    Text Content
+                                </h3>
+                                {!editingText && textContent && (
+                                    <HeroButton
+                                        onClick={handleEditText}
+                                        variant="bordered"
+                                        size="sm"
+                                        startContent={<Edit3Icon className="w-4 h-4" />}
+                                    >
+                                        Edit
+                                    </HeroButton>
+                                )}
+                            </div>
                             
                             {textLoading ? (
                                 <div className="flex items-center justify-center gap-2 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                                     <Spinner size="sm" />
                                     <p className="text-gray-600 dark:text-gray-300">Loading content...</p>
+                                </div>
+                            ) : editingText ? (
+                                <div className="space-y-3 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                            Text content
+                                        </label>
+                                        <HeroTextarea
+                                            value={editedTextContent}
+                                            onChange={(e) => setEditedTextContent(e.target.value)}
+                                            minRows={10}
+                                            className="w-full"
+                                        />
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <HeroButton
+                                            onClick={handleSaveText}
+                                            color="primary"
+                                            size="sm"
+                                            isDisabled={savingText}
+                                            isLoading={savingText}
+                                            startContent={!savingText ? <CheckCircle className="w-4 h-4" /> : undefined}
+                                        >
+                                            {savingText ? 'Saving...' : 'Save'}
+                                        </HeroButton>
+                                        <HeroButton
+                                            onClick={handleCancelTextEdit}
+                                            variant="bordered"
+                                            size="sm"
+                                            isDisabled={savingText}
+                                        >
+                                            Cancel
+                                        </HeroButton>
+                                    </div>
                                 </div>
                             ) : textContent ? (
                                 <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border">
@@ -565,9 +956,22 @@ export function DataSourceConfig({
                                     </div>
                                 </div>
                             ) : (
-                                <div className="text-center p-8 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                                    <Type className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                                    <p className="text-gray-500 dark:text-gray-400">No text content added yet</p>
+                                <div className="space-y-4">
+                                    <div className="text-center p-8 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                                        <Type className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                                        <p className="text-gray-500 dark:text-gray-400">No text content added yet</p>
+                                    </div>
+                                    <HeroButton
+                                        onClick={() => {
+                                            setEditedTextContent('');
+                                            setEditingText(true);
+                                        }}
+                                        variant="bordered"
+                                        size="sm"
+                                        startContent={<PlusIcon className="w-4 h-4" />}
+                                    >
+                                        Add Text Content
+                                    </HeroButton>
                                 </div>
                             )}
                         </div>
