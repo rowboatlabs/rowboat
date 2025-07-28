@@ -2,7 +2,7 @@
 import { WithStringId } from "../../../lib/types/types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { z } from "zod";
-import { XIcon, FileIcon, FilesIcon, FileTextIcon, GlobeIcon, AlertTriangle, CheckCircle, Clock, Circle, ExternalLinkIcon } from "lucide-react";
+import { XIcon, FileIcon, FilesIcon, FileTextIcon, GlobeIcon, AlertTriangle, CheckCircle, Clock, Circle, ExternalLinkIcon, Type } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,11 @@ export function DataSourceConfig({
                 if (ds.data.type === 'urls') {
                     await loadUrls(currentProjectId, dataSourceId, 1);
                 }
+                
+                // Load text content if it's a text data source
+                if (ds.data.type === 'text') {
+                    await loadTextContent(currentProjectId, dataSourceId);
+                }
             } catch (err) {
                 console.error('Failed to load data source:', err);
                 setError('Failed to load data source details');
@@ -91,6 +96,10 @@ export function DataSourceConfig({
     const [urlsPage, setUrlsPage] = useState(1);
     const [urlsTotal, setUrlsTotal] = useState(0);
 
+    // Text-related state
+    const [textContent, setTextContent] = useState<string>('');
+    const [textLoading, setTextLoading] = useState(false);
+
     // Load URLs function
     const loadUrls = async (projectId: string, sourceId: string, page: number) => {
         try {
@@ -108,6 +117,29 @@ export function DataSourceConfig({
             console.error('Failed to load URLs:', err);
         } finally {
             setUrlsLoading(false);
+        }
+    };
+
+    // Load text content function
+    const loadTextContent = async (projectId: string, sourceId: string) => {
+        try {
+            setTextLoading(true);
+            const { files } = await listDocsInDataSource({
+                projectId,
+                sourceId,
+                limit: 1,
+            });
+            
+            if (files.length > 0 && files[0].data.type === 'text') {
+                setTextContent(files[0].data.content);
+            } else {
+                setTextContent('');
+            }
+        } catch (err) {
+            console.error('Failed to load text content:', err);
+            setTextContent('');
+        } finally {
+            setTextLoading(false);
         }
     };
 
@@ -504,6 +536,38 @@ export function DataSourceConfig({
                                             />
                                         </div>
                                     )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Text Content Section (for text-type data sources) */}
+                    {dataSource.data.type === 'text' && (
+                        <div className="space-y-3">
+                            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                Text Content
+                            </h3>
+                            
+                            {textLoading ? (
+                                <div className="flex items-center justify-center gap-2 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                                    <Spinner size="sm" />
+                                    <p className="text-gray-600 dark:text-gray-300">Loading content...</p>
+                                </div>
+                            ) : textContent ? (
+                                <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border">
+                                    <div className="flex items-start gap-3">
+                                        <Type className="w-4 h-4 text-gray-500 flex-shrink-0 mt-1" />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap break-words">
+                                                {textContent}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center p-8 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                                    <Type className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                                    <p className="text-gray-500 dark:text-gray-400">No text content added yet</p>
                                 </div>
                             )}
                         </div>
