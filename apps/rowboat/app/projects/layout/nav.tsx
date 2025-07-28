@@ -9,10 +9,8 @@ import { FolderOpenIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-re
 
 export function Nav({
     projectId,
-    useRag,
 }: {
     projectId: string;
-    useRag: boolean;
 }) {
     const [collapsed, setCollapsed] = useState(false);
     const [projectName, setProjectName] = useState<string | null>(null);
@@ -56,6 +54,6 @@ export function Nav({
                 <FolderOpenIcon size={16} className="ml-1" />
             </Link>
         </Tooltip>}
-        <Menu projectId={projectId} collapsed={collapsed} useRag={useRag} />
+        <Menu projectId={projectId} collapsed={collapsed} />
     </div>;
 }

@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { Tooltip } from "@heroui/react";
 import { UserButton } from "@/app/lib/components/user_button";
 import { 
-  DatabaseIcon, 
   SettingsIcon, 
   WorkflowIcon, 
   PlayIcon,
@@ -23,7 +22,6 @@ import { useHelpModal } from "@/app/providers/help-modal-provider";
 
 interface SidebarProps {
   projectId?: string;
-  useRag: boolean;
   useAuth: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -33,7 +31,7 @@ interface SidebarProps {
 const EXPANDED_ICON_SIZE = 20;
 const COLLAPSED_ICON_SIZE = 20; // DO NOT CHANGE THIS
 
-export default function Sidebar({ projectId, useRag, useAuth, collapsed = false, onToggleCollapse, useBilling }: SidebarProps) {
+export default function Sidebar({ projectId, useAuth, collapsed = false, onToggleCollapse, useBilling }: SidebarProps) {
   const pathname = usePathname();
   const [projectName, setProjectName] = useState<string>("Select Project");
   const isProjectsRoute = pathname === '/projects';
@@ -62,12 +60,6 @@ export default function Sidebar({ projectId, useRag, useAuth, collapsed = false,
       icon: WorkflowIcon,
       requiresProject: true
     },
-    ...(useRag ? [{
-      href: 'sources',
-      label: 'RAG',
-      icon: DatabaseIcon,
-      requiresProject: true
-    }] : []),
     {
       href: 'config',
       label: 'Settings',

@@ -8,12 +8,11 @@ import { useRouter } from 'next/navigation';
 
 interface AppLayoutProps {
   children: ReactNode;
-  useRag?: boolean;
   useAuth?: boolean;
   useBilling?: boolean;
 }
 
-export default function AppLayout({ children, useRag = false, useAuth = false, useBilling = false }: AppLayoutProps) {
+export default function AppLayout({ children, useAuth = false, useBilling = false }: AppLayoutProps) {
   const router = useRouter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [billingPastDue, setBillingPastDue] = useState(false);
@@ -46,7 +45,6 @@ export default function AppLayout({ children, useRag = false, useAuth = false, u
       <div className="overflow-hidden rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm">
         <Sidebar 
           projectId={projectId ?? undefined} 
-          useRag={useRag} 
           useAuth={useAuth}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}

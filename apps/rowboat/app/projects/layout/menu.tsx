@@ -1,7 +1,7 @@
 'use client';
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { DatabaseIcon, SettingsIcon, WorkflowIcon, PlayIcon, LucideIcon } from "lucide-react";
+import { SettingsIcon, WorkflowIcon, PlayIcon, LucideIcon } from "lucide-react";
 import MenuItem from "./components/menu-item";
 
 interface NavLinkProps {
@@ -29,11 +29,9 @@ function NavLink({ href, label, icon, collapsed, selected = false }: NavLinkProp
 export default function Menu({
     projectId,
     collapsed,
-    useRag,
 }: {
     projectId: string;
     collapsed: boolean;
-    useRag: boolean;
 }) {
     const pathname = usePathname();
 
@@ -53,15 +51,6 @@ export default function Menu({
                 icon={PlayIcon}
                 selected={pathname.startsWith(`/projects/${projectId}/test`)}
             />
-            {useRag && (
-                <NavLink
-                    href={`/projects/${projectId}/sources`}
-                    label="Knowledge"
-                    collapsed={collapsed}
-                    icon={DatabaseIcon}
-                    selected={pathname.startsWith(`/projects/${projectId}/sources`)}
-                />
-            )}
             <NavLink
                 href={`/projects/${projectId}/config`}
                 label="Settings"

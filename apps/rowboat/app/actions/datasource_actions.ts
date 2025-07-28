@@ -133,7 +133,7 @@ export async function deleteDataSource(projectId: string, sourceId: string) {
         },
     });
 
-    redirect(`/projects/${projectId}/sources`);
+    redirect(`/projects/${projectId}/workflow`);
 }
 
 export async function deleteDataSourceFromBuildView(projectId: string, sourceId: string) {

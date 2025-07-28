@@ -706,11 +706,11 @@ export function AgentConfig({
                                                                 onClick={(e) => {
                                                                     e.preventDefault();
                                                                     e.stopPropagation();
-                                                                    router.push(`/projects/${projectId}/sources`);
+                                                                    router.push(`/projects/${projectId}/workflow`);
                                                                 }}
                                                                 startContent={<DatabaseIcon className="w-3 h-3" />}
                                                             >
-                                                                Go to RAG Sources
+                                                                Go to Data Sources
                                                             </CustomButton>
                                                         </div>
                                                     </SelectItem>
