@@ -6,7 +6,6 @@ import { createDataSource, addDocsToDataSource } from "../../../../actions/datas
 import { FormStatusButton } from "../../../../lib/components/form-status-button";
 import { DataSourceIcon } from "../../../../lib/components/datasource-icon";
 import { PlusIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Panel } from "@/components/common/panel-common";
 
@@ -26,7 +25,6 @@ export function Form({
     hidePanel?: boolean;
 }) {
     const [sourceType, setSourceType] = useState("");
-    const router = useRouter();
 
     let dropdownOptions = [
         {
@@ -85,8 +83,6 @@ export function Form({
         });
         if (onSuccess) {
             onSuccess(source._id);
-        } else {
-            router.push(`/projects/${projectId}/sources/${source._id}`);
         }
     }
 
@@ -102,8 +98,6 @@ export function Form({
 
         if (onSuccess) {
             onSuccess(source._id);
-        } else {
-            router.push(`/projects/${projectId}/sources/${source._id}`);
         }
     }
 
@@ -133,8 +127,6 @@ export function Form({
 
         if (onSuccess) {
             onSuccess(source._id);
-        } else {
-            router.push(`/projects/${projectId}/sources/${source._id}`);
         }
     }
 

@@ -8,7 +8,7 @@ import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
 import { DataSourceIcon } from "@/app/lib/components/datasource-icon";
 import { Tooltip } from "@heroui/react";
-import { getDataSource, listDocsInDataSource, deleteDocsFromDataSource, getDownloadUrlForFile, addDocsToDataSource, getUploadUrlsForFilesDataSource, setDataSourcePending } from "@/app/actions/datasource_actions";
+import { getDataSource, listDocsInDataSource, deleteDocsFromDataSource, getDownloadUrlForFile, addDocsToDataSource, getUploadUrlsForFilesDataSource } from "@/app/actions/datasource_actions";
 import { DataSourceDoc } from "../../../lib/types/datasource_types";
 import { RelativeTime } from "@primer/react";
 import { Pagination, Spinner, Button as HeroButton, Textarea as HeroTextarea } from "@heroui/react";
@@ -227,9 +227,6 @@ export function DataSourceConfig({
             // Reload files
             await loadFiles(projectId, dataSourceId, filesPage);
             
-            // Set data source to pending to trigger re-processing
-            await setDataSourcePending({ projectId, sourceId: dataSourceId });
-            
             // Reload data source to get updated status
             await updateDataSourceAndNotify();
         } catch (err) {
@@ -264,9 +261,6 @@ export function DataSourceConfig({
             });
             // Reload URLs
             await loadUrls(projectId, dataSourceId, urlsPage);
-            
-            // Set data source to pending to trigger re-processing
-            await setDataSourcePending({ projectId, sourceId: dataSourceId });
             
             // Reload data source to get updated status
             await updateDataSourceAndNotify();
@@ -326,9 +320,6 @@ export function DataSourceConfig({
             setEditingText(false);
             setEditedTextContent('');
             
-            // Set data source to pending to trigger re-processing
-            await setDataSourcePending({ projectId, sourceId: dataSourceId });
-            
             // Reload data source to get updated status
             await updateDataSourceAndNotify();
         } catch (err) {
@@ -362,9 +353,6 @@ export function DataSourceConfig({
             
             setShowAddUrlForm(false);
             await loadUrls(projectId, dataSourceId, urlsPage);
-            
-            // Set data source to pending to trigger re-processing
-            await setDataSourcePending({ projectId, sourceId: dataSourceId });
             
             // Reload data source to get updated status
             await updateDataSourceAndNotify();
@@ -439,9 +427,6 @@ export function DataSourceConfig({
             });
 
             await loadFiles(projectId, dataSourceId, filesPage);
-            
-            // Set data source to pending to trigger re-processing
-            await setDataSourcePending({ projectId, sourceId: dataSourceId });
             
             // Reload data source to get updated status
             await updateDataSourceAndNotify();
@@ -641,10 +626,6 @@ export function DataSourceConfig({
                                     </span>
                                 </div>
                             )}
-                            <div className="flex justify-between">
-                                <span className="text-gray-500 dark:text-gray-400">Version:</span>
-                                <span className="text-gray-900 dark:text-gray-100">{dataSource.version}</span>
-                            </div>
                         </div>
                     </div>
 

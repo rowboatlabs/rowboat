@@ -21,7 +21,7 @@ import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@herou
 import { ToolsModal } from './components/ToolsModal';
 import { DataSourcesModal } from './components/DataSourcesModal';
 import { DataSourceIcon } from '../../../lib/components/datasource-icon';
-import { deleteDataSourceFromBuildView } from '../../../actions/datasource_actions';
+import { deleteDataSource } from '../../../actions/datasource_actions';
 import { ToolkitAuthModal } from '../tools/components/ToolkitAuthModal';
 import { deleteConnectedAccount } from '@/app/actions/composio_actions';
 import { ProjectWideChangeConfirmationModal } from '@/components/common/project-wide-change-confirmation-modal';
@@ -394,6 +394,10 @@ export function EntityList({
 
     function handleToolSelection(name: string) {
         onSelectTool(name);
+    }
+
+    function handleSelectDataSource(id: string) {
+        onSelectDataSource?.(id);
     }
 
     const sensors = useSensors(
@@ -788,7 +792,7 @@ export function EntityList({
                                                             <button
                                                                 ref={selectedEntity?.type === "datasource" && selectedEntity.name === dataSource._id ? selectedRef : undefined}
                                                                 className="flex-1 flex items-center gap-2 text-sm text-left"
-                                                                onClick={() => onSelectDataSource?.(dataSource._id)}
+                                                                onClick={() => handleSelectDataSource(dataSource._id)}
                                                             >
                                                                 <div className="shrink-0 flex items-center justify-center w-3 h-3">
                                                                     <DataSourceIcon type={
@@ -806,7 +810,7 @@ export function EntityList({
                                                                         name={dataSource.name} 
                                                                         onDelete={async () => {
                                                                             if (window.confirm(`Are you sure you want to delete the data source "${dataSource.name}"?`)) {
-                                                                                await deleteDataSourceFromBuildView(projectId, dataSource._id);
+                                                                                await deleteDataSource(projectId, dataSource._id);
                                                                                 onDataSourcesUpdated?.();
                                                                             }
                                                                         }} 

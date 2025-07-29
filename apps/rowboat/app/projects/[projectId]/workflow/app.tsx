@@ -100,7 +100,7 @@ export function App({
             if (!stillHasPending) {
                 clearInterval(interval);
             }
-        }, 3000); // Poll every 3 seconds
+        }, 7000); // Poll every 7 seconds (reduced from 3)
 
         return () => clearInterval(interval);
     }, [dataSources, projectId]);

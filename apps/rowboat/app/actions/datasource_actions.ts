@@ -1,5 +1,4 @@
 'use server';
-import { redirect } from "next/navigation";
 import { ObjectId, WithId } from "mongodb";
 import { dataSourcesCollection, dataSourceDocsCollection } from "../lib/mongodb";
 import { z } from 'zod';
@@ -132,31 +131,8 @@ export async function deleteDataSource(projectId: string, sourceId: string) {
             version: 1,
         },
     });
-
-    redirect(`/projects/${projectId}/workflow`);
 }
 
-export async function deleteDataSourceFromBuildView(projectId: string, sourceId: string) {
-    await projectAuthCheck(projectId);
-    await getDataSource(projectId, sourceId);
-
-    // mark data source as deleted
-    await dataSourcesCollection.updateOne({
-        _id: new ObjectId(sourceId),
-    }, {
-        $set: {
-            status: 'deleted',
-            billingError: undefined,
-            lastUpdatedAt: (new Date()).toISOString(),
-            attempts: 0,
-        },
-        $inc: {
-            version: 1,
-        },
-    });
-
-    // No redirect - stay in build view
-}
 
 export async function toggleDataSource(projectId: string, sourceId: string, active: boolean) {
     await projectAuthCheck(projectId);
@@ -416,27 +392,3 @@ export async function updateDataSource({
     });
 }
 
-export async function setDataSourcePending({
-    projectId,
-    sourceId,
-}: {
-    projectId: string,
-    sourceId: string,
-}) {
-    await projectAuthCheck(projectId);
-    await getDataSource(projectId, sourceId);
-
-    await dataSourcesCollection.updateOne({
-        _id: new ObjectId(sourceId),
-    }, {
-        $set: {
-            status: 'pending',
-            billingError: undefined,
-            attempts: 0,
-            lastUpdatedAt: new Date().toISOString(),
-        },
-        $inc: {
-            version: 1,
-        },
-    });
-}
