@@ -133,7 +133,6 @@ export async function deleteDataSource(projectId: string, sourceId: string) {
     });
 }
 
-
 export async function toggleDataSource(projectId: string, sourceId: string, active: boolean) {
     await projectAuthCheck(projectId);
     await getDataSource(projectId, sourceId);
