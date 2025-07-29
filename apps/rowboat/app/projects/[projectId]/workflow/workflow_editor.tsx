@@ -602,6 +602,7 @@ export function WorkflowEditor({
     onRevertToLive,
     onProjectToolsUpdated,
     onDataSourcesUpdated,
+    onProjectConfigUpdated,
     chatWidgetHost,
 }: {
     projectId: string;
@@ -620,6 +621,7 @@ export function WorkflowEditor({
     onRevertToLive: () => void;
     onProjectToolsUpdated?: () => void;
     onDataSourcesUpdated?: () => void;
+    onProjectConfigUpdated?: () => void;
     chatWidgetHost: string;
 }) {
 
@@ -913,6 +915,8 @@ export function WorkflowEditor({
         if (validateProjectName(value)) {
             try {
                 await updateProjectName(projectId, value);
+                // Trigger refresh of project config to update all references to project name
+                onProjectConfigUpdated?.();
             } catch (error) {
                 setProjectNameError("Failed to update project name");
                 console.error('Failed to update project name:', error);

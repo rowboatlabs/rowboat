@@ -86,6 +86,13 @@ export function App({
         setDataSources(updatedDataSources);
     }, [projectId]);
 
+    const handleProjectConfigUpdate = useCallback(async () => {
+        // Refresh project config when project name or other settings change
+        const updatedProjectConfig = await getProjectConfig(projectId);
+        setProject(updatedProjectConfig);
+        setProjectConfig(updatedProjectConfig);
+    }, [projectId]);
+
     // Auto-update data sources when there are pending ones
     useEffect(() => {
         if (!dataSources) return;
@@ -146,6 +153,7 @@ export function App({
             onRevertToLive={handleRevertToLive}
             onProjectToolsUpdated={handleProjectToolsUpdate}
             onDataSourcesUpdated={handleDataSourcesUpdate}
+            onProjectConfigUpdated={handleProjectConfigUpdate}
             chatWidgetHost={chatWidgetHost}
         />}
     </>
