@@ -143,16 +143,16 @@ async function getDynamicToolsPrompt(userQuery: string, workflow: z.infer<typeof
 
 
     console.log('--- [Co-pilot] Exiting Dynamic Tool Creation (Success) ---');
-    const prompt = `**DYNAMIC COMPOSIO TOOLS AVAILABLE**:
-The following Composio tools have been dynamically discovered and are now available for use in your workflow:
+    const toolConfigs = workflowTools.map(tool => 
+        `**${tool.name}**:\n\`\`\`json\n${JSON.stringify(tool, null, 2)}\n\`\`\``
+    ).join('\n\n');
 
+    const prompt = `## Tool Suggestions:
+The following tools are being suggested by the AI. You can use them in your workflow:
 
-**Tool Configurations:**
-\`\`\`json
-${JSON.stringify(workflowTools, null, 2)}
-\`\`\`
+${toolConfigs}
 
-These tools are ready to be used by your agents. You can reference them in your workflow configuration.`;
+To add any tool you can copy the above json as an add tool block`;
     console.log(prompt);
     return prompt;
 }
@@ -166,7 +166,7 @@ function updateLastUserMessage(
 ): void {
     const lastMessage = messages[messages.length - 1];
     if (lastMessage.role === 'user') {
-        lastMessage.content = `${dynamicToolsPrompt}\n\n${currentWorkflowPrompt}\n\n${contextPrompt}\n\n${dataSourcesPrompt}\n\nUser: ${JSON.stringify(lastMessage.content)}`;
+        lastMessage.content = `${currentWorkflowPrompt}\n\n${contextPrompt}\n\n${dataSourcesPrompt}\n\n${dynamicToolsPrompt}\n\nUser: ${JSON.stringify(lastMessage.content)}`;
     }
 }
 
