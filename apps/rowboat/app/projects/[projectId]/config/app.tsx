@@ -15,7 +15,7 @@ import { RelativeTime } from "@primer/react";
 import { Label } from "../../../lib/components/label";
 import { FormSection } from "../../../lib/components/form-section";
 import { Panel } from "@/components/common/panel-common";
-import { ProjectSection } from './components/project';
+import { ProjectSection, SimpleProjectSection } from './components/project';
 
 export const metadata: Metadata = {
     title: "Project config",
@@ -572,6 +572,25 @@ export function ConfigApp({
                     projectId={projectId}
                     useChatWidget={useChatWidget}
                     chatWidgetHost={chatWidgetHost}
+                />
+            </Panel>
+        </div>
+    );
+}
+
+export function SimpleConfigApp({
+    projectId,
+    onProjectConfigUpdated,
+}: {
+    projectId: string;
+    onProjectConfigUpdated?: () => void;
+}) {
+    return (
+        <div className="h-full overflow-auto p-6">
+            <Panel title="Project Settings">
+                <SimpleProjectSection
+                    projectId={projectId}
+                    onProjectConfigUpdated={onProjectConfigUpdated}
                 />
             </Panel>
         </div>

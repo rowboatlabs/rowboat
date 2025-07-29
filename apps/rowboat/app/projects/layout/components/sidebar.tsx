@@ -59,6 +59,12 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
       label: 'Build',
       icon: WorkflowIcon,
       requiresProject: true
+    },
+    {
+      href: 'config',
+      label: 'Settings',
+      icon: SettingsIcon,
+      requiresProject: true
     }
   ];
 

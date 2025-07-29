@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useState, useCallback } from "react";
 import { Spinner, Dropdown, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure } from "@heroui/react";
 import { Button } from "@/components/ui/button";
-import { getProjectConfig, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret } from "../../../../actions/project_actions";
+import { getProjectConfig, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret, updateProjectName } from "../../../../actions/project_actions";
 import { CopyButton } from "../../../../../components/common/copy-button";
 import { EyeIcon, EyeOffIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { WithStringId } from "../../../../lib/types/types";
@@ -13,6 +13,7 @@ import { RelativeTime } from "@primer/react";
 import { Label } from "../../../../lib/components/label";
 import { sectionHeaderStyles, sectionDescriptionStyles } from './shared-styles';
 import { clsx } from "clsx";
+import { InputField } from "../../../../lib/components/input-field";
 
 export function Section({
     title,
@@ -60,6 +61,52 @@ export function RightContent({
     return <div>{children}</div>;
 }
 
+function ProjectNameSection({ 
+    projectId, 
+    onProjectConfigUpdated 
+}: { 
+    projectId: string;
+    onProjectConfigUpdated?: () => void;
+}) {
+    const [loading, setLoading] = useState(false);
+    const [projectName, setProjectName] = useState<string | null>(null);
+
+    useEffect(() => {
+        setLoading(true);
+        getProjectConfig(projectId).then((project) => {
+            setProjectName(project?.name);
+            setLoading(false);
+        });
+    }, [projectId]);
+
+    async function updateName(name: string) {
+        setLoading(true);
+        await updateProjectName(projectId, name);
+        setProjectName(name);
+        setLoading(false);
+        if (onProjectConfigUpdated) {
+            onProjectConfigUpdated();
+        }
+    }
+
+    return <Section 
+        title="Project Name"
+        description="The name of your project."
+    >
+        <div className="space-y-4">
+            {loading ? (
+                <Spinner size="sm" />
+            ) : (
+                <InputField
+                    type="text"
+                    value={projectName || ''}
+                    onChange={updateName}
+                    className="w-full"
+                />
+            )}
+        </div>
+    </Section>;
+}
 
 function ProjectIdSection({ projectId }: { projectId: string }) {
     return <Section 
@@ -481,9 +528,23 @@ export function ProjectSection({
     return (
         <div className="p-6 space-y-6">
             <ProjectIdSection projectId={projectId} />
-            <SecretSection projectId={projectId} />
             <ApiKeysSection projectId={projectId} />
             {useChatWidget && <ChatWidgetSection projectId={projectId} chatWidgetHost={chatWidgetHost} />}
+        </div>
+    );
+}
+
+export function SimpleProjectSection({
+    projectId,
+    onProjectConfigUpdated,
+}: {
+    projectId: string;
+    onProjectConfigUpdated?: () => void;
+}) {
+    return (
+        <div className="p-6 space-y-6">
+            <ProjectNameSection projectId={projectId} onProjectConfigUpdated={onProjectConfigUpdated} />
+            <SecretSection projectId={projectId} />
             <DeleteProjectSection projectId={projectId} />
         </div>
     );
