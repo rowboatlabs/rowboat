@@ -3,8 +3,7 @@
 import { ReactNode, useEffect, useState, useCallback } from "react";
 import { Spinner, Dropdown, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure } from "@heroui/react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { getProjectConfig, updateProjectName, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret } from "../../../../actions/project_actions";
+import { getProjectConfig, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret } from "../../../../actions/project_actions";
 import { CopyButton } from "../../../../../components/common/copy-button";
 import { EyeIcon, EyeOffIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { WithStringId } from "../../../../lib/types/types";
@@ -61,59 +60,6 @@ export function RightContent({
     return <div>{children}</div>;
 }
 
-function ProjectNameSection({ projectId }: { projectId: string }) {
-    const [loading, setLoading] = useState(false);
-    const [projectName, setProjectName] = useState<string | null>(null);
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        setLoading(true);
-        getProjectConfig(projectId).then((project) => {
-            setProjectName(project?.name);
-            setLoading(false);
-        });
-    }, [projectId]);
-
-    const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const value = e.target.value;
-        setProjectName(value);
-        
-        if (!value.trim()) {
-            setError("Project name cannot be empty");
-            return;
-        }
-        
-        setError(null);
-        updateProjectName(projectId, value);
-    };
-
-    return <Section 
-        title="Project Name"
-        description="The name of your project."
-    >
-        {loading ? (
-            <Spinner size="sm" />
-        ) : (
-            <div className="space-y-2">
-                <div className={clsx(
-                    "border rounded-lg focus-within:ring-2",
-                    error 
-                        ? "border-red-500 focus-within:ring-red-500/20" 
-                        : "border-gray-200 dark:border-gray-700 focus-within:ring-indigo-500/20 dark:focus-within:ring-indigo-400/20"
-                )}>
-                    <Textarea
-                        value={projectName || ''}
-                        onChange={handleChange}
-                        placeholder="Enter project name..."
-                        className="w-full text-sm bg-transparent border-0 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors px-4 py-3"
-                        autoResize
-                    />
-                </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
-            </div>
-        )}
-    </Section>;
-}
 
 function ProjectIdSection({ projectId }: { projectId: string }) {
     return <Section 
@@ -534,7 +480,6 @@ export function ProjectSection({
 }) {
     return (
         <div className="p-6 space-y-6">
-            <ProjectNameSection projectId={projectId} />
             <ProjectIdSection projectId={projectId} />
             <SecretSection projectId={projectId} />
             <ApiKeysSection projectId={projectId} />
