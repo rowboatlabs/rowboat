@@ -302,7 +302,7 @@ export function VoiceSection({ projectId }: { projectId: string }) {
                         >
                             {existingConfig ? 'Update Twilio Config' : 'Import from Twilio'}
                         </Button>
-                        {existingConfig ? (
+                        {existingConfig && (
                             <Button
                         variant="primary"
                         color="red"
@@ -311,24 +311,6 @@ export function VoiceSection({ projectId }: { projectId: string }) {
                                 disabled={loading}
                             >
                                 Delete Configuration
-                            </Button>
-                        ) : (
-                            <Button
-                        variant="tertiary"
-                        size="sm"
-                                onClick={() => {
-                                    setFormState({
-                                        phone: '',
-                                        accountSid: '',
-                                        authToken: '',
-                                        label: ''
-                                    });
-                                    setError(null);
-                                    setIsDirty(false);
-                                }}
-                                disabled={loading}
-                            >
-                                Cancel
                             </Button>
                         )}
                     </div>
