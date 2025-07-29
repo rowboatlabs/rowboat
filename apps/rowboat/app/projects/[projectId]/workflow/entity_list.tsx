@@ -296,7 +296,7 @@ export const EntityList = forwardRef<
 }: EntityListProps & { 
     projectId: string,
     onReorderAgents: (agents: z.infer<typeof WorkflowAgent>[]) => void 
-}) {
+}, ref) {
     const [showAgentTypeModal, setShowAgentTypeModal] = useState(false);
     const [showToolsModal, setShowToolsModal] = useState(false);
     const [showDataSourcesModal, setShowDataSourcesModal] = useState(false);

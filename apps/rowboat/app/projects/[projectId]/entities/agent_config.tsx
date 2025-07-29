@@ -48,6 +48,7 @@ export function AgentConfig({
     useRag,
     triggerCopilotChat,
     eligibleModels,
+    onOpenDataSourcesModal,
 }: {
     projectId: string,
     workflow: z.infer<typeof Workflow>,
