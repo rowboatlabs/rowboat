@@ -23,6 +23,7 @@ import {
 import { Copilot } from "../copilot/app";
 import { publishWorkflow } from "@/app/actions/project_actions";
 import { saveWorkflow } from "@/app/actions/project_actions";
+import { updateProjectName } from "@/app/actions/project_actions";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
 import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon, SettingsIcon, ChevronDownIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
@@ -32,6 +33,7 @@ import { AgentGraphVisualizer } from "../entities/AgentGraphVisualizer";
 import { Panel } from "@/components/common/panel-common";
 import { Button as CustomButton } from "@/components/ui/button";
 import { ConfigApp } from "../config/app";
+import { InputField } from "@/app/lib/components/input-field";
 
 enablePatches();
 
@@ -658,6 +660,10 @@ export function WorkflowEditor({
     
     // Modal state for settings
     const { isOpen: isSettingsModalOpen, onOpen: onSettingsModalOpen, onClose: onSettingsModalClose } = useDisclosure();
+    
+    // Project name state
+    const [localProjectName, setLocalProjectName] = useState<string>(projectConfig.name || '');
+    const [projectNameError, setProjectNameError] = useState<string | null>(null);
 
     // Load agent order from localStorage on mount
     // useEffect(() => {
@@ -883,9 +889,36 @@ export function WorkflowEditor({
         }
     }, [state.present.workflow, state.present.pendingChanges, processQueue, state]);
 
+    // Sync project name when projectConfig changes
+    useEffect(() => {
+        setLocalProjectName(projectConfig.name || '');
+    }, [projectConfig.name]);
+
     function handlePlaygroundClick() {
         setIsInitialState(false);
     }
+
+    const validateProjectName = (value: string) => {
+        if (value.length === 0) {
+            setProjectNameError("Project name cannot be empty");
+            return false;
+        }
+        setProjectNameError(null);
+        return true;
+    };
+
+    const handleProjectNameChange = async (value: string) => {
+        setLocalProjectName(value);
+        
+        if (validateProjectName(value)) {
+            try {
+                await updateProjectName(projectId, value);
+            } catch (error) {
+                setProjectNameError("Failed to update project name");
+                console.error('Failed to update project name:', error);
+            }
+        }
+    };
 
     return (
         <EntitySelectionContext.Provider value={{
@@ -896,6 +929,20 @@ export function WorkflowEditor({
             <div className="flex flex-col h-full relative">
                 <div className="shrink-0 flex justify-between items-center pb-6">
                     <div className="workflow-version-selector flex items-center gap-4 px-2 text-gray-800 dark:text-gray-100">
+                        {/* Project Name Editor */}
+                        <div className="flex flex-col min-w-0 max-w-xs">
+                            <InputField
+                                type="text"
+                                value={localProjectName}
+                                onChange={handleProjectNameChange}
+                                error={projectNameError}
+                                placeholder="Project name..."
+                                className="text-lg font-semibold"
+                            />
+                        </div>
+                        
+                        <div className="h-6 w-px bg-gray-300 dark:bg-gray-600"></div>
+                        
                         <WorkflowIcon size={16} />
                         <div className="flex items-center gap-2">
                             {state.present.publishing && <Spinner size="sm" />}
