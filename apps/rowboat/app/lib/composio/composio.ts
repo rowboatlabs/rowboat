@@ -294,6 +294,11 @@ export async function listTools(toolkitSlug: string, searchQuery: string | null 
     return composioApiCall(ZListResponse(ZTool), url.toString());
 }
 
+export async function getTool(toolSlug: string): Promise<z.infer<typeof ZTool>> {
+    const url = new URL(`${BASE_URL}/tools/${toolSlug}`);
+    return composioApiCall(ZTool, url.toString());
+}
+
 export async function listAuthConfigs(toolkitSlug: string, cursor: string | null = null, managedOnly: boolean = false): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZAuthConfig>>>> {
     const url = new URL(`${BASE_URL}/auth_configs`);
     url.searchParams.set("toolkit_slug", toolkitSlug);
