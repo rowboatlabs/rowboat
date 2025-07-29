@@ -1,4 +1,4 @@
-import React from "react";
+import React, { forwardRef, useImperativeHandle } from "react";
 import { z } from "zod";
 import { WorkflowPrompt, WorkflowAgent, WorkflowTool, Workflow } from "../../../lib/types/workflow_types";
 import { Project } from "../../../lib/types/project_types";
@@ -258,7 +258,13 @@ type ComposioToolkit = {
     tools: z.infer<typeof WorkflowTool>[];
 }
 
-export function EntityList({
+export const EntityList = forwardRef<
+    { openDataSourcesModal: () => void },
+    EntityListProps & { 
+        projectId: string,
+        onReorderAgents: (agents: z.infer<typeof WorkflowAgent>[]) => void 
+    }
+>(function EntityList({
     agents,
     tools,
     prompts,
@@ -427,6 +433,12 @@ export function EntityList({
             onReorderAgents(updatedAgents);
         }
     };
+
+    useImperativeHandle(ref, () => ({
+        openDataSourcesModal: () => {
+            setShowDataSourcesModal(true);
+        }
+    }));
 
     return (
         <div ref={containerRef} className="flex flex-col h-full min-h-0">
@@ -936,7 +948,7 @@ export function EntityList({
             />
         </div>
     );
-}
+});
 
 function AgentDropdown({
     agent,

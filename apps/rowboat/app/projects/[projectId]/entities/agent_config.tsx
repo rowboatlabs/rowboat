@@ -23,7 +23,6 @@ import { Info } from "lucide-react";
 import { useCopilot } from "../copilot/use-copilot";
 import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { ModelsResponse } from "@/app/lib/types/billing_types";
-import { useRouter } from "next/navigation";
 import { SectionCard } from "@/components/common/section-card";
 
 // Common section header styles
@@ -63,6 +62,7 @@ export function AgentConfig({
     useRag: boolean,
     triggerCopilotChat: (message: string) => void,
     eligibleModels: z.infer<typeof ModelsResponse.shape.agentModels> | "*",
+    onOpenDataSourcesModal?: () => void,
 }) {
     const [isAdvancedConfigOpen, setIsAdvancedConfigOpen] = useState(false);
     const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -75,7 +75,6 @@ export function AgentConfig({
     const [showRagCta, setShowRagCta] = useState(false);
     const [previousRagSources, setPreviousRagSources] = useState<string[]>([]);
     const [billingError, setBillingError] = useState<string | null>(null);
-    const router = useRouter();
     const [showSavedBanner, setShowSavedBanner] = useState(false);
 
     const {
@@ -706,11 +705,11 @@ export function AgentConfig({
                                                                 onClick={(e) => {
                                                                     e.preventDefault();
                                                                     e.stopPropagation();
-                                                                    router.push(`/projects/${projectId}/workflow`);
+                                                                    onOpenDataSourcesModal?.();
                                                                 }}
                                                                 startContent={<DatabaseIcon className="w-3 h-3" />}
                                                             >
-                                                                Go to Data Sources
+                                                                Add Data Source
                                                             </CustomButton>
                                                         </div>
                                                     </SelectItem>

@@ -648,6 +648,7 @@ export function WorkflowEditor({
     const [isInitialState, setIsInitialState] = useState(true);
     const [showTour, setShowTour] = useState(true);
     const copilotRef = useRef<{ handleUserMessage: (message: string) => void }>(null);
+    const entityListRef = useRef<{ openDataSourcesModal: () => void } | null>(null);
     
     // Modal state for revert confirmation
     const { isOpen: isRevertModalOpen, onOpen: onRevertModalOpen, onClose: onRevertModalClose } = useDisclosure();
@@ -680,6 +681,10 @@ export function WorkflowEditor({
         setTimeout(() => {
             copilotRef.current?.handleUserMessage(message);
         }, 100);
+    }, []);
+
+    const handleOpenDataSourcesModal = useCallback(() => {
+        entityListRef.current?.openDataSourcesModal();
     }, []);
 
     console.log(`workflow editor chat key: ${state.present.chatKey}`);
@@ -997,6 +1002,7 @@ export function WorkflowEditor({
                     <ResizablePanel minSize={10} defaultSize={PANEL_RATIOS.entityList}>
                         <div className="flex flex-col h-full">
                             <EntityList
+                                ref={entityListRef}
                                 agents={state.present.workflow.agents}
                                 tools={state.present.workflow.tools}
                                 prompts={state.present.workflow.prompts}
@@ -1070,6 +1076,7 @@ export function WorkflowEditor({
                             useRag={useRag}
                             triggerCopilotChat={triggerCopilotChat}
                             eligibleModels={eligibleModels === "*" ? "*" : eligibleModels.agentModels}
+                            onOpenDataSourcesModal={handleOpenDataSourcesModal}
                         />}
                         {state.present.selection?.type === "tool" && (() => {
                             const selectedTool = state.present.workflow.tools.find(
