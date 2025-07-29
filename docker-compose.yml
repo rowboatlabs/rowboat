@@ -17,6 +17,7 @@ services:
       - "${PORT:-3000}:3000"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ENABLE_DYNAMIC_TOOL_CONTEXT=true
       - MONGODB_CONNECTION_STRING=mongodb://mongo:27017/rowboat
       - USE_AUTH=${USE_AUTH}
       - AUTH0_SECRET=test_secret
