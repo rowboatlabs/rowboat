@@ -25,7 +25,7 @@ import { publishWorkflow } from "@/app/actions/project_actions";
 import { saveWorkflow } from "@/app/actions/project_actions";
 import { updateProjectName } from "@/app/actions/project_actions";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
-import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon, SettingsIcon, ChevronDownIcon, PhoneIcon } from "lucide-react";
+import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon, SettingsIcon, ChevronDownIcon, PhoneIcon, MessageCircleIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
 import { ProductTour } from "@/components/common/product-tour";
 import { ModelsResponse } from "@/app/lib/types/billing_types";
@@ -35,6 +35,7 @@ import { Button as CustomButton } from "@/components/ui/button";
 import { ConfigApp } from "../config/app";
 import { InputField } from "@/app/lib/components/input-field";
 import { VoiceSection } from "../config/components/voice";
+import { ChatWidgetSection } from "../config/components/project";
 
 enablePatches();
 
@@ -667,6 +668,9 @@ export function WorkflowEditor({
     // Modal state for phone/Twilio configuration
     const { isOpen: isPhoneModalOpen, onOpen: onPhoneModalOpen, onClose: onPhoneModalClose } = useDisclosure();
     
+    // Modal state for chat widget configuration
+    const { isOpen: isChatWidgetModalOpen, onOpen: onChatWidgetModalOpen, onClose: onChatWidgetModalClose } = useDisclosure();
+    
     // Project name state
     const [localProjectName, setLocalProjectName] = useState<string>(projectConfig.name || '');
     const [projectNameError, setProjectNameError] = useState<string | null>(null);
@@ -1076,6 +1080,13 @@ export function WorkflowEditor({
                                         >
                                             Phone
                                         </DropdownItem>
+                                        <DropdownItem
+                                            key="chat-widget"
+                                            startContent={<MessageCircleIcon size={16} />}
+                                            onPress={onChatWidgetModalOpen}
+                                        >
+                                            Chat widget
+                                        </DropdownItem>
                                     </DropdownMenu>
                                 </Dropdown>
                             </div>
@@ -1320,6 +1331,28 @@ export function WorkflowEditor({
                         </ModalHeader>
                         <ModalBody className="p-0">
                             <VoiceSection projectId={projectId} />
+                        </ModalBody>
+                    </ModalContent>
+                </Modal>
+                
+                {/* Chat Widget Modal */}
+                <Modal 
+                    isOpen={isChatWidgetModalOpen} 
+                    onClose={onChatWidgetModalClose}
+                    size="4xl"
+                    scrollBehavior="inside"
+                >
+                    <ModalContent className="h-[70vh]">
+                        <ModalHeader className="flex flex-col gap-1">
+                            Chat Widget
+                        </ModalHeader>
+                        <ModalBody className="p-0">
+                            <div className="p-6">
+                                <ChatWidgetSection 
+                                    projectId={projectId} 
+                                    chatWidgetHost={chatWidgetHost} 
+                                />
+                            </div>
                         </ModalBody>
                     </ModalContent>
                 </Modal>

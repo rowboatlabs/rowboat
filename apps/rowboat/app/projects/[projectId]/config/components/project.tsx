@@ -307,7 +307,7 @@ function ApiKeysSection({ projectId }: { projectId: string }) {
     </Section>;
 }
 
-function ChatWidgetSection({ projectId, chatWidgetHost }: { projectId: string, chatWidgetHost: string }) {
+export function ChatWidgetSection({ projectId, chatWidgetHost }: { projectId: string, chatWidgetHost: string }) {
     const [loading, setLoading] = useState(false);
     const [chatClientId, setChatClientId] = useState<string | null>(null);
 
