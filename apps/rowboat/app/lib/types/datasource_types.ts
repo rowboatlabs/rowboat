@@ -13,7 +13,7 @@ export const DataSource = z.object({
     ]).optional(),
     version: z.number(),
     error: z.string().optional(),
-    billingError: z.string().optional(),
+    billingError: z.string().nullable().optional(),
     createdAt: z.string().datetime(),
     lastUpdatedAt: z.string().datetime().optional(),
     attempts: z.number(),

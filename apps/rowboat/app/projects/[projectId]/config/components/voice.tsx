@@ -191,6 +191,7 @@ export function VoiceSection({ projectId }: { projectId: string }) {
         setError(null);
     };
 
+
     const handleConfigureTwilio = async () => {
         if (!formState.phone || !formState.accountSid || !formState.authToken) {
             setError('Please fill in all required fields');
@@ -241,6 +242,7 @@ export function VoiceSection({ projectId }: { projectId: string }) {
             setIsDirty(false);
         }
     };
+
 
     return (
         <div className="p-6 space-y-6">

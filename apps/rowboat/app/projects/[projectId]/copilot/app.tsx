@@ -2,6 +2,7 @@
 import { Button } from "@/components/ui/button";
 import { Dropdown, DropdownItem, DropdownMenu, DropdownSection, DropdownTrigger, Spinner, Tooltip } from "@heroui/react";
 import { useRef, useState, createContext, useContext, useCallback, forwardRef, useImperativeHandle, useEffect, Ref } from "react";
+import { useVoiceMode } from "../../../hooks/use-voice-mode";
 import { CopilotChatContext } from "../../../lib/types/copilot_types";
 import { CopilotMessage } from "../../../lib/types/copilot_types";
 import { Workflow } from "@/app/lib/types/workflow_types";
@@ -53,6 +54,33 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     const startRef = useRef<any>(null);
     const cancelRef = useRef<any>(null);
     const [statusBar, setStatusBar] = useState<any>(null);
+    const voiceModeRequestIdRef = useRef<string | null>(null);
+    const speakTextRef = useRef<any>(null);
+    
+    // Voice mode integration
+    const {
+        isListening,
+        isSpeaking,
+        isSupported: voiceSupported,
+        error: voiceError,
+        startListening,
+        stopListening,
+        speakText,
+        stopSpeaking,
+        clearError: clearVoiceError
+    } = useVoiceMode({
+        onTranscriptionComplete: (text: string) => {
+            // Generate unique ID for this voice request
+            voiceModeRequestIdRef.current = Date.now().toString();
+            handleUserMessage(text);
+        },
+        onTTSComplete: () => {
+            // Clear the voice request ID when TTS completes
+            voiceModeRequestIdRef.current = null;
+        },
+        elevenLabsApiKey: process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY,
+        elevenLabsVoiceId: process.env.NEXT_PUBLIC_ELEVENLABS_VOICE_ID,
+    });
 
     // Always use effectiveContext for the user's current selection
     const effectiveContext = discardContext ? null : chatContext;
@@ -82,9 +110,10 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         dataSources: dataSources
     });
 
-    // Store latest start/cancel functions in refs
+    // Store latest start/cancel/speakText functions in refs
     startRef.current = start;
     cancelRef.current = cancel;
+    speakTextRef.current = speakText;
 
     // Notify parent of message changes
     useEffect(() => {
@@ -119,6 +148,17 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         setIsLastInteracted(true);
     }, [setMessages, setIsLastInteracted, pendingContext, setLockedContext]);
 
+    // Voice mode handler
+    const handleVoiceMode = useCallback(() => {
+        if (isListening) {
+            stopListening();
+        } else if (isSpeaking) {
+            stopSpeaking();
+        } else {
+            startListening();
+        }
+    }, [isListening, isSpeaking, startListening, stopListening, stopSpeaking]);
+
     // Effect for getting copilot response
     useEffect(() => {
         if (!messages.length || messages.at(-1)?.role !== 'user') return;
@@ -129,8 +169,10 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
 
         const currentStart = startRef.current;
         const currentCancel = cancelRef.current;
+        const currentVoiceRequestId = voiceModeRequestIdRef.current;
 
         currentStart(messages, (finalResponse: string) => {
+            // Always add the complete, unmodified response to messages for UI display
             setMessages(prev => [
                 ...prev,
                 {
@@ -138,6 +180,15 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                     content: finalResponse
                 }
             ]);
+            
+            // If this was a voice request and we haven't spoken yet, speak the first 2 sentences
+            if (currentVoiceRequestId && voiceModeRequestIdRef.current === currentVoiceRequestId) {
+                const first2Sentences = getFirst2Sentences(finalResponse);
+                if (first2Sentences) {
+                    // Use the function from the ref to avoid dependency issues
+                    speakTextRef.current?.(first2Sentences);
+                }
+            }
         });
 
         return () => currentCancel();
@@ -200,6 +251,19 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         });
     }, [lockedContext]);
 
+    // Extract first 2 sentences for TTS
+    const getFirst2Sentences = (text: string): string => {
+        if (!text || typeof text !== 'string') return '';
+        
+        // Simple sentence extraction - split on periods, exclamation marks, question marks
+        const sentences = text.match(/[^\.!?]+[\.!?]+/g) || [];
+        
+        if (sentences.length === 0) return '';
+        
+        // Take first 2 sentences
+        return sentences.slice(0, 2).join(' ').trim();
+    };
+
     return (
         <CopilotContext.Provider value={{ workflow: workflowRef.current, dispatch }}>
             <div className="h-full flex flex-col">
@@ -236,6 +300,18 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                             </Button>
                         </div>
                     )}
+                    {voiceError && (
+                        <div className="mb-4 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex gap-2 justify-between items-center text-sm">
+                            <p className="text-red-600 dark:text-red-400">{voiceError}</p>
+                            <Button
+                                size="sm"
+                                color="danger"
+                                onClick={clearVoiceError}
+                            >
+                                Dismiss
+                            </Button>
+                        </div>
+                    )}
                     <ComposeBoxCopilot
                         handleUserMessage={handleUserMessage}
                         messages={messages}
@@ -245,6 +321,9 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         onFocus={() => setIsLastInteracted(true)}
                         onCancel={cancel}
                         statusBar={statusBar || { context: lockedContext }}
+                        onVoiceMode={voiceSupported ? handleVoiceMode : undefined}
+                        isListening={isListening}
+                        isSpeaking={isSpeaking}
                     />
                 </div>
             </div>

@@ -23,6 +23,9 @@ interface ComposeBoxCopilotProps {
     onFocus?: () => void;
     onCancel?: () => void;
     statusBar?: any;
+    onVoiceMode?: () => void;
+    isListening?: boolean;
+    isSpeaking?: boolean;
 }
 
 export function ComposeBoxCopilot({
@@ -34,6 +37,9 @@ export function ComposeBoxCopilot({
     onFocus,
     onCancel,
     statusBar,
+    onVoiceMode,
+    isListening = false,
+    isSpeaking = false,
 }: ComposeBoxCopilotProps) {
     const [input, setInput] = useState('');
     const [isFocused, setIsFocused] = useState(false);
@@ -116,6 +122,38 @@ export function ComposeBoxCopilot({
                         `}
                     />
                 </div>
+                {/* Voice mode button */}
+                {onVoiceMode && (
+                    <Button
+                        size="sm"
+                        isIconOnly
+                        disabled={loading}
+                        onPress={onVoiceMode}
+                        className={`
+                            transition-all duration-200
+                            ${loading 
+                                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 opacity-50' 
+                                : isListening
+                                    ? 'bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-900/50 dark:hover:bg-red-800/60 dark:text-red-300 animate-pulse'
+                                    : isSpeaking
+                                        ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:hover:bg-blue-800/60 dark:text-blue-300'
+                                        : 'bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:hover:bg-purple-800/60 dark:text-purple-300'
+                            }
+                            scale-100 hover:scale-105 active:scale-95
+                            disabled:opacity-50 disabled:scale-95
+                            hover:shadow-md dark:hover:shadow-purple-950/10
+                            mb-0.5
+                        `}
+                    >
+                        {isListening ? (
+                            <MicIcon size={16} />
+                        ) : isSpeaking ? (
+                            <SpeakerIcon size={16} />
+                        ) : (
+                            <MicIcon size={16} />
+                        )}
+                    </Button>
+                )}
                 {/* Send button */}
                 <Button
                     size="sm"
@@ -182,6 +220,49 @@ function StopIcon({ size, className }: { size: number, className?: string }) {
             className={className}
         >
             <rect x="6" y="6" width="12" height="12" rx="1" />
+        </svg>
+    );
+}
+
+// Custom MicIcon component for voice mode
+function MicIcon({ size, className }: { size: number, className?: string }) {
+    return (
+        <svg 
+            width={size} 
+            height={size} 
+            viewBox="0 0 24 24" 
+            fill="none" 
+            stroke="currentColor" 
+            strokeWidth="2" 
+            strokeLinecap="round" 
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <line x1="12" x2="12" y1="19" y2="22" />
+            <line x1="8" x2="16" y1="22" y2="22" />
+        </svg>
+    );
+}
+
+// Custom SpeakerIcon component for TTS mode
+function SpeakerIcon({ size, className }: { size: number, className?: string }) {
+    return (
+        <svg 
+            width={size} 
+            height={size} 
+            viewBox="0 0 24 24" 
+            fill="none" 
+            stroke="currentColor" 
+            strokeWidth="2" 
+            strokeLinecap="round" 
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
         </svg>
     );
 }
