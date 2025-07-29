@@ -723,6 +723,9 @@ export function WorkflowEditor({
     function handleSelectPrompt(name: string) {
         dispatch({ type: "select_prompt", name });
     }
+    function handleSelectDataSource(id: string) {
+        dispatch({ type: "select_datasource", id });
+    }
 
     function handleUnselectAgent() {
         dispatch({ type: "unselect_agent" });
@@ -1021,9 +1024,7 @@ export function WorkflowEditor({
                                 onSelectAgent={handleSelectAgent}
                                 onSelectTool={handleSelectTool}
                                 onSelectPrompt={handleSelectPrompt}
-                                onSelectDataSource={(id: string) => {
-                                    dispatch({ type: "select_datasource", id });
-                                }}
+                                onSelectDataSource={handleSelectDataSource}
                                 onAddAgent={handleAddAgent}
                                 onAddTool={handleAddTool}
                                 onAddPrompt={handleAddPrompt}
