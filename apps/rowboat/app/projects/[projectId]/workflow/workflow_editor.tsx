@@ -13,7 +13,7 @@ import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner,
 import { PromptConfig } from "../entities/prompt_config";
 import { DataSourceConfig } from "../entities/datasource_config";
 import { RelativeTime } from "@primer/react";
-import { USE_PRODUCT_TOUR } from "@/app/lib/feature_flags";
+import { USE_PRODUCT_TOUR, USE_CHAT_WIDGET } from "@/app/lib/feature_flags";
 
 import {
     ResizableHandle,
@@ -24,13 +24,14 @@ import { Copilot } from "../copilot/app";
 import { publishWorkflow } from "@/app/actions/project_actions";
 import { saveWorkflow } from "@/app/actions/project_actions";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
-import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon } from "lucide-react";
+import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon, SettingsIcon, ChevronDownIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
 import { ProductTour } from "@/components/common/product-tour";
 import { ModelsResponse } from "@/app/lib/types/billing_types";
 import { AgentGraphVisualizer } from "../entities/AgentGraphVisualizer";
 import { Panel } from "@/components/common/panel-common";
 import { Button as CustomButton } from "@/components/ui/button";
+import { ConfigApp } from "../config/app";
 
 enablePatches();
 
@@ -599,6 +600,7 @@ export function WorkflowEditor({
     onRevertToLive,
     onProjectToolsUpdated,
     onDataSourcesUpdated,
+    chatWidgetHost,
 }: {
     projectId: string;
     dataSources: WithStringId<z.infer<typeof DataSource>>[];
@@ -616,6 +618,7 @@ export function WorkflowEditor({
     onRevertToLive: () => void;
     onProjectToolsUpdated?: () => void;
     onDataSourcesUpdated?: () => void;
+    chatWidgetHost: string;
 }) {
 
     const [state, dispatch] = useReducer(reducer, {
@@ -652,6 +655,9 @@ export function WorkflowEditor({
     
     // Modal state for revert confirmation
     const { isOpen: isRevertModalOpen, onOpen: onRevertModalOpen, onClose: onRevertModalClose } = useDisclosure();
+    
+    // Modal state for settings
+    const { isOpen: isSettingsModalOpen, onOpen: onSettingsModalOpen, onClose: onSettingsModalClose } = useDisclosure();
 
     // Load agent order from localStorage on mount
     // useEffect(() => {
@@ -979,16 +985,38 @@ export function WorkflowEditor({
                             >
                                 <RedoIcon size={16} />
                             </button>
-                            <Button
-                                variant="solid"
-                                size="md"
-                                onPress={handlePublishWorkflow}
-                                className="gap-2 px-4 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm"
-                                startContent={<RocketIcon size={16} />}
-                                data-tour-target="deploy"
-                            >
-                                Deploy
-                            </Button>
+                            <div className="flex">
+                                <Button
+                                    variant="solid"
+                                    size="md"
+                                    onPress={handlePublishWorkflow}
+                                    className="gap-2 px-4 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-r-none"
+                                    startContent={<RocketIcon size={16} />}
+                                    data-tour-target="deploy"
+                                >
+                                    Deploy
+                                </Button>
+                                <Dropdown>
+                                    <DropdownTrigger>
+                                        <Button
+                                            variant="solid"
+                                            size="md"
+                                            className="min-w-0 px-2 bg-green-600 hover:bg-green-700 border-l-1 border-green-500 text-white font-semibold text-sm rounded-l-none"
+                                        >
+                                            <ChevronDownIcon size={14} />
+                                        </Button>
+                                    </DropdownTrigger>
+                                    <DropdownMenu aria-label="Deploy actions">
+                                        <DropdownItem
+                                            key="settings"
+                                            startContent={<SettingsIcon size={16} />}
+                                            onPress={onSettingsModalOpen}
+                                        >
+                                            Settings
+                                        </DropdownItem>
+                                    </DropdownMenu>
+                                </Dropdown>
+                            </div>
                             <Button
                                 variant="solid"
                                 size="md"
@@ -1193,6 +1221,27 @@ export function WorkflowEditor({
                                 Revert to Live
                             </Button>
                         </ModalFooter>
+                    </ModalContent>
+                </Modal>
+                
+                {/* Settings Modal */}
+                <Modal 
+                    isOpen={isSettingsModalOpen} 
+                    onClose={onSettingsModalClose}
+                    size="5xl"
+                    scrollBehavior="inside"
+                >
+                    <ModalContent className="h-[80vh]">
+                        <ModalHeader className="flex flex-col gap-1">
+                            Project Settings
+                        </ModalHeader>
+                        <ModalBody className="p-0">
+                            <ConfigApp
+                                projectId={projectId}
+                                useChatWidget={USE_CHAT_WIDGET}
+                                chatWidgetHost={chatWidgetHost}
+                            />
+                        </ModalBody>
                     </ModalContent>
                 </Modal>
             </div>

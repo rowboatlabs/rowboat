@@ -1,7 +1,7 @@
 'use client';
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { SettingsIcon, WorkflowIcon, PlayIcon, LucideIcon } from "lucide-react";
+import { WorkflowIcon, PlayIcon, LucideIcon } from "lucide-react";
 import MenuItem from "./components/menu-item";
 
 interface NavLinkProps {
@@ -50,13 +50,6 @@ export default function Menu({
                 collapsed={collapsed}
                 icon={PlayIcon}
                 selected={pathname.startsWith(`/projects/${projectId}/test`)}
-            />
-            <NavLink
-                href={`/projects/${projectId}/config`}
-                label="Settings"
-                collapsed={collapsed}
-                icon={SettingsIcon}
-                selected={pathname.startsWith(`/projects/${projectId}/config`)}
             />
         </div>
     );

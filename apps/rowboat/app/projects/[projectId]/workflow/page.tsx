@@ -42,6 +42,7 @@ export default async function Page(
             useRagS3Uploads={USE_RAG_S3_UPLOADS}
             useRagScraping={USE_RAG_SCRAPING}
             defaultModel={DEFAULT_MODEL}
+            chatWidgetHost={process.env.CHAT_WIDGET_HOST || ''}
         />
     );
 }
