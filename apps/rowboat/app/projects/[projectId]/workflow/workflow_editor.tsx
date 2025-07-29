@@ -25,7 +25,7 @@ import { publishWorkflow } from "@/app/actions/project_actions";
 import { saveWorkflow } from "@/app/actions/project_actions";
 import { updateProjectName } from "@/app/actions/project_actions";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
-import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon, SettingsIcon, ChevronDownIcon } from "lucide-react";
+import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon, SettingsIcon, ChevronDownIcon, PhoneIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
 import { ProductTour } from "@/components/common/product-tour";
 import { ModelsResponse } from "@/app/lib/types/billing_types";
@@ -34,6 +34,7 @@ import { Panel } from "@/components/common/panel-common";
 import { Button as CustomButton } from "@/components/ui/button";
 import { ConfigApp } from "../config/app";
 import { InputField } from "@/app/lib/components/input-field";
+import { VoiceSection } from "../config/components/voice";
 
 enablePatches();
 
@@ -663,6 +664,9 @@ export function WorkflowEditor({
     // Modal state for settings
     const { isOpen: isSettingsModalOpen, onOpen: onSettingsModalOpen, onClose: onSettingsModalClose } = useDisclosure();
     
+    // Modal state for phone/Twilio configuration
+    const { isOpen: isPhoneModalOpen, onOpen: onPhoneModalOpen, onClose: onPhoneModalClose } = useDisclosure();
+    
     // Project name state
     const [localProjectName, setLocalProjectName] = useState<string>(projectConfig.name || '');
     const [projectNameError, setProjectNameError] = useState<string | null>(null);
@@ -1063,7 +1067,14 @@ export function WorkflowEditor({
                                             startContent={<SettingsIcon size={16} />}
                                             onPress={onSettingsModalOpen}
                                         >
-                                            Settings
+                                            API & SDK
+                                        </DropdownItem>
+                                        <DropdownItem
+                                            key="phone"
+                                            startContent={<PhoneIcon size={16} />}
+                                            onPress={onPhoneModalOpen}
+                                        >
+                                            Phone
                                         </DropdownItem>
                                     </DropdownMenu>
                                 </Dropdown>
@@ -1284,7 +1295,7 @@ export function WorkflowEditor({
                 >
                     <ModalContent className="h-[80vh]">
                         <ModalHeader className="flex flex-col gap-1">
-                            Project Settings
+                            API & SDK
                         </ModalHeader>
                         <ModalBody className="p-0">
                             <ConfigApp
@@ -1292,6 +1303,23 @@ export function WorkflowEditor({
                                 useChatWidget={USE_CHAT_WIDGET}
                                 chatWidgetHost={chatWidgetHost}
                             />
+                        </ModalBody>
+                    </ModalContent>
+                </Modal>
+                
+                {/* Phone/Twilio Modal */}
+                <Modal 
+                    isOpen={isPhoneModalOpen} 
+                    onClose={onPhoneModalClose}
+                    size="4xl"
+                    scrollBehavior="inside"
+                >
+                    <ModalContent className="h-[80vh]">
+                        <ModalHeader className="flex flex-col gap-1">
+                            Phone Configuration
+                        </ModalHeader>
+                        <ModalBody className="p-0">
+                            <VoiceSection projectId={projectId} />
                         </ModalBody>
                     </ModalContent>
                 </Modal>

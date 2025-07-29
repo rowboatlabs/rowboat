@@ -1,7 +1,8 @@
 'use client';
 
 import { Metadata } from "next";
-import { Spinner, Textarea, Button, Dropdown, DropdownMenu, DropdownItem, DropdownTrigger, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure, Divider, Tab, Tabs } from "@heroui/react";
+import { Spinner, Dropdown, DropdownMenu, DropdownItem, DropdownTrigger, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure, Divider, Textarea } from "@heroui/react";
+import { Button } from "@/components/ui/button";
 import { ReactNode, useEffect, useState } from "react";
 import { getProjectConfig, updateProjectName, updateWebhookUrl, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret } from "../../../actions/project_actions";
 import { CopyButton } from "../../../../components/common/copy-button";
@@ -15,7 +16,6 @@ import { Label } from "../../../lib/components/label";
 import { FormSection } from "../../../lib/components/form-section";
 import { Panel } from "@/components/common/panel-common";
 import { ProjectSection } from './components/project';
-import { VoiceSection } from "./components/voice";
 
 export const metadata: Metadata = {
     title: "Project config",
@@ -187,11 +187,11 @@ export function ApiKeysSection({
                     API keys are used to authenticate requests to the Rowboat API.
                 </p>
                 <Button
-                    onPress={handleCreateKey}
+                    onClick={handleCreateKey}
                     size="sm"
                     startContent={<Plus className="h-4 w-4" />}
-                    variant="flat"
-                    isDisabled={loading}
+                    variant="primary"
+                    disabled={loading}
                 >
                     Create API key
                 </Button>
@@ -321,10 +321,10 @@ export function SecretSection({
                         />
                         <Button
                             size="sm"
-                            variant="flat"
+                            variant="primary"
                             color="warning"
-                            onPress={handleRotateSecret}
-                            isDisabled={loading}
+                            onClick={handleRotateSecret}
+                            disabled={loading}
                         >
                             Rotate
                         </Button>
@@ -477,9 +477,8 @@ export function DeleteProjectSection({
                     <Button
                         color="danger"
                         size="sm"
-                        onPress={onOpen}
-                        isDisabled={loading}
-                        isLoading={loading}
+                        onClick={onOpen}
+                        disabled={loading}
                     >
                         Delete project
                     </Button>
@@ -508,13 +507,13 @@ export function DeleteProjectSection({
                             </div>
                         </ModalBody>
                         <ModalFooter>
-                            <Button variant="light" onPress={onClose}>
+                            <Button variant="secondary" onClick={onClose}>
                                 Cancel
                             </Button>
                             <Button
                                 color="danger"
-                                onPress={handleDelete}
-                                isDisabled={!isValid}
+                                onClick={handleDelete}
+                                disabled={!isValid}
                             >
                                 Delete Project
                             </Button>
@@ -566,39 +565,15 @@ export function ConfigApp({
     useChatWidget: boolean;
     chatWidgetHost: string;
 }) {
-    const [selected, setSelected] = useState("general");
-
     return (
         <div className="h-full overflow-auto p-6">
-            <Tabs
-                selectedKey={selected}
-                onSelectionChange={(key) => setSelected(key.toString())}
-                fullWidth
-            >
-                <Tab
-                    key="general"
-                    title="Project settings"
-                >
-                    <Panel title="Project settings">
-                        <ProjectSection
-                            projectId={projectId}
-                            useChatWidget={useChatWidget}
-                            chatWidgetHost={chatWidgetHost}
-                        />
-                    </Panel>
-                </Tab>
-
-                <Tab
-                    key="twilio"
-                    title="Twilio"
-                >
-                    <Panel title="Twilio settings">
-                        <VoiceSection
-                            projectId={projectId}
-                        />
-                    </Panel>
-                </Tab>
-            </Tabs>
+            <Panel title="Project settings">
+                <ProjectSection
+                    projectId={projectId}
+                    useChatWidget={useChatWidget}
+                    chatWidgetHost={chatWidgetHost}
+                />
+            </Panel>
         </div>
     );
 }
