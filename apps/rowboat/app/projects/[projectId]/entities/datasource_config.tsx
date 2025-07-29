@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { DataSourceIcon } from "@/app/lib/components/datasource-icon";
 import { Tooltip } from "@heroui/react";
 import { getDataSource, listDocsInDataSource, deleteDocsFromDataSource, getDownloadUrlForFile, addDocsToDataSource, getUploadUrlsForFilesDataSource } from "@/app/actions/datasource_actions";
+import { InputField } from "@/app/lib/components/input-field";
 import { DataSourceDoc } from "../../../lib/types/datasource_types";
 import { RelativeTime } from "@primer/react";
 import { Pagination, Spinner, Button as HeroButton, Textarea as HeroTextarea } from "@heroui/react";
@@ -160,8 +161,6 @@ export function DataSourceConfig({
     // Text-related state
     const [textContent, setTextContent] = useState<string>('');
     const [textLoading, setTextLoading] = useState(false);
-    const [editingText, setEditingText] = useState(false);
-    const [editedTextContent, setEditedTextContent] = useState<string>('');
     const [savingText, setSavingText] = useState(false);
     
     // URL form state
@@ -274,18 +273,8 @@ export function DataSourceConfig({
         loadUrls(projectId, dataSourceId, page);
     };
 
-    // Handle text editing
-    const handleEditText = () => {
-        setEditedTextContent(textContent);
-        setEditingText(true);
-    };
-
-    const handleCancelTextEdit = () => {
-        setEditingText(false);
-        setEditedTextContent('');
-    };
-
-    const handleSaveText = async () => {
+    // Handle text content update
+    const handleUpdateTextContent = async (newContent: string) => {
         setSavingText(true);
         try {
             // Delete existing text doc if it exists
@@ -311,14 +300,12 @@ export function DataSourceConfig({
                     name: 'text',
                     data: {
                         type: 'text',
-                        content: editedTextContent,
+                        content: newContent,
                     },
                 }],
             });
 
-            setTextContent(editedTextContent);
-            setEditingText(false);
-            setEditedTextContent('');
+            setTextContent(newContent);
             
             // Reload data source to get updated status
             await updateDataSourceAndNotify();
@@ -880,16 +867,6 @@ export function DataSourceConfig({
                                 <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
                                     Text Content
                                 </h3>
-                                {!editingText && textContent && (
-                                    <HeroButton
-                                        onClick={handleEditText}
-                                        variant="bordered"
-                                        size="sm"
-                                        startContent={<Edit3Icon className="w-4 h-4" />}
-                                    >
-                                        Edit
-                                    </HeroButton>
-                                )}
                             </div>
                             
                             {textLoading ? (
@@ -897,68 +874,25 @@ export function DataSourceConfig({
                                     <Spinner size="sm" />
                                     <p className="text-gray-600 dark:text-gray-300">Loading content...</p>
                                 </div>
-                            ) : editingText ? (
-                                <div className="space-y-3 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border">
-                                    <div className="space-y-2">
-                                        <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                                            Text content
-                                        </label>
-                                        <HeroTextarea
-                                            value={editedTextContent}
-                                            onChange={(e) => setEditedTextContent(e.target.value)}
-                                            minRows={10}
-                                            className="w-full"
-                                        />
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <HeroButton
-                                            onClick={handleSaveText}
-                                            color="primary"
-                                            size="sm"
-                                            isDisabled={savingText}
-                                            isLoading={savingText}
-                                            startContent={!savingText ? <CheckCircle className="w-4 h-4" /> : undefined}
-                                        >
-                                            {savingText ? 'Saving...' : 'Save'}
-                                        </HeroButton>
-                                        <HeroButton
-                                            onClick={handleCancelTextEdit}
-                                            variant="bordered"
-                                            size="sm"
-                                            isDisabled={savingText}
-                                        >
-                                            Cancel
-                                        </HeroButton>
-                                    </div>
-                                </div>
-                            ) : textContent ? (
-                                <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border">
-                                    <div className="flex items-start gap-3">
-                                        <Type className="w-4 h-4 text-gray-500 flex-shrink-0 mt-1" />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap break-words">
-                                                {textContent}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
                             ) : (
-                                <div className="space-y-4">
-                                    <div className="text-center p-8 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                                        <Type className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                                        <p className="text-gray-500 dark:text-gray-400">No text content added yet</p>
-                                    </div>
-                                    <HeroButton
-                                        onClick={() => {
-                                            setEditedTextContent('');
-                                            setEditingText(true);
-                                        }}
-                                        variant="bordered"
-                                        size="sm"
-                                        startContent={<PlusIcon className="w-4 h-4" />}
-                                    >
-                                        Add Text Content
-                                    </HeroButton>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                        Text content
+                                    </label>
+                                    <InputField
+                                        type="text"
+                                        value={textContent}
+                                        onChange={handleUpdateTextContent}
+                                        multiline={true}
+                                        placeholder="Enter your text content here"
+                                        className="w-full"
+                                        disabled={savingText}
+                                    />
+                                    {savingText && (
+                                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                                            Saving...
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

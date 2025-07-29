@@ -12,7 +12,6 @@ import { z } from "zod";
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
 import { PromptConfig } from "../entities/prompt_config";
 import { DataSourceConfig } from "../entities/datasource_config";
-import { EditableField } from "../../../lib/components/editable-field";
 import { RelativeTime } from "@primer/react";
 import { USE_PRODUCT_TOUR } from "@/app/lib/feature_flags";
 
