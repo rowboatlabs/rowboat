@@ -87,11 +87,13 @@ export default function MentionEditor({
     value,
     placeholder,
     onValueChange,
+    autoFocus = false,
 }: {
     atValues: Match[];
     value: string;
     placeholder?: string;
     onValueChange?: (value: string) => void;
+    autoFocus?: boolean;
 }) {
     const containerRef = useRef<HTMLDivElement>(null);
     const quillRef = useRef<Quill | null>(null);
@@ -175,6 +177,13 @@ export default function MentionEditor({
                 }
             });
             quillRef.current = quill;
+
+            // Auto-focus if requested
+            if (autoFocus) {
+                setTimeout(() => {
+                    quill.focus();
+                }, 0);
+            }
         }
 
         load();
@@ -184,7 +193,7 @@ export default function MentionEditor({
                 quillRef.current.off(Quill.events.TEXT_CHANGE);
             }
         }
-    }, [atValues, onValueChange, placeholder, value]);
+    }, [atValues, onValueChange, placeholder, value, autoFocus]);
 
     return <div className="relative">
         <button className="absolute top-2 right-2 z-10">

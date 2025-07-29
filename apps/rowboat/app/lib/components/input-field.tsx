@@ -254,6 +254,7 @@ function TextInputField({
                             value={value}
                             placeholder={placeholder}
                             onValueChange={setLocalValue}
+                            autoFocus
                         />
                     </div>
                 ) : multiline ? (
