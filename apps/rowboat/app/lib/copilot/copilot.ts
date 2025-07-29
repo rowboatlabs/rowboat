@@ -1,6 +1,6 @@
 import z from "zod";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateObject, streamText, tool } from "ai";
+import { generateObject, streamText } from "ai";
 import { WithStringId } from "../types/types";
 import { Workflow, WorkflowTool } from "../types/workflow_types";
 import { CopilotChatContext, CopilotMessage } from "../types/copilot_types";
@@ -103,7 +103,6 @@ async function getDynamicToolsPrompt(userQuery: string, workflow: z.infer<typeof
         return '';
     }
 
-
     const composio = new Composio();
 
     // Step 1: Search for relevant tool slugs
@@ -140,8 +139,6 @@ async function getDynamicToolsPrompt(userQuery: string, workflow: z.infer<typeof
         },
     }));
 
-
-
     console.log('--- [Co-pilot] Exiting Dynamic Tool Creation (Success) ---');
     const toolConfigs = workflowTools.map(tool => 
         `**${tool.name}**:\n\`\`\`json\n${JSON.stringify(tool, null, 2)}\n\`\`\``
@@ -169,7 +166,6 @@ function updateLastUserMessage(
         lastMessage.content = `${currentWorkflowPrompt}\n\n${contextPrompt}\n\n${dataSourcesPrompt}\n\n${dynamicToolsPrompt}\n\nUser: ${JSON.stringify(lastMessage.content)}`;
     }
 }
-
 
 export async function getEditAgentInstructionsResponse(
     projectId: string,
