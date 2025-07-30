@@ -10,7 +10,70 @@ import { CreateProject } from "./components/create-project";
 import clsx from 'clsx';
 import Image from 'next/image';
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Send } from "lucide-react";
 import { useRouter } from 'next/navigation';
+
+// Add glow animation styles
+const glowStyles = `
+    @keyframes glow {
+        0% {
+            border-color: rgba(99, 102, 241, 0.3);
+            box-shadow: 0 0 8px 1px rgba(99, 102, 241, 0.2);
+        }
+        50% {
+            border-color: rgba(99, 102, 241, 0.6);
+            box-shadow: 0 0 12px 2px rgba(99, 102, 241, 0.4);
+        }
+        100% {
+            border-color: rgba(99, 102, 241, 0.3);
+            box-shadow: 0 0 8px 1px rgba(99, 102, 241, 0.2);
+        }
+    }
+
+    @keyframes glow-dark {
+        0% {
+            border-color: rgba(129, 140, 248, 0.3);
+            box-shadow: 0 0 8px 1px rgba(129, 140, 248, 0.2);
+        }
+        50% {
+            border-color: rgba(129, 140, 248, 0.6);
+            box-shadow: 0 0 12px 2px rgba(129, 140, 248, 0.4);
+        }
+        100% {
+            border-color: rgba(129, 140, 248, 0.3);
+            box-shadow: 0 0 8px 1px rgba(129, 140, 248, 0.2);
+        }
+    }
+
+    .animate-glow {
+        animation: glow 2s ease-in-out infinite;
+        border-width: 2px;
+    }
+
+    .dark .animate-glow {
+        animation: glow-dark 2s ease-in-out infinite;
+        border-width: 2px;
+    }
+`;
+
+// Textarea styling from CreateProject component
+const textareaStyles = clsx(
+    "w-full",
+    "rounded-lg p-3",
+    "border border-gray-200 dark:border-gray-700",
+    "bg-white dark:bg-gray-800",
+    "hover:bg-gray-50 dark:hover:bg-gray-750",
+    "focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20",
+    "placeholder:text-gray-400 dark:placeholder:text-gray-500",
+    "transition-all duration-200"
+);
+
+const emptyTextareaStyles = clsx(
+    "animate-glow",
+    "border-indigo-500/40 dark:border-indigo-400/40",
+    "shadow-[0_0_8px_1px_rgba(99,102,241,0.2)] dark:shadow-[0_0_8px_1px_rgba(129,140,248,0.2)]"
+);
 
 export default function App() {
     const [projects, setProjects] = useState<z.infer<typeof Project>[]>([]);
@@ -19,6 +82,7 @@ export default function App() {
     const [defaultName, setDefaultName] = useState('Assistant 1');
     const [userPrompt, setUserPrompt] = useState('');
     const [isCreating, setIsCreating] = useState(false);
+    const [promptError, setPromptError] = useState<string | null>(null);
     const router = useRouter();
 
     const getNextAssistantNumber = (projects: z.infer<typeof Project>[]) => {
@@ -64,11 +128,25 @@ export default function App() {
         }
     }, []);
 
+    // Inject glow animation styles
+    useEffect(() => {
+        const styleSheet = document.createElement("style");
+        styleSheet.innerText = glowStyles;
+        document.head.appendChild(styleSheet);
+
+        return () => {
+            document.head.removeChild(styleSheet);
+        };
+    }, []);
+
     const handleCreateAssistant = async () => {
-        if (!userPrompt.trim()) return;
-        
-        setIsCreating(true);
         try {
+            if (!userPrompt.trim()) {
+                setPromptError("Prompt cannot be empty");
+                return;
+            }
+            
+            setIsCreating(true);
             const formData = new FormData();
             formData.append('name', defaultName);
             
@@ -92,21 +170,9 @@ export default function App() {
                 <div className="max-w-6xl mx-auto">
                     {/* Main Headline */}
                     <div className="text-center mb-16">
-                        <h1 className="text-5xl md:text-6xl font-bold text-gray-900 dark:text-gray-100 mb-6 leading-tight">
-                            Let AI build and manage your{' '}
-                            <span className="text-blue-500">agent workforce</span>
+                        <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-6 leading-tight">
+                            Build <span className="bg-gradient-to-r from-blue-500 to-purple-500 bg-clip-text text-transparent">Rowboats</span> that work for you
                         </h1>
-                        
-                        {/* Y Combinator Badge */}
-                        <div className="inline-flex items-center gap-2 bg-white dark:bg-gray-800 px-4 py-2 rounded-full shadow-sm border border-gray-200 dark:border-gray-700">
-                            <span className="text-sm text-gray-600 dark:text-gray-400">Backed by</span>
-                            <div className="flex items-center gap-1">
-                                <div className="w-5 h-5 bg-orange-500 text-white text-xs font-bold flex items-center justify-center rounded">
-                                    Y
-                                </div>
-                                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">Combinator</span>
-                            </div>
-                        </div>
                     </div>
 
                     {/* Input Section with Mascot */}
@@ -129,31 +195,55 @@ export default function App() {
                                     <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
                                         Hey! What agents can I build for you?
                                     </h2>
-                                    <textarea
-                                        value={userPrompt}
-                                        onChange={(e) => setUserPrompt(e.target.value)}
-                                        placeholder="Ask Rowboat to build an AI SDR agent..."
-                                        className="w-full p-4 text-base border border-gray-300 dark:border-gray-600 rounded-lg resize-none bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[120px]"
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                e.preventDefault();
-                                                handleCreateAssistant();
-                                            }
-                                        }}
-                                    />
-                                    <div className="flex justify-end mt-4">
-                                        <Button
-                                            onClick={handleCreateAssistant}
-                                            disabled={!userPrompt.trim() || isCreating}
-                                            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                                        >
-                                            {isCreating ? 'Getting Started...' : 'Get Started'}
-                                            {!isCreating && (
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                                                </svg>
-                                            )}
-                                        </Button>
+                                    <div className="relative group flex flex-col">
+                                        <div className="relative">
+                                            <Textarea
+                                                value={userPrompt}
+                                                onChange={(e) => {
+                                                    setUserPrompt(e.target.value);
+                                                    setPromptError(null);
+                                                }}
+                                                placeholder="Ask Rowboat to build an AI SDR agent..."
+                                                className={clsx(
+                                                    textareaStyles,
+                                                    "text-base",
+                                                    "text-gray-900 dark:text-gray-100",
+                                                    promptError && "border-red-500 focus:ring-red-500/20",
+                                                    !userPrompt && emptyTextareaStyles,
+                                                    "pr-14" // more space for send button
+                                                )}
+                                                style={{ minHeight: "120px" }}
+                                                autoFocus
+                                                autoResize
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                                        e.preventDefault();
+                                                        handleCreateAssistant();
+                                                    }
+                                                }}
+                                            />
+                                            <div className="absolute right-3 bottom-3 z-10">
+                                                <button
+                                                    type="submit"
+                                                    disabled={isCreating || !userPrompt.trim()}
+                                                    onClick={handleCreateAssistant}
+                                                    className={clsx(
+                                                        "rounded-full p-2",
+                                                        userPrompt.trim()
+                                                            ? "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:hover:bg-indigo-800/60 dark:text-indigo-300"
+                                                            : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500",
+                                                        "transition-all duration-200 scale-100 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:scale-95 hover:shadow-md dark:hover:shadow-indigo-950/10"
+                                                    )}
+                                                >
+                                                    <Send size={18} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {promptError && (
+                                            <p className="text-sm text-red-500 m-0 mt-2">
+                                                {promptError}
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
                             </div>
