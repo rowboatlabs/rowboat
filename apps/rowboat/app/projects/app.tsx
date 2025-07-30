@@ -59,29 +59,61 @@ export default function App() {
     }, []);
 
     return (
-        <div className="flex gap-8 px-16 pt-8">
-            {USE_MULTIPLE_PROJECTS && isProjectPaneOpen && (
-                <div className="w-1/3 min-w-[300px] max-w-[400px]">
-                    <SearchProjects
-                        projects={projects}
-                        isLoading={isLoading}
-                        heading="Select existing assistant"
-                        className="h-full"
-                        onClose={() => setIsProjectPaneOpen(false)}
-                    />
-                </div>
-            )}
-
-            <div className={clsx(
-                "flex-1",
-                !isProjectPaneOpen && "w-full",
-            )}>
+        <div className="px-16 pt-8 space-y-8">
+            {/* Create New Assistant Section */}
+            <div className="w-full">
                 <CreateProject
                     defaultName={defaultName}
-                    onOpenProjectPane={() => setIsProjectPaneOpen(true)}
-                    isProjectPaneOpen={isProjectPaneOpen}
+                    onOpenProjectPane={() => setIsProjectPaneOpen(false)}
+                    isProjectPaneOpen={false}
+                    hideHeader={false}
                 />
             </div>
+
+            {/* Select Existing Assistant Section */}
+            {USE_MULTIPLE_PROJECTS && projects.length > 0 && (
+                <div className="w-full">
+                    <div className="card">
+                        <div className="px-4 pt-4 pb-6">
+                            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                                Select existing assistant
+                            </h2>
+                        </div>
+                        <div className="px-4 pb-4 max-h-96 overflow-y-auto">
+                            {isLoading ? (
+                                <div className="flex items-center justify-center py-8 text-sm text-zinc-500">
+                                    Loading assistants...
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                                    {projects.map((project) => (
+                                        <a
+                                            key={project._id}
+                                            href={`/projects/${project._id}/workflow`}
+                                            className="block p-4 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:border-indigo-300 dark:hover:border-indigo-600 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-all group"
+                                        >
+                                            <div className="space-y-2">
+                                                <div className="font-medium text-zinc-900 dark:text-zinc-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors line-clamp-1">
+                                                    {project.name}
+                                                </div>
+                                                <div className="text-xs text-zinc-500 dark:text-zinc-500">
+                                                    Created {new Date(project.createdAt).toLocaleDateString()}
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <div className="text-xs text-zinc-400 dark:text-zinc-600">
+                                                        Last updated {new Date(project.lastUpdatedAt).toLocaleDateString()}
+                                                    </div>
+                                                    <div className="w-2 h-2 rounded-full bg-green-500 opacity-75"></div>
+                                                </div>
+                                            </div>
+                                        </a>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 } 
