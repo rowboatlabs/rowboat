@@ -18,7 +18,7 @@ export const WorkflowAgent = z.object({
     ragDataSources: z.array(z.string()).optional(),
     ragReturnType: z.enum(['chunks', 'content']).default('chunks'),
     ragK: z.number().default(3),
-    outputVisibility: z.enum(['user_facing', 'internal']).default('user_facing').optional(),
+    outputVisibility: z.enum(['user_facing', 'internal', 'pipeline']).default('user_facing').optional(),
     controlType: z.enum([
         'retain',
         'relinquish_to_parent',
@@ -58,10 +58,19 @@ export const WorkflowTool = z.object({
         logo: z.string(), // the logo for the Composio tool
     }).optional(), // the data for the Composio tool, if it is a Composio tool
 });
+
+export const WorkflowPipeline = z.object({
+    name: z.string(),
+    description: z.string().optional(),
+    agents: z.array(z.string()), // ordered list of agent names in the pipeline
+    order: z.number().int().optional(),
+});
+
 export const Workflow = z.object({
     agents: z.array(WorkflowAgent),
     prompts: z.array(WorkflowPrompt),
     tools: z.array(WorkflowTool),
+    pipelines: z.array(WorkflowPipeline).optional(),
     startAgent: z.string(),
     lastUpdatedAt: z.string().datetime(),
     mockTools: z.record(z.string(), z.string()).optional(), // a dict of toolName => mockInstructions
@@ -76,7 +85,7 @@ export const WorkflowTemplate = Workflow
     });
 
 export const ConnectedEntity = z.object({
-    type: z.enum(['tool', 'prompt', 'agent']),
+    type: z.enum(['tool', 'prompt', 'agent', 'pipeline']),
     name: z.string(),
 });
 
@@ -86,13 +95,14 @@ export function sanitizeTextWithMentions(
         agents: z.infer<typeof WorkflowAgent>[],
         tools: z.infer<typeof WorkflowTool>[],
         prompts: z.infer<typeof WorkflowPrompt>[],
+        pipelines?: z.infer<typeof WorkflowPipeline>[],
     },
 ): {
     sanitized: string;
     entities: z.infer<typeof ConnectedEntity>[];
 } {
-    // Regex to match [@type:name](#type:something) pattern where type is tool/prompt/agent
-    const mentionRegex = /\[@(tool|prompt|agent):([^\]]+)\]\(#mention\)/g;
+    // Regex to match [@type:name](#type:something) pattern where type is tool/prompt/agent/pipeline
+    const mentionRegex = /\[@(tool|prompt|agent|pipeline):([^\]]+)\]\(#mention\)/g;
     const seen = new Set<string>();
 
     // collect entities
@@ -107,7 +117,7 @@ export function sanitizeTextWithMentions(
         })
         .map(match => {
             return {
-                type: match[1] as 'tool' | 'prompt' | 'agent',
+                type: match[1] as 'tool' | 'prompt' | 'agent' | 'pipeline',
                 name: match[2],
             };
         })
@@ -119,6 +129,8 @@ export function sanitizeTextWithMentions(
                 return workflow.tools.some(t => t.name === entity.name);
             } else if (entity.type === 'prompt') {
                 return workflow.prompts.some(p => p.name === entity.name);
+            } else if (entity.type === 'pipeline') {
+                return workflow.pipelines?.some(p => p.name === entity.name);
             }
             return false;
         })

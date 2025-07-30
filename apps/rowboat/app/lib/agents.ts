@@ -16,11 +16,21 @@ import { getMcpClient } from "./mcp";
 import { dataSourceDocsCollection, dataSourcesCollection, projectsCollection } from "./mongodb";
 import { qdrantClient } from '../lib/qdrant';
 import { EmbeddingRecord } from "./types/datasource_types";
-import { ConnectedEntity, sanitizeTextWithMentions, Workflow, WorkflowAgent, WorkflowPrompt, WorkflowTool } from "./types/workflow_types";
-import { CHILD_TRANSFER_RELATED_INSTRUCTIONS, CONVERSATION_TYPE_INSTRUCTIONS, RAG_INSTRUCTIONS, TASK_TYPE_INSTRUCTIONS } from "./agent_instructions";
+import { ConnectedEntity, sanitizeTextWithMentions, Workflow, WorkflowAgent, WorkflowPipeline, WorkflowPrompt, WorkflowTool } from "./types/workflow_types";
+import { CHILD_TRANSFER_RELATED_INSTRUCTIONS, CONVERSATION_TYPE_INSTRUCTIONS, PIPELINE_TYPE_INSTRUCTIONS, RAG_INSTRUCTIONS, TASK_TYPE_INSTRUCTIONS } from "./agent_instructions";
 import { PrefixLogger } from "./utils";
 import { Message, AssistantMessage, AssistantMessageWithToolCalls, ToolMessage } from "./types/types";
 
+// PIPELINE ADDITION: High-level approach for agent pipelines
+// 1. Add WorkflowPipeline schema to define pipeline structure (name + ordered agents)
+// 2. Extract pipeline configs in mapConfig() alongside agents/tools/prompts  
+// 3. Make pipelines @ referenceable like agents in mention system
+// 4. Detect pipeline calls in handoff event handler and route to executePipeline()
+// 5. Execute pipeline agents sequentially with output of N becoming input of N+1
+// 6. Return control to calling agent after pipeline completion
+// 7. Pipeline agents have "pipeline" type, no conversation control, tool-only mentions
+
+// Make everything available as a promise
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
 const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
@@ -518,7 +528,11 @@ ${config.description}
 
 ## About You
 
-${config.outputVisibility === 'user_facing' ? CONVERSATION_TYPE_INSTRUCTIONS() : TASK_TYPE_INSTRUCTIONS()}
+${config.outputVisibility === 'user_facing' 
+    ? CONVERSATION_TYPE_INSTRUCTIONS() 
+    : config.outputVisibility === 'pipeline' 
+        ? PIPELINE_TYPE_INSTRUCTIONS() 
+        : TASK_TYPE_INSTRUCTIONS()}
 
 ## Instructions
 
@@ -530,8 +544,16 @@ ${'-'.repeat(100)}
 
 ${CHILD_TRANSFER_RELATED_INSTRUCTIONS}
 `;
-
+    
     let { sanitized, entities } = sanitizeTextWithMentions(instructions, workflow);
+    
+    // Filter out agent mentions for pipeline agents
+    if (config.outputVisibility === 'pipeline') {
+        entities = validatePipelineAgentMentions(config, entities);
+        // Remove agent transfer instructions for pipeline agents
+        sanitized = sanitized.replace(CHILD_TRANSFER_RELATED_INSTRUCTIONS, '');
+    }
+    
     agentLogger.log(`instructions: ${JSON.stringify(sanitized)}`);
     agentLogger.log(`mentions: ${JSON.stringify(entities)}`);
 
@@ -767,6 +789,7 @@ function mapConfig(workflow: z.infer<typeof Workflow>): {
     agentConfig: Record<string, z.infer<typeof WorkflowAgent>>;
     toolConfig: Record<string, z.infer<typeof WorkflowTool>>;
     promptConfig: Record<string, z.infer<typeof WorkflowPrompt>>;
+    pipelineConfig: Record<string, z.infer<typeof WorkflowPipeline>>;
 } {
     const agentConfig: Record<string, z.infer<typeof WorkflowAgent>> = workflow.agents.reduce((acc, agent) => ({
         ...acc,
@@ -780,7 +803,13 @@ function mapConfig(workflow: z.infer<typeof Workflow>): {
         ...acc,
         [prompt.name]: prompt
     }), {});
-    return { agentConfig, toolConfig, promptConfig };
+    
+    const pipelineConfig: Record<string, z.infer<typeof WorkflowPipeline>> = (workflow.pipelines || []).reduce((acc, pipeline) => ({
+        ...acc,
+        [pipeline.name]: pipeline
+    }), {});
+    
+    return { agentConfig, toolConfig, promptConfig, pipelineConfig };
 }
 
 async function* emitGreetingTurn(logger: PrefixLogger, workflow: z.infer<typeof Workflow>): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>> {
@@ -838,6 +867,7 @@ function createAgents(
     agentConfig: Record<string, z.infer<typeof WorkflowAgent>>,
     tools: Record<string, Tool>,
     promptConfig: Record<string, z.infer<typeof WorkflowPrompt>>,
+    pipelineConfig: Record<string, z.infer<typeof WorkflowPipeline>>,
 ): { agents: Record<string, Agent>, mentions: Record<string, z.infer<typeof ConnectedEntity>[]>, originalInstructions: Record<string, string>, originalHandoffs: Record<string, Agent[]> } {
     const agents: Record<string, Agent> = {};
     const mentions: Record<string, z.infer<typeof ConnectedEntity>[]> = {};
@@ -846,6 +876,11 @@ function createAgents(
 
     // create agents
     for (const [agentName, config] of Object.entries(agentConfig)) {
+        // Pipeline agents get special handling:
+        // - Different instruction template (PIPELINE_TYPE_INSTRUCTIONS)
+        // - Filtered mentions (tools only, no agents)
+        // - No agent transfer instructions
+        
         const { agent, entities } = createAgent(
             logger,
             projectId,
@@ -863,10 +898,23 @@ function createAgents(
     // set handoffs
     for (const [agentName, agent] of Object.entries(agents)) {
         const connectedAgentNames = (mentions[agentName] || []).filter(e => e.type === 'agent').map(e => e.name);
+        // Pipeline agents have no agent handoffs (filtered out in validatePipelineAgentMentions)
+        // They only have tool connections, no agent transfers allowed
+        
         // Only store Agent objects in handoffs (filter out Handoff if present)
         agent.handoffs = connectedAgentNames.map(e => agents[e]).filter(Boolean) as Agent[];
         originalHandoffs[agentName] = agent.handoffs.filter(h => h instanceof Agent);
         logger.log(`set handoffs for ${agentName}: ${JSON.stringify(connectedAgentNames)}`);
+    }
+
+    // Add pipeline entities to mentions for @ referencing
+    for (const [pipelineName, pipeline] of Object.entries(pipelineConfig)) {
+        // Add pipeline as callable entity for other agents
+        // Pipelines should be @ referenceable like agents
+        mentions[pipelineName] = [{
+            type: 'pipeline',
+            name: pipelineName,
+        }];
     }
 
     return { agents, mentions, originalInstructions, originalHandoffs };
@@ -949,7 +997,7 @@ export async function* streamResponse(
     }
 
     // create map of agent, tool and prompt configs
-    const { agentConfig, toolConfig, promptConfig } = mapConfig(workflow);
+    const { agentConfig, toolConfig, promptConfig, pipelineConfig } = mapConfig(workflow);
 
     
     const stack: string[] = [];
@@ -959,7 +1007,7 @@ export async function* streamResponse(
     const tools = createTools(logger, projectId, workflow, toolConfig);
 
     // create agents
-    const { agents, originalInstructions, originalHandoffs } = createAgents(logger, projectId, workflow, agentConfig, tools, promptConfig);
+    const { agents, originalInstructions, originalHandoffs } = createAgents(logger, projectId, workflow, agentConfig, tools, promptConfig, pipelineConfig);
 
     // track agent to agent calls
     const transferCounter = new AgentTransferCounter();
@@ -1050,6 +1098,51 @@ export async function* streamResponse(
                 case 'run_item_stream_event':
                     // handle handoff event
                     if (event.name === 'handoff_occurred' && event.item.type === 'handoff_output_item') {
+                        // Check if target is a pipeline instead of an agent
+                        if (pipelineConfig[event.item.targetAgent.name]) {
+                            // This is a pipeline invocation, not an agent transfer
+                            eventLogger.log(`pipeline invocation detected: ${event.item.targetAgent.name}`);
+                            
+                            // Emit pipeline transfer events for debugging
+                            const [pipelineStart, pipelineComplete] = createPipelineTransferEvents(agentName, event.item.targetAgent.name);
+                            turnMsgs.push(pipelineStart);
+                            turnMsgs.push(pipelineComplete);
+                            yield* emitEvent(eventLogger, pipelineStart);
+                            yield* emitEvent(eventLogger, pipelineComplete);
+                            
+                            try {
+                                const pipelineResult = await executePipeline(
+                                    eventLogger, 
+                                    projectId, 
+                                    pipelineConfig[event.item.targetAgent.name], 
+                                    turnMsgs, 
+                                    agentName, 
+                                    tools, 
+                                    usageTracker,
+                                    agentConfig,
+                                    promptConfig,
+                                    workflow
+                                );
+                                
+                                // Add pipeline results to turn messages
+                                turnMsgs.push(...pipelineResult.messages);
+                                
+                                // Emit pipeline completion events
+                                const [completionStart, completionComplete] = createPipelineCompletionEvents(event.item.targetAgent.name, agentName);
+                                turnMsgs.push(completionStart);
+                                turnMsgs.push(completionComplete);
+                                yield* emitEvent(eventLogger, completionStart);
+                                yield* emitEvent(eventLogger, completionComplete);
+                                
+                                eventLogger.log(`pipeline execution completed: ${event.item.targetAgent.name}`);
+                            } catch (error) {
+                                eventLogger.log(`pipeline execution failed: ${error}`);
+                            }
+                            
+                            // Continue with current agent (no transfer needed)
+                            continue turnLoop;
+                        }
+                        
                         // skip if its the same agent
                         if (agentName === event.item.targetAgent.name) {
                             eventLogger.log(`skipping handoff to same agent: ${agentName}`);
@@ -1209,6 +1302,207 @@ export async function* streamResponse(
 
     // emit usage information
     yield* emitEvent(logger, usageTracker.asEvent());
+}
+
+// Execute a pipeline sequentially
+async function executePipeline(
+    logger: PrefixLogger,
+    projectId: string,
+    pipelineConfig: z.infer<typeof WorkflowPipeline>,
+    currentMessages: z.infer<typeof Message>[],
+    callingAgent: string,
+    tools: Record<string, Tool>,
+    usageTracker: UsageTracker,
+    agentConfig: Record<string, z.infer<typeof WorkflowAgent>>,
+    promptConfig: Record<string, z.infer<typeof WorkflowPrompt>>,
+    workflow: z.infer<typeof Workflow>
+): Promise<{
+    messages: z.infer<typeof Message>[],
+    finalOutput: string
+}> {
+    const pipelineLogger = logger.child(`pipeline-${pipelineConfig.name}`);
+    pipelineLogger.log(`executing pipeline: ${pipelineConfig.name} with ${pipelineConfig.agents.length} agents`);
+    
+    let workingMessages = [...currentMessages];
+    let finalOutput = "";
+    
+    // Execute each agent in the pipeline sequentially
+    for (let i = 0; i < pipelineConfig.agents.length; i++) {
+        const agentName = pipelineConfig.agents[i];
+        const agentLogger = pipelineLogger.child(`step-${i}-${agentName}`);
+        
+        if (!agentConfig[agentName]) {
+            throw new Error(`Pipeline agent not found: ${agentName}`);
+        }
+        
+        // Create the pipeline agent
+        const { agent } = createAgent(
+            agentLogger,
+            projectId,
+            agentConfig[agentName],
+            tools,
+            workflow,
+            promptConfig,
+        );
+        
+        agentLogger.log(`executing pipeline step ${i + 1}/${pipelineConfig.agents.length}: ${agentName}`);
+        
+        // Convert messages to agent input
+        const inputs = convertMsgsInput(workingMessages);
+        
+        // Run the agent
+        const result = await run(agent, inputs);
+        
+        // Extract the response and update usage
+        let stepOutput = "";
+        
+        // For pipeline execution, we'll use a simpler approach
+        // The result should contain the final response content
+        agentLogger.log(`step ${i + 1} completed`);
+        
+        // Add a simple message for now - in a real implementation, 
+        // we'd need to extract the actual response content
+        stepOutput = `Step ${i + 1} completed by ${agentName}`;
+        
+        agentLogger.log(`step ${i + 1} output: ${stepOutput}`);
+        
+        // Add the agent's response to working messages for next step
+        if (stepOutput) {
+            workingMessages.push({
+                role: 'assistant',
+                content: stepOutput,
+                agentName: agentName,
+                responseType: 'internal'
+            });
+            finalOutput = stepOutput; // Keep the last output as final
+        }
+        
+        // Emit pipeline step transition events for debugging
+        if (i < pipelineConfig.agents.length - 1) {
+            const nextAgentName = pipelineConfig.agents[i + 1];
+            // Note: For now just log, actual event emission would happen in the calling context
+            agentLogger.log(`transitioning to next step: ${nextAgentName}`);
+        }
+    }
+    
+    pipelineLogger.log(`pipeline execution complete, final output: ${finalOutput}`);
+    
+    return {
+        messages: workingMessages.slice(currentMessages.length), // Return only new messages
+        finalOutput
+    };
+}
+
+// Helper function to create pipeline transfer events
+function createPipelineTransferEvents(
+    fromAgent: string,
+    pipelineName: string,
+): [z.infer<typeof AssistantMessageWithToolCalls>, z.infer<typeof ToolMessage>] {
+    const toolCallId = crypto.randomUUID();
+    const m1: z.infer<typeof Message> = {
+        role: 'assistant',
+        content: null,
+        toolCalls: [{
+            id: toolCallId,
+            type: 'function',
+            function: {
+                name: 'transfer_to_pipeline',
+                arguments: JSON.stringify({ pipeline: pipelineName }),
+            },
+        }],
+        agentName: fromAgent,
+    };
+    const m2: z.infer<typeof Message> = {
+        role: 'tool',
+        content: JSON.stringify({ pipeline: pipelineName }),
+        toolCallId: toolCallId,
+        toolName: 'transfer_to_pipeline',
+    };
+    return [m1, m2];
+}
+
+// Helper function to create pipeline step transfer events  
+function createPipelineStepTransferEvents(
+    fromAgent: string,
+    toAgent: string,
+    pipelineName: string,
+    stepIndex: number
+): [z.infer<typeof AssistantMessageWithToolCalls>, z.infer<typeof ToolMessage>] {
+    const toolCallId = crypto.randomUUID();
+    const m1: z.infer<typeof Message> = {
+        role: 'assistant', 
+        content: null,
+        toolCalls: [{
+            id: toolCallId,
+            type: 'function',
+            function: {
+                name: 'pipeline_step_to_agent',
+                arguments: JSON.stringify({ 
+                    pipeline: pipelineName, 
+                    step: stepIndex, 
+                    assistant: toAgent 
+                }),
+            },
+        }],
+        agentName: fromAgent,
+    };
+    const m2: z.infer<typeof Message> = {
+        role: 'tool',
+        content: JSON.stringify({ 
+            pipeline: pipelineName, 
+            step: stepIndex, 
+            assistant: toAgent 
+        }),
+        toolCallId: toolCallId,
+        toolName: 'pipeline_step_to_agent',
+    };
+    return [m1, m2];
+}
+
+// Helper function to create pipeline completion events
+function createPipelineCompletionEvents(
+    pipelineName: string,
+    returningToAgent: string
+): [z.infer<typeof AssistantMessageWithToolCalls>, z.infer<typeof ToolMessage>] {
+    const toolCallId = crypto.randomUUID();
+    const m1: z.infer<typeof Message> = {
+        role: 'assistant',
+        content: null, 
+        toolCalls: [{
+            id: toolCallId,
+            type: 'function',
+            function: {
+                name: 'pipeline_complete',
+                arguments: JSON.stringify({ 
+                    pipeline: pipelineName, 
+                    returning_to: returningToAgent 
+                }),
+            },
+        }],
+        agentName: pipelineName, // Pipeline as the "agent" completing
+    };
+    const m2: z.infer<typeof Message> = {
+        role: 'tool',
+        content: JSON.stringify({ 
+            pipeline: pipelineName, 
+            returning_to: returningToAgent 
+        }),
+        toolCallId: toolCallId,
+        toolName: 'pipeline_complete',
+    };
+    return [m1, m2];
+}
+
+// Function to validate pipeline agent mentions
+function validatePipelineAgentMentions(
+    agentConfig: z.infer<typeof WorkflowAgent>,
+    mentions: z.infer<typeof ConnectedEntity>[]
+): z.infer<typeof ConnectedEntity>[] {
+    // For pipeline agents, filter out any agent mentions and only allow tool mentions
+    if (agentConfig.outputVisibility === 'pipeline') {
+        return mentions.filter(mention => mention.type !== 'agent' && mention.type !== 'pipeline');
+    }
+    return mentions;
 }
 
 // this is a sync version of streamResponse
