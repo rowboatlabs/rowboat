@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { Tooltip, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
 import { UserButton } from "@/app/lib/components/user_button";
@@ -203,6 +204,32 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
     <>
       <aside className={`${collapsed ? 'w-16' : 'w-60'} bg-transparent flex flex-col h-full transition-all duration-300`}>
         <div className="flex flex-col grow">
+          {/* Rowboat Logo */}
+          <div className="p-3 border-b border-zinc-100 dark:border-zinc-800">
+            <Tooltip content={collapsed ? "Rowboat" : ""} showArrow placement="right">
+              <Link
+                href="/projects"
+                className={`
+                  w-full flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all
+                  ${collapsed ? 'justify-center py-4' : 'gap-3 px-4 py-2.5'}
+                `}
+              >
+                <Image
+                  src="/logo-only.png"
+                  alt="Rowboat"
+                  width={collapsed ? 20 : 24}
+                  height={collapsed ? 20 : 24}
+                  className="rounded-full transition-all duration-200"
+                />
+                {!collapsed && (
+                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    Rowboat
+                  </span>
+                )}
+              </Link>
+            </Tooltip>
+          </div>
+
           {!isProjectsRoute && (
             <>
               {/* Project Selector */}
