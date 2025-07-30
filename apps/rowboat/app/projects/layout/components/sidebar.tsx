@@ -234,9 +234,9 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
             <>
               {/* Project Selector */}
               <div className="p-3 border-b border-zinc-100 dark:border-zinc-800 space-y-2">
-                <Tooltip content={collapsed ? projectName : "Change project"} showArrow placement="right">
-                  <Link 
-                    href="/projects"
+                <Tooltip content={collapsed ? "Change Assistant" : ""} showArrow placement="right">
+                  <button 
+                    onClick={onAssistantsModalOpen}
                     className={`
                       flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all
                       ${collapsed ? 'justify-center py-4' : 'gap-3 px-4 py-2.5'}
@@ -247,11 +247,11 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
                       className="text-zinc-500 dark:text-zinc-400 transition-all duration-200" 
                     />
                     {!collapsed && (
-                      <span className="text-sm font-medium truncate">
-                        {projectName}
+                      <span className="text-sm font-medium">
+                        Change Assistant
                       </span>
                     )}
-                  </Link>
+                  </button>
                 </Tooltip>
                 
                 <Tooltip content={collapsed ? "New Project" : ""} showArrow placement="right">
