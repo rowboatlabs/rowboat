@@ -128,9 +128,10 @@ interface CreateProjectProps {
     defaultName: string;
     onOpenProjectPane: () => void;
     isProjectPaneOpen: boolean;
+    hideHeader?: boolean;
 }
 
-export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpen }: CreateProjectProps) {
+export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpen, hideHeader = false }: CreateProjectProps) {
     const [selectedTab, setSelectedTab] = useState<TabState>(TabType.Describe);
     const [customPrompt, setCustomPrompt] = useState("");
     const [name, setName] = useState(defaultName);
@@ -344,7 +345,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                     !USE_MULTIPLE_PROJECTS && "px-24",
                     USE_MULTIPLE_PROJECTS && "px-8"
                 )}>
-                    {USE_MULTIPLE_PROJECTS && (
+                    {USE_MULTIPLE_PROJECTS && !hideHeader && (
                         <>
                             <div className="px-4 pt-4 pb-6 flex justify-between items-center">
                                 <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
