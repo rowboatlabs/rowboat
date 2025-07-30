@@ -326,6 +326,19 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
         }
     }
 
+    async function handleSubmitWithTemplate(formData: FormData) {
+        try {
+            const response = await createProject(formData);
+            if ('id' in response) {
+                router.push(`/projects/${response.id}/workflow`);
+            } else {
+                setBillingError(response.billingError);
+            }
+        } catch (error) {
+            console.error('Error creating project:', error);
+        }
+    }
+
     return (
         <>
             <input
@@ -478,16 +491,42 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                                         </p>
                                                     )}
                                                 </div>
-                                                {/* Import JSON button always below the main input, left-aligned, when no file is selected */}
-                                                <div className="mt-2">
+                                                
+                                                {/* Separation line with OR */}
+                                                <div className="relative my-6">
+                                                    <div className="absolute inset-0 flex items-center">
+                                                        <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
+                                                    </div>
+                                                    <div className="relative flex justify-center text-sm">
+                                                        <span className="bg-white dark:bg-gray-900 px-3 text-gray-500 dark:text-gray-400">OR</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Action buttons */}
+                                                <div className="flex gap-3 justify-start">
                                                     <Button
-                                                        variant="secondary"
+                                                        variant="primary"
                                                         size="sm"
                                                         onClick={handleImportJsonClick}
                                                         type="button"
-                                                        startContent={<Upload size={16} />}
+                                                        startContent={<Upload size={14} />}
+                                                        className="bg-white dark:bg-white text-gray-900 hover:bg-gray-50 border border-gray-300 dark:border-gray-300"
                                                     >
                                                         Import JSON
+                                                    </Button>
+                                                    <Button
+                                                        variant="primary"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            const formData = new FormData();
+                                                            formData.append('name', name);
+                                                            formData.append('template', 'default');
+                                                            handleSubmitWithTemplate(formData);
+                                                        }}
+                                                        type="button"
+                                                        className="bg-white dark:bg-white text-gray-900 hover:bg-gray-50 border border-gray-300 dark:border-gray-300"
+                                                    >
+                                                        I&apos;ll build it myself
                                                     </Button>
                                                 </div>
                                             </>
