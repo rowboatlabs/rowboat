@@ -7,7 +7,7 @@ import clsx from 'clsx';
 import Image from 'next/image';
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Send, Upload, Search } from "lucide-react";
+import { Send, Upload } from "lucide-react";
 import { Workflow } from '../../lib/types/workflow_types';
 
 // Add glow animation styles
@@ -121,17 +121,20 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
 
     // Import JSON functionality
     const handleImportJsonClick = () => {
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        setTimeout(() => {
-            fileInputRef.current?.click();
-        }, 0);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+            setTimeout(() => {
+                fileInputRef.current?.click();
+            }, 0);
+        }
     };
 
     // Handle file selection
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (!file) return;
-        
+        if (!file) {
+            return;
+        }
         setImportLoading(true);
         setImportError(null);
         try {
