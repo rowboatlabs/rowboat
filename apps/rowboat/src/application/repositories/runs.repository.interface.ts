@@ -1,5 +1,13 @@
-import { CreateRunData, Run, UpdateRunData } from "@/src/entities/models/run";
+import { Run, UpdateRunData } from "@/src/entities/models/run";
 import { z } from "zod";
+
+export const CreateRunData = Run.omit({
+    id: true,
+    createdAt: true,
+    lastUpdatedAt: true,
+    status: true,
+    error: true,
+});
 
 export interface IRunsRepository {
     // create a new run

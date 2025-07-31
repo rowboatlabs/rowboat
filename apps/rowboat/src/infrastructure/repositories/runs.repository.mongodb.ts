@@ -1,5 +1,6 @@
 import { IRunsRepository } from "@/src/application/repositories/runs.repository.interface";
-import { CreateRunData, Run, UpdateRunData } from "@/src/entities/models/run";
+import { Run, UpdateRunData } from "@/src/entities/models/run";
+import { CreateRunData } from "@/src/application/repositories/runs.repository.interface";
 import { z } from "zod";
 import { db } from "@/app/lib/mongodb";
 import { ObjectId } from "mongodb";
@@ -29,7 +30,6 @@ export class RunsRepository implements IRunsRepository {
             ...data,
             createdAt: now.toISOString(),
             status: "pending" as const,
-            messages: [],
         }
 
         await this.collection.insertOne({

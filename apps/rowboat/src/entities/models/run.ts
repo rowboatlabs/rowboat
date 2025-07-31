@@ -26,14 +26,6 @@ export const Run = z.object({
     lastUpdatedAt: z.date().optional(),
 });
 
-export const CreateRunData = Run.omit({
-    id: true,
-    createdAt: true,
-    lastUpdatedAt: true,
-    status: true,
-    error: true,
-});
-
 export const UpdateRunData = Run.pick({
     messages: true,
     status: true,

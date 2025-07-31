@@ -1,5 +1,6 @@
 import { IRunsRepository } from "@/src/application/repositories/runs.repository.interface";
-import { CreateRunData, Run } from "@/src/entities/models/run";
+import { Run } from "@/src/entities/models/run";
+import { CreateRunData } from "../../repositories/runs.repository.interface";
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { authorize, getCustomerIdForProject } from "@/app/lib/billing";
 import { BillingError } from '@/src/entities/errors/common';
@@ -82,6 +83,13 @@ export class CreateRunUseCase implements ICreateRunUseCase {
                 throw new BillingError(response.error || 'Billing error');
             }
         }
+
+        // set timestamps where missing
+        data.runData.messages.forEach(msg => {
+            if (!msg.timestamp) {
+                msg.timestamp = new Date().toISOString();
+            }
+        });
 
         // create run
         return await this.runsRepository.createRun(data.runData);

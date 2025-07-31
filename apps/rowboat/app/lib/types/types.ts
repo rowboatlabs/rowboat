@@ -1,24 +1,28 @@
 import { z } from "zod";
 import { Workflow, WorkflowTool } from "./workflow_types";
 
-export const SystemMessage = z.object({
+export const BaseMessage = z.object({
+    timestamp: z.string().datetime().optional(),
+});
+
+export const SystemMessage = BaseMessage.extend({
     role: z.literal("system"),
     content: z.string(),
 });
 
-export const UserMessage = z.object({
+export const UserMessage = BaseMessage.extend({
     role: z.literal("user"),
     content: z.string(),
 });
 
-export const AssistantMessage = z.object({
+export const AssistantMessage = BaseMessage.extend({
     role: z.literal("assistant"),
     content: z.string(),
     agentName: z.string().nullable(),
     responseType: z.enum(['internal', 'external']),
 });
 
-export const AssistantMessageWithToolCalls = z.object({
+export const AssistantMessageWithToolCalls = BaseMessage.extend({
     role: z.literal("assistant"),
     content: z.null(),
     toolCalls: z.array(z.object({
@@ -32,7 +36,7 @@ export const AssistantMessageWithToolCalls = z.object({
     agentName: z.string().nullable(),
 });
 
-export const ToolMessage = z.object({
+export const ToolMessage = BaseMessage.extend({
     role: z.literal("tool"),
     content: z.string(),
     toolCallId: z.string(),
