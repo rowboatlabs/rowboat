@@ -98,8 +98,11 @@ ${JSON.stringify(simplifiedDataSources)}
 
 async function searchRelevantTools(query: string): Promise<string> {
     const logger = new PrefixLogger("copilot-search-tools");
+    console.log("🔧 TOOL CALL: searchRelevantTools", { query });
+    
     if (!USE_COMPOSIO_TOOLS) {
         logger.log("dynamic tool search is disabled");
+        console.log("❌ TOOL CALL SKIPPED: searchRelevantTools - Composio tools disabled");
         return 'No tools found!';
     }
 
@@ -107,6 +110,7 @@ async function searchRelevantTools(query: string): Promise<string> {
 
     // Search for relevant tool slugs
     logger.log('searching for relevant tools...');
+    console.log("🔍 TOOL CALL: COMPOSIO_SEARCH_TOOLS", { use_case: query });
     const searchResult = await composio.tools.execute('COMPOSIO_SEARCH_TOOLS', {
         userId: '0000-0000-0000',
         arguments: { use_case: query },
@@ -114,13 +118,22 @@ async function searchRelevantTools(query: string): Promise<string> {
 
     if (!searchResult.successful || !Array.isArray(searchResult.data?.results)) {
         logger.log("tool search was not successful or returned no results");
+        console.log("❌ TOOL CALL FAILED: COMPOSIO_SEARCH_TOOLS", { 
+            successful: searchResult.successful, 
+            results: searchResult.data?.results 
+        });
         return '';
     }
 
     const toolSlugs: string[] = searchResult.data.results.map((result: any) => result.tool);
     logger.log(`found tool slugs: ${toolSlugs.join(', ')}`);
+    console.log("✅ TOOL CALL SUCCESS: COMPOSIO_SEARCH_TOOLS", { 
+        toolSlugs, 
+        resultCount: toolSlugs.length 
+    });
 
     // Enrich tools with full details
+    console.log("🔧 TOOL CALL: getTool (multiple calls)", { toolSlugs });
     const composioTools = await Promise.all(toolSlugs.map(slug => getTool(slug)));
     const workflowTools: z.infer<typeof WorkflowTool>[] = composioTools.map(tool => ({
         name: tool.name,
@@ -147,6 +160,10 @@ async function searchRelevantTools(query: string): Promise<string> {
 
     const response = `The following tools were found:\n\n${toolConfigs}`;
     logger.log('returning response', response);
+    console.log("✅ TOOL CALL COMPLETED: searchRelevantTools", { 
+        toolsFound: workflowTools.length,
+        toolNames: workflowTools.map(t => t.name)
+    });
     return response;
 }
 
@@ -215,6 +232,13 @@ export async function* streamMultiAgentResponse(
     logger.log('context', context);
     logger.log('projectId', projectId);
 
+    console.log("🚀 COPILOT STREAM STARTED", { 
+        projectId, 
+        contextType: context?.type, 
+        contextName: context && 'name' in context ? context.name : undefined,
+        messageCount: messages.length 
+    });
+
     // set the current workflow prompt
     const currentWorkflowPrompt = getCurrentWorkflowPrompt(workflow);
 
@@ -228,22 +252,29 @@ export async function* streamMultiAgentResponse(
     updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, dataSourcesPrompt);
 
     // call model
-    console.log("calling model", JSON.stringify({
+    console.log("🤖 AI MODEL CALL STARTED", {
         model: COPILOT_MODEL,
-        system: SYSTEM_PROMPT,
-        messages: messages,
-    }));
+        maxSteps: 5,
+        availableTools: ["search_relevant_tools"]
+    });
+    
     const { textStream } = streamText({
         model: openai(COPILOT_MODEL),
         maxSteps: 5,
         tools: {
             "search_relevant_tools": tool({
-                description: "Search for relevant tools",
+                description: "Use this tool whenever the user wants to add tools to their agents , search for tools or have questions about specific tools. ALWAYS search for real tools before suggesting mock tools. Use this when users mention: email sending, calendar management, file operations, database queries, web scraping, payment processing, social media integration, CRM operations, analytics, notifications, or any external service integration. This tool searches a comprehensive library of real, production-ready tools that can be integrated into workflows.",
                 parameters: z.object({
-                    query: z.string().describe("the use-case to search for"),
+                    query: z.string().describe("Describe the specific functionality or use-case needed. Be specific about the action (e.g., 'send email via Gmail', 'create calendar events', 'upload files to cloud storage', 'process payments via Stripe', 'search web content', 'manage customer data in CRM'). Include the service/platform if mentioned by user."),
                 }),
                 execute: async ({ query }: { query: string }) => {
-                    return await searchRelevantTools(query);
+                    console.log("🎯 AI TOOL CALL: search_relevant_tools", { query });
+                    const result = await searchRelevantTools(query);
+                    console.log("✅ AI TOOL CALL COMPLETED: search_relevant_tools", { 
+                        query, 
+                        resultLength: result.length 
+                    });
+                    return result;
                 },
             }),
         },
@@ -257,11 +288,21 @@ export async function* streamMultiAgentResponse(
     });
 
     // emit response chunks
+    let chunkCount = 0;
     for await (const chunk of textStream) {
+        chunkCount++;
+        if (chunkCount === 1) {
+            console.log("📤 FIRST RESPONSE CHUNK SENT");
+        }
         yield {
             content: chunk,
         };
     }
+
+    console.log("✅ COPILOT STREAM COMPLETED", { 
+        projectId, 
+        totalChunks: chunkCount 
+    });
 
     // done
     yield {

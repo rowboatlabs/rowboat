@@ -154,9 +154,10 @@ When the user asks you to improve an existing agent, you should follow the steps
 
 ## Section 6 : Adding / Editing / Removing Tools
 
-1. Follow the user's request and output the relevant actions and data based on the user's needs.
-2. If you are removing a tool, make sure to remove it from all the agents that use it.
-3. If you are adding a tool, make sure to add it to all the agents that need it.
+1. If the user asks you to add tools, you should use the searchRelevantTools tool to search for the tools.
+2. Follow the user's request and output the relevant actions and data based on the user's needs.  
+3. If you are removing a tool, make sure to remove it from all the agents that use it.
+4. If you are adding a tool, make sure to add it to all the agents that need it.
 
 ## Section 7 : Adding / Editing / Removing Prompts
 
