@@ -1,17 +1,18 @@
 'use client';
 
 import { Project } from "../lib/types/project_types";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { z } from "zod";
-import { listProjects, createProject } from "../actions/project_actions";
+import { listProjects, createProject, createProjectFromWorkflowJson } from "../actions/project_actions";
 import { USE_MULTIPLE_PROJECTS } from "@/app/lib/feature_flags";
+import { Workflow } from '../lib/types/workflow_types';
 import { SearchProjects } from "./components/search-projects";
 import { CreateProject } from "./components/create-project";
 import clsx from 'clsx';
 import Image from 'next/image';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send } from "lucide-react";
+import { Send, Upload } from "lucide-react";
 import { useRouter } from 'next/navigation';
 
 // Add glow animation styles
@@ -83,6 +84,11 @@ export default function App() {
     const [userPrompt, setUserPrompt] = useState('');
     const [isCreating, setIsCreating] = useState(false);
     const [promptError, setPromptError] = useState<string | null>(null);
+    const [importLoading, setImportLoading] = useState(false);
+    const [importedJson, setImportedJson] = useState<string | null>(null);
+    const [importedFilename, setImportedFilename] = useState<string | null>(null);
+    const [importError, setImportError] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
 
     const getNextAssistantNumber = (projects: z.infer<typeof Project>[]) => {
@@ -105,10 +111,10 @@ export default function App() {
             setIsLoading(true);
             const projects = await listProjects();
             if (!ignore) {
-                const sortedProjects = [...projects].sort((a, b) => 
+                const sortedProjects = [...projects].sort((a, b) =>
                     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
                 );
-                
+
                 setProjects(sortedProjects);
                 setIsLoading(false);
                 const nextNumber = getNextAssistantNumber(sortedProjects);
@@ -145,11 +151,11 @@ export default function App() {
                 setPromptError("Prompt cannot be empty");
                 return;
             }
-            
+
             setIsCreating(true);
             const formData = new FormData();
             formData.append('name', defaultName);
-            
+
             const response = await createProject(formData);
             if ('id' in response) {
                 // Store the prompt in localStorage for the workflow page
@@ -163,32 +169,96 @@ export default function App() {
         }
     };
 
+    // Import JSON functionality
+    const handleImportJsonClick = () => {
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setTimeout(() => {
+            fileInputRef.current?.click();
+        }, 0);
+    };
+
+    // Handle file selection
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setImportLoading(true);
+        setImportError(null);
+        try {
+            const text = await file.text();
+            let parsed = Workflow.safeParse(JSON.parse(text));
+            if (!parsed.success) {
+                setImportError('Invalid workflow JSON: ' + JSON.stringify(parsed.error.issues));
+                setImportLoading(false);
+                return;
+            }
+
+            // Create project from imported JSON
+            const formData = new FormData();
+            formData.append('name', defaultName);
+            formData.append('workflowJson', text);
+            const response = await createProjectFromWorkflowJson(formData);
+            if ('id' in response) {
+                router.push(`/projects/${response.id}/workflow`);
+            } else {
+                setImportError(response.billingError || 'Failed to create project');
+            }
+        } catch (err) {
+            setImportError('Invalid JSON: ' + (err instanceof Error ? err.message : String(err)));
+        } finally {
+            setImportLoading(false);
+        }
+    };
+
+    // Handle "I'll build it myself" button
+    const handleBuildItMyself = async () => {
+        try {
+            const formData = new FormData();
+            formData.append('name', defaultName);
+            formData.append('template', 'default');
+            const response = await createProject(formData);
+            if ('id' in response) {
+                router.push(`/projects/${response.id}/workflow`);
+            }
+        } catch (error) {
+            console.error('Error creating project:', error);
+        }
+    };
+
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-            {/* Hero Section */}
+        <>
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json"
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+            />
+            <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+                {/* Hero Section */}
             <div className="px-8 py-16">
-                <div className="max-w-6xl mx-auto">
+                <div className="max-w-7xl mx-auto">
                     {/* Main Headline */}
                     <div className="text-center mb-16">
                         <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-6 leading-tight">
-                            Build <span className="bg-gradient-to-r from-blue-500 to-purple-500 bg-clip-text text-transparent">Rowboats</span> that work for you
+                            Build <span className="bg-gradient-to-r from-blue-500 to-purple-500 bg-clip-text text-transparent">Rowboats</span> that Work for You
                         </h1>
                     </div>
 
                     {/* Input Section with Mascot */}
-                    <div className="max-w-4xl mx-auto">
-                        <div className="flex items-start gap-12">
+                    <div className="max-w-5xl mx-auto">
+                        <div className="flex items-center gap-12">
                             {/* Mascot */}
                             <div className="flex-shrink-0">
                                 <Image
                                     src="/mascot.png"
                                     alt="Rowboat Mascot"
-                                    width={200}
-                                    height={200}
-                                    className="w-[200px] h-[200px] object-contain"
+                                    width={260}
+                                    height={260}
+                                    className="w-[260px] h-[260px] object-contain"
                                 />
                             </div>
-                            
+
                             {/* Input Area */}
                             <div className="flex-1">
                                 <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700">
@@ -212,7 +282,7 @@ export default function App() {
                                                     !userPrompt && emptyTextareaStyles,
                                                     "pr-14" // more space for send button
                                                 )}
-                                                style={{ minHeight: "120px" }}
+                                                style={{ minHeight: "96px" }}
                                                 autoFocus
                                                 autoResize
                                                 onKeyDown={(e) => {
@@ -245,6 +315,40 @@ export default function App() {
                                             </p>
                                         )}
                                     </div>
+
+                                    {/* Separation line with OR */}
+                                    <div className="relative my-3">
+                                        <div className="absolute inset-0 flex items-center">
+                                            <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
+                                        </div>
+                                        <div className="relative flex justify-center text-sm">
+                                            <span className="bg-white dark:bg-gray-800 px-3 text-gray-500 dark:text-gray-400">OR</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Action buttons */}
+                                    <div className="flex gap-3 justify-start">
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            onClick={handleImportJsonClick}
+                                            type="button"
+                                            startContent={<Upload size={14} />}
+                                            className="bg-white dark:bg-white text-gray-900 hover:bg-gray-50 border border-gray-300 dark:border-gray-300"
+                                            disabled={importLoading}
+                                        >
+                                            {importLoading ? 'Importing...' : 'Import JSON'}
+                                        </Button>
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            onClick={handleBuildItMyself}
+                                            type="button"
+                                            className="bg-white dark:bg-white text-gray-900 hover:bg-gray-50 border border-gray-300 dark:border-gray-300"
+                                        >
+                                            Go to Builder
+                                        </Button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -255,7 +359,7 @@ export default function App() {
             {/* Select Existing Assistant Section */}
             {USE_MULTIPLE_PROJECTS && projects.length > 0 && (
                 <div className="px-8 pb-16">
-                    <div className="max-w-6xl mx-auto">
+                    <div className="max-w-7xl mx-auto">
                         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700">
                             <div className="px-6 pt-6 pb-4">
                                 <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
@@ -298,6 +402,7 @@ export default function App() {
                     </div>
                 </div>
             )}
-        </div>
+            </div>
+        </>
     );
-} 
+}
