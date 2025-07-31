@@ -9,7 +9,6 @@ import {
   SettingsIcon, 
   WorkflowIcon, 
   PlayIcon,
-  FolderOpenIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   Moon,
@@ -18,17 +17,14 @@ import {
   MessageSquareIcon,
   LogsIcon
 } from "lucide-react";
-import { getProjectConfig, listProjects, createProject } from "@/app/actions/project_actions";
+import { getProjectConfig, createProject } from "@/app/actions/project_actions";
 import { useTheme } from "@/app/providers/theme-provider";
 import { USE_PRODUCT_TOUR } from '@/app/lib/feature_flags';
 import { useHelpModal } from "@/app/providers/help-modal-provider";
-import { Project } from "@/app/lib/types/project_types";
-import { z } from "zod";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Plus } from "lucide-react";
-import { CreateProject } from "@/app/projects/components/create-project";
+import { Send } from "lucide-react";
 
 interface SidebarProps {
   projectId?: string;
@@ -45,19 +41,13 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
   const pathname = usePathname();
   const router = useRouter();
   const [projectName, setProjectName] = useState<string>("Select Project");
-  const [allProjects, setAllProjects] = useState<z.infer<typeof Project>[]>([]);
-  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [assistantName, setAssistantName] = useState("");
   const [assistantPrompt, setAssistantPrompt] = useState("");
   const [isCreatingAssistant, setIsCreatingAssistant] = useState(false);
-  const [defaultName, setDefaultName] = useState('Assistant 1');
-  const [isProjectPaneOpen, setIsProjectPaneOpen] = useState(false);
   const isProjectsRoute = pathname === '/projects';
   const { theme, toggleTheme } = useTheme();
   const { showHelpModal } = useHelpModal();
-  const { isOpen: isAssistantsModalOpen, onOpen: onAssistantsModalOpen, onClose: onAssistantsModalClose } = useDisclosure();
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure();
-  const { isOpen: isNewProjectModalOpen, onOpen: onNewProjectModalOpen, onClose: onNewProjectModalClose } = useDisclosure();
 
   useEffect(() => {
     async function fetchProjectName() {
@@ -74,67 +64,7 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
     fetchProjectName();
   }, [projectId, isProjectsRoute]);
 
-  // Load projects when modal opens
-  useEffect(() => {
-    async function loadProjects() {
-      if ((isAssistantsModalOpen || isNewProjectModalOpen) && !isProjectsRoute) {
-        setIsLoadingProjects(true);
-        try {
-          const projects = await listProjects();
-          // For assistants modal, filter out current project
-          const otherProjects = isAssistantsModalOpen ? projects.filter(p => p._id !== projectId) : projects;
-          const sortedProjects = [...otherProjects].sort((a, b) => 
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-          setAllProjects(sortedProjects);
-          
-          // Calculate default name for new project
-          const getNextAssistantNumber = () => {
-            const untitledProjects = projects
-              .map(p => p.name)
-              .filter(name => name.startsWith('Assistant '))
-              .map(name => {
-                const num = parseInt(name.replace('Assistant ', ''));
-                return isNaN(num) ? 0 : num;
-              });
 
-            if (untitledProjects.length === 0) return 1;
-            return Math.max(...untitledProjects) + 1;
-          };
-          
-          const nextNumber = getNextAssistantNumber();
-          setDefaultName(`Assistant ${nextNumber}`);
-        } catch (error) {
-          console.error('Failed to fetch projects:', error);
-        } finally {
-          setIsLoadingProjects(false);
-        }
-      }
-    }
-
-    loadProjects();
-  }, [isAssistantsModalOpen, isNewProjectModalOpen, projectId, isProjectsRoute]);
-
-  // Generate default assistant name when create modal opens
-  useEffect(() => {
-    if (isCreateModalOpen && !assistantName) {
-      const getNextAssistantNumber = () => {
-        const untitledProjects = allProjects
-          .map(p => p.name)
-          .filter(name => name.startsWith('Assistant '))
-          .map(name => {
-            const num = parseInt(name.replace('Assistant ', ''));
-            return isNaN(num) ? 0 : num;
-          });
-
-        if (untitledProjects.length === 0) return 1;
-        return Math.max(...untitledProjects) + 1;
-      };
-
-      const nextNumber = getNextAssistantNumber();
-      setAssistantName(`Assistant ${nextNumber}`);
-    }
-  }, [isCreateModalOpen, allProjects, assistantName]);
 
   const handleCreateAssistant = async () => {
     if (!assistantPrompt.trim()) return;
@@ -152,7 +82,6 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
         }
         // Close modals and navigate
         onCreateModalClose();
-        onAssistantsModalClose();
         router.push(`/projects/${response.id}/workflow`);
       }
     } catch (error) {
@@ -232,48 +161,6 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
 
           {!isProjectsRoute && (
             <>
-              {/* Project Selector */}
-              <div className="p-3 border-b border-zinc-100 dark:border-zinc-800 space-y-2">
-                <Tooltip content={collapsed ? "Change Assistant" : ""} showArrow placement="right">
-                  <button 
-                    onClick={onAssistantsModalOpen}
-                    className={`
-                      flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all
-                      ${collapsed ? 'justify-center py-4' : 'gap-3 px-4 py-2.5'}
-                    `}
-                  >
-                    <FolderOpenIcon 
-                      size={collapsed ? COLLAPSED_ICON_SIZE : EXPANDED_ICON_SIZE} 
-                      className="text-zinc-500 dark:text-zinc-400 transition-all duration-200" 
-                    />
-                    {!collapsed && (
-                      <span className="text-sm font-medium">
-                        Change Assistant
-                      </span>
-                    )}
-                  </button>
-                </Tooltip>
-                
-                <Tooltip content={collapsed ? "New Project" : ""} showArrow placement="right">
-                  <button 
-                    onClick={onNewProjectModalOpen}
-                    className={`
-                      w-full flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all
-                      ${collapsed ? 'justify-center py-4' : 'gap-3 px-4 py-2.5'}
-                    `}
-                  >
-                    <Plus 
-                      size={collapsed ? COLLAPSED_ICON_SIZE : EXPANDED_ICON_SIZE} 
-                      className="text-zinc-500 dark:text-zinc-400 transition-all duration-200" 
-                    />
-                    {!collapsed && (
-                      <span className="text-sm font-medium">
-                        New Project
-                      </span>
-                    )}
-                  </button>
-                </Tooltip>
-              </div>
 
               {/* Project-specific navigation Items */}
               {projectId && <nav className="p-3 space-y-4">
@@ -402,63 +289,6 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
         </div>
       </aside>
 
-      {/* Assistants Modal */}
-      <Modal 
-        isOpen={isAssistantsModalOpen} 
-        onClose={onAssistantsModalClose}
-        size="4xl"
-        scrollBehavior="inside"
-      >
-        <ModalContent>
-          <ModalHeader className="flex flex-col gap-1">
-            Select Assistant
-          </ModalHeader>
-          <ModalBody>
-            <div className="space-y-2">
-              {isLoadingProjects ? (
-                <div className="flex items-center justify-center py-8 text-sm text-zinc-500">
-                  Loading assistants...
-                </div>
-              ) : allProjects.length > 0 ? (
-                <>
-                  <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300 px-1 py-2">
-                    Existing Assistants ({allProjects.length})
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto p-1">
-                    {allProjects.map((project) => (
-                      <Link
-                        key={project._id}
-                        href={`/projects/${project._id}/workflow`}
-                        onClick={onAssistantsModalClose}
-                        className="block p-4 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:border-indigo-300 dark:hover:border-indigo-600 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-all group"
-                      >
-                        <div className="space-y-2">
-                          <div className="font-medium text-zinc-900 dark:text-zinc-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors line-clamp-1">
-                            {project.name}
-                          </div>
-                          <div className="text-xs text-zinc-500 dark:text-zinc-500">
-                            Created {new Date(project.createdAt).toLocaleDateString()}
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <div className="text-xs text-zinc-400 dark:text-zinc-600">
-                              Last updated {new Date(project.lastUpdatedAt).toLocaleDateString()}
-                            </div>
-                            <div className="w-2 h-2 rounded-full bg-green-500 opacity-75"></div>
-                          </div>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="text-sm text-zinc-500 dark:text-zinc-500 text-center py-8">
-                  No other assistants found
-                </div>
-              )}
-            </div>
-          </ModalBody>
-        </ModalContent>
-      </Modal>
 
       {/* Create Assistant Modal */}
       <Modal 
@@ -552,29 +382,6 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
         </ModalContent>
       </Modal>
 
-      {/* New Project Modal - matches projects/select view */}
-      <Modal 
-        isOpen={isNewProjectModalOpen} 
-        onClose={onNewProjectModalClose}
-        size="5xl"
-        scrollBehavior="inside"
-      >
-        <ModalContent>
-          <ModalHeader className="flex flex-col gap-1">
-            Create New Assistant
-          </ModalHeader>
-          <ModalBody className="p-0">
-            <div className="p-8">
-              <CreateProject
-                defaultName={defaultName}
-                onOpenProjectPane={() => setIsProjectPaneOpen(false)}
-                isProjectPaneOpen={false}
-                hideHeader={true}
-              />
-            </div>
-          </ModalBody>
-        </ModalContent>
-      </Modal>
     </>
   );
 } 
