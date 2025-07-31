@@ -165,16 +165,16 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
               <Link
                 href="/projects"
                 className={`
-                  w-full flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all
-                  ${collapsed ? 'justify-center py-4' : 'gap-3 px-4 py-2.5'}
+                  w-full flex items-center justify-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all
+                  ${collapsed ? 'py-3' : 'gap-3 px-4 py-2.5 justify-start'}
                 `}
               >
                 <Image
                   src="/logo-only.png"
                   alt="Rowboat"
-                  width={collapsed ? 20 : 24}
-                  height={collapsed ? 20 : 24}
-                  className="rounded-full transition-all duration-200"
+                  width={collapsed ? 24 : 24}
+                  height={collapsed ? 24 : 24}
+                  className="rounded-full transition-all duration-200 flex-shrink-0"
                 />
                 {!collapsed && (
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">

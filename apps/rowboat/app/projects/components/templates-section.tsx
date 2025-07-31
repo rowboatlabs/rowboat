@@ -82,29 +82,30 @@ export function TemplatesSection({}: TemplatesSectionProps) {
     }, []);
 
     return (
-        <div className="px-8 py-16">
-            <div className="max-w-7xl mx-auto">
-                <div className="px-6 pt-6 pb-4">
+        <div className="h-screen flex flex-col px-8 py-8 overflow-hidden">
+            <div className="max-w-7xl mx-auto w-full flex flex-col h-full">
+                <div className="px-6 pb-4">
                     <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
                         Pre-built agents
                     </h2>
                 </div>
-                <div className="px-6 pb-6">
+                <div className="px-6 flex-1 overflow-hidden">
                         {templatesLoading ? (
-                            <div className="flex items-center justify-center py-8 text-sm text-gray-500 dark:text-gray-400">
+                            <div className="flex items-center justify-center h-full text-sm text-gray-500 dark:text-gray-400">
                                 Loading templates...
                             </div>
                         ) : templatesError ? (
-                            <div className="flex items-center justify-center py-8 text-sm text-red-500">
+                            <div className="flex items-center justify-center h-full text-sm text-red-500 dark:text-red-400">
                                 Error: {templatesError}
                             </div>
                         ) : templates.length === 0 ? (
-                            <div className="flex items-center justify-center py-8 text-sm text-gray-500 dark:text-gray-400">
+                            <div className="flex items-center justify-center h-full text-sm text-gray-500 dark:text-gray-400">
                                 No templates available
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                {templates.map((template) => (
+                            <div className="h-full overflow-y-auto">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-4">
+                                    {templates.map((template) => (
                                     <button
                                         key={template.id}
                                         onClick={() => handleTemplateSelect(template.id, template.name)}
@@ -155,7 +156,8 @@ export function TemplatesSection({}: TemplatesSectionProps) {
                                             </div>
                                         </div>
                                     </button>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
                         )}
                 </div>

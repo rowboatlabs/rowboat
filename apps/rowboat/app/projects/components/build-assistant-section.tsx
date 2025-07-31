@@ -285,7 +285,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                                             onClick={handleImportJsonClick}
                                             type="button"
                                             startContent={<Upload size={14} />}
-                                            className="bg-white dark:bg-white text-gray-900 hover:bg-gray-50 border border-gray-300 dark:border-gray-300"
+                                            className="bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600"
                                             disabled={importLoading}
                                         >
                                             {importLoading ? 'Importing...' : 'Import JSON'}
@@ -295,7 +295,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                                             size="sm"
                                             onClick={handleBuildItMyself}
                                             type="button"
-                                            className="bg-white dark:bg-white text-gray-900 hover:bg-gray-50 border border-gray-300 dark:border-gray-300"
+                                            className="bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600"
                                         >
                                             Go to Builder
                                         </Button>
