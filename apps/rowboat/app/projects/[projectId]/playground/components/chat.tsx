@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getAssistantResponseStreamId } from "@/app/actions/actions";
+import { createPlaygroundChatRun } from "@/app/actions/run_actions";
 import { Messages } from "./messages";
-import z from "zod";
+import z, { set } from "zod";
 import { Message, ToolMessage } from "@/app/lib/types/types";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { ComposeBoxPlayground } from "@/components/common/compose-box-playground";
@@ -11,6 +11,7 @@ import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { ChevronDownIcon } from "@heroicons/react/24/outline";
 import { FeedbackModal } from "./feedback-modal";
 import { FIX_WORKFLOW_PROMPT, FIX_WORKFLOW_PROMPT_WITH_FEEDBACK, EXPLAIN_WORKFLOW_PROMPT_ASSISTANT, EXPLAIN_WORKFLOW_PROMPT_TOOL, EXPLAIN_WORKFLOW_PROMPT_TRANSITION } from "../copilot-prompts";
+import { Run } from "@/src/entities/models/run";
 
 export function Chat({
     projectId,
@@ -29,9 +30,10 @@ export function Chat({
     showJsonMode?: boolean;
     triggerCopilotChat?: (message: string) => void;
 }) {
+    const [run, setRun] = useState<z.infer<typeof Run> | null>(null);
     const [messages, setMessages] = useState<z.infer<typeof Message>[]>([]);
-    const [loadingAssistantResponse, setLoadingAssistantResponse] = useState<boolean>(false);
-    const [fetchResponseError, setFetchResponseError] = useState<string | null>(null);
+    const [loading, setLoading] = useState<boolean>(false);
+    const [error, setError] = useState<string | null>(null);
     const [billingError, setBillingError] = useState<string | null>(null);
     const [lastAgenticRequest, setLastAgenticRequest] = useState<unknown | null>(null);
     const [lastAgenticResponse, setLastAgenticResponse] = useState<unknown | null>(null);
@@ -142,7 +144,7 @@ export function Chat({
         if (eventSourceRef.current) {
             eventSourceRef.current.close();
             eventSourceRef.current = null;
-            setLoadingAssistantResponse(false);
+            setLoading(false);
         }
     }, []);
 
@@ -152,7 +154,7 @@ export function Chat({
             content: prompt,
         }];
         setMessages(updatedMessages);
-        setFetchResponseError(null);
+        setError(null);
         setIsLastInteracted(true);
     }
 
@@ -165,7 +167,7 @@ export function Chat({
         } else {
             setShowUnreadBubble(true);
         }
-    }, [optimisticMessages, loadingAssistantResponse, autoScroll]);
+    }, [optimisticMessages, loading, autoScroll]);
 
     // Expose copy function to parent
     useEffect(() => {
@@ -190,23 +192,14 @@ export function Chat({
         }
     }, [messages, messageSubscriber]);
 
-    // get assistant response
+    // create a new run
     useEffect(() => {
         let ignore = false;
-        let eventSource: EventSource | null = null;
-        let msgs: z.infer<typeof Message>[] = [];
 
         async function process() {
-            setLoadingAssistantResponse(true);
-            setFetchResponseError(null);
-
-            // Reset request/response state before making new request
-            setLastAgenticRequest(null);
-            setLastAgenticResponse(null);
-
-            let streamId: string | null = null;
+            // if there is no run, create it
             try {
-                const response = await getAssistantResponseStreamId(
+                const response = await createPlaygroundChatRun(
                     projectId,
                     workflow,
                     messages,
@@ -216,25 +209,69 @@ export function Chat({
                 }
                 if ('billingError' in response) {
                     setBillingError(response.billingError);
-                    setFetchResponseError(response.billingError);
-                    setLoadingAssistantResponse(false);
-                    console.log('returning from getAssistantResponseStreamId due to billing error');
+                    setError(response.billingError);
+                    setLoading(false);
+                    console.log('returning from createRun due to billing error');
                     return;
                 }
-                streamId = response.streamId;
+                setRun(response);
             } catch (err) {
                 if (!ignore) {
-                    setFetchResponseError(`Failed to get assistant response: ${err instanceof Error ? err.message : 'Unknown error'}`);
-                    setLoadingAssistantResponse(false);
+                    setError(`Failed to create run: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                    setLoading(false);
                 }
             }
+        }
 
-            if (ignore || !streamId) {
+        // if there's already a run, don't create another one
+        if (run) {
+            return;
+        }
+
+        // if there are no messages yet, return
+        if (messages.length === 0) {
+            return;
+        }
+
+        // if last message is not a user message, return
+        const last = messages[messages.length - 1];
+        if (last.role !== 'user') {
+            return;
+        }
+
+        // if there is an error, return
+        if (error) {
+            return;
+        }
+
+        console.log(`executing createRun: fetchresponseerr: ${error}`);
+        setLoading(true);
+        setError(null);
+        process();
+
+        return () => {
+            ignore = true;
+        };
+    }, [
+        messages,
+        projectId,
+        workflow,
+        error,
+        run,
+    ]);
+
+    // stream from run until completion
+    useEffect(() => {
+        let ignore = false;
+        let eventSource: EventSource | null = null;
+        let msgs: z.infer<typeof Message>[] = [];
+
+        async function process() {
+            if (!run) {
                 return;
             }
 
-            console.log(`chat.tsx: got streamid: ${streamId}`);
-            eventSource = new EventSource(`/api/stream-response/${streamId}`);
+            eventSource = new EventSource(`/api/stream-response/${run.id}`);
             eventSourceRef.current = eventSource;
 
             eventSource.addEventListener("message", (event) => {
@@ -251,7 +288,7 @@ export function Chat({
                     setOptimisticMessages(prev => [...prev, parsedMsg]);
                 } catch (err) {
                     console.error('Failed to parse SSE message:', err);
-                    setFetchResponseError(`Failed to parse SSE message: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                    setError(`Failed to parse SSE message: ${err instanceof Error ? err.message : 'Unknown error'}`);
                     // Rollback to last known good state on parsing errors
                     setOptimisticMessages(messages);
                 }
@@ -274,7 +311,7 @@ export function Chat({
 
                 // Commit all streamed messages atomically to the source of truth
                 setMessages([...messages, ...msgs]);
-                setLoadingAssistantResponse(false);
+                setLoading(false);
             });
 
             eventSource.addEventListener('stream_error', (event) => {
@@ -286,38 +323,34 @@ export function Chat({
 
                 console.error('SSE Error:', event);
                 if (!ignore) {
-                    setLoadingAssistantResponse(false);
-                    setFetchResponseError('Error: ' + JSON.parse(event.data).error);
+                    setLoading(false);
+                    setError('Error: ' + JSON.parse(event.data).error);
                     // Rollback to last known good state on stream errors
                     setOptimisticMessages(messages);
+                    // Clear the run on error
+                    setRun(null);
                 }
             });
 
             eventSource.onerror = (error) => {
                 console.error('SSE Error:', error);
                 if (!ignore) {
-                    setLoadingAssistantResponse(false);
-                    setFetchResponseError('Stream connection failed');
+                    setLoading(false);
+                    setError('Stream connection failed');
                     // Rollback to last known good state on connection errors
                     setOptimisticMessages(messages);
+                    // Clear the run on error
+                    setRun(null);
                 }
             };
         }
 
-        // if last message is not a user message, return
-        if (messages.length > 0) {
-            const last = messages[messages.length - 1];
-            if (last.role !== 'user') {
-                return;
-            }
-        }
-
-        // if there is an error, return
-        if (fetchResponseError) {
+        // Only stream if we have a run
+        if (!run) {
             return;
         }
 
-        console.log(`executing response process: fetchresponseerr: ${fetchResponseError}`);
+        console.log(`executing streamFromRun for run: ${run.id}`);
         process();
 
         return () => {
@@ -328,10 +361,8 @@ export function Chat({
             }
         };
     }, [
+        run,
         messages,
-        projectId,
-        workflow,
-        fetchResponseError,
     ]);
 
     return (
@@ -349,9 +380,17 @@ export function Chat({
                 >
                     <Messages
                         projectId={projectId}
-                        messages={optimisticMessages}
+                        messages={[
+                            {
+                                role: 'assistant',
+                                content: 'Hi, how can I help you today?',
+                                agentName: 'assistant',
+                                responseType: 'external',
+                            },
+                            ...optimisticMessages,
+                        ]}
                         toolCallResults={toolCallResults}
-                        loadingAssistantResponse={loadingAssistantResponse}
+                        loadingAssistantResponse={loading}
                         workflow={workflow}
                         showDebugMessages={showDebugMessages}
                         showJsonMode={showJsonMode}
@@ -403,15 +442,15 @@ export function Chat({
                             </Button>
                         </div>
                     )}
-                    {fetchResponseError && (
+                    {error && (
                         <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 
                                       rounded-lg flex gap-2 justify-between items-center">
-                            <p className="text-red-600 dark:text-red-400 text-sm">{fetchResponseError}</p>
+                            <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
                             <Button
                                 size="sm"
                                 color="danger"
                                 onPress={() => {
-                                    setFetchResponseError(null);
+                                    setError(null);
                                     setBillingError(null);
                                 }}
                             >
@@ -423,7 +462,7 @@ export function Chat({
                     <ComposeBoxPlayground
                         handleUserMessage={handleUserMessage}
                         messages={messages.filter(msg => msg.content !== undefined) as any}
-                        loading={loadingAssistantResponse}
+                        loading={loading}
                         shouldAutoFocus={isLastInteracted}
                         onFocus={() => setIsLastInteracted(true)}
                         onCancel={handleStop}
