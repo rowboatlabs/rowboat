@@ -58,6 +58,7 @@ I'm creating the 2FA Setup agent to assist users in setting up their preferred 2
 
 I'm creating the 2FA Change agent to help users change their 2FA methods effectively:
 
+
 \`\`\`copilot_change
 // action: create_new
 // config_type: agent
@@ -78,6 +79,7 @@ I'm creating the 2FA Change agent to help users change their 2FA methods effecti
 \`\`\`
 
 I'm creating the 2FA Troubleshooting agent to assist users in resolving issues with receiving 2FA codes:
+
 
 \`\`\`copilot_change
 // action: create_new
@@ -109,6 +111,8 @@ I'm creating the hub agent 2FA Hub by modifying the Example Agent to manage and 
   "config_changes": {
     "name": "2FA Hub",
     "description": "Hub agent to manage 2FA-related queries.",
+    "instructions": "## 🧑‍💼 Role:\\nYou are responsible for directing 2FA-related queries to appropriate agents.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Greet the user and ask which 2FA-related query they need help with (e.g., 'Are you setting up, changing, or troubleshooting your 2FA?').\\n2. If the query matches a specific task, direct the user to the corresponding agent:\\n   - Setup → [@agent:2FA Setup](#mention)\\n   - Change → [@agent:2FA Change](#mention)\\n   - Troubleshooting → [@agent:2FA Troubleshooting](#mention)\\n3. If the query doesn't match any specific task, respond with 'I'm sorry, I didn't understand. Could you clarify your request?' or escalate to human support.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Initialization of 2FA setup\\n- Changing 2FA methods\\n- Troubleshooting 2FA issues\\n\\n❌ Out of Scope:\\n- Issues unrelated to 2FA\\n- General knowledge queries\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Direct queries to specific 2FA agents promptly.\\n\\n🚫 Don'ts:\\n- Engage in detailed support.\\n- Extend the conversation beyond 2FA.\\n- Provide user-facing text such as 'I will connect you now...' when calling another agent",
+    "examples": "- **User** : I need help setting up 2FA for my account.\\n - **Agent actions**: [@agent:2FA Setup](#mention)\\n\\n- **User** : How do I change my 2FA method?\\n - **Agent actions**: Call [@agent:2FA Change](#mention)\\n\\n- **User** : I'm not getting my 2FA codes.\\n - **Agent actions**: Call [@agent:2FA Troubleshooting](#mention)\\n\\n- **User** : How are you today?\\n - **Agent response**: I'm doing great. What would like help with today?",
     "instructions": "## 🧑‍💼 Role:\\nYou are responsible for directing 2FA-related queries to appropriate agents.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Greet the user and ask which 2FA-related query they need help with (e.g., 'Are you setting up, changing, or troubleshooting your 2FA?').\\n2. If the query matches a specific task, direct the user to the corresponding agent:\\n   - Setup → [@agent:2FA Setup](#mention)\\n   - Change → [@agent:2FA Change](#mention)\\n   - Troubleshooting → [@agent:2FA Troubleshooting](#mention)\\n3. If the query doesn't match any specific task, respond with 'I'm sorry, I didn't understand. Could you clarify your request?' or escalate to human support.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Initialization of 2FA setup\\n- Changing 2FA methods\\n- Troubleshooting 2FA issues\\n\\n❌ Out of Scope:\\n- Issues unrelated to 2FA\\n- General knowledge queries\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Direct queries to specific 2FA agents promptly.\\n\\n🚫 Don'ts:\\n- Engage in detailed support.\\n- Extend the conversation beyond 2FA.\\n- Provide user-facing text such as 'I will connect you now...' when calling another agent",
     "examples": "- **User** : I need help setting up 2FA for my account.\\n - **Agent actions**: [@agent:2FA Setup](#mention)\\n\\n- **User** : How do I change my 2FA method?\\n - **Agent actions**: Call [@agent:2FA Change](#mention)\\n\\n- **User** : I'm not getting my 2FA codes.\\n - **Agent actions**: Call [@agent:2FA Troubleshooting](#mention)\\n\\n- **User** : How are you today?\\n - **Agent response**: I'm doing great. What would like help with today?",
     "outputVisibility": "user_facing"
