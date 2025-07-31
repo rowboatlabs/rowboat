@@ -50,11 +50,11 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                 setPromptError("Prompt cannot be empty");
                 return;
             }
-            
+
             setIsCreating(true);
             const formData = new FormData();
             formData.append('name', defaultName);
-            
+
             const response = await createProject(formData);
             if ('id' in response) {
                 // Store the prompt in localStorage for the workflow page
@@ -94,7 +94,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                 setImportLoading(false);
                 return;
             }
-            
+
             // Create project from imported JSON
             const formData = new FormData();
             formData.append('name', defaultName);
@@ -173,15 +173,16 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                                                     setUserPrompt(e.target.value);
                                                     setPromptError(null);
                                                 }}
-                                                placeholder="Ask Rowboat to build an AI SDR agent..."
+                                                placeholder="Example: build me an AI SDR agent..."
                                                 className={clsx(
                                                     textareaStyles,
                                                     "text-base",
                                                     "text-gray-900 dark:text-gray-100",
                                                     promptError && "border-red-500 focus:ring-red-500/20",
                                                     !userPrompt && emptyTextareaStyles,
-                                                    "pr-14 min-h-24" // more space for send button
+                                                    "pr-14 min-h-40" // more space for send button
                                                 )}
+                                                rows={3}
                                                 autoFocus
                                                 autoResize
                                                 onKeyDown={(e) => {
@@ -214,7 +215,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                                             </p>
                                         )}
                                     </div>
-                                    
+
                                     {/* Separation line with OR */}
                                     <div className="relative my-3">
                                         <div className="absolute inset-0 flex items-center">
@@ -248,7 +249,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                                             Go to Builder
                                         </Button>
                                     </div>
-                                    
+
                                     {importError && (
                                         <p className="text-sm text-red-500 mt-2">
                                             {importError}
