@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Tooltip, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
 import { UserButton } from "@/app/lib/components/user_button";
 import { 
@@ -15,7 +15,10 @@ import {
   Sun,
   HelpCircle,
   MessageSquareIcon,
-  LogsIcon
+  LogsIcon,
+  Plus,
+  FolderIcon,
+  Sparkles
 } from "lucide-react";
 import { getProjectConfig, createProject } from "@/app/actions/project_actions";
 import { useTheme } from "@/app/providers/theme-provider";
@@ -39,12 +42,14 @@ const COLLAPSED_ICON_SIZE = 20; // DO NOT CHANGE THIS
 
 export default function Sidebar({ projectId, useAuth, collapsed = false, onToggleCollapse, useBilling }: SidebarProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const [projectName, setProjectName] = useState<string>("Select Project");
   const [assistantName, setAssistantName] = useState("");
   const [assistantPrompt, setAssistantPrompt] = useState("");
   const [isCreatingAssistant, setIsCreatingAssistant] = useState(false);
   const isProjectsRoute = pathname === '/projects';
+  const currentSection = searchParams.get('section') || 'build';
   const { theme, toggleTheme } = useTheme();
   const { showHelpModal } = useHelpModal();
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure();
@@ -124,6 +129,27 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
     }
   ];
 
+  const projectsNavItems = [
+    {
+      href: '/projects?section=build',
+      label: 'Build Assistant',
+      icon: Plus,
+      requiresProject: false
+    },
+    {
+      href: '/projects?section=my-assistants',
+      label: 'My Assistants',
+      icon: FolderIcon,
+      requiresProject: false
+    },
+    {
+      href: '/projects?section=templates',
+      label: 'Pre-built Assistants',
+      icon: Sparkles,
+      requiresProject: false
+    }
+  ];
+
   const handleStartTour = () => {
     localStorage.removeItem('user_product_tour_completed');
     window.location.reload();
@@ -159,62 +185,106 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
             </Tooltip>
           </div>
 
-          {!isProjectsRoute && (
-            <>
-
-              {/* Project-specific navigation Items */}
-              {projectId && <nav className="p-3 space-y-4">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const fullPath = `/projects/${projectId}/${item.href}`;
-                  const isActive = pathname.startsWith(fullPath);
-                  const isDisabled = isProjectsRoute && item.requiresProject;
-                  
-                  return (
-                    <Tooltip 
-                      key={item.href}
-                      content={collapsed ? item.label : ""}
-                      showArrow 
-                      placement="right"
+          {/* Navigation Items */}
+          <nav className="p-3 space-y-4">
+            {isProjectsRoute ? (
+              // Projects route navigation
+              projectsNavItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = pathname === '/projects' && (
+                  (item.href.includes('section=build') && currentSection === 'build') ||
+                  (item.href.includes('section=my-assistants') && currentSection === 'my-assistants') ||
+                  (item.href.includes('section=templates') && currentSection === 'templates')
+                );
+                
+                return (
+                  <Tooltip 
+                    key={item.href}
+                    content={collapsed ? item.label : ""}
+                    showArrow 
+                    placement="right"
+                  >
+                    <Link 
+                      href={item.href}
+                      className={`
+                        relative w-full rounded-md flex items-center
+                        text-[15px] font-medium transition-all duration-200
+                        ${collapsed ? 'justify-center py-4' : 'px-2.5 py-3 gap-2.5'}
+                        ${isActive 
+                          ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-600 dark:border-indigo-400' 
+                          : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300'
+                        }
+                      `}
                     >
-                      <Link 
-                        href={isDisabled ? '#' : fullPath}
+                      <Icon 
+                        size={collapsed ? COLLAPSED_ICON_SIZE : EXPANDED_ICON_SIZE} 
                         className={`
-                          relative w-full rounded-md flex items-center
-                          text-[15px] font-medium transition-all duration-200
-                          ${collapsed ? 'justify-center py-4' : 'px-2.5 py-3 gap-2.5'}
-                          ${isActive 
-                            ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-600 dark:border-indigo-400' 
-                            : isDisabled
-                              ? 'text-zinc-300 dark:text-zinc-600 cursor-not-allowed'
-                              : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300'
+                          transition-all duration-200
+                          ${isActive
+                            ? 'text-indigo-600 dark:text-indigo-400'
+                            : 'text-zinc-500 dark:text-zinc-400'
                           }
-                          ${isDisabled ? 'pointer-events-none' : ''}
                         `}
-                        data-tour-target={item.href === 'config' ? 'settings' : item.href === 'sources' ? 'entity-data-sources' : undefined}
-                      >
-                        <Icon 
-                          size={collapsed ? COLLAPSED_ICON_SIZE : EXPANDED_ICON_SIZE} 
-                          className={`
-                            transition-all duration-200
-                            ${isDisabled 
-                              ? 'text-zinc-300 dark:text-zinc-600' 
-                              : isActive
-                                ? 'text-indigo-600 dark:text-indigo-400'
-                                : 'text-zinc-500 dark:text-zinc-400'
-                            }
-                          `}
-                        />
-                        {!collapsed && (
-                          <span>{item.label}</span>
-                        )}
-                      </Link>
-                    </Tooltip>
-                  );
-                })}
-              </nav>}
-            </>
-          )}
+                      />
+                      {!collapsed && (
+                        <span>{item.label}</span>
+                      )}
+                    </Link>
+                  </Tooltip>
+                );
+              })
+            ) : (
+              // Project-specific navigation
+              projectId && navItems.map((item) => {
+                const Icon = item.icon;
+                const fullPath = `/projects/${projectId}/${item.href}`;
+                const isActive = pathname.startsWith(fullPath);
+                const isDisabled = isProjectsRoute && item.requiresProject;
+                
+                return (
+                  <Tooltip 
+                    key={item.href}
+                    content={collapsed ? item.label : ""}
+                    showArrow 
+                    placement="right"
+                  >
+                    <Link 
+                      href={isDisabled ? '#' : fullPath}
+                      className={`
+                        relative w-full rounded-md flex items-center
+                        text-[15px] font-medium transition-all duration-200
+                        ${collapsed ? 'justify-center py-4' : 'px-2.5 py-3 gap-2.5'}
+                        ${isActive 
+                          ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-600 dark:border-indigo-400' 
+                          : isDisabled
+                            ? 'text-zinc-300 dark:text-zinc-600 cursor-not-allowed'
+                            : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300'
+                        }
+                        ${isDisabled ? 'pointer-events-none' : ''}
+                      `}
+                      data-tour-target={item.href === 'config' ? 'settings' : item.href === 'sources' ? 'entity-data-sources' : undefined}
+                    >
+                      <Icon 
+                        size={collapsed ? COLLAPSED_ICON_SIZE : EXPANDED_ICON_SIZE} 
+                        className={`
+                          transition-all duration-200
+                          ${isDisabled 
+                            ? 'text-zinc-300 dark:text-zinc-600' 
+                            : isActive
+                              ? 'text-indigo-600 dark:text-indigo-400'
+                              : 'text-zinc-500 dark:text-zinc-400'
+                          }
+                        `}
+                      />
+                      {!collapsed && (
+                        <span>{item.label}</span>
+                      )}
+                    </Link>
+                  </Tooltip>
+                );
+              })
+            )}
+          </nav>
         </div>
 
         {/* Bottom section */}
