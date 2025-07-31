@@ -12,8 +12,9 @@ import clsx from 'clsx';
 import Image from 'next/image';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Upload } from "lucide-react";
+import { Send, Upload, Search } from "lucide-react";
 import { useRouter } from 'next/navigation';
+import { PictureImg } from '@/components/ui/picture-img';
 
 // Add glow animation styles
 const glowStyles = `
@@ -93,6 +94,37 @@ export default function App() {
     const [templatesError, setTemplatesError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
+
+    // Extract unique tools from template
+    const getUniqueTools = (template: any) => {
+        if (!template.tools) return [];
+        
+        const uniqueToolsMap = new Map();
+        template.tools.forEach((tool: any) => {
+            if (!uniqueToolsMap.has(tool.name)) {
+                const toolData: any = {
+                    name: tool.name,
+                    isComposio: tool.isComposio,
+                    isLibrary: tool.isLibrary,
+                };
+                
+                if (tool.isComposio && tool.composioData?.logo) {
+                    toolData.logo = tool.composioData.logo;
+                    toolData.logoType = 'image';
+                } else if (tool.isLibrary && tool.name === 'rag_search') {
+                    toolData.logoType = 'icon';
+                    toolData.iconName = 'search';
+                }
+                
+                // Only include tools that have some form of logo/icon
+                if (toolData.logo || toolData.logoType === 'icon') {
+                    uniqueToolsMap.set(tool.name, toolData);
+                }
+            }
+        });
+        
+        return Array.from(uniqueToolsMap.values());
+    };
 
     const getNextAssistantNumber = (projects: z.infer<typeof Project>[]) => {
         const untitledProjects = projects
@@ -486,9 +518,43 @@ export default function App() {
                                                 <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
                                                     {template.description}
                                                 </div>
-                                                <div className="flex items-center justify-between">
+                                                
+                                                {/* Tool logos */}
+                                                {(() => {
+                                                    const tools = getUniqueTools(template);
+                                                    return tools.length > 0 && (
+                                                        <div className="flex items-center gap-2 mt-2">
+                                                            <div className="text-xs text-gray-400 dark:text-gray-500">
+                                                                Tools:
+                                                            </div>
+                                                            <div className="flex items-center gap-1">
+                                                                {tools.slice(0, 4).map((tool, index) => (
+                                                                    <div key={tool.name} title={tool.name}>
+                                                                        {tool.logoType === 'image' ? (
+                                                                            <PictureImg
+                                                                                src={tool.logo}
+                                                                                alt={`${tool.name} logo`}
+                                                                                className="w-4 h-4 rounded-sm object-cover"
+                                                                            />
+                                                                        ) : tool.logoType === 'icon' && tool.iconName === 'search' ? (
+                                                                            <div className="w-4 h-4 flex items-center justify-center bg-gray-100 dark:bg-gray-700 rounded-sm">
+                                                                                <Search size={10} className="text-gray-600 dark:text-gray-400" />
+                                                                            </div>
+                                                                        ) : null}
+                                                                    </div>
+                                                                ))}
+                                                                {tools.length > 4 && (
+                                                                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                                                                        +{tools.length - 4}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
+                                                
+                                                <div className="flex items-center justify-between mt-2">
                                                     <div className="text-xs text-gray-400 dark:text-gray-500">
-                                                        Template
                                                     </div>
                                                     <div className="w-2 h-2 rounded-full bg-blue-500 opacity-75"></div>
                                                 </div>
