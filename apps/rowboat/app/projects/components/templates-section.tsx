@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from 'next/navigation';
-import { createProject } from "@/app/actions/project_actions";
+import { createProject, listTemplates } from "@/app/actions/project_actions";
 import { PictureImg } from '@/components/ui/picture-img';
 
 interface TemplatesSectionProps {}
@@ -39,20 +39,7 @@ export function TemplatesSection({}: TemplatesSectionProps) {
         setTemplatesLoading(true);
         setTemplatesError(null);
         try {
-            const response = await fetch('https://dev.rowboatlabs.com/api/templates');
-            if (!response.ok) {
-                throw new Error('Failed to fetch templates');
-            }
-            const data = await response.json();
-            
-            // Convert the object structure to an array of templates
-            const templatesArray = Object.entries(data)
-                .filter(([key]) => key !== 'default') // Exclude the default template
-                .map(([key, template]: [string, any]) => ({
-                    id: key,
-                    ...template
-                }));
-            
+            const templatesArray = await listTemplates();
             setTemplates(templatesArray);
         } catch (error) {
             console.error('Error fetching templates:', error);

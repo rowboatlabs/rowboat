@@ -6,6 +6,7 @@ import { listProjects } from "@/app/actions/project_actions";
 import { Project } from "@/app/lib/types/project_types";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import clsx from 'clsx';
+import Link from 'next/link';
 
 interface MyAssistantsSectionProps {}
 
@@ -15,6 +16,11 @@ export function MyAssistantsSection({}: MyAssistantsSectionProps) {
     const [projects, setProjects] = useState<z.infer<typeof Project>[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [currentPage, setCurrentPage] = useState(1);
+
+    const totalPages = Math.ceil(projects.length / ITEMS_PER_PAGE);
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const currentProjects = projects.slice(startIndex, endIndex);
 
     useEffect(() => {
         let ignore = false;
@@ -37,11 +43,6 @@ export function MyAssistantsSection({}: MyAssistantsSectionProps) {
             ignore = true;
         }
     }, []);
-
-    const totalPages = Math.ceil(projects.length / ITEMS_PER_PAGE);
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    const endIndex = startIndex + ITEMS_PER_PAGE;
-    const currentProjects = projects.slice(startIndex, endIndex);
 
     return (
         <div className="h-screen flex flex-col px-8 py-8 overflow-hidden">
@@ -68,11 +69,10 @@ export function MyAssistantsSection({}: MyAssistantsSectionProps) {
                             ) : (
                                 <div className="space-y-2 h-full flex flex-col justify-start">
                                     {currentProjects.map((project) => (
-                                        <a
+                                        <Link
                                             key={project._id}
                                             href={`/projects/${project._id}/workflow`}
-                                            className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all group hover:shadow-sm flex-shrink-0"
-                                            style={{ height: 'calc((100% - 2.5rem) / 6)' }}
+                                            className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all group hover:shadow-sm flex-shrink-0 h-[calc((100%-2.5rem)/6)]"
                                         >
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-3">
@@ -92,14 +92,13 @@ export function MyAssistantsSection({}: MyAssistantsSectionProps) {
                                                     →
                                                 </div>
                                             </div>
-                                        </a>
+                                        </Link>
                                     ))}
                                     {/* Fill remaining slots if fewer than 6 items */}
                                     {currentProjects.length < 6 && Array.from({ length: 6 - currentProjects.length }).map((_, index) => (
                                         <div 
                                             key={`empty-${index}`}
-                                            className="flex-shrink-0"
-                                            style={{ height: 'calc((100% - 2.5rem) / 6)' }}
+                                            className="flex-shrink-0 h-[calc((100%-2.5rem)/6)]"
                                         />
                                     ))}
                                 </div>

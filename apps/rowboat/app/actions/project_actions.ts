@@ -20,6 +20,17 @@ const KLAVIS_API_KEY = process.env.KLAVIS_API_KEY || '';
 
 const projectActionAuthorizationPolicy = container.resolve<IProjectActionAuthorizationPolicy>('projectActionAuthorizationPolicy');
 
+export async function listTemplates() {
+    const templatesArray = Object.entries(templates)
+        .filter(([key]) => key !== 'default') // Exclude the default template
+        .map(([key, template]) => ({
+            id: key,
+            ...template
+        }));
+    
+    return templatesArray;
+}
+
 export async function projectAuthCheck(projectId: string) {
     if (!USE_AUTH) {
         return;

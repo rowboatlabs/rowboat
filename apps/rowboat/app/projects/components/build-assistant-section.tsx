@@ -10,48 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Send, Upload } from "lucide-react";
 import { Workflow } from '../../lib/types/workflow_types';
 
-// Add glow animation styles
-const glowStyles = `
-    @keyframes glow {
-        0% {
-            border-color: rgba(99, 102, 241, 0.3);
-            box-shadow: 0 0 8px 1px rgba(99, 102, 241, 0.2);
-        }
-        50% {
-            border-color: rgba(99, 102, 241, 0.6);
-            box-shadow: 0 0 12px 2px rgba(99, 102, 241, 0.4);
-        }
-        100% {
-            border-color: rgba(99, 102, 241, 0.3);
-            box-shadow: 0 0 8px 1px rgba(99, 102, 241, 0.2);
-        }
-    }
-
-    @keyframes glow-dark {
-        0% {
-            border-color: rgba(129, 140, 248, 0.3);
-            box-shadow: 0 0 8px 1px rgba(129, 140, 248, 0.2);
-        }
-        50% {
-            border-color: rgba(129, 140, 248, 0.6);
-            box-shadow: 0 0 12px 2px rgba(129, 140, 248, 0.4);
-        }
-        100% {
-            border-color: rgba(129, 140, 248, 0.3);
-            box-shadow: 0 0 8px 1px rgba(129, 140, 248, 0.2);
-        }
-    }
-
-    .animate-glow {
-        animation: glow 2s ease-in-out infinite;
-        border-width: 2px;
-    }
-
-    .dark .animate-glow {
-        animation: glow-dark 2s ease-in-out infinite;
-        border-width: 2px;
-    }
-`;
 
 // Textarea styling
 const textareaStyles = clsx(
@@ -66,9 +24,10 @@ const textareaStyles = clsx(
 );
 
 const emptyTextareaStyles = clsx(
-    "animate-glow",
+    "animate-pulse",
     "border-indigo-500/40 dark:border-indigo-400/40",
-    "shadow-[0_0_8px_1px_rgba(99,102,241,0.2)] dark:shadow-[0_0_8px_1px_rgba(129,140,248,0.2)]"
+    "border-2",
+    "shadow-lg shadow-indigo-500/20 dark:shadow-indigo-400/20"
 );
 
 interface BuildAssistantSectionProps {
@@ -84,16 +43,6 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
     const fileInputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
 
-    // Inject glow animation styles
-    useEffect(() => {
-        const styleSheet = document.createElement("style");
-        styleSheet.innerText = glowStyles;
-        document.head.appendChild(styleSheet);
-
-        return () => {
-            document.head.removeChild(styleSheet);
-        };
-    }, []);
 
     const handleCreateAssistant = async () => {
         try {
@@ -184,7 +133,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                 ref={fileInputRef}
                 type="file"
                 accept="application/json"
-                style={{ display: 'none' }}
+                className="hidden"
                 onChange={handleFileChange}
             />
             <div className="px-8 py-16">
@@ -231,9 +180,8 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                                                     "text-gray-900 dark:text-gray-100",
                                                     promptError && "border-red-500 focus:ring-red-500/20",
                                                     !userPrompt && emptyTextareaStyles,
-                                                    "pr-14" // more space for send button
+                                                    "pr-14 min-h-24" // more space for send button
                                                 )}
-                                                style={{ minHeight: "96px" }}
                                                 autoFocus
                                                 autoResize
                                                 onKeyDown={(e) => {

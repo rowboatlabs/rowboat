@@ -63,21 +63,12 @@ export default function App() {
         }
     }, []);
 
-    const renderSection = () => {
-        switch (section) {
-            case 'my-assistants':
-                return <MyAssistantsSection />;
-            case 'templates':
-                return <TemplatesSection />;
-            case 'build':
-            default:
-                return <BuildAssistantSection defaultName={defaultName} />;
-        }
-    };
-
     return (
         <div className="min-h-screen bg-white dark:bg-gray-900">
-            {renderSection()}
+            {section === 'my-assistants' && <MyAssistantsSection />}
+            {section === 'templates' && <TemplatesSection />}
+            {section === 'build' && <BuildAssistantSection defaultName={defaultName} />}
+            {!section && <BuildAssistantSection defaultName={defaultName} />}
         </div>
     );
 }
