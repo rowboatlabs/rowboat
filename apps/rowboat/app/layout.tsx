@@ -1,11 +1,12 @@
 import "./globals.css";
 import { ThemeProvider } from "./providers/theme-provider";
+import { Inter } from "next/font/google";
 import { Providers } from "./providers";
 import { Metadata } from "next";
 import { HelpModalProvider } from "./providers/help-modal-provider";
 import { Auth0Provider } from "@auth0/nextjs-auth0";
 
-// Font is loaded via CSS import in globals.css
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: {
@@ -22,7 +23,7 @@ export default function RootLayout({
   return <html lang="en" className="h-dvh">
     <Auth0Provider>
       <ThemeProvider>
-        <body className="h-full text-base [scrollbar-width:thin] bg-background">
+        <body className={`${inter.className} h-full text-base [scrollbar-width:thin] bg-background`}>
           <Providers className='h-full flex flex-col'>
             <HelpModalProvider>
               {children}

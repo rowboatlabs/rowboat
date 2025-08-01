@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import Link from "next/link";
 import Image from "next/image";
+import logoImage from '/public/logo-only.png';
 import { usePathname, useSearchParams } from "next/navigation";
 import { Tooltip, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
 import { UserButton } from "@/app/lib/components/user_button";
@@ -26,8 +27,7 @@ import { USE_PRODUCT_TOUR } from '@/app/lib/feature_flags';
 import { useHelpModal } from "@/app/providers/help-modal-provider";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Send } from "lucide-react";
+import { TextareaWithSend } from "@/app/components/ui/textarea-with-send";
 
 interface SidebarProps {
   projectId?: string;
@@ -170,7 +170,7 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
                 `}
               >
                 <Image
-                  src="/logo-only.png"
+                  src={logoImage}
                   alt="Rowboat"
                   width={collapsed ? 24 : 24}
                   height={collapsed ? 24 : 24}
@@ -191,11 +191,8 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
               // Projects route navigation
               projectsNavItems.map((item) => {
                 const Icon = item.icon;
-                const isActive = pathname === '/projects' && (
-                  (item.href.includes('section=build') && currentSection === 'build') ||
-                  (item.href.includes('section=my-assistants') && currentSection === 'my-assistants') ||
-                  (item.href.includes('section=templates') && currentSection === 'templates')
-                );
+                const sectionParam = new URLSearchParams(item.href.split('?')[1]).get('section');
+                const isActive = pathname === '/projects' && sectionParam === currentSection;
                 
                 return (
                   <Tooltip 
@@ -391,41 +388,15 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   What do you want to build?
                 </label>
-                <div className="relative">
-                  <Textarea
-                    value={assistantPrompt}
-                    onChange={(e) => setAssistantPrompt(e.target.value)}
-                    placeholder="Example: Create a customer support assistant that can handle product inquiries and returns"
-                    className="w-full pr-14 min-h-[120px] border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleCreateAssistant();
-                      }
-                    }}
-                  />
-                  <div className="absolute right-3 bottom-3">
-                    <button
-                      onClick={handleCreateAssistant}
-                      disabled={isCreatingAssistant || !assistantPrompt.trim()}
-                      className={`
-                        rounded-full p-2 transition-all duration-200
-                        ${assistantPrompt.trim()
-                          ? "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:hover:bg-indigo-800/60 dark:text-indigo-300"
-                          : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500"
-                        }
-                        ${isCreatingAssistant ? "opacity-50" : "hover:scale-105 active:scale-95"}
-                      `}
-                    >
-                      {isCreatingAssistant ? (
-                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
-                      ) : (
-                        <Send size={18} />
-                      )}
-                    </button>
-                  </div>
-                </div>
+                <TextareaWithSend
+                  value={assistantPrompt}
+                  onChange={setAssistantPrompt}
+                  onSubmit={handleCreateAssistant}
+                  isSubmitting={isCreatingAssistant}
+                  placeholder="Example: Create a customer support assistant that can handle product inquiries and returns"
+                  className="w-full min-h-[120px] border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  autoFocus
+                />
               </div>
 
               <div className="text-xs text-gray-500 dark:text-gray-400">

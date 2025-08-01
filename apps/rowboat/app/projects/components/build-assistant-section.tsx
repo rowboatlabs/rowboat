@@ -5,30 +5,13 @@ import { createProject, createProjectFromWorkflowJson } from "@/app/actions/proj
 import { useRouter } from 'next/navigation';
 import clsx from 'clsx';
 import Image from 'next/image';
-import { Textarea } from "@/components/ui/textarea";
+import mascotImage from '/public/mascot.png';
 import { Button } from "@/components/ui/button";
-import { Send, Upload } from "lucide-react";
+import { Upload } from "lucide-react";
+import { TextareaWithSend } from "@/app/components/ui/textarea-with-send";
 import { Workflow } from '../../lib/types/workflow_types';
 
 
-// Textarea styling
-const textareaStyles = clsx(
-    "w-full",
-    "rounded-lg p-3",
-    "border border-gray-200 dark:border-gray-700",
-    "bg-white dark:bg-gray-800",
-    "hover:bg-gray-50 dark:hover:bg-gray-750",
-    "focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20",
-    "placeholder:text-gray-400 dark:placeholder:text-gray-500",
-    "transition-all duration-200"
-);
-
-const emptyTextareaStyles = clsx(
-    "animate-pulse",
-    "border-indigo-500/40 dark:border-indigo-400/40",
-    "border-2",
-    "shadow-lg shadow-indigo-500/20 dark:shadow-indigo-400/20"
-);
 
 interface BuildAssistantSectionProps {
     defaultName: string;
@@ -151,7 +134,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                             {/* Mascot */}
                             <div className="flex-shrink-0">
                                 <Image
-                                    src="/mascot.png"
+                                    src={mascotImage}
                                     alt="Rowboat Mascot"
                                     width={260}
                                     height={260}
@@ -166,49 +149,28 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                                         Hey! What agents can I build for you?
                                     </h2>
                                     <div className="relative group flex flex-col">
-                                        <div className="relative">
-                                            <Textarea
-                                                value={userPrompt}
-                                                onChange={(e) => {
-                                                    setUserPrompt(e.target.value);
-                                                    setPromptError(null);
-                                                }}
-                                                placeholder="Example: build me an AI SDR agent..."
-                                                className={clsx(
-                                                    textareaStyles,
-                                                    "text-base",
-                                                    "text-gray-900 dark:text-gray-100",
-                                                    promptError && "border-red-500 focus:ring-red-500/20",
-                                                    !userPrompt && emptyTextareaStyles,
-                                                    "pr-14 min-h-40" // more space for send button
-                                                )}
-                                                rows={3}
-                                                autoFocus
-                                                autoResize
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                                        e.preventDefault();
-                                                        handleCreateAssistant();
-                                                    }
-                                                }}
-                                            />
-                                            <div className="absolute right-3 bottom-3 z-10">
-                                                <button
-                                                    type="submit"
-                                                    disabled={isCreating || !userPrompt.trim()}
-                                                    onClick={handleCreateAssistant}
-                                                    className={clsx(
-                                                        "rounded-full p-2",
-                                                        userPrompt.trim()
-                                                            ? "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:hover:bg-indigo-800/60 dark:text-indigo-300"
-                                                            : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500",
-                                                        "transition-all duration-200 scale-100 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:scale-95 hover:shadow-md dark:hover:shadow-indigo-950/10"
-                                                    )}
-                                                >
-                                                    <Send size={18} />
-                                                </button>
-                                            </div>
-                                        </div>
+                                        <TextareaWithSend
+                                            value={userPrompt}
+                                            onChange={(value) => {
+                                                setUserPrompt(value);
+                                                setPromptError(null);
+                                            }}
+                                            onSubmit={handleCreateAssistant}
+                                            isSubmitting={isCreating}
+                                            placeholder="Example: build me an AI SDR agent..."
+                                            className={clsx(
+                                                "w-full rounded-lg p-3 border border-gray-200 dark:border-gray-700",
+                                                "bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750",
+                                                "focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20",
+                                                "placeholder:text-gray-400 dark:placeholder:text-gray-500 transition-all duration-200",
+                                                "text-base text-gray-900 dark:text-gray-100 min-h-40",
+                                                promptError && "border-red-500 focus:ring-red-500/20",
+                                                !userPrompt && "animate-pulse border-2 border-indigo-500/40 dark:border-indigo-400/40 shadow-lg shadow-indigo-500/20 dark:shadow-indigo-400/20"
+                                            )}
+                                            rows={3}
+                                            autoFocus
+                                            autoResize
+                                        />
                                         {promptError && (
                                             <p className="text-sm text-red-500 m-0 mt-2">
                                                 {promptError}
