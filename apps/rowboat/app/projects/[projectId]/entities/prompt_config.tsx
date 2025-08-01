@@ -14,6 +14,9 @@ const sectionHeaderStyles = "block text-xs font-medium uppercase tracking-wider 
 // Enhanced textarea styles with improved states
 const textareaStyles = "rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-gray-400 dark:placeholder:text-gray-500";
 
+// Value field styles without grey placeholder text
+const valueTextareaStyles = "rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-black dark:placeholder:text-white";
+
 export function PromptConfig({
     prompt,
     agents,
@@ -128,7 +131,7 @@ export function PromptConfig({
 
                 <div className="space-y-4">
                     <label className={sectionHeaderStyles}>
-                        Prompt
+                        Value
                     </label>
                     <Textarea
                         value={prompt.prompt}
@@ -139,8 +142,8 @@ export function PromptConfig({
                             });
                             showSavedMessage();
                         }}
-                        placeholder="Edit prompt here..."
-                        className={`${textareaStyles} min-h-[200px]`}
+                        placeholder="Enter variable value..."
+                        className={`${valueTextareaStyles} min-h-[200px]`}
                         autoResize
                     />
                 </div>

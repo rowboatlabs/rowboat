@@ -1146,7 +1146,7 @@ export const EntityList = forwardRef<
                                             )}
                                         </button>
                                         <PenLine className="w-4 h-4" />
-                                        <span>Prompts</span>
+                                        <span>Variables</span>
                                     </div>
                                     <Button
                                         variant="secondary"
@@ -1158,13 +1158,12 @@ export const EntityList = forwardRef<
                                         }}
                                         className={`group ${buttonClasses}`}
                                         showHoverContent={true}
-                                        hoverContent="Add Prompt"
+                                        hoverContent="Add Variable"
                                     >
                                         <PlusIcon className="w-4 h-4" />
                                     </Button>
                                 </div>
                             }
-                        >
                             {expandedPanels.prompts && (
                                 <div className="h-[calc(100%-53px)] overflow-y-auto">
                                     <div className="p-2">
@@ -1188,7 +1187,7 @@ export const EntityList = forwardRef<
                                                 ))}
                                             </div>
                                         ) : (
-                                            <EmptyState entity="prompts" hasFilteredItems={false} />
+                                            <EmptyState entity="variables" hasFilteredItems={false} />
                                         )}
                                     </div>
                                 </div>

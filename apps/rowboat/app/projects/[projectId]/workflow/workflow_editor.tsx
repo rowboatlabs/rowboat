@@ -391,10 +391,10 @@ function reducer(state: State, action: Action): State {
                             if (isLive) {
                                 break;
                             }
-                            let newPromptName = "New prompt";
+                            let newPromptName = "New Variable";
                             if (draft.workflow?.prompts.some((prompt) => prompt.name === newPromptName)) {
-                                newPromptName = `New prompt ${draft.workflow?.prompts.filter((prompt) =>
-                                    prompt.name.startsWith("New prompt")).length + 1}`;
+                                newPromptName = `New Variable ${draft.workflow?.prompts.filter((prompt) =>
+                                    prompt.name.startsWith("New Variable")).length + 1}`;
                             }
                             draft.workflow?.prompts.push({
                                 name: newPromptName,
