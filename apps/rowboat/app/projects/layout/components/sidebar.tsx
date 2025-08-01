@@ -16,8 +16,7 @@ import {
   Sun,
   HelpCircle,
   MessageSquareIcon,
-  LogsIcon,
-  Plus
+  LogsIcon
 } from "lucide-react";
 import { getProjectConfig, createProject } from "@/app/actions/project_actions";
 import { useTheme } from "@/app/providers/theme-provider";
@@ -127,14 +126,12 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
     }
   ];
 
-  const projectsNavItems = [
-    {
-      href: '/projects?section=build',
-      label: 'Build Assistant',
-      icon: Plus,
-      requiresProject: false
-    }
-  ];
+  const projectsNavItems: Array<{
+    href: string;
+    label: string;
+    icon: any;
+    requiresProject: boolean;
+  }> = [];
 
   const handleStartTour = () => {
     localStorage.removeItem('user_product_tour_completed');
