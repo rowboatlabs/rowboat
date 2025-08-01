@@ -18,7 +18,8 @@ import {
   MessageSquareIcon,
   LogsIcon
 } from "lucide-react";
-import { getProjectConfig, createProject } from "@/app/actions/project_actions";
+import { getProjectConfig } from "@/app/actions/project_actions";
+import { createProjectWithOptions } from "../../lib/project-creation-utils";
 import { useTheme } from "@/app/providers/theme-provider";
 import { USE_PRODUCT_TOUR } from '@/app/lib/feature_flags';
 import { useHelpModal } from "@/app/providers/help-modal-provider";
@@ -71,21 +72,17 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
 
     setIsCreatingAssistant(true);
     try {
-      const formData = new FormData();
-      formData.append('name', assistantName || 'New Assistant');
-
-      const response = await createProject(formData);
-      if ('id' in response) {
-        // Store prompt in localStorage for the copilot to use
-        if (assistantPrompt.trim()) {
-          localStorage.setItem(`project_prompt_${response.id}`, assistantPrompt);
+      await createProjectWithOptions({
+        name: assistantName || 'New Assistant',
+        prompt: assistantPrompt,
+        router,
+        onSuccess: () => {
+          onCreateModalClose();
+        },
+        onError: (error) => {
+          console.error('Error creating assistant:', error);
         }
-        // Close modals and navigate
-        onCreateModalClose();
-        router.push(`/projects/${response.id}/workflow`);
-      }
-    } catch (error) {
-      console.error('Error creating assistant:', error);
+      });
     } finally {
       setIsCreatingAssistant(false);
     }

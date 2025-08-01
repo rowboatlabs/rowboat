@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from 'next/navigation';
-import { createProject, listTemplates } from "@/app/actions/project_actions";
+import { listTemplates } from "@/app/actions/project_actions";
+import { createProjectFromTemplate } from "../lib/project-creation-utils";
 import { PictureImg } from '@/components/ui/picture-img';
 
 interface TemplatesSectionProps {}
@@ -51,17 +52,7 @@ export function TemplatesSection({}: TemplatesSectionProps) {
 
     // Handle template selection
     const handleTemplateSelect = async (templateId: string, templateName: string) => {
-        try {
-            const formData = new FormData();
-            formData.append('name', templateName);
-            formData.append('template', templateId);
-            const response = await createProject(formData);
-            if ('id' in response) {
-                router.push(`/projects/${response.id}/workflow`);
-            }
-        } catch (error) {
-            console.error('Error creating project from template:', error);
-        }
+        await createProjectFromTemplate(templateId, templateName, router);
     };
 
     useEffect(() => {

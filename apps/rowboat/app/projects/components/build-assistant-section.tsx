@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect } from "react";
-import { createProject, createProjectFromWorkflowJson, listTemplates, listProjects } from "@/app/actions/project_actions";
+import { listTemplates, listProjects } from "@/app/actions/project_actions";
+import { createProjectWithOptions, createProjectFromJsonWithOptions, createProjectFromTemplate } from "../lib/project-creation-utils";
 import { useRouter } from 'next/navigation';
 import clsx from 'clsx';
 import Image from 'next/image';
@@ -83,17 +84,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
 
     // Handle template selection
     const handleTemplateSelect = async (templateId: string, templateName: string) => {
-        try {
-            const formData = new FormData();
-            formData.append('name', templateName);
-            formData.append('template', templateId);
-            const response = await createProject(formData);
-            if ('id' in response) {
-                router.push(`/projects/${response.id}/workflow`);
-            }
-        } catch (error) {
-            console.error('Error creating project from template:', error);
-        }
+        await createProjectFromTemplate(templateId, templateName, router);
     };
 
     const fetchProjects = async () => {
@@ -117,24 +108,21 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
     }, []);
 
     const handleCreateAssistant = async () => {
+        if (!userPrompt.trim()) {
+            setPromptError("Prompt cannot be empty");
+            return;
+        }
+
+        setIsCreating(true);
         try {
-            if (!userPrompt.trim()) {
-                setPromptError("Prompt cannot be empty");
-                return;
-            }
-
-            setIsCreating(true);
-            const formData = new FormData();
-            formData.append('name', defaultName);
-
-            const response = await createProject(formData);
-            if ('id' in response) {
-                // Store the prompt in localStorage for the workflow page
-                localStorage.setItem(`project_prompt_${response.id}`, userPrompt);
-                router.push(`/projects/${response.id}/workflow`);
-            }
-        } catch (error) {
-            console.error('Error creating project:', error);
+            await createProjectWithOptions({
+                name: defaultName,
+                prompt: userPrompt,
+                router,
+                onError: (error) => {
+                    console.error('Error creating project:', error);
+                }
+            });
         } finally {
             setIsCreating(false);
         }
@@ -168,15 +156,14 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
             }
 
             // Create project from imported JSON
-            const formData = new FormData();
-            formData.append('name', defaultName);
-            formData.append('workflowJson', text);
-            const response = await createProjectFromWorkflowJson(formData);
-            if ('id' in response) {
-                router.push(`/projects/${response.id}/workflow`);
-            } else {
-                setImportError(response.billingError || 'Failed to create project');
-            }
+            await createProjectFromJsonWithOptions({
+                name: defaultName,
+                workflowJson: text,
+                router,
+                onError: (error) => {
+                    setImportError(error instanceof Error ? error.message : String(error));
+                }
+            });
         } catch (err) {
             setImportError('Invalid JSON: ' + (err instanceof Error ? err.message : String(err)));
         } finally {
@@ -186,17 +173,11 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
 
     // Handle "I'll build it myself" button
     const handleBuildItMyself = async () => {
-        try {
-            const formData = new FormData();
-            formData.append('name', defaultName);
-            formData.append('template', 'default');
-            const response = await createProject(formData);
-            if ('id' in response) {
-                router.push(`/projects/${response.id}/workflow`);
-            }
-        } catch (error) {
-            console.error('Error creating project:', error);
-        }
+        await createProjectWithOptions({
+            name: defaultName,
+            template: 'default',
+            router
+        });
     };
 
     return (
