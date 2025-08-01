@@ -18,8 +18,7 @@ import {
   MessageSquareIcon,
   LogsIcon,
   Plus,
-  FolderIcon,
-  Sparkles
+  FolderIcon
 } from "lucide-react";
 import { getProjectConfig, createProject } from "@/app/actions/project_actions";
 import { useTheme } from "@/app/providers/theme-provider";
@@ -140,12 +139,6 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
       href: '/projects?section=my-assistants',
       label: 'My Assistants',
       icon: FolderIcon,
-      requiresProject: false
-    },
-    {
-      href: '/projects?section=templates',
-      label: 'Pre-built Assistants',
-      icon: Sparkles,
       requiresProject: false
     }
   ];

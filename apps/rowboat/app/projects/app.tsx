@@ -6,7 +6,6 @@ import { z } from "zod";
 import { listProjects } from "../actions/project_actions";
 import { BuildAssistantSection } from "./components/build-assistant-section";
 import { MyAssistantsSection } from "./components/my-assistants-section";
-import { TemplatesSection } from "./components/templates-section";
 import { useRouter, useSearchParams } from 'next/navigation';
 
 
@@ -66,7 +65,6 @@ export default function App() {
     return (
         <div className="min-h-screen bg-white dark:bg-gray-900">
             {section === 'my-assistants' && <MyAssistantsSection />}
-            {section === 'templates' && <TemplatesSection />}
             {section === 'build' && <BuildAssistantSection defaultName={defaultName} />}
             {!section && <BuildAssistantSection defaultName={defaultName} />}
         </div>
