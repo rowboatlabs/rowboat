@@ -36,6 +36,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
     const [projects, setProjects] = useState<z.infer<typeof Project>[]>([]);
     const [projectsLoading, setProjectsLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
+    const [selectedTab, setSelectedTab] = useState('new');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
 
@@ -219,7 +220,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                     {/* Tabs Section */}
                     <div className="max-w-5xl mx-auto">
                         <div className="p-6 pb-0">
-                            <Tabs defaultSelectedKey="new" className="w-full">
+                            <Tabs defaultSelectedKey="new" selectedKey={selectedTab} onSelectionChange={(key) => setSelectedTab(key as string)} className="w-full">
                                 <Tab key="new" title="New Assistant">
                                     <div className="pt-4">
                                         <div className="flex items-center gap-12">
@@ -398,11 +399,12 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                         </div>
                     </div>
 
-                    {/* Pre-built Assistants Section */}
-                    <div className="max-w-5xl mx-auto mt-16">
+                    {/* Pre-built Assistants Section - Only show for New Assistant tab */}
+                    {selectedTab === 'new' && (
+                        <div className="max-w-5xl mx-auto mt-16">
                         <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700">
                             <div className="text-left mb-6">
-                                <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
+                                <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
                                     Pre-built Assistants
                                 </h2>
                             </div>
@@ -476,6 +478,7 @@ export function BuildAssistantSection({ defaultName }: BuildAssistantSectionProp
                             )}
                         </div>
                     </div>
+                    )}
                 </div>
             </div>
         </>
