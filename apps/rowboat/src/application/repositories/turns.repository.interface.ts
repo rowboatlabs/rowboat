@@ -7,6 +7,7 @@ export const CreateTurnData = Turn.omit({
     lastUpdatedAt: true,
     status: true,
     error: true,
+    messages: true,
 });
 
 export const UpdateTurnData = Turn.pick({

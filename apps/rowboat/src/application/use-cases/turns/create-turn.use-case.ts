@@ -104,7 +104,7 @@ export class CreateTurnUseCase implements ICreateTurnUseCase {
         }
 
         // set timestamps where missing
-        data.turnData.messages.forEach(msg => {
+        data.turnData.triggerData.messages.forEach(msg => {
             if (!msg.timestamp) {
                 msg.timestamp = new Date().toISOString();
             }

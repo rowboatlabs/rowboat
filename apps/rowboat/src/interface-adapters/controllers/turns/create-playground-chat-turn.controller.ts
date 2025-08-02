@@ -39,7 +39,6 @@ export class CreatePlaygroundChatTurnController implements ICreatePlaygroundChat
                     workflow: result.data.workflow,
                 },
                 projectId: result.data.projectId,
-                messages: result.data.messages,
             },
         });
     }

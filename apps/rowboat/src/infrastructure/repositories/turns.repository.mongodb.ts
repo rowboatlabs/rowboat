@@ -46,11 +46,13 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
         await this.collection.insertOne({
             ...doc,
             _id,
+            messages: [],
         });
 
         return {
             ...data,
             ...doc,
+            messages: [],
             id: _id.toString(),
             createdAt: now,
         };

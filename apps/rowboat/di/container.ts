@@ -3,6 +3,7 @@ import { ConversationsRepositoryMongodb } from "@/src/infrastructure/repositorie
 import { TurnsRepositoryMongodb } from "@/src/infrastructure/repositories/turns.repository.mongodb";
 import { RedisPubSubService } from "@/src/infrastructure/services/pubsub.service.redis";
 import { CreatePlaygroundChatTurnController } from "@/src/interface-adapters/controllers/turns/create-playground-chat-turn.controller";
+import { StreamTurnController } from "@/src/interface-adapters/controllers/turns/stream-turn.controller";
 import { asClass, createContainer, InjectionMode } from "awilix";
 
 export const container = createContainer({
@@ -16,6 +17,7 @@ container.register({
     turnsRepository: asClass(TurnsRepositoryMongodb).singleton(),
     createTurnUseCase: asClass(CreateTurnUseCase).singleton(),
     createPlaygroundChatTurnController: asClass(CreatePlaygroundChatTurnController).singleton(),
+    streamTurnController: asClass(StreamTurnController).singleton(),
 
     pubsubService: asClass(RedisPubSubService).singleton(),
 });
