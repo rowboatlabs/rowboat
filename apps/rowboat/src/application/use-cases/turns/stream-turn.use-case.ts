@@ -28,7 +28,6 @@ export class StreamTurnUseCase implements IStreamTurnUseCase {
 
         const bufferedEvents: z.infer<typeof TurnEvent>[] = [];
         let subscription: ISubscription | null = null;
-        let isSubscribed = false;
 
         try {
             // Subscribe to Redis Pub/Sub first, buffer messages

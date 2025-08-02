@@ -1,4 +1,4 @@
-import { CreateTurnUseCase } from "@/src/application/use-cases/runs/create-turn.use-case";
+import { CreateTurnUseCase } from "@/src/application/use-cases/turns/create-turn.use-case";
 import { ConversationsRepositoryMongodb } from "@/src/infrastructure/repositories/conversations.repository.mongodb";
 import { TurnsRepositoryMongodb } from "@/src/infrastructure/repositories/turns.repository.mongodb";
 import { RedisPubSubService } from "@/src/infrastructure/services/pubsub.service.redis";

@@ -1,6 +1,6 @@
 import { Message } from "@/app/lib/types/types";
 import { Workflow } from "@/app/lib/types/workflow_types";
-import { ICreateTurnUseCase } from "@/src/application/use-cases/runs/create-turn.use-case";
+import { ICreateTurnUseCase } from "@/src/application/use-cases/turns/create-turn.use-case";
 import { Turn } from "@/src/entities/models/turn";
 import { BadRequestError } from "@/src/entities/errors/common";
 import z from "zod";
