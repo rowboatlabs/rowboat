@@ -18,7 +18,15 @@ export interface ICreatePlaygroundChatTurnController {
 }
 
 export class CreatePlaygroundChatTurnController implements ICreatePlaygroundChatTurnController {
-    constructor(private readonly createTurnUseCase: ICreateTurnUseCase) {}
+    private readonly createTurnUseCase: ICreateTurnUseCase;
+
+    constructor({
+        createTurnUseCase,
+    }: {
+        createTurnUseCase: ICreateTurnUseCase,
+    }) {
+        this.createTurnUseCase = createTurnUseCase;
+    }
 
     async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<typeof Turn>> {
         // parse input

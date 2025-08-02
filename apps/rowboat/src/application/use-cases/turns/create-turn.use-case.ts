@@ -7,8 +7,8 @@ import { BadRequestError, BillingError, NotAuthorizedError, NotFoundError } from
 import { check_query_limit } from "@/app/lib/rate_limiting";
 import { QueryLimitError } from "@/src/entities/errors/common";
 import { apiKeysCollection, projectMembersCollection } from "@/app/lib/mongodb";
-import { z } from "zod";
 import { IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
+import { z } from "zod";
 
 const inputSchema = z.object({
     turnData: CreateTurnData
@@ -28,10 +28,19 @@ export interface ICreateTurnUseCase {
 }
 
 export class CreateTurnUseCase implements ICreateTurnUseCase {
-    constructor(
-        private readonly turnsRepository: ITurnsRepository,
-        private readonly conversationsRepository: IConversationsRepository,
-    ) {}
+    private readonly turnsRepository: ITurnsRepository;
+    private readonly conversationsRepository: IConversationsRepository;
+
+    constructor({
+        turnsRepository,
+        conversationsRepository,
+    }: {
+        turnsRepository: ITurnsRepository,
+        conversationsRepository: IConversationsRepository,
+    }) {
+        this.turnsRepository = turnsRepository;
+        this.conversationsRepository = conversationsRepository;
+    }
 
     async execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Turn>> {
         const { projectId } = data.turnData;

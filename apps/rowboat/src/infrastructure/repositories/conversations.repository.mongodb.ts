@@ -7,10 +7,6 @@ import { Conversation } from "@/src/entities/models/conversation";
 const DocSchema = Conversation
     .omit({
         id: true,
-        createdAt: true,
-    })
-    .extend({
-        createdAt: z.string().datetime(),
     });
 
 export class ConversationsRepositoryMongodb implements IConversationsRepository {
@@ -34,7 +30,6 @@ export class ConversationsRepositoryMongodb implements IConversationsRepository 
             ...data,
             ...doc,
             id: _id.toString(),
-            createdAt: now,
         };
     }
 
@@ -52,7 +47,6 @@ export class ConversationsRepositoryMongodb implements IConversationsRepository 
         return {
             ...rest,
             id,
-            createdAt: new Date(result.createdAt),
         };
     }
 }

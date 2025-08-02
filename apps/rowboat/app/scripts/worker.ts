@@ -15,7 +15,9 @@ const HOST_NAME = process.env.HOST || "worker-1";
 const WORKER_COUNT = parseInt(process.env.WORKERS || "1", 10);
 
 async function publish(topic: string, event: z.infer<typeof TurnEvent>): Promise<void> {
-    await pubsubService.publish(topic, JSON.stringify(event));
+    const serialised = JSON.stringify(event);
+    console.log('!! publishing event', topic, serialised);
+    await pubsubService.publish(topic, serialised);
 }
 
 // Worker function to process a single job
@@ -34,12 +36,12 @@ async function processJob(workerId: string) {
                 continue;
             }
 
-            const pubsubTopic = `turn-${turn.id}`;
+            const topic = `turn-${turn.id}`;
             let billingCustomerId: string | null = null;
             const turnLogger = logger.child(`turn-${turn.id}`);
             const generatedMessages: z.infer<typeof Message>[] = [];
             let index = 0;
-            let error: string | null = null;
+            let errorState: string | null = null;
             turnLogger.log('>>> starting turn');
 
             try {
@@ -53,10 +55,10 @@ async function processJob(workerId: string) {
                 const allTurns = await turnsRepo.getConversationTurns(turn.conversationId);
                 const previousTurns = allTurns.filter(t => t.id !== turn.id);
                 const conversationMessages = previousTurns.flatMap(t => t.messages);
-                const inputMessages = {
+                const inputMessages = [
                     ...conversationMessages,
                     ...turn.triggerData.messages,
-                }
+                ]
 
                 // call agents runtime and handle generated messages
                 for await (const event of streamResponse(turn.projectId, turn.triggerData.workflow, inputMessages)) {
@@ -77,7 +79,7 @@ async function processJob(workerId: string) {
                         generatedMessages.push(msg);
 
                         // publish generated messages to topic
-                        await publish(pubsubTopic, {
+                        await publish(topic, {
                             type: "message",
                             data: msg,
                             index,
@@ -87,26 +89,28 @@ async function processJob(workerId: string) {
                         index++;
                     }
                 }
-            } catch (error) {
-                turnLogger.log('Error processing turn:', error);
-                error = error instanceof Error ? error.message : "Unknown error";
-                await publish(pubsubTopic, {
+            } catch (err) {
+                turnLogger.log('Error processing turn:', err);
+                errorState = err instanceof Error ? err.message : "Unknown error";
+                await publish(topic, {
                     type: "error",
-                    error: error instanceof Error ? error.message : "Unknown error",
+                    error: err instanceof Error ? err.message : "Unknown error",
                 });
             } finally {
                 // mark turn as completed
                 const updatedTurn = await turnsRepo.saveTurn(turn.id, {
-                    status: error ? "failed" : "completed",
-                    ...(error ? { error } : {}),
+                    status: errorState ? "failed" : "completed",
+                    ...(errorState ? { error: errorState } : {}),
                 });
                 turnLogger.log("updated turn state");
 
                 // emit done event
-                await publish(pubsubTopic, {
-                    type: "done",
-                    turn: updatedTurn,
-                });
+                if (!errorState) {
+                    await publish(topic, {
+                        type: "done",
+                        turn: updatedTurn,
+                    });
+                }
 
                 // log billing usage
                 if (USE_BILLING && billingCustomerId) {
@@ -116,6 +120,9 @@ async function processJob(workerId: string) {
                     });
                     turnLogger.log("logged billing usage");
                 }
+
+                // release lock
+                await turnsRepo.releaseTurn(turn.id);
 
                 turnLogger.log('<< completed turn');
             }

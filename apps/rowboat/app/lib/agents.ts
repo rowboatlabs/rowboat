@@ -939,6 +939,8 @@ export async function* streamResponse(
     let logger = new PrefixLogger(`agent-loop`)
     logger.log('projectId', projectId);
 
+    logger.log('messages', messages);
+
     // ensure valid system message
     ensureSystemMessage(logger, messages);
 

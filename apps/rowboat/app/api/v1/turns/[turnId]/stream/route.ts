@@ -1,6 +1,7 @@
 import { container } from "@/di/container";
 import { IStreamTurnController } from "@/src/interface-adapters/controllers/turns/stream-turn.controller";
 import { auth0 } from "@/app/lib/auth0";
+import { requireAuth } from "@/app/lib/auth";
 
 const streamTurnController = container.resolve<IStreamTurnController>("streamTurnController");
 
@@ -8,10 +9,7 @@ export async function GET(request: Request, props: { params: Promise<{ turnId: s
   const { turnId } = await props.params;
 
   // check session
-  const session = await auth0.getSession();
-  if (!session) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const user = await requireAuth();
 
   // Extract Last-Event-ID header for SSE resuming
   const lastEventId = request.headers.get('Last-Event-ID');
@@ -32,7 +30,7 @@ export async function GET(request: Request, props: { params: Promise<{ turnId: s
           turnId,
           lastEventIndex: validLastEventIndex,
           caller: "user",
-          userId: session.user.sub,
+          userId: user._id,
         })) {
           // Build SSE message with optional ID field
           let sseMessage = '';

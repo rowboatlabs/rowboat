@@ -18,7 +18,19 @@ export interface IStreamTurnUseCase {
 }
 
 export class StreamTurnUseCase implements IStreamTurnUseCase {
-    constructor(private readonly turnsRepository: ITurnsRepository, private readonly pubsubService: IPubSubService) {}
+    private readonly turnsRepository: ITurnsRepository;
+    private readonly pubsubService: IPubSubService;
+
+    constructor({
+        turnsRepository,
+        pubsubService,
+    }: {
+        turnsRepository: ITurnsRepository,
+        pubsubService: IPubSubService,
+    }) {
+        this.turnsRepository = turnsRepository;
+        this.pubsubService = pubsubService;
+    }
 
     async *execute(data: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof TurnEvent>, void, unknown> {
         const { turnId, lastEventIndex = 0 } = data;
@@ -152,15 +164,15 @@ export class StreamTurnUseCase implements IStreamTurnUseCase {
     }
 
     private async authorizeAccess(data: z.infer<typeof inputSchema>): Promise<void> {
-        const { turnId: runId } = data;
+        const { turnId } = data;
 
         // fetch run data for authorization
-        const run = await this.turnsRepository.getTurn(runId);
-        if (!run) {
-            throw new NotFoundError('Run not found');
+        const turn = await this.turnsRepository.getTurn(turnId);
+        if (!turn) {
+            throw new NotFoundError('Turn not found');
         }
 
-        const { projectId } = run;
+        const { projectId } = turn;
 
         // if caller is a user, ensure they are a member of project
         if (data.caller === "user") {

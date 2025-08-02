@@ -6,7 +6,7 @@ export const Turn = z.object({
     id: z.string(),
     projectId: z.string(),
     conversationId: z.string(),
-    createdAt: z.date(),
+    createdAt: z.string().datetime(),
     trigger: z.enum([
         "chat",
         "api",
@@ -23,10 +23,13 @@ export const Turn = z.object({
         "failed",
     ]),
     error: z.string().optional(),
-    lastUpdatedAt: z.date().optional(),
+    lastUpdatedAt: z.string().datetime().optional(),
+    lockedByWorkerId: z.string().optional(),
+    lockAcquiredAt: z.string().datetime().optional(),
+    lockReleasedAt: z.string().datetime().optional(),
 });
 
-export const TurnEvent = z.union([
+export const TurnEvent = z.discriminatedUnion("type", [
     z.object({
         type: z.literal("message"),
         index: z.number(),

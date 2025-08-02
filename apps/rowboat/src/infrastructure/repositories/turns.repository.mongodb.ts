@@ -9,15 +9,6 @@ import { ObjectId } from "mongodb";
 const DocSchema = Turn
     .omit({
         id: true,
-        createdAt: true,
-        lastUpdatedAt: true,
-    })
-    .extend({
-        createdAt: z.string().datetime(),
-        lastUpdatedAt: z.string().datetime().optional(),
-        lockedByWorkerId: z.string().optional(),
-        lockAcquiredAt: z.string().datetime().optional(),
-        lockReleasedAt: z.string().datetime().optional(),
     });
 
 export class TurnsRepositoryMongodb implements ITurnsRepository {
@@ -28,8 +19,6 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
         return {
             ...rest,
             id: id || _id.toString(),
-            createdAt: new Date(doc.createdAt),
-            lastUpdatedAt: doc.lastUpdatedAt ? new Date(doc.lastUpdatedAt) : undefined,
         };
     }
 
@@ -54,7 +43,6 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
             ...doc,
             messages: [],
             id: _id.toString(),
-            createdAt: now,
         };
     }
 
@@ -75,6 +63,9 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
             _id: new ObjectId(id),
         }, {
             $push: { messages: { $each: data.messages } },
+            $set: {
+                lastUpdatedAt: new Date().toISOString(),
+            },
         }, {
             returnDocument: "after",
         });
@@ -90,7 +81,10 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
         const result = await this.collection.findOneAndUpdate({
             _id: new ObjectId(id),
         }, {
-            $set: data,
+            $set: {
+                ...data,
+                lastUpdatedAt: new Date().toISOString(),
+            },
         }, {
             returnDocument: "after",
         });
@@ -132,6 +126,7 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
             $set: {
                 lockedByWorkerId: workerId,
                 lockAcquiredAt: new Date().toISOString(),
+                lastUpdatedAt: new Date().toISOString(),
                 status: "running" as const,
             },
         }, {
@@ -153,7 +148,7 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
             $set: {
                 lockedByWorkerId: undefined,
                 lockAcquiredAt: undefined,
-                status: "pending" as const,
+                lastUpdatedAt: new Date().toISOString(),
             },
         });
 

@@ -16,7 +16,15 @@ export interface IStreamTurnController {
 }
 
 export class StreamTurnController implements IStreamTurnController {
-    constructor(private readonly streamTurnUseCase: IStreamTurnUseCase) {}
+    private readonly streamTurnUseCase: IStreamTurnUseCase;
+    
+    constructor({
+        streamTurnUseCase,
+    }: {
+        streamTurnUseCase: IStreamTurnUseCase,
+    }) {
+        this.streamTurnUseCase = streamTurnUseCase;
+    }
 
     async *execute(request: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof TurnEvent>, void, unknown> {
         // parse input
