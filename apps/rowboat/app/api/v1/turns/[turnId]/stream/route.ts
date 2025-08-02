@@ -15,11 +15,6 @@ export async function GET(request: Request, props: { params: Promise<{ turnId: s
   const lastEventId = request.headers.get('Last-Event-ID');
   const lastEventIndex = lastEventId ? parseInt(lastEventId, 10) : undefined;
   
-  // Validate the parsed index (must be a non-negative integer)
-  const validLastEventIndex = (lastEventIndex !== undefined && !isNaN(lastEventIndex) && lastEventIndex >= 0) 
-    ? lastEventIndex 
-    : 0;
-
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -28,7 +23,7 @@ export async function GET(request: Request, props: { params: Promise<{ turnId: s
         // Iterate over the generator
         for await (const event of streamTurnController.execute({
           turnId,
-          lastEventIndex: validLastEventIndex,
+          lastEventIndex,
           caller: "user",
           userId: user._id,
         })) {

@@ -32,7 +32,7 @@ export function Chat({
     triggerCopilotChat?: (message: string) => void;
 }) {
     const [conversationId, setConversationId] = useState<string | null>(null);
-    const [turn, setTurn] = useState<z.infer<typeof Turn> | null>(null);
+    const [turnId, setTurnId] = useState<string | null>(null);
     const [messages, setMessages] = useState<z.infer<typeof Message>[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
@@ -179,7 +179,7 @@ export function Chat({
     // Function to reset conversation (useful for starting fresh)
     const resetConversation = useCallback(() => {
         setConversationId(null);
-        setTurn(null);
+        setTurnId(null);
         setMessages([]);
         setOptimisticMessages([]);
         setError(null);
@@ -210,7 +210,7 @@ export function Chat({
         }
     }, [messages, messageSubscriber]);
 
-    // create a new run
+    // create a new turn
     useEffect(() => {
         let ignore = false;
 
@@ -221,7 +221,7 @@ export function Chat({
                     projectId,
                     conversationId: conversationId || undefined,
                     workflow,
-                    messages,
+                    messages: [messages[messages.length - 1]], // send only the last user message
                 });
                 if (ignore) {
                     return;
@@ -233,7 +233,7 @@ export function Chat({
                     console.log('returning from createRun due to billing error');
                     return;
                 }
-                setTurn(response);
+                setTurnId(response.id);
                 setConversationId(response.conversationId);
             } catch (err) {
                 if (!ignore) {
@@ -241,11 +241,6 @@ export function Chat({
                     setLoading(false);
                 }
             }
-        }
-
-        // if there's already a run, don't create another one
-        if (turn) {
-            return;
         }
 
         // if there are no messages yet, return
@@ -278,21 +273,15 @@ export function Chat({
         projectId,
         workflow,
         error,
-        turn,
     ]);
 
     // stream from run until completion
     useEffect(() => {
         let ignore = false;
         let eventSource: EventSource | null = null;
-        let msgs: z.infer<typeof Message>[] = [];
 
         async function process() {
-            if (!turn) {
-                return;
-            }
-
-            eventSource = new EventSource(`/api/v1/turns/${turn.id}/stream`);
+            eventSource = new EventSource(`/api/v1/turns/${turnId}/stream`);
             eventSourceRef.current = eventSource;
 
             eventSource.addEventListener("message", (event) => {
@@ -307,10 +296,9 @@ export function Chat({
                     
                     if (turnEvent.type === "message") {
                         // Handle regular message events
-                        const parsedMsg = turnEvent.data;
-                        msgs.push(parsedMsg);
+                        const generatedMessage = turnEvent.data;
                         // Update optimistic messages immediately for real-time streaming UX
-                        setOptimisticMessages(prev => [...prev, parsedMsg]);
+                        setOptimisticMessages(prev => [...prev, generatedMessage]);
                     } else if (turnEvent.type === "done") {
                         // Handle completion event
                         console.log(`chat.tsx: got done event`);
@@ -322,12 +310,15 @@ export function Chat({
                         // Combine state and collected messages in the response
                         setLastAgenticResponse({
                             turn: turnEvent.turn,
-                            messages: msgs
+                            messages: turnEvent.turn.messages,
                         });
 
                         // Commit all streamed messages atomically to the source of truth
-                        setMessages([...messages, ...msgs]);
+                        setMessages([...messages, ...turnEvent.turn.messages]);
                         setLoading(false);
+
+                        // clear turn
+                        setTurnId(null);
                     } else if (turnEvent.type === "error") {
                         // Handle error event
                         console.log(`chat.tsx: got error event: ${turnEvent.error}`);
@@ -342,8 +333,8 @@ export function Chat({
                             setError('Error: ' + turnEvent.error);
                             // Rollback to last known good state on stream errors
                             setOptimisticMessages(messages);
-                            // Clear the run on error
-                            setTurn(null);
+                            // Clear the turn on error
+                            setTurnId(null);
                         }
                     }
                 } catch (err) {
@@ -362,17 +353,17 @@ export function Chat({
                     // Rollback to last known good state on connection errors
                     setOptimisticMessages(messages);
                     // Clear the run on error
-                    setTurn(null);
+                    setTurnId(null);
                 }
             };
         }
 
-        // Only stream if we have a run
-        if (!turn) {
+        // Only stream if we have a turn
+        if (!turnId) {
             return;
         }
 
-        console.log(`executing streamFromRun for run: ${turn.id}`);
+        console.log(`executing streamFromRun for turn: ${turnId}`);
         process();
 
         return () => {
@@ -383,7 +374,7 @@ export function Chat({
             }
         };
     }, [
-        turn,
+        turnId,
         messages,
     ]);
 

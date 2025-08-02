@@ -33,7 +33,7 @@ export class StreamTurnUseCase implements IStreamTurnUseCase {
     }
 
     async *execute(data: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof TurnEvent>, void, unknown> {
-        const { turnId, lastEventIndex = 0 } = data;
+        const { turnId, lastEventIndex = -1 } = data;
 
         // Perform authorization first
         await this.authorizeAccess(data);

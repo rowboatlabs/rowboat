@@ -54,9 +54,12 @@ async function processJob(workerId: string) {
                 // fetch previous conversation turns and pull message history
                 const allTurns = await turnsRepo.getConversationTurns(turn.conversationId);
                 const previousTurns = allTurns.filter(t => t.id !== turn.id);
-                const conversationMessages = previousTurns.flatMap(t => t.messages);
+                const previousMessages = previousTurns.flatMap(t => [
+                    ...t.triggerData.messages,
+                    ...t.messages,
+                ]);
                 const inputMessages = [
-                    ...conversationMessages,
+                    ...previousMessages,
                     ...turn.triggerData.messages,
                 ]
 
