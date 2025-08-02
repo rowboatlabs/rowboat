@@ -23,7 +23,6 @@ export async function createPlaygroundChatRun(
             projectId,
             messages,
             workflow,
-            isLiveWorkflow: false,
         });
     } catch (err) {
         if (err instanceof BillingError) {

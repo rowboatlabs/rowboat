@@ -8,9 +8,9 @@ import z from "zod";
 const inputSchema = z.object({
     userId: z.string(),
     projectId: z.string(),
+    conversationId: z.string().optional(),
     messages: z.array(Message),
     workflow: Workflow,
-    isLiveWorkflow: z.boolean(),
 });
 
 export interface ICreatePlaygroundChatTurnController {
@@ -33,7 +33,7 @@ export class CreatePlaygroundChatTurnController implements ICreatePlaygroundChat
             userId: result.data.userId,
             turnData: {
                 trigger: "chat",
-                conversationId: "",
+                conversationId: result.data.conversationId,
                 triggerData: {
                     messages: result.data.messages,
                     workflow: result.data.workflow,

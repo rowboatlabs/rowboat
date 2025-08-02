@@ -1,5 +1,6 @@
 import { CreateTurnUseCase } from "@/src/application/use-cases/runs/create-turn.use-case";
-import { TurnsRepository } from "@/src/infrastructure/repositories/runs.repository.mongodb";
+import { ConversationsRepositoryMongodb } from "@/src/infrastructure/repositories/conversations.repository.mongodb";
+import { TurnsRepositoryMongodb } from "@/src/infrastructure/repositories/turns.repository.mongodb";
 import { RedisPubSubService } from "@/src/infrastructure/services/pubsub.service.redis";
 import { CreatePlaygroundChatTurnController } from "@/src/interface-adapters/controllers/turns/create-playground-chat-turn.controller";
 import { asClass, createContainer, InjectionMode } from "awilix";
@@ -10,7 +11,9 @@ export const container = createContainer({
 });
 
 container.register({
-    turnsRepository: asClass(TurnsRepository).singleton(),
+    conversationsRepository: asClass(ConversationsRepositoryMongodb).singleton(),
+
+    turnsRepository: asClass(TurnsRepositoryMongodb).singleton(),
     createTurnUseCase: asClass(CreateTurnUseCase).singleton(),
     createPlaygroundChatTurnController: asClass(CreatePlaygroundChatTurnController).singleton(),
 

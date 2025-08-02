@@ -26,12 +26,6 @@ export const Turn = z.object({
     lastUpdatedAt: z.date().optional(),
 });
 
-export const UpdateTurnData = Turn.pick({
-    messages: true,
-    status: true,
-    error: true,
-});
-
 export const TurnEvent = z.union([
     z.object({
         type: z.literal("message"),
@@ -43,6 +37,6 @@ export const TurnEvent = z.union([
     }),
     z.object({
         type: z.literal("done"),
-        run: Turn,
+        turn: Turn,
     }),
 ]);

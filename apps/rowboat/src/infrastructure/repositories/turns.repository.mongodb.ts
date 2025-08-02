@@ -1,5 +1,6 @@
-import { ITurnsRepository } from "@/src/application/repositories/turns.repository.interface";
-import { Turn, UpdateTurnData } from "@/src/entities/models/turn";
+import { AddMessagesData, ITurnsRepository } from "@/src/application/repositories/turns.repository.interface";
+import { Turn } from "@/src/entities/models/turn";
+import { UpdateTurnData } from "@/src/application/repositories/turns.repository.interface";
 import { CreateTurnData } from "@/src/application/repositories/turns.repository.interface";
 import { z } from "zod";
 import { db } from "@/app/lib/mongodb";
@@ -19,7 +20,7 @@ const DocSchema = Turn
         lockReleasedAt: z.string().datetime().optional(),
     });
 
-export class TurnsRepository implements ITurnsRepository {
+export class TurnsRepositoryMongodb implements ITurnsRepository {
     private readonly collection = db.collection<z.infer<typeof DocSchema>>("turns");
 
     async createTurn(data: z.infer<typeof CreateTurnData>): Promise<z.infer<typeof Turn>> {
@@ -54,6 +55,29 @@ export class TurnsRepository implements ITurnsRepository {
             return null;
         }
         
+        const { _id, ...rest } = result;
+
+        return {
+            ...rest,
+            id,
+            createdAt: new Date(result.createdAt),
+            lastUpdatedAt: result.lastUpdatedAt ? new Date(result.lastUpdatedAt) : undefined,
+        };
+    }
+
+    async addMessages(id: string, data: z.infer<typeof AddMessagesData>): Promise<z.infer<typeof Turn>> {
+        const result = await this.collection.findOneAndUpdate({
+            _id: new ObjectId(id),
+        }, {
+            $push: { messages: { $each: data.messages } },
+        }, {
+            returnDocument: "after",
+        });
+
+        if (!result) {
+            throw new Error("Turn not found");
+        }
+
         const { _id, ...rest } = result;
 
         return {

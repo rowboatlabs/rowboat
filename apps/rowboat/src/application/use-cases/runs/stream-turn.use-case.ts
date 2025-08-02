@@ -77,7 +77,7 @@ export class StreamTurnUseCase implements IStreamTurnUseCase {
             if (run.status === "completed") {
                 yield {
                     type: "done",
-                    run: run
+                    turn: run
                 } as z.infer<typeof TurnEvent>;
                 return; // End streaming for completed runs
             } else if (run.status === "failed") {
@@ -131,7 +131,7 @@ export class StreamTurnUseCase implements IStreamTurnUseCase {
                                 type: currentRun.status === "failed" ? "error" : "done",
                                 ...(currentRun.status === "failed" 
                                     ? { error: currentRun.error || "Run failed" }
-                                    : { run: currentRun }
+                                    : { turn: currentRun }
                                 )
                             } as z.infer<typeof TurnEvent>;
                         }

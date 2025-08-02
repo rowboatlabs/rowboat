@@ -9,7 +9,7 @@ import { IPubSubService } from "@/src/application/services/pubsub.service.interf
 import { z } from "zod";
 import { TurnEvent } from "@/src/entities/models/turn";
 
-const runsRepo = container.resolve<ITurnsRepository>("turnsRepository");
+const turnsRepo = container.resolve<ITurnsRepository>("turnsRepository");
 const pubsubService = container.resolve<IPubSubService>("pubsubService");
 const HOST_NAME = process.env.HOST || "worker-1";
 const WORKER_COUNT = parseInt(process.env.WORKERS || "1", 10);
@@ -25,34 +25,42 @@ async function processJob(workerId: string) {
 
     while (true) {
         try {
-            // fetch next run
-            const run = await runsRepo.pollTurns(workerId);
+            // fetch next job
+            const turn = await turnsRepo.pollTurns(workerId);
 
-            // nothing to run? sleep and try again
-            if (!run) {
+            // nothing to do? sleep and try again
+            if (!turn) {
                 await new Promise(resolve => setTimeout(resolve, 3000));
                 continue;
             }
 
-            const pubsubTopic = `run-${run.id}`;
+            const pubsubTopic = `turn-${turn.id}`;
             let billingCustomerId: string | null = null;
-            const runLogger = logger.child(`run-${run.id}`);
+            const turnLogger = logger.child(`turn-${turn.id}`);
             const msgs: z.infer<typeof Message>[] = [];
             let error: string | null = null;
-            runLogger.log('starting run');
+            turnLogger.log('>>> starting turn');
 
             try {
 
                 // fetch billing customer id
                 if (USE_BILLING) {
-                    billingCustomerId = await getCustomerIdForProject(run.projectId);
-                    runLogger.log('billing customer id', billingCustomerId);
+                    billingCustomerId = await getCustomerIdForProject(turn.projectId);
+                    turnLogger.log('billing customer id', billingCustomerId);
                 }
 
                 // collect events
-                for await (const event of streamResponse(run.projectId, run.triggerData.workflow, run.messages)) {
-                    runLogger.log('got event', JSON.stringify(event));
+                for await (const event of streamResponse(turn.projectId, turn.triggerData.workflow, turn.messages)) {
+                    turnLogger.log('got event', JSON.stringify(event));
+
+                    // handle message events
                     if ("role" in event) {
+                        // save message to turn
+                        await turnsRepo.addMessages(turn.id, {
+                            messages: [event],
+                        });
+
+                        // publish message event
                         const msg = {
                             ...event,
                             timestamp: new Date().toISOString(),
@@ -65,28 +73,24 @@ async function processJob(workerId: string) {
                     }
                 }
             } catch (error) {
-                runLogger.log('Error processing job:', error);
+                turnLogger.log('Error processing turn:', error);
                 error = error instanceof Error ? error.message : "Unknown error";
                 await publish(pubsubTopic, {
                     type: "error",
                     error: error instanceof Error ? error.message : "Unknown error",
                 });
             } finally {
-                // save events and mark run as completed
-                const updatedRun = await runsRepo.saveTurn(run.id, {
+                // mark turn as completed
+                const updatedTurn = await turnsRepo.saveTurn(turn.id, {
                     status: error ? "failed" : "completed",
                     ...(error ? { error } : {}),
-                    messages: {
-                        ...run.messages,
-                        ...msgs,
-                    },
                 });
-                runLogger.log("updated run state");
+                turnLogger.log("updated turn state");
 
                 // emit done event
                 await publish(pubsubTopic, {
                     type: "done",
-                    run: updatedRun,
+                    turn: updatedTurn,
                 });
 
                 // log billing usage
@@ -95,10 +99,10 @@ async function processJob(workerId: string) {
                         type: "agent_messages",
                         amount: msgs.filter(e => e.role === 'assistant').length,
                     });
-                    runLogger.log("logged billing usage");
+                    turnLogger.log("logged billing usage");
                 }
 
-                runLogger.log('completed');
+                turnLogger.log('<< completed turn');
             }
         } catch (error) {
             logger.log('Error processing job:', error);
