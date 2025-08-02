@@ -1,6 +1,6 @@
-import { IRunsRepository } from "@/src/application/repositories/runs.repository.interface";
-import { Run } from "@/src/entities/models/run";
-import { CreateRunData } from "../../repositories/runs.repository.interface";
+import { ITurnsRepository } from "@/src/application/repositories/turns.repository.interface";
+import { Turn } from "@/src/entities/models/turn";
+import { CreateTurnData } from "../../repositories/turns.repository.interface";
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { authorize, getCustomerIdForProject } from "@/app/lib/billing";
 import { BadRequestError, BillingError, NotAuthorizedError } from '@/src/entities/errors/common';
@@ -10,25 +10,21 @@ import { apiKeysCollection, projectMembersCollection } from "@/app/lib/mongodb";
 import { z } from "zod";
 
 const inputSchema = z.object({
-    runData: CreateRunData,
+    turnData: CreateTurnData,
     caller: z.enum(["user", "api"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
 });
 
-export interface ICreateRunUseCase {
-    execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Run>>;
+export interface ICreateTurnUseCase {
+    execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Turn>>;
 }
 
-export class CreateRunUseCase implements ICreateRunUseCase {
-    private readonly runsRepository: IRunsRepository;
+export class CreateTurnUseCase implements ICreateTurnUseCase {
+    constructor(private readonly turnsRepository: ITurnsRepository) {}
 
-    constructor({ runsRepository }: { runsRepository: IRunsRepository }) {
-        this.runsRepository = runsRepository;
-    }
-
-    async execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Run>> {
-        const { projectId } = data.runData;
+    async execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Turn>> {
+        const { projectId } = data.turnData;
 
         // if caller is a user, ensure they are a member of project
         if (data.caller === "user") {
@@ -69,7 +65,7 @@ export class CreateRunUseCase implements ICreateRunUseCase {
         if (USE_BILLING) {
             // get billing customer id for project
             const customerId = await getCustomerIdForProject(projectId);
-            const agentModels = data.runData.workflow.agents.reduce((acc, agent) => {
+            const agentModels = data.turnData.triggerData.workflow.agents.reduce((acc, agent) => {
                 acc.push(agent.model);
                 return acc;
             }, [] as string[]);
@@ -85,13 +81,13 @@ export class CreateRunUseCase implements ICreateRunUseCase {
         }
 
         // set timestamps where missing
-        data.runData.messages.forEach(msg => {
+        data.turnData.messages.forEach(msg => {
             if (!msg.timestamp) {
                 msg.timestamp = new Date().toISOString();
             }
         });
 
         // create run
-        return await this.runsRepository.createRun(data.runData);
+        return await this.turnsRepository.createTurn(data.turnData);
     }
 }

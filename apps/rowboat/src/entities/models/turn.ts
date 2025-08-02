@@ -2,8 +2,10 @@ import { Message } from "@/app/lib/types/types";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { z } from "zod";
 
-export const Run = z.object({
+export const Turn = z.object({
     id: z.string(),
+    projectId: z.string(),
+    conversationId: z.string(),
     createdAt: z.date(),
     trigger: z.enum([
         "chat",
@@ -11,10 +13,8 @@ export const Run = z.object({
     ]),
     triggerData: z.object({
         messages: z.array(Message),
+        workflow: Workflow,
     }),
-    projectId: z.string(),
-    workflow: Workflow,
-    isLiveWorkflow: z.boolean(),
     messages: z.array(Message),
     status: z.enum([
         "pending",
@@ -26,8 +26,23 @@ export const Run = z.object({
     lastUpdatedAt: z.date().optional(),
 });
 
-export const UpdateRunData = Run.pick({
+export const UpdateTurnData = Turn.pick({
     messages: true,
     status: true,
     error: true,
 });
+
+export const TurnEvent = z.union([
+    z.object({
+        type: z.literal("message"),
+        data: Message,
+    }),
+    z.object({
+        type: z.literal("error"),
+        error: z.string(),
+    }),
+    z.object({
+        type: z.literal("done"),
+        run: Turn,
+    }),
+]);

@@ -1,11 +1,11 @@
-import { IRunsRepository } from "@/src/application/repositories/runs.repository.interface";
-import { Run, UpdateRunData } from "@/src/entities/models/run";
-import { CreateRunData } from "@/src/application/repositories/runs.repository.interface";
+import { ITurnsRepository } from "@/src/application/repositories/turns.repository.interface";
+import { Turn, UpdateTurnData } from "@/src/entities/models/turn";
+import { CreateTurnData } from "@/src/application/repositories/turns.repository.interface";
 import { z } from "zod";
 import { db } from "@/app/lib/mongodb";
 import { ObjectId } from "mongodb";
 
-const DocSchema = Run
+const DocSchema = Turn
     .omit({
         id: true,
         createdAt: true,
@@ -19,10 +19,10 @@ const DocSchema = Run
         lockReleasedAt: z.string().datetime().optional(),
     });
 
-export class RunsRepository implements IRunsRepository {
-    private readonly collection = db.collection<z.infer<typeof DocSchema>>("runs");
+export class TurnsRepository implements ITurnsRepository {
+    private readonly collection = db.collection<z.infer<typeof DocSchema>>("turns");
 
-    async createRun(data: z.infer<typeof CreateRunData>): Promise<z.infer<typeof Run>> {
+    async createTurn(data: z.infer<typeof CreateTurnData>): Promise<z.infer<typeof Turn>> {
         const now = new Date();
         const _id = new ObjectId();
 
@@ -45,7 +45,7 @@ export class RunsRepository implements IRunsRepository {
         };
     }
 
-    async getRun(id: string): Promise<z.infer<typeof Run> | null> {
+    async getTurn(id: string): Promise<z.infer<typeof Turn> | null> {
         const result = await this.collection.findOne({
             _id: new ObjectId(id),
         });
@@ -64,7 +64,7 @@ export class RunsRepository implements IRunsRepository {
         };
     }
 
-    async saveRun(id: string, data: z.infer<typeof UpdateRunData>): Promise<z.infer<typeof Run>> {
+    async saveTurn(id: string, data: z.infer<typeof UpdateTurnData>): Promise<z.infer<typeof Turn>> {
         const result = await this.collection.findOneAndUpdate({
             _id: new ObjectId(id),
         }, {
@@ -87,7 +87,7 @@ export class RunsRepository implements IRunsRepository {
         };
     }
 
-    async pollRuns(workerId: string): Promise<z.infer<typeof Run> | null> {
+    async pollTurns(workerId: string): Promise<z.infer<typeof Turn> | null> {
         const result = await this.collection.findOneAndUpdate({
             status: "pending",
             lockedByWorkerId: { $exists: false }
@@ -115,7 +115,7 @@ export class RunsRepository implements IRunsRepository {
         };
     }
 
-    async lockRun(runId: string, workerId: string): Promise<z.infer<typeof Run> | null> {
+    async lockTurn(runId: string, workerId: string): Promise<z.infer<typeof Turn> | null> {
         const result = await this.collection.findOneAndUpdate({
             _id: new ObjectId(runId),
             status: "pending",
@@ -144,7 +144,7 @@ export class RunsRepository implements IRunsRepository {
         };
     }
 
-    async releaseRun(runId: string): Promise<boolean> {
+    async releaseTurn(runId: string): Promise<boolean> {
         const result = await this.collection.updateOne({
             _id: new ObjectId(runId),
             lockedByWorkerId: { $exists: true },

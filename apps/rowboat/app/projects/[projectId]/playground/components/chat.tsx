@@ -11,7 +11,7 @@ import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { ChevronDownIcon } from "@heroicons/react/24/outline";
 import { FeedbackModal } from "./feedback-modal";
 import { FIX_WORKFLOW_PROMPT, FIX_WORKFLOW_PROMPT_WITH_FEEDBACK, EXPLAIN_WORKFLOW_PROMPT_ASSISTANT, EXPLAIN_WORKFLOW_PROMPT_TOOL, EXPLAIN_WORKFLOW_PROMPT_TRANSITION } from "../copilot-prompts";
-import { Run } from "@/src/entities/models/run";
+import { Turn } from "@/src/entities/models/turn";
 
 export function Chat({
     projectId,
@@ -30,7 +30,7 @@ export function Chat({
     showJsonMode?: boolean;
     triggerCopilotChat?: (message: string) => void;
 }) {
-    const [run, setRun] = useState<z.infer<typeof Run> | null>(null);
+    const [run, setRun] = useState<z.infer<typeof Turn> | null>(null);
     const [messages, setMessages] = useState<z.infer<typeof Message>[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);

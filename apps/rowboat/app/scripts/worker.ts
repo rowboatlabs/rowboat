@@ -1,5 +1,5 @@
 import { container } from "@/di/container";
-import { IRunsRepository } from "@/src/application/repositories/runs.repository.interface";
+import { ITurnsRepository } from "@/src/application/repositories/turns.repository.interface";
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { getCustomerIdForProject, logUsage } from "@/app/lib/billing";
 import { streamResponse } from "../lib/agents";
@@ -7,14 +7,14 @@ import { Message } from "../lib/types/types";
 import { PrefixLogger } from "../lib/utils";
 import { IPubSubService } from "@/src/application/services/pubsub.service.interface";
 import { z } from "zod";
-import { RunEvent } from "@/src/entities/models/run-event";
+import { TurnEvent } from "@/src/entities/models/turn";
 
-const runsRepo = container.resolve<IRunsRepository>("runsRepository");
+const runsRepo = container.resolve<ITurnsRepository>("turnsRepository");
 const pubsubService = container.resolve<IPubSubService>("pubsubService");
 const HOST_NAME = process.env.HOST || "worker-1";
 const WORKER_COUNT = parseInt(process.env.WORKERS || "1", 10);
 
-async function publish(topic: string, event: z.infer<typeof RunEvent>): Promise<void> {
+async function publish(topic: string, event: z.infer<typeof TurnEvent>): Promise<void> {
     await pubsubService.publish(topic, JSON.stringify(event));
 }
 
@@ -26,7 +26,7 @@ async function processJob(workerId: string) {
     while (true) {
         try {
             // fetch next run
-            const run = await runsRepo.pollRuns(workerId);
+            const run = await runsRepo.pollTurns(workerId);
 
             // nothing to run? sleep and try again
             if (!run) {
@@ -50,7 +50,7 @@ async function processJob(workerId: string) {
                 }
 
                 // collect events
-                for await (const event of streamResponse(run.projectId, run.workflow, run.messages)) {
+                for await (const event of streamResponse(run.projectId, run.triggerData.workflow, run.messages)) {
                     runLogger.log('got event', JSON.stringify(event));
                     if ("role" in event) {
                         const msg = {
@@ -73,7 +73,7 @@ async function processJob(workerId: string) {
                 });
             } finally {
                 // save events and mark run as completed
-                const updatedRun = await runsRepo.saveRun(run.id, {
+                const updatedRun = await runsRepo.saveTurn(run.id, {
                     status: error ? "failed" : "completed",
                     ...(error ? { error } : {}),
                     messages: {

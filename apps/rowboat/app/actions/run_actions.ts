@@ -4,18 +4,18 @@ import { Workflow } from "../lib/types/workflow_types";
 import { Message } from "@/app/lib/types/types";
 import { authCheck } from './auth_actions';
 import { container } from '@/di/container';
-import { ICreatePlaygroundChatRunController } from '@/src/interface-adapters/controllers/runs/create-playground-chat-run.controller';
+import { ICreatePlaygroundChatTurnController } from '@/src/interface-adapters/controllers/turns/create-playground-chat-turn.controller';
 import { BillingError } from '@/src/entities/errors/common';
-import { Run } from '@/src/entities/models/run';
+import { Turn } from '@/src/entities/models/turn';
 
 export async function createPlaygroundChatRun(
     projectId: string,
     workflow: z.infer<typeof Workflow>,
     messages: z.infer<typeof Message>[],
-): Promise<z.infer<typeof Run> | { billingError: string }> {
+): Promise<z.infer<typeof Turn> | { billingError: string }> {
     const user = await authCheck();
 
-    const controller = container.resolve<ICreatePlaygroundChatRunController>("createPlaygroundChatRunController");
+    const controller = container.resolve<ICreatePlaygroundChatTurnController>("createPlaygroundChatTurnController");
 
     try {
         return await controller.execute({

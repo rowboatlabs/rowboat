@@ -1,42 +1,36 @@
-import { IRunsRepository } from "@/src/application/repositories/runs.repository.interface";
+import { ITurnsRepository } from "@/src/application/repositories/turns.repository.interface";
 import { BadRequestError, BillingError, NotAuthorizedError, NotFoundError } from '@/src/entities/errors/common';
 import { check_query_limit } from "@/app/lib/rate_limiting";
 import { QueryLimitError } from "@/src/entities/errors/common";
 import { apiKeysCollection, projectMembersCollection } from "@/app/lib/mongodb";
 import { z } from "zod";
 import { IPubSubService, ISubscription } from "@/src/application/services/pubsub.service.interface";
-import { RunEvent } from "@/src/entities/models/run-event";
+import { TurnEvent } from "@/src/entities/models/turn";
 
 const inputSchema = z.object({
     fromIndex: z.number().optional().default(0), // Start streaming from this message index
-    runId: z.string(),
+    turnId: z.string(),
     caller: z.enum(["user", "api"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
 });
 
-export interface IStreamRunUseCase {
-    execute(data: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown>;
+export interface IStreamTurnUseCase {
+    execute(data: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof TurnEvent>, void, unknown>;
 }
 
-export class StreamRunUseCase implements IStreamRunUseCase {
-    private readonly runsRepository: IRunsRepository;
-    private readonly pubsubService: IPubSubService;
+export class StreamTurnUseCase implements IStreamTurnUseCase {
+    constructor(private readonly turnsRepository: ITurnsRepository, private readonly pubsubService: IPubSubService) {}
 
-    constructor({ runsRepository, pubsubService }: { runsRepository: IRunsRepository, pubsubService: IPubSubService }) {
-        this.runsRepository = runsRepository;
-        this.pubsubService = pubsubService;
-    }
-
-    async *execute(data: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
-        const { runId, fromIndex } = data;
+    async *execute(data: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof TurnEvent>, void, unknown> {
+        const { turnId: runId, fromIndex } = data;
 
         // Perform authorization first
         await this.authorizeAccess(data);
 
         // Buffer for pubsub messages with their indices
         interface BufferedEvent {
-            event: z.infer<typeof RunEvent>;
+            event: z.infer<typeof TurnEvent>;
             messageIndex?: number;
         }
         const bufferedEvents: BufferedEvent[] = [];
@@ -48,7 +42,7 @@ export class StreamRunUseCase implements IStreamRunUseCase {
             subscription = await this.pubsubService.subscribe(`run-${runId}`, (message) => {
                 try {
                     const parsedMessage = JSON.parse(message);
-                    const event = parsedMessage.event as z.infer<typeof RunEvent>;
+                    const event = parsedMessage.event as z.infer<typeof TurnEvent>;
                     const messageIndex = parsedMessage.messageIndex as number | undefined;
                     
                     bufferedEvents.push({
@@ -62,7 +56,7 @@ export class StreamRunUseCase implements IStreamRunUseCase {
             isSubscribed = true;
 
             // 2. Fetch messages from DB from fromIndex onwards
-            const run = await this.runsRepository.getRun(runId);
+            const run = await this.turnsRepository.getTurn(runId);
             if (!run) {
                 throw new NotFoundError('Run not found');
             }
@@ -76,7 +70,7 @@ export class StreamRunUseCase implements IStreamRunUseCase {
                 yield {
                     type: "message",
                     data: message
-                } as z.infer<typeof RunEvent>;
+                } as z.infer<typeof TurnEvent>;
             }
 
             // If the run is already completed or failed, yield the terminal event
@@ -84,13 +78,13 @@ export class StreamRunUseCase implements IStreamRunUseCase {
                 yield {
                     type: "done",
                     run: run
-                } as z.infer<typeof RunEvent>;
+                } as z.infer<typeof TurnEvent>;
                 return; // End streaming for completed runs
             } else if (run.status === "failed") {
                 yield {
                     type: "error",
                     error: run.error || "Run failed"
-                } as z.infer<typeof RunEvent>;
+                } as z.infer<typeof TurnEvent>;
                 return; // End streaming for failed runs
             }
 
@@ -129,7 +123,7 @@ export class StreamRunUseCase implements IStreamRunUseCase {
                     }
                 } else {
                     // Check current run status to see if it's completed
-                    const currentRun = await this.runsRepository.getRun(runId);
+                    const currentRun = await this.turnsRepository.getTurn(runId);
                     if (currentRun && (currentRun.status === "completed" || currentRun.status === "failed")) {
                         // Yield final state if not already yielded
                         if (bufferedEvents.length === 0) {
@@ -139,7 +133,7 @@ export class StreamRunUseCase implements IStreamRunUseCase {
                                     ? { error: currentRun.error || "Run failed" }
                                     : { run: currentRun }
                                 )
-                            } as z.infer<typeof RunEvent>;
+                            } as z.infer<typeof TurnEvent>;
                         }
                         break;
                     }
@@ -162,10 +156,10 @@ export class StreamRunUseCase implements IStreamRunUseCase {
     }
 
     private async authorizeAccess(data: z.infer<typeof inputSchema>): Promise<void> {
-        const { runId } = data;
+        const { turnId: runId } = data;
 
         // fetch run data for authorization
-        const run = await this.runsRepository.getRun(runId);
+        const run = await this.turnsRepository.getTurn(runId);
         if (!run) {
             throw new NotFoundError('Run not found');
         }

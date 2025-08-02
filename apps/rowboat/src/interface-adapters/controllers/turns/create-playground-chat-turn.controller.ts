@@ -1,7 +1,7 @@
 import { Message } from "@/app/lib/types/types";
 import { Workflow } from "@/app/lib/types/workflow_types";
-import { ICreateRunUseCase } from "@/src/application/use-cases/runs/create-run.use-case";
-import { Run } from "@/src/entities/models/run";
+import { ICreateTurnUseCase } from "@/src/application/use-cases/runs/create-turn.use-case";
+import { Turn } from "@/src/entities/models/turn";
 import { BadRequestError } from "@/src/entities/errors/common";
 import z from "zod";
 
@@ -13,18 +13,14 @@ const inputSchema = z.object({
     isLiveWorkflow: z.boolean(),
 });
 
-export interface ICreatePlaygroundChatRunController {
-    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<typeof Run>>;
+export interface ICreatePlaygroundChatTurnController {
+    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<typeof Turn>>;
 }
 
-export class CreatePlaygroundChatRunController implements ICreatePlaygroundChatRunController {
-    private readonly createRunUseCase: ICreateRunUseCase;
+export class CreatePlaygroundChatTurnController implements ICreatePlaygroundChatTurnController {
+    constructor(private readonly createTurnUseCase: ICreateTurnUseCase) {}
 
-    constructor({ createRunUseCase }: { createRunUseCase: ICreateRunUseCase }) {
-        this.createRunUseCase = createRunUseCase;
-    }
-
-    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<typeof Run>> {
+    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<typeof Turn>> {
         // parse input
         const result = inputSchema.safeParse(request);
         if (!result.success) {
@@ -32,18 +28,18 @@ export class CreatePlaygroundChatRunController implements ICreatePlaygroundChatR
         }
 
         // execute use case
-        return this.createRunUseCase.execute({
+        return this.createTurnUseCase.execute({
             caller: "user",
             userId: result.data.userId,
-            runData: {
+            turnData: {
                 trigger: "chat",
+                conversationId: "",
                 triggerData: {
                     messages: result.data.messages,
+                    workflow: result.data.workflow,
                 },
                 projectId: result.data.projectId,
                 messages: result.data.messages,
-                workflow: result.data.workflow,
-                isLiveWorkflow: result.data.isLiveWorkflow,
             },
         });
     }
