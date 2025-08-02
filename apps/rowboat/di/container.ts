@@ -1,5 +1,6 @@
 import { CreateRunUseCase } from "@/src/application/use-cases/runs/create-run.use-case";
 import { RunsRepository } from "@/src/infrastructure/repositories/runs.repository.mongodb";
+import { RedisPubSubService } from "@/src/infrastructure/services/pubsub.service.redis";
 import { CreatePlaygroundChatRunController } from "@/src/interface-adapters/controllers/runs/create-playground-chat-run.controller";
 import { asClass, createContainer, InjectionMode } from "awilix";
 
@@ -12,4 +13,6 @@ container.register({
     runsRepository: asClass(RunsRepository).singleton(),
     createRunUseCase: asClass(CreateRunUseCase).singleton(),
     createPlaygroundChatRunController: asClass(CreatePlaygroundChatRunController).singleton(),
+
+    pubsubService: asClass(RedisPubSubService).singleton(),
 });

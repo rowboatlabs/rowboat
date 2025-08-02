@@ -5,11 +5,18 @@ import { getCustomerIdForProject, logUsage } from "@/app/lib/billing";
 import { streamResponse } from "../lib/agents";
 import { Message } from "../lib/types/types";
 import { PrefixLogger } from "../lib/utils";
+import { IPubSubService } from "@/src/application/services/pubsub.service.interface";
 import { z } from "zod";
+import { RunEvent } from "@/src/entities/models/run-event";
 
 const runsRepo = container.resolve<IRunsRepository>("runsRepository");
+const pubsubService = container.resolve<IPubSubService>("pubsubService");
 const HOST_NAME = process.env.HOST || "worker-1";
 const WORKER_COUNT = parseInt(process.env.WORKERS || "1", 10);
+
+async function publish(topic: string, event: z.infer<typeof RunEvent>): Promise<void> {
+    await pubsubService.publish(topic, JSON.stringify(event));
+}
 
 // Worker function to process a single job
 async function processJob(workerId: string) {
@@ -27,6 +34,7 @@ async function processJob(workerId: string) {
                 continue;
             }
 
+            const pubsubTopic = `run-${run.id}`;
             let billingCustomerId: string | null = null;
             const runLogger = logger.child(`run-${run.id}`);
             const msgs: z.infer<typeof Message>[] = [];
@@ -45,18 +53,27 @@ async function processJob(workerId: string) {
                 for await (const event of streamResponse(run.projectId, run.workflow, run.messages)) {
                     runLogger.log('got event', JSON.stringify(event));
                     if ("role" in event) {
-                        msgs.push({
+                        const msg = {
                             ...event,
                             timestamp: new Date().toISOString(),
+                        };
+                        msgs.push(msg);
+                        await publish(pubsubTopic, {
+                            type: "message",
+                            data: msg,
                         });
                     }
                 }
             } catch (error) {
                 runLogger.log('Error processing job:', error);
                 error = error instanceof Error ? error.message : "Unknown error";
+                await publish(pubsubTopic, {
+                    type: "error",
+                    error: error instanceof Error ? error.message : "Unknown error",
+                });
             } finally {
                 // save events and mark run as completed
-                await runsRepo.saveRun(run.id, {
+                const updatedRun = await runsRepo.saveRun(run.id, {
                     status: error ? "failed" : "completed",
                     ...(error ? { error } : {}),
                     messages: {
@@ -65,6 +82,12 @@ async function processJob(workerId: string) {
                     },
                 });
                 runLogger.log("updated run state");
+
+                // emit done event
+                await publish(pubsubTopic, {
+                    type: "done",
+                    run: updatedRun,
+                });
 
                 // log billing usage
                 if (USE_BILLING && billingCustomerId) {

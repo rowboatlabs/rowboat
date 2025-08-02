@@ -3,7 +3,7 @@ import { Run } from "@/src/entities/models/run";
 import { CreateRunData } from "../../repositories/runs.repository.interface";
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { authorize, getCustomerIdForProject } from "@/app/lib/billing";
-import { BillingError } from '@/src/entities/errors/common';
+import { BadRequestError, BillingError, NotAuthorizedError } from '@/src/entities/errors/common';
 import { check_query_limit } from "@/app/lib/rate_limiting";
 import { QueryLimitError } from "@/src/entities/errors/common";
 import { apiKeysCollection, projectMembersCollection } from "@/app/lib/mongodb";
@@ -33,18 +33,18 @@ export class CreateRunUseCase implements ICreateRunUseCase {
         // if caller is a user, ensure they are a member of project
         if (data.caller === "user") {
             if (!data.userId) {
-                throw new Error('User ID is required');
+                throw new BadRequestError('User ID is required');
             }
             const membership = await projectMembersCollection.findOne({
                 projectId,
                 userId: data.userId,
             });
             if (!membership) {
-                throw new Error('User not a member of project');
+                throw new NotAuthorizedError('User not a member of project');
             }
         } else {
             if (!data.apiKey) {
-                throw new Error('API key is required');
+                throw new BadRequestError('API key is required');
             }
             // check if api key is valid
             // while also updating last used timestamp
@@ -56,7 +56,7 @@ export class CreateRunUseCase implements ICreateRunUseCase {
                 { $set: { lastUsedAt: new Date().toISOString() } }
             );
             if (!result) {
-                throw new Error('Invalid API key');
+                throw new NotAuthorizedError('Invalid API key');
             }
         }
 
