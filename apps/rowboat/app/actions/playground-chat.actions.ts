@@ -8,11 +8,17 @@ import { ICreatePlaygroundChatTurnController } from '@/src/interface-adapters/co
 import { BillingError } from '@/src/entities/errors/common';
 import { Turn } from '@/src/entities/models/turn';
 
-export async function createPlaygroundChatRun(
-    projectId: string,
-    workflow: z.infer<typeof Workflow>,
-    messages: z.infer<typeof Message>[],
-): Promise<z.infer<typeof Turn> | { billingError: string }> {
+export async function createTurn({
+    projectId,
+    conversationId,
+    workflow,
+    messages,
+}: {
+    projectId: string;
+    conversationId?: string;
+    workflow: z.infer<typeof Workflow>;
+    messages: z.infer<typeof Message>[];
+}): Promise<z.infer<typeof Turn> | { billingError: string }> {
     const user = await authCheck();
 
     const controller = container.resolve<ICreatePlaygroundChatTurnController>("createPlaygroundChatTurnController");
@@ -21,6 +27,7 @@ export async function createPlaygroundChatRun(
         return await controller.execute({
             userId: user._id,
             projectId,
+            conversationId,
             messages,
             workflow,
         });

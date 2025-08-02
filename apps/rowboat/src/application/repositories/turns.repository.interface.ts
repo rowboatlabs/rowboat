@@ -39,4 +39,7 @@ export interface ITurnsRepository {
 
     // release lock on turn
     releaseTurn(runId: string): Promise<boolean>;
+
+    // get all turns of a conversation
+    getConversationTurns(conversationId: string): Promise<z.infer<typeof Turn>[]>;
 }

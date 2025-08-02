@@ -37,20 +37,29 @@ async function processJob(workerId: string) {
             const pubsubTopic = `turn-${turn.id}`;
             let billingCustomerId: string | null = null;
             const turnLogger = logger.child(`turn-${turn.id}`);
-            const msgs: z.infer<typeof Message>[] = [];
+            const generatedMessages: z.infer<typeof Message>[] = [];
+            let index = 0;
             let error: string | null = null;
             turnLogger.log('>>> starting turn');
 
             try {
-
                 // fetch billing customer id
                 if (USE_BILLING) {
                     billingCustomerId = await getCustomerIdForProject(turn.projectId);
                     turnLogger.log('billing customer id', billingCustomerId);
                 }
 
-                // collect events
-                for await (const event of streamResponse(turn.projectId, turn.triggerData.workflow, turn.messages)) {
+                // fetch previous conversation turns and pull message history
+                const allTurns = await turnsRepo.getConversationTurns(turn.conversationId);
+                const previousTurns = allTurns.filter(t => t.id !== turn.id);
+                const conversationMessages = previousTurns.flatMap(t => t.messages);
+                const inputMessages = {
+                    ...conversationMessages,
+                    ...turn.triggerData.messages,
+                }
+
+                // call agents runtime and handle generated messages
+                for await (const event of streamResponse(turn.projectId, turn.triggerData.workflow, inputMessages)) {
                     turnLogger.log('got event', JSON.stringify(event));
 
                     // handle message events
@@ -60,16 +69,22 @@ async function processJob(workerId: string) {
                             messages: [event],
                         });
 
-                        // publish message event
+                        // collect generated message
                         const msg = {
                             ...event,
                             timestamp: new Date().toISOString(),
                         };
-                        msgs.push(msg);
+                        generatedMessages.push(msg);
+
+                        // publish generated messages to topic
                         await publish(pubsubTopic, {
                             type: "message",
                             data: msg,
+                            index,
                         });
+
+                        // increment index
+                        index++;
                     }
                 }
             } catch (error) {
@@ -97,7 +112,7 @@ async function processJob(workerId: string) {
                 if (USE_BILLING && billingCustomerId) {
                     await logUsage(billingCustomerId, {
                         type: "agent_messages",
-                        amount: msgs.filter(e => e.role === 'assistant').length,
+                        amount: generatedMessages.filter(e => e.role === 'assistant').length,
                     });
                     turnLogger.log("logged billing usage");
                 }

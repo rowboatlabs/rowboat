@@ -29,6 +29,7 @@ export const Turn = z.object({
 export const TurnEvent = z.union([
     z.object({
         type: z.literal("message"),
+        index: z.number(),
         data: Message,
     }),
     z.object({

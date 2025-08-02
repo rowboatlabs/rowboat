@@ -23,6 +23,16 @@ const DocSchema = Turn
 export class TurnsRepositoryMongodb implements ITurnsRepository {
     private readonly collection = db.collection<z.infer<typeof DocSchema>>("turns");
 
+    private transformDocToTurn(doc: z.infer<typeof DocSchema> & { _id: ObjectId }, id?: string): z.infer<typeof Turn> {
+        const { _id, ...rest } = doc;
+        return {
+            ...rest,
+            id: id || _id.toString(),
+            createdAt: new Date(doc.createdAt),
+            lastUpdatedAt: doc.lastUpdatedAt ? new Date(doc.lastUpdatedAt) : undefined,
+        };
+    }
+
     async createTurn(data: z.infer<typeof CreateTurnData>): Promise<z.infer<typeof Turn>> {
         const now = new Date();
         const _id = new ObjectId();
@@ -55,14 +65,7 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
             return null;
         }
         
-        const { _id, ...rest } = result;
-
-        return {
-            ...rest,
-            id,
-            createdAt: new Date(result.createdAt),
-            lastUpdatedAt: result.lastUpdatedAt ? new Date(result.lastUpdatedAt) : undefined,
-        };
+        return this.transformDocToTurn(result, id);
     }
 
     async addMessages(id: string, data: z.infer<typeof AddMessagesData>): Promise<z.infer<typeof Turn>> {
@@ -78,14 +81,7 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
             throw new Error("Turn not found");
         }
 
-        const { _id, ...rest } = result;
-
-        return {
-            ...rest,
-            id,
-            createdAt: new Date(result.createdAt),
-            lastUpdatedAt: result.lastUpdatedAt ? new Date(result.lastUpdatedAt) : undefined,
-        };
+        return this.transformDocToTurn(result, id);
     }
 
     async saveTurn(id: string, data: z.infer<typeof UpdateTurnData>): Promise<z.infer<typeof Turn>> {
@@ -101,14 +97,7 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
             throw new Error("Run not found");
         }
 
-        const { _id, ...rest } = result;
-
-        return {
-            ...rest,
-            id,
-            createdAt: new Date(result.createdAt),
-            lastUpdatedAt: result.lastUpdatedAt ? new Date(result.lastUpdatedAt) : undefined,
-        };
+        return this.transformDocToTurn(result, id);
     }
 
     async pollTurns(workerId: string): Promise<z.infer<typeof Turn> | null> {
@@ -129,14 +118,7 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
             return null;
         }
 
-        const { _id, ...rest } = result;
-
-        return {
-            ...rest,
-            id: _id.toString(),
-            createdAt: new Date(result.createdAt),
-            lastUpdatedAt: result.lastUpdatedAt ? new Date(result.lastUpdatedAt) : undefined,
-        };
+        return this.transformDocToTurn(result);
     }
 
     async lockTurn(runId: string, workerId: string): Promise<z.infer<typeof Turn> | null> {
@@ -158,14 +140,7 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
             return null;
         }
 
-        const { _id, ...rest } = result;
-
-        return {
-            ...rest,
-            id: _id.toString(),
-            createdAt: new Date(result.createdAt),
-            lastUpdatedAt: result.lastUpdatedAt ? new Date(result.lastUpdatedAt) : undefined,
-        };
+        return this.transformDocToTurn(result);
     }
 
     async releaseTurn(runId: string): Promise<boolean> {
@@ -181,5 +156,13 @@ export class TurnsRepositoryMongodb implements ITurnsRepository {
         });
 
         return result.modifiedCount > 0;
+    }
+
+    async getConversationTurns(conversationId: string): Promise<z.infer<typeof Turn>[]> {
+        const result = await this.collection.find({
+            conversationId,
+        }).toArray();
+
+        return result.map(doc => this.transformDocToTurn(doc));
     }
 }

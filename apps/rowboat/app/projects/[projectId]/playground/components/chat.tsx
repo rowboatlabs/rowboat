@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from "react";
-import { createPlaygroundChatRun } from "@/app/actions/run_actions";
+import { createTurn } from "@/app/actions/playground-chat.actions";
 import { Messages } from "./messages";
 import z, { set } from "zod";
 import { Message, ToolMessage } from "@/app/lib/types/types";
@@ -12,6 +12,7 @@ import { ChevronDownIcon } from "@heroicons/react/24/outline";
 import { FeedbackModal } from "./feedback-modal";
 import { FIX_WORKFLOW_PROMPT, FIX_WORKFLOW_PROMPT_WITH_FEEDBACK, EXPLAIN_WORKFLOW_PROMPT_ASSISTANT, EXPLAIN_WORKFLOW_PROMPT_TOOL, EXPLAIN_WORKFLOW_PROMPT_TRANSITION } from "../copilot-prompts";
 import { Turn } from "@/src/entities/models/turn";
+import { Conversation } from "@/src/entities/models/conversation";
 
 export function Chat({
     projectId,
@@ -30,7 +31,8 @@ export function Chat({
     showJsonMode?: boolean;
     triggerCopilotChat?: (message: string) => void;
 }) {
-    const [run, setRun] = useState<z.infer<typeof Turn> | null>(null);
+    const [conversation, setConversation] = useState<z.infer<typeof Conversation> | null>(null);
+    const [turn, setTurn] = useState<z.infer<typeof Turn> | null>(null);
     const [messages, setMessages] = useState<z.infer<typeof Message>[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
@@ -199,11 +201,11 @@ export function Chat({
         async function process() {
             // if there is no run, create it
             try {
-                const response = await createPlaygroundChatRun(
+                const response = await createTurn({
                     projectId,
                     workflow,
                     messages,
-                );
+                });
                 if (ignore) {
                     return;
                 }
@@ -214,7 +216,7 @@ export function Chat({
                     console.log('returning from createRun due to billing error');
                     return;
                 }
-                setRun(response);
+                setTurn(response);
             } catch (err) {
                 if (!ignore) {
                     setError(`Failed to create run: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -224,7 +226,7 @@ export function Chat({
         }
 
         // if there's already a run, don't create another one
-        if (run) {
+        if (turn) {
             return;
         }
 
@@ -257,7 +259,7 @@ export function Chat({
         projectId,
         workflow,
         error,
-        run,
+        turn,
     ]);
 
     // stream from run until completion
@@ -267,11 +269,11 @@ export function Chat({
         let msgs: z.infer<typeof Message>[] = [];
 
         async function process() {
-            if (!run) {
+            if (!turn) {
                 return;
             }
 
-            eventSource = new EventSource(`/api/stream-response/${run.id}`);
+            eventSource = new EventSource(`/api/stream-response/${turn.id}`);
             eventSourceRef.current = eventSource;
 
             eventSource.addEventListener("message", (event) => {
@@ -328,7 +330,7 @@ export function Chat({
                     // Rollback to last known good state on stream errors
                     setOptimisticMessages(messages);
                     // Clear the run on error
-                    setRun(null);
+                    setTurn(null);
                 }
             });
 
@@ -340,17 +342,17 @@ export function Chat({
                     // Rollback to last known good state on connection errors
                     setOptimisticMessages(messages);
                     // Clear the run on error
-                    setRun(null);
+                    setTurn(null);
                 }
             };
         }
 
         // Only stream if we have a run
-        if (!run) {
+        if (!turn) {
             return;
         }
 
-        console.log(`executing streamFromRun for run: ${run.id}`);
+        console.log(`executing streamFromRun for run: ${turn.id}`);
         process();
 
         return () => {
@@ -361,7 +363,7 @@ export function Chat({
             }
         };
     }, [
-        run,
+        turn,
         messages,
     ]);
 
