@@ -94,7 +94,12 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
                 },
             });
             if (!response.success) {
-                throw new BillingError(response.error || 'Billing error');
+                yield {
+                    type: "error",
+                    error: response.error || 'Billing error',
+                    isBillingError: true,
+                };
+                return;
             }
         }
 

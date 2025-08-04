@@ -15,7 +15,7 @@ const inputSchema = z.object({
 });
 
 export interface IFetchCachedTurnUseCase {
-    execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof CachedTurnRequest>;
+    execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof CachedTurnRequest>>;
 }
 
 export class FetchCachedTurnUseCase implements IFetchCachedTurnUseCase {

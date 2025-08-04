@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from "react";
-import { createTurn } from "@/app/actions/playground-chat.actions";
+import { createCachedTurn, createConversation } from "@/app/actions/playground-chat.actions";
 import { Messages } from "./messages";
-import z, { set } from "zod";
+import { z } from "zod";
 import { Message, ToolMessage } from "@/app/lib/types/types";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { ComposeBoxPlayground } from "@/components/common/compose-box-playground";
@@ -11,8 +11,7 @@ import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { ChevronDownIcon } from "@heroicons/react/24/outline";
 import { FeedbackModal } from "./feedback-modal";
 import { FIX_WORKFLOW_PROMPT, FIX_WORKFLOW_PROMPT_WITH_FEEDBACK, EXPLAIN_WORKFLOW_PROMPT_ASSISTANT, EXPLAIN_WORKFLOW_PROMPT_TOOL, EXPLAIN_WORKFLOW_PROMPT_TRANSITION } from "../copilot-prompts";
-import { Turn, TurnEvent } from "@/src/entities/models/turn";
-import { Conversation } from "@/src/entities/models/conversation";
+import { TurnEvent } from "@/src/entities/models/turn";
 
 export function Chat({
     projectId,
@@ -31,8 +30,7 @@ export function Chat({
     showJsonMode?: boolean;
     triggerCopilotChat?: (message: string) => void;
 }) {
-    const [conversationId, setConversationId] = useState<string | null>(null);
-    const [turnId, setTurnId] = useState<string | null>(null);
+    const conversationId = useRef<string | null>(null);
     const [messages, setMessages] = useState<z.infer<typeof Message>[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
@@ -176,22 +174,6 @@ export function Chat({
         onCopyClick(getCopyContent);
     }, [getCopyContent, onCopyClick]);
 
-    // Function to reset conversation (useful for starting fresh)
-    const resetConversation = useCallback(() => {
-        setConversationId(null);
-        setTurnId(null);
-        setMessages([]);
-        setOptimisticMessages([]);
-        setError(null);
-        setBillingError(null);
-        setLoading(false);
-        // Close any active event source
-        if (eventSourceRef.current) {
-            eventSourceRef.current.close();
-            eventSourceRef.current = null;
-        }
-    }, []);
-
     // Keep optimistic messages in sync with committed messages
     // This ensures UI shows the latest confirmed state when messages are updated
     useEffect(() => {
@@ -210,31 +192,113 @@ export function Chat({
         }
     }, [messages, messageSubscriber]);
 
-    // create a new turn
+    // get agent response
     useEffect(() => {
         let ignore = false;
+        let eventSource: EventSource | null = null;
 
         async function process() {
-            // if there is no run, create it
             try {
-                const response = await createTurn({
-                    projectId,
-                    conversationId: conversationId || undefined,
+                // first, if there is no conversation id, create it
+                if (!conversationId.current) {
+                    const response = await createConversation({
+                        projectId,
+                    });
+                    conversationId.current = response.id;
+                }
+
+                // set up a cached turn
+                const response = await createCachedTurn({
+                    conversationId: conversationId.current,
                     workflow,
-                    messages: [messages[messages.length - 1]], // send only the last user message
+                    messages: messages.slice(-1), // only send the last message
                 });
                 if (ignore) {
                     return;
                 }
-                if ('billingError' in response) {
-                    setBillingError(response.billingError);
-                    setError(response.billingError);
-                    setLoading(false);
-                    console.log('returning from createRun due to billing error');
-                    return;
-                }
-                setTurnId(response.id);
-                setConversationId(response.conversationId);
+                // if ('billingError' in response) {
+                //     setBillingError(response.billingError);
+                //     setError(response.billingError);
+                //     setLoading(false);
+                //     console.log('returning from createRun due to billing error');
+                //     return;
+                // }
+
+                // stream events
+                eventSource = new EventSource(`/api/stream-response/${response.key}`);
+                eventSourceRef.current = eventSource;
+
+                // handle events
+                eventSource.addEventListener("message", (event) => {
+                    console.log(`chat.tsx: got message: ${event.data}`);
+                    if (ignore) {
+                        return;
+                    }
+
+                    try {
+                        const data = JSON.parse(event.data);
+                        const turnEvent = TurnEvent.parse(data);
+
+                        if (turnEvent.type === "message") {
+                            // Handle regular message events
+                            const generatedMessage = turnEvent.data;
+                            // Update optimistic messages immediately for real-time streaming UX
+                            setOptimisticMessages(prev => [...prev, generatedMessage]);
+                        } else if (turnEvent.type === "done") {
+                            // Handle completion event
+                            console.log(`chat.tsx: got done event`);
+                            if (eventSource) {
+                                eventSource.close();
+                                eventSourceRef.current = null;
+                            }
+
+                            // Combine state and collected messages in the response
+                            setLastAgenticResponse({
+                                turn: turnEvent.turn,
+                                messages: turnEvent.turn.output,
+                            });
+
+                            // Commit all streamed messages atomically to the source of truth
+                            setMessages([...messages, ...turnEvent.turn.output]);
+                            setLoading(false);
+                        } else if (turnEvent.type === "error") {
+                            // Handle error event
+                            console.log(`chat.tsx: got error event: ${turnEvent.error}`);
+                            if (eventSource) {
+                                eventSource.close();
+                                eventSourceRef.current = null;
+                            }
+
+                            console.error('Turn Error:', turnEvent.error);
+                            if (!ignore) {
+                                setLoading(false);
+                                setError('Error: ' + turnEvent.error);
+                                // Rollback to last known good state on stream errors
+                                setOptimisticMessages(messages);
+
+                                // check if billing error
+                                if (turnEvent.isBillingError) {
+                                    setBillingError(turnEvent.error);
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Failed to parse SSE message:', err);
+                        setError(`Failed to parse SSE message: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                        // Rollback to last known good state on parsing errors
+                        setOptimisticMessages(messages);
+                    }
+                });
+
+                eventSource.onerror = (error) => {
+                    console.error('SSE Error:', error);
+                    if (!ignore) {
+                        setLoading(false);
+                        setError('Stream connection failed');
+                        // Rollback to last known good state on connection errors
+                        setOptimisticMessages(messages);
+                    }
+                };
             } catch (err) {
                 if (!ignore) {
                     setError(`Failed to create run: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -259,7 +323,7 @@ export function Chat({
             return;
         }
 
-        console.log(`executing createRun: fetchresponseerr: ${error}`);
+        console.log(`chat.tsx: fetching agent response`);
         setLoading(true);
         setError(null);
         process();
@@ -273,109 +337,6 @@ export function Chat({
         projectId,
         workflow,
         error,
-    ]);
-
-    // stream from run until completion
-    useEffect(() => {
-        let ignore = false;
-        let eventSource: EventSource | null = null;
-
-        async function process() {
-            eventSource = new EventSource(`/api/v1/turns/${turnId}/stream`);
-            eventSourceRef.current = eventSource;
-
-            eventSource.addEventListener("message", (event) => {
-                console.log(`chat.tsx: got message: ${event.data}`);
-                if (ignore) {
-                    return;
-                }
-
-                try {
-                    const data = JSON.parse(event.data);
-                    const turnEvent = TurnEvent.parse(data);
-                    
-                    if (turnEvent.type === "message") {
-                        // Handle regular message events
-                        const generatedMessage = turnEvent.data;
-                        // Update optimistic messages immediately for real-time streaming UX
-                        setOptimisticMessages(prev => [...prev, generatedMessage]);
-                    } else if (turnEvent.type === "done") {
-                        // Handle completion event
-                        console.log(`chat.tsx: got done event`);
-                        if (eventSource) {
-                            eventSource.close();
-                            eventSourceRef.current = null;
-                        }
-
-                        // Combine state and collected messages in the response
-                        setLastAgenticResponse({
-                            turn: turnEvent.turn,
-                            messages: turnEvent.turn.output,
-                        });
-
-                        // Commit all streamed messages atomically to the source of truth
-                        setMessages([...messages, ...turnEvent.turn.output]);
-                        setLoading(false);
-
-                        // clear turn
-                        setTurnId(null);
-                    } else if (turnEvent.type === "error") {
-                        // Handle error event
-                        console.log(`chat.tsx: got error event: ${turnEvent.error}`);
-                        if (eventSource) {
-                            eventSource.close();
-                            eventSourceRef.current = null;
-                        }
-
-                        console.error('Turn Error:', turnEvent.error);
-                        if (!ignore) {
-                            setLoading(false);
-                            setError('Error: ' + turnEvent.error);
-                            // Rollback to last known good state on stream errors
-                            setOptimisticMessages(messages);
-                            // Clear the turn on error
-                            setTurnId(null);
-                        }
-                    }
-                } catch (err) {
-                    console.error('Failed to parse SSE message:', err);
-                    setError(`Failed to parse SSE message: ${err instanceof Error ? err.message : 'Unknown error'}`);
-                    // Rollback to last known good state on parsing errors
-                    setOptimisticMessages(messages);
-                }
-            });
-
-            eventSource.onerror = (error) => {
-                console.error('SSE Error:', error);
-                if (!ignore) {
-                    setLoading(false);
-                    setError('Stream connection failed');
-                    // Rollback to last known good state on connection errors
-                    setOptimisticMessages(messages);
-                    // Clear the run on error
-                    setTurnId(null);
-                }
-            };
-        }
-
-        // Only stream if we have a turn
-        if (!turnId) {
-            return;
-        }
-
-        console.log(`executing streamFromRun for turn: ${turnId}`);
-        process();
-
-        return () => {
-            ignore = true;
-            if (eventSource) {
-                eventSource.close();
-                eventSourceRef.current = null;
-            }
-        };
-    }, [
-        turnId,
-        messages,
     ]);
 
     return (

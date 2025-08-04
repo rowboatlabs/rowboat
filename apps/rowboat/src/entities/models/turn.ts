@@ -14,6 +14,7 @@ export const Turn = z.object({
     }),
     output: z.array(Message),
     error: z.string().optional(),
+    isBillingError: z.boolean().optional(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime().optional(),
 });
@@ -31,6 +32,7 @@ export const TurnEvent = z.discriminatedUnion("type", [
     z.object({
         type: z.literal("error"),
         error: z.string(),
+        isBillingError: z.boolean().optional(),
     }),
     z.object({
         type: z.literal("done"),
