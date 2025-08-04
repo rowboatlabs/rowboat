@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Workflow, WorkflowTool } from "./workflow_types";
+import { WorkflowTool } from "./workflow_types";
 
 export const BaseMessage = z.object({
     timestamp: z.string().datetime().optional(),
@@ -199,8 +199,3 @@ export function convertMcpServerToolToWorkflowTool(
 
     return converted;
 }
-export const ZRunConversationTurnStreamPayload = z.object({
-    conversationId: z.string(),
-    workflow: Workflow,
-    messages: z.array(Message),
-});

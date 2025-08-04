@@ -5,6 +5,9 @@ import { asClass, createContainer, InjectionMode } from "awilix";
 import { CreateConversationController } from "@/src/interface-adapters/controllers/conversations/create-conversation.controller";
 import { CreateConversationUseCase } from "@/src/application/use-cases/conversations/create-conversation.use-case";
 import { RedisCacheService } from "@/src/infrastructure/services/redis.cache.service";
+import { CreateCachedTurnUseCase } from "@/src/application/use-cases/conversations/create-cached-turn.use-case";
+import { FetchCachedTurnUseCase } from "@/src/application/use-cases/conversations/fetch-cached-turn.use-case";
+import { CreateCachedTurnController } from "@/src/interface-adapters/controllers/conversations/create-cached-turn.controller";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -13,12 +16,19 @@ export const container = createContainer({
 
 container.register({
     // services
+    // ---
     cacheService: asClass(RedisCacheService).singleton(),
 
     // conversations
+    // ---
     conversationsRepository: asClass(MongoDBConversationsRepository).singleton(),
+
     createConversationUseCase: asClass(CreateConversationUseCase).singleton(),
+    createCachedTurnUseCase: asClass(CreateCachedTurnUseCase).singleton(),
+    fetchCachedTurnUseCase: asClass(FetchCachedTurnUseCase).singleton(),
     runConversationTurnUseCase: asClass(RunConversationTurnUseCase).singleton(),
+
     createConversationController: asClass(CreateConversationController).singleton(),
-    runPlaygroundChatTurnController: asClass(RunCachedTurnController).singleton(),
+    createCachedTurnController: asClass(CreateCachedTurnController).singleton(),
+    runCachedTurnController: asClass(RunCachedTurnController).singleton(),
 });

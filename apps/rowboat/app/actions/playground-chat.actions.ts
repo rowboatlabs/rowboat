@@ -1,12 +1,12 @@
 'use server';
 import { z } from 'zod';
 import { Workflow } from "../lib/types/workflow_types";
-import { Message, ZRunConversationTurnStreamPayload } from "@/app/lib/types/types";
+import { Message } from "@/app/lib/types/types";
 import { authCheck } from './auth_actions';
 import { container } from '@/di/container';
 import { Conversation } from '@/src/entities/models/conversation';
 import { ICreateConversationController } from '@/src/interface-adapters/controllers/conversations/create-conversation.controller';
-import { redisClient } from '../lib/redis';
+import { ICreateCachedTurnController } from '@/src/interface-adapters/controllers/conversations/create-cached-turn.controller';
 
 export async function createConversation({
     projectId,
@@ -24,7 +24,7 @@ export async function createConversation({
     });
 }
 
-export async function createRunConversationTurnStreamId({
+export async function createCachedTurn({
     conversationId,
     workflow,
     messages,
@@ -32,23 +32,21 @@ export async function createRunConversationTurnStreamId({
     conversationId: string;
     workflow: z.infer<typeof Workflow>;
     messages: z.infer<typeof Message>[];
-}): Promise<{ streamId: string }> {
-    const payload: z.infer<typeof ZRunConversationTurnStreamPayload> = {
+}): Promise<{ key: string }> {
+    const user = await authCheck();
+    const createCachedTurnController = container.resolve<ICreateCachedTurnController>("createCachedTurnController");
+
+    const { key } = await createCachedTurnController.execute({
+        caller: "user",
+        userId: user._id,
         conversationId,
-        workflow,
-        messages,
-    }
-
-    // serialize the request
-    const serialized = JSON.stringify(payload);
-
-    // create a uuid for the stream
-    const streamId = crypto.randomUUID();
-
-    // store payload in redis
-    await redisClient.set(`chat-stream-${streamId}`, serialized, 'EX', 60 * 10); // expire in 10 minutes
+        input: {
+            messages,
+            workflow,
+        },
+    });
 
     return {
-        streamId,
-    }
+        key,
+    };
 }
