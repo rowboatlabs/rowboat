@@ -1,7 +1,7 @@
 "use client";
 import React, { useReducer, Reducer, useState, useCallback, useEffect, useRef, createContext, useContext } from "react";
 import { MCPServer, Message, WithStringId } from "../../../lib/types/types";
-import { Workflow, WorkflowTool, WorkflowPrompt, WorkflowAgent } from "../../../lib/types/workflow_types";
+import { Workflow, WorkflowTool, WorkflowPrompt, WorkflowAgent, WorkflowPipeline } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { Project } from "../../../lib/types/project_types";
 import { produce, applyPatches, enablePatches, produceWithPatches, Patch } from 'immer';
@@ -49,7 +49,7 @@ interface StateItem {
     workflow: z.infer<typeof Workflow>;
     publishing: boolean;
     selection: {
-        type: "agent" | "tool" | "prompt" | "datasource" | "visualise";
+        type: "agent" | "tool" | "prompt" | "datasource" | "pipeline" | "visualise";
         name: string;
     } | null;
     saving: boolean;
@@ -84,10 +84,16 @@ export type Action = {
     type: "add_prompt";
     prompt: Partial<z.infer<typeof WorkflowPrompt>>;
 } | {
+    type: "add_pipeline";
+    pipeline: Partial<z.infer<typeof WorkflowPipeline>>;
+} | {
     type: "select_agent";
     name: string;
 } | {
     type: "select_tool";
+    name: string;
+} | {
+    type: "select_pipeline";
     name: string;
 } | {
     type: "delete_agent";
@@ -95,6 +101,13 @@ export type Action = {
 } | {
     type: "delete_tool";
     name: string;
+} | {
+    type: "delete_pipeline";
+    name: string;
+} | {
+    type: "update_pipeline";
+    name: string;
+    pipeline: Partial<z.infer<typeof WorkflowPipeline>>;
 } | {
     type: "update_agent";
     name: string;
@@ -120,6 +133,8 @@ export type Action = {
 } | {
     type: "unselect_prompt";
 } | {
+    type: "unselect_pipeline";
+} | {
     type: "delete_prompt";
     name: string;
 } | {
@@ -144,6 +159,9 @@ export type Action = {
 } | {
     type: "reorder_agents";
     agents: z.infer<typeof WorkflowAgent>[];
+} | {
+    type: "reorder_pipelines";
+    pipelines: z.infer<typeof WorkflowPipeline>[];
 } | {
     type: "select_datasource";
     id: string;
@@ -235,6 +253,23 @@ function reducer(state: State, action: Action): State {
                 currentIndex: state.currentIndex + 1,
             };
         }
+        case "reorder_pipelines": {
+            const newState = produce(state.present, draft => {
+                draft.workflow.pipelines = action.pipelines;
+                draft.lastUpdatedAt = new Date().toISOString();
+            });
+            const [nextState, patches, inversePatches] = produceWithPatches(state.present, draft => {
+                draft.workflow.pipelines = action.pipelines;
+                draft.lastUpdatedAt = new Date().toISOString();
+            });
+            return {
+                ...state,
+                present: nextState,
+                patches: [...state.patches.slice(0, state.currentIndex), patches],
+                inversePatches: [...state.inversePatches.slice(0, state.currentIndex), inversePatches],
+                currentIndex: state.currentIndex + 1,
+            };
+        }
         case "show_visualise": {
             newState = produce(state, draft => {
                 draft.present.selection = { type: "visualise", name: "visualise" };
@@ -270,6 +305,12 @@ function reducer(state: State, action: Action): State {
                                 name: action.name
                             };
                             break;
+                        case "select_pipeline":
+                            draft.selection = {
+                                type: "pipeline",
+                                name: action.name
+                            };
+                            break;
                         case "select_datasource":
                             draft.selection = {
                                 type: "datasource",
@@ -280,6 +321,7 @@ function reducer(state: State, action: Action): State {
                         case "unselect_tool":
                         case "unselect_prompt":
                         case "unselect_datasource":
+                        case "unselect_pipeline":
                             draft.selection = null;
                             break;
                         case "add_agent": {
@@ -366,6 +408,54 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         }
+                        case "add_pipeline": {
+                            if (isLive) {
+                                break;
+                            }
+                            let newPipelineName = "New pipeline";
+                            if (draft.workflow?.pipelines?.some((pipeline) => pipeline.name === newPipelineName)) {
+                                newPipelineName = `New pipeline ${(draft.workflow?.pipelines?.filter((pipeline) =>
+                                    pipeline.name.startsWith("New pipeline")).length || 0) + 1}`;
+                            }
+                            if (!draft.workflow.pipelines) {
+                                draft.workflow.pipelines = [];
+                            }
+                            
+                            // Create the first agent for this pipeline
+                            const firstAgentName = `${action.pipeline.name || newPipelineName} Step 1`;
+                            draft.workflow.agents.push({
+                                name: firstAgentName,
+                                type: "conversation",
+                                description: "",
+                                disabled: false,
+                                instructions: "",
+                                model: "gpt-4o",
+                                locked: false,
+                                toggleAble: true,
+                                ragReturnType: "chunks",
+                                ragK: 3,
+                                controlType: "relinquish_to_parent",
+                                outputVisibility: "pipeline",
+                                maxCallsPerParentAgent: 3,
+                            });
+                            
+                            // Create the pipeline with the first agent
+                            draft.workflow.pipelines.push({
+                                name: newPipelineName,
+                                description: "",
+                                agents: [firstAgentName],
+                                ...action.pipeline
+                            });
+                            
+                            // Select the newly created agent to open it in agent_config
+                            draft.selection = {
+                                type: "agent",
+                                name: firstAgentName
+                            };
+                            draft.pendingChanges = true;
+                            draft.chatKey++;
+                            break;
+                        }
                         case "delete_agent":
                             if (isLive) {
                                 break;
@@ -399,7 +489,34 @@ function reducer(state: State, action: Action): State {
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
-                        case "update_agent":
+                        case "delete_pipeline":
+                            if (isLive) {
+                                break;
+                            }
+                            if (draft.workflow.pipelines) {
+                                draft.workflow.pipelines = draft.workflow.pipelines.filter(
+                                    (pipeline) => pipeline.name !== action.name
+                                );
+                            }
+                            draft.selection = null;
+                            draft.pendingChanges = true;
+                            draft.chatKey++;
+                            break;
+                        case "update_pipeline": {
+                            if (isLive) {
+                                break;
+                            }
+                            if (draft.workflow.pipelines) {
+                                draft.workflow.pipelines = draft.workflow.pipelines.map(pipeline =>
+                                    pipeline.name === action.name ? { ...pipeline, ...action.pipeline } : pipeline
+                                );
+                            }
+                            draft.selection = null;
+                            draft.pendingChanges = true;
+                            draft.chatKey++;
+                            break;
+                        }
+                        case "update_agent": {
                             if (isLive) {
                                 break;
                             }
@@ -432,6 +549,16 @@ function reducer(state: State, action: Action): State {
                                     )
                                 }));
 
+                                // update pipeline references if this agent is part of any pipeline
+                                if (draft.workflow.pipelines) {
+                                    draft.workflow.pipelines = draft.workflow.pipelines.map(pipeline => ({
+                                        ...pipeline,
+                                        agents: pipeline.agents.map(agentName => 
+                                            agentName === action.name ? action.agent.name! : agentName
+                                        )
+                                    }));
+                                }
+
                                 // update the selection pointer if this is the selected agent
                                 if (draft.selection?.type === "agent" && draft.selection.name === action.name) {
                                     draft.selection = {
@@ -449,6 +576,7 @@ function reducer(state: State, action: Action): State {
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
+                        }
                         case "update_tool":
                             if (isLive) {
                                 break;
@@ -785,6 +913,50 @@ export function WorkflowEditor({
         dispatch({ type: "add_prompt", prompt });
     }
 
+    function handleSelectPipeline(name: string) {
+        dispatch({ type: "select_pipeline", name });
+    }
+
+    function handleAddPipeline(pipeline: Partial<z.infer<typeof WorkflowPipeline>> = {}) {
+        dispatch({ type: "add_pipeline", pipeline });
+    }
+
+    function handleDeletePipeline(name: string) {
+        if (window.confirm(`Are you sure you want to delete the pipeline "${name}"?`)) {
+            dispatch({ type: "delete_pipeline", name });
+        }
+    }
+
+    function handleAddAgentToPipeline(pipelineName: string) {
+        // Create a pipeline agent and add it to the specified pipeline
+        const newAgentName = `${pipelineName} Step ${(state.present.workflow.pipelines?.find(p => p.name === pipelineName)?.agents.length || 0) + 1}`;
+        
+        const agentWithModel = {
+            name: newAgentName,
+            outputVisibility: 'pipeline' as const,
+            model: defaultModel || "gpt-4o"
+        };
+        
+        // First add the agent
+        dispatch({ type: "add_agent", agent: agentWithModel });
+        
+        // Then add it to the pipeline
+        const pipeline = state.present.workflow.pipelines?.find(p => p.name === pipelineName);
+        if (pipeline) {
+            dispatch({ 
+                type: "update_pipeline", 
+                name: pipelineName, 
+                pipeline: { 
+                    ...pipeline, 
+                    agents: [...pipeline.agents, newAgentName] 
+                } 
+            });
+        }
+        
+        // Select the newly created agent to open it in agent_config
+        dispatch({ type: "select_agent", name: newAgentName });
+    }
+
     function handleUpdateAgent(name: string, agent: Partial<z.infer<typeof WorkflowAgent>>) {
         dispatch({ type: "update_agent", name, agent });
     }
@@ -833,6 +1005,18 @@ export function WorkflowEditor({
         localStorage.setItem(`${mode}_workflow_${projectId}_agent_order`, JSON.stringify(orderMap));
         
         dispatch({ type: "reorder_agents", agents });
+    }
+
+    function handleReorderPipelines(pipelines: z.infer<typeof WorkflowPipeline>[]) {
+        // Save order to localStorage
+        const orderMap = pipelines.reduce((acc, pipeline, index) => {
+            acc[pipeline.name] = index;
+            return acc;
+        }, {} as Record<string, number>);
+        const mode = isLive ? 'live' : 'draft';
+        localStorage.setItem(`${mode}_workflow_${projectId}_pipeline_order`, JSON.stringify(orderMap));
+        
+        dispatch({ type: "reorder_pipelines", pipelines });
     }
 
     async function handlePublishWorkflow() {
@@ -1110,6 +1294,7 @@ export function WorkflowEditor({
                                 agents={state.present.workflow.agents}
                                 tools={state.present.workflow.tools}
                                 prompts={state.present.workflow.prompts}
+                                pipelines={state.present.workflow.pipelines || []}
                                 dataSources={dataSources}
                                 workflow={state.present.workflow}
                                 selectedEntity={
@@ -1117,7 +1302,8 @@ export function WorkflowEditor({
                                     (state.present.selection.type === "agent" ||
                                      state.present.selection.type === "tool" ||
                                      state.present.selection.type === "prompt" ||
-                                     state.present.selection.type === "datasource")
+                                     state.present.selection.type === "datasource" ||
+                                     state.present.selection.type === "pipeline")
                                       ? state.present.selection
                                       : null
                                 }
@@ -1125,21 +1311,26 @@ export function WorkflowEditor({
                                 onSelectAgent={handleSelectAgent}
                                 onSelectTool={handleSelectTool}
                                 onSelectPrompt={handleSelectPrompt}
+                                onSelectPipeline={handleSelectPipeline}
                                 onSelectDataSource={handleSelectDataSource}
                                 onAddAgent={handleAddAgent}
                                 onAddTool={handleAddTool}
                                 onAddPrompt={handleAddPrompt}
+                                onAddPipeline={handleAddPipeline}
+                                onAddAgentToPipeline={handleAddAgentToPipeline}
                                 onToggleAgent={handleToggleAgent}
                                 onSetMainAgent={handleSetMainAgent}
                                 onDeleteAgent={handleDeleteAgent}
                                 onDeleteTool={handleDeleteTool}
                                 onDeletePrompt={handleDeletePrompt}
+                                onDeletePipeline={handleDeletePipeline}
                                 onShowVisualise={handleShowVisualise}
                                 projectId={projectId}
                                 onProjectToolsUpdated={onProjectToolsUpdated}
                                 onDataSourcesUpdated={onDataSourcesUpdated}
                                 projectConfig={projectConfig}
                                 onReorderAgents={handleReorderAgents}
+                                onReorderPipelines={handleReorderPipelines}
                                 useRagUploads={useRagUploads}
                                 useRagS3Uploads={useRagS3Uploads}
                                 useRagScraping={useRagScraping}
@@ -1209,6 +1400,35 @@ export function WorkflowEditor({
                             handleClose={() => dispatch({ type: "unselect_datasource" })}
                             onDataSourceUpdate={onDataSourcesUpdated}
                         />}
+                        {state.present.selection?.type === "pipeline" && (
+                            <Panel 
+                                title={
+                                    <div className="flex items-center justify-between w-full">
+                                        <div className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                                            Pipeline Configuration
+                                        </div>
+                                        <CustomButton
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => dispatch({ type: "unselect_pipeline" })}
+                                            className="text-sm px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:hover:bg-indigo-900 dark:text-indigo-400"
+                                        >
+                                            Close
+                                        </CustomButton>
+                                    </div>
+                                }
+                                className="p-6"
+                            >
+                                <div className="text-center text-gray-500 dark:text-gray-400">
+                                    <Layers2Icon className="w-12 h-12 mx-auto mb-4 text-indigo-400" />
+                                    <h3 className="text-lg font-medium mb-2">Pipeline Configuration</h3>
+                                    <p className="text-sm">
+                                        Pipeline configuration interface coming soon. 
+                                        For now, you can create and reference pipelines using the @ mention system.
+                                    </p>
+                                </div>
+                            </Panel>
+                        )}
                         {state.present.selection?.type === "visualise" && (
                             <Panel 
                                 title={

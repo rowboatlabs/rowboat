@@ -3,7 +3,7 @@ import { WithStringId } from "../../../lib/types/types";
 import { WorkflowPrompt, WorkflowAgent, Workflow, WorkflowTool } from "../../../lib/types/workflow_types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { z } from "zod";
-import { PlusIcon, Sparkles, X as XIcon, ChevronDown, ChevronRight, Trash2, Maximize2, Minimize2, StarIcon, DatabaseIcon, UserIcon, Settings } from "lucide-react";
+import { PlusIcon, Sparkles, X as XIcon, ChevronDown, ChevronRight, Trash2, Maximize2, Minimize2, StarIcon, DatabaseIcon, UserIcon, Settings, Info } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { usePreviewModal } from "../workflow/preview-modal";
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Select, SelectItem, Chip, SelectSection } from "@heroui/react";
@@ -19,7 +19,7 @@ import clsx from "clsx";
 import { InputField } from "@/app/lib/components/input-field";
 import { USE_TRANSFER_CONTROL_OPTIONS } from "@/app/lib/feature_flags";
 import { Input } from "@/components/ui/input";
-import { Info } from "lucide-react";
+import { Info as InfoIcon } from "lucide-react";
 import { useCopilot } from "../copilot/use-copilot";
 import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { ModelsResponse } from "@/app/lib/types/billing_types";
@@ -117,14 +117,31 @@ export function AgentConfig({
         setShowRagCta(false);
     };
 
-    // Add effect to handle control type update when transfer control is disabled or when internal agents have invalid control type
+    // Add effect to handle control type update to ensure agents have correct control types
     useEffect(() => {
-        if (!USE_TRANSFER_CONTROL_OPTIONS && agent.controlType !== 'retain') {
-            handleUpdate({ ...agent, controlType: 'retain' });
+        let correctControlType: "retain" | "relinquish_to_parent" | "relinquish_to_start" | undefined = undefined;
+
+        // Determine the correct control type based on output visibility
+        if (agent.outputVisibility === "pipeline") {
+            correctControlType = "relinquish_to_parent";
+        } else if (agent.outputVisibility === "internal") {
+            correctControlType = "relinquish_to_parent";
+        } else if (agent.outputVisibility === "user_facing") {
+            correctControlType = "retain";
         }
-        // For internal agents, "retain" is not a valid option, so change it to "relinquish_to_parent"
-        if (agent.outputVisibility === "internal" && agent.controlType === 'retain') {
-            handleUpdate({ ...agent, controlType: 'relinquish_to_parent' });
+
+        // Handle undefined control type
+        if (agent.controlType === undefined) {
+            if (agent.outputVisibility === "user_facing") {
+                correctControlType = "retain";
+            } else {
+                correctControlType = "relinquish_to_parent";
+            }
+        }
+
+        // Update if the control type is incorrect
+        if (correctControlType && agent.controlType !== correctControlType) {
+            handleUpdate({ ...agent, controlType: correctControlType });
         }
     }, [agent.controlType, agent.outputVisibility, agent, handleUpdate]);
 
@@ -175,10 +192,12 @@ export function AgentConfig({
     };
 
     const atMentions = createAtMentions({
-        agents,
+        agents: agents,
         prompts,
         tools,
-        currentAgentName: agent.name
+        pipelines: agent.outputVisibility === "pipeline" ? [] : (workflow.pipelines || []), // Pipeline agents can't reference pipelines
+        currentAgentName: agent.name,
+        currentAgent: agent
     });
 
     // Add local state for max calls input
@@ -211,7 +230,7 @@ export function AgentConfig({
             <div className="flex flex-col gap-6 p-4 h-[calc(100vh-100px)] min-h-0 flex-1">
                                {/* Saved Banner */}
                {showSavedBanner && (
-                   <div className="absolute top-4 right-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
+                   <div className="absolute top-4 left-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                        </svg>
@@ -246,7 +265,7 @@ export function AgentConfig({
                                     <div className="h-full flex flex-col">
                                         {/* Saved Banner for maximized instructions */}
                                         {showSavedBanner && (
-                                            <div className="absolute top-4 right-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
+                                            <div className="absolute top-4 left-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                                 </svg>
@@ -368,7 +387,7 @@ export function AgentConfig({
                                                 <div className="h-full flex flex-col">
                                                     {/* Saved Banner for maximized examples */}
                                                     {showSavedBanner && (
-                                                        <div className="absolute top-4 right-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
+                                                        <div className="absolute top-4 left-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
                                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                                             </svg>
@@ -504,7 +523,8 @@ export function AgentConfig({
                                                 value={agent.outputVisibility}
                                                 options={[
                                                     { key: "user_facing", label: "Conversation Agent" },
-                                                    { key: "internal", label: "Task Agent" }
+                                                    { key: "internal", label: "Task Agent" },
+                                                    { key: "pipeline", label: "Pipeline Agent" }
                                                 ]}
                                                 onChange={(value) => {
                                                     handleUpdate({
@@ -516,6 +536,27 @@ export function AgentConfig({
                                             />
                                         </div>
                                     </div>
+                                    {agent.outputVisibility === "pipeline" && (
+                                        <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
+                                            <div className="md:w-32"></div>
+                                            <div className="flex-1">
+                                                <div className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
+                                                    <div className="flex items-start gap-2">
+                                                        <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                                        <div>
+                                                            <div className="font-medium mb-1">Pipeline Agent Constraints</div>
+                                                            <ul className="text-xs space-y-1 list-disc list-inside">
+                                                                <li>Can only reference tools (no agent or pipeline transfers)</li>
+                                                                <li>Executes as one step in a sequential pipeline</li>
+                                                                <li>No conversation control - output flows to next step</li>
+                                                                <li>Focus on your specific task in the pipeline</li>
+                                                            </ul>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                     <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                         <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Model</label>
                                         <div className="flex-1">
@@ -627,9 +668,13 @@ export function AgentConfig({
                                             <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">After Turn</label>
                                             <div className="flex-1">
                                                 <CustomDropdown
-                                                    value={agent.controlType}
+                                                    value={agent.controlType || 'retain'}
                                                     options={
-                                                        agent.outputVisibility === "internal"
+                                                        agent.outputVisibility === "pipeline"
+                                                            ? [
+                                                                { key: "relinquish_to_parent", label: "Relinquish to parent" }
+                                                            ]
+                                                            : agent.outputVisibility === "internal"
                                                             ? [
                                                                 { key: "relinquish_to_parent", label: "Relinquish to parent" },
                                                                 { key: "relinquish_to_start", label: "Relinquish to 'start' agent" }

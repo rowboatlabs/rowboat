@@ -23,8 +23,29 @@ export const WorkflowAgent = z.object({
         'retain',
         'relinquish_to_parent',
         'relinquish_to_start',
-    ]).default('retain').describe('Whether this agent retains control after a turn, relinquishes to the parent agent, or relinquishes to the start agent'),
+    ]).optional().describe('Whether this agent retains control after a turn, relinquishes to the parent agent, or relinquishes to the start agent'),
     maxCallsPerParentAgent: z.number().default(3).describe('Maximum number of times this agent can be called by a parent agent in a single turn').optional(),
+}).refine((data) => {
+    // Pipeline agents should have relinquish_to_parent control type
+    if (data.outputVisibility === 'pipeline' && data.controlType !== 'relinquish_to_parent') {
+        return false;
+    }
+    // Internal agents should have relinquish_to_parent control type
+    if (data.outputVisibility === 'internal' && data.controlType !== 'relinquish_to_parent') {
+        return false;
+    }
+    // User-facing agents should not have relinquish_to_parent control type
+    if (data.outputVisibility === 'user_facing' && data.controlType === 'relinquish_to_parent') {
+        return false;
+    }
+    // All agents should have a control type
+    if (data.controlType === undefined) {
+        return false;
+    }
+    return true;
+}, {
+    message: "Pipeline agents must have 'relinquish_to_parent' control type, while other agents must have appropriate control types",
+    path: ["controlType"]
 });
 export const WorkflowPrompt = z.object({
     name: z.string(),
@@ -97,6 +118,7 @@ export function sanitizeTextWithMentions(
         prompts: z.infer<typeof WorkflowPrompt>[],
         pipelines?: z.infer<typeof WorkflowPipeline>[],
     },
+    currentAgent?: z.infer<typeof WorkflowAgent>,
 ): {
     sanitized: string;
     entities: z.infer<typeof ConnectedEntity>[];
@@ -123,8 +145,16 @@ export function sanitizeTextWithMentions(
         })
         .filter(entity => {
             seen.add(entity.name);
+            
+            // For pipeline agents, only allow tool and prompt mentions
+            if (currentAgent?.outputVisibility === 'pipeline') {
+                return entity.type === 'tool' || entity.type === 'prompt';
+            }
+            
             if (entity.type === 'agent') {
-                return workflow.agents.some(a => a.name === entity.name);
+                // Filter out pipeline agents - they should not be @ referenceable
+                const agent = workflow.agents.find(a => a.name === entity.name);
+                return agent && agent.outputVisibility !== 'pipeline';
             } else if (entity.type === 'tool') {
                 return workflow.tools.some(t => t.name === entity.name);
             } else if (entity.type === 'prompt') {
