@@ -135,7 +135,7 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
                 // yield event
                 yield {
                     type: "message",
-                    data: event,
+                    data: msg,
                 };
             } else {
                 // save turn data
