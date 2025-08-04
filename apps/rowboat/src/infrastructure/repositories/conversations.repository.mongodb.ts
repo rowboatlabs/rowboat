@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { db } from "@/app/lib/mongodb";
 import { ObjectId } from "mongodb";
-import { CreateConversationData, IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
+import { AddTurnData, CreateConversationData, IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
 import { Conversation } from "@/src/entities/models/conversation";
+import { nanoid } from "nanoid";
+import { Turn } from "@/src/entities/models/turn";
 
 const DocSchema = Conversation
     .omit({
@@ -48,5 +50,27 @@ export class ConversationsRepositoryMongodb implements IConversationsRepository 
             ...rest,
             id,
         };
+    }
+
+    async addTurn(conversationId: string, data: z.infer<typeof AddTurnData>): Promise<z.infer<typeof Turn>> {
+        // create turn object from data
+        const turn: z.infer<typeof Turn> = {
+            ...data,
+            id: nanoid(),
+            createdAt: new Date().toISOString(),
+        };
+
+        await this.collection.updateOne({
+            _id: new ObjectId(conversationId),
+        }, {
+            $push: {
+                turns: turn,
+            },
+            $set: {
+                updatedAt: new Date().toISOString(),
+            },
+        });
+
+        return turn;
     }
 }

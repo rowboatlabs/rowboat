@@ -310,11 +310,11 @@ export function Chat({
                         // Combine state and collected messages in the response
                         setLastAgenticResponse({
                             turn: turnEvent.turn,
-                            messages: turnEvent.turn.messages,
+                            messages: turnEvent.turn.output,
                         });
 
                         // Commit all streamed messages atomically to the source of truth
-                        setMessages([...messages, ...turnEvent.turn.messages]);
+                        setMessages([...messages, ...turnEvent.turn.output]);
                         setLoading(false);
 
                         // clear turn

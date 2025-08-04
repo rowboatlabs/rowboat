@@ -1,6 +1,4 @@
-import { ITurnsRepository } from "@/src/application/repositories/turns.repository.interface";
-import { Turn } from "@/src/entities/models/turn";
-import { CreateTurnData } from "../../repositories/turns.repository.interface";
+import { Turn, TurnEvent } from "@/src/entities/models/turn";
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { authorize, getCustomerIdForProject } from "@/app/lib/billing";
 import { BadRequestError, BillingError, NotAuthorizedError, NotFoundError } from '@/src/entities/errors/common';
@@ -8,42 +6,48 @@ import { check_query_limit } from "@/app/lib/rate_limiting";
 import { QueryLimitError } from "@/src/entities/errors/common";
 import { apiKeysCollection, projectMembersCollection } from "@/app/lib/mongodb";
 import { IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
+import { streamResponse } from "@/app/lib/agents";
 import { z } from "zod";
+import { Message } from "@/app/lib/types/types";
 
 const inputSchema = z.object({
-    turnData: CreateTurnData
-        .omit({
-            conversationId: true,
-        })
-        .extend({
-            conversationId: z.string().optional(),
-        }),
     caller: z.enum(["user", "api"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
+    conversationId: z.string(),
+    trigger: Turn.shape.trigger,
+    input: Turn.shape.input,
 });
 
-export interface ICreateTurnUseCase {
-    execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Turn>>;
+export interface IRunConversationTurnUseCase {
+    execute(data: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof TurnEvent>, void, unknown>;
 }
 
-export class CreateTurnUseCase implements ICreateTurnUseCase {
-    private readonly turnsRepository: ITurnsRepository;
+export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
     private readonly conversationsRepository: IConversationsRepository;
 
     constructor({
-        turnsRepository,
         conversationsRepository,
     }: {
-        turnsRepository: ITurnsRepository,
         conversationsRepository: IConversationsRepository,
     }) {
-        this.turnsRepository = turnsRepository;
         this.conversationsRepository = conversationsRepository;
     }
 
-    async execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Turn>> {
-        const { projectId } = data.turnData;
+    async *execute(data: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof TurnEvent>, void, unknown> {
+        // fetch conversation
+        const conversation = await this.conversationsRepository.getConversation(data.conversationId);
+        if (!conversation) {
+            throw new NotFoundError('Conversation not found');
+        }
+
+        // extract projectid from conversation
+        const { projectId } = conversation;
+
+        // check query limit for project
+        if (!await check_query_limit(projectId)) {
+            throw new QueryLimitError('Query limit exceeded');
+        }
 
         // if caller is a user, ensure they are a member of project
         if (data.caller === "user") {
@@ -75,29 +79,11 @@ export class CreateTurnUseCase implements ICreateTurnUseCase {
             }
         }
 
-        // if conversation id is provided, fetch conversation
-        if (data.turnData.conversationId) {
-            const conversation = await this.conversationsRepository.getConversation(data.turnData.conversationId);
-            if (!conversation) {
-                throw new NotFoundError('Conversation not found');
-            }
-
-            // ensure conversation belongs to project
-            if (conversation.projectId !== projectId) {
-                throw new NotAuthorizedError('Conversation does not belong to project');
-            }
-        }
-
-        // check query limit for project
-        if (!await check_query_limit(projectId)) {
-            throw new QueryLimitError('Query limit exceeded');
-        }
-
         // Check billing auth
         if (USE_BILLING) {
             // get billing customer id for project
             const customerId = await getCustomerIdForProject(projectId);
-            const agentModels = data.turnData.triggerData.workflow.agents.reduce((acc, agent) => {
+            const agentModels = data.input.workflow.agents.reduce((acc, agent) => {
                 acc.push(agent.model);
                 return acc;
             }, [] as string[]);
@@ -113,25 +99,53 @@ export class CreateTurnUseCase implements ICreateTurnUseCase {
         }
 
         // set timestamps where missing
-        data.turnData.triggerData.messages.forEach(msg => {
+        data.input.messages.forEach(msg => {
             if (!msg.timestamp) {
                 msg.timestamp = new Date().toISOString();
             }
         });
 
-        // if conversation id is not provided, create a new conversation
-        let conversationId = data.turnData.conversationId;
-        if (!conversationId) {
-            const { id } = await this.conversationsRepository.createConversation({
-                projectId,
-            });
-            conversationId = id;
-        }
+        // fetch previous conversation turns and pull message history
+        const previousMessages = conversation.turns?.flatMap(t => [
+            ...t.input.messages,
+            ...t.output,
+        ]);
+        const inputMessages = [
+            ...previousMessages || [],
+            ...data.input.messages,
+        ]
 
-        // create run
-        return await this.turnsRepository.createTurn({
-            ...data.turnData,
-            conversationId,
-        });
+        // call agents runtime and handle generated messages
+        const outputMessages: z.infer<typeof Message>[] = [];
+        for await (const event of streamResponse(projectId, data.input.workflow, inputMessages)) {
+            // handle msg events
+            if ("role" in event) {
+                // collect generated message
+                const msg = {
+                    ...event,
+                    timestamp: new Date().toISOString(),
+                };
+                outputMessages.push(msg);
+
+                // yield event
+                yield {
+                    type: "message",
+                    data: event,
+                };
+            } else {
+                // save turn data
+                const turn = await this.conversationsRepository.addTurn(data.conversationId, {
+                    trigger: data.trigger,
+                    input: data.input,
+                    output: outputMessages, 
+                });
+
+                // yield event
+                yield {
+                    type: "done",
+                    turn,
+                }
+            }
+        }
     }
 }

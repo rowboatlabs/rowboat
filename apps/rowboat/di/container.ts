@@ -1,11 +1,9 @@
-import { CreateTurnUseCase } from "@/src/application/use-cases/turns/create-turn.use-case";
-import { StreamTurnUseCase } from "@/src/application/use-cases/turns/stream-turn.use-case";
+import { RunConversationTurnUseCase } from "@/src/application/use-cases/conversations/run-conversation-turn.use-case";
 import { ConversationsRepositoryMongodb } from "@/src/infrastructure/repositories/conversations.repository.mongodb";
-import { TurnsRepositoryMongodb } from "@/src/infrastructure/repositories/turns.repository.mongodb";
-import { RedisPubSubService } from "@/src/infrastructure/services/pubsub.service.redis";
-import { CreatePlaygroundChatTurnController } from "@/src/interface-adapters/controllers/turns/create-playground-chat-turn.controller";
-import { StreamTurnController } from "@/src/interface-adapters/controllers/turns/stream-turn.controller";
+import { RunPlaygroundChatTurnController } from "@/src/interface-adapters/controllers/conversations/run-playground-chat-turn.controller";
 import { asClass, createContainer, InjectionMode } from "awilix";
+import { CreateConversationController } from "@/src/interface-adapters/controllers/conversations/create-conversation.controller";
+import { CreateConversationUseCase } from "@/src/application/use-cases/conversations/create-conversation.use-case";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -15,13 +13,8 @@ export const container = createContainer({
 container.register({
     // conversations
     conversationsRepository: asClass(ConversationsRepositoryMongodb).singleton(),
-
-    // turns
-    turnsRepository: asClass(TurnsRepositoryMongodb).singleton(),
-    createTurnUseCase: asClass(CreateTurnUseCase).singleton(),
-    streamTurnUseCase: asClass(StreamTurnUseCase).singleton(),
-    createPlaygroundChatTurnController: asClass(CreatePlaygroundChatTurnController).singleton(),
-    streamTurnController: asClass(StreamTurnController).singleton(),
-
-    pubsubService: asClass(RedisPubSubService).singleton(),
+    createConversationUseCase: asClass(CreateConversationUseCase).singleton(),
+    runConversationTurnUseCase: asClass(RunConversationTurnUseCase).singleton(),
+    createConversationController: asClass(CreateConversationController).singleton(),
+    runPlaygroundChatTurnController: asClass(RunPlaygroundChatTurnController).singleton(),
 });

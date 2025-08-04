@@ -54,6 +54,7 @@
     "lucide-react": "^0.465.0",
     "mermaid": "^11.9.0",
     "mongodb": "^6.8.0",
+    "nanoid": "^5.1.5",
     "next": "15.3.4",
     "openai": "^4.67.2",
     "quill": "^2.0.3",
