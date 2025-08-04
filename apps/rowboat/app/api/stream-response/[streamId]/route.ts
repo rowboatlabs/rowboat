@@ -2,7 +2,7 @@ import { container } from "@/di/container";
 import { IRunCachedTurnController } from "@/src/interface-adapters/controllers/conversations/run-cached-turn.controller";
 import { requireAuth } from "@/app/lib/auth";
 
-export async function GET(request: Request, props: { params: Promise<{ key: string }> }) {
+export async function GET(request: Request, props: { params: Promise<{ streamId: string }> }) {
     const params = await props.params;
     
     // get user data
@@ -19,7 +19,7 @@ export async function GET(request: Request, props: { params: Promise<{ key: stri
                 for await (const event of runCachedTurnController.execute({
                     caller: "user",
                     userId: user._id,
-                    cachedTurnKey: params.key,
+                    cachedTurnKey: params.streamId,
                 })) {
                     controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(event)}\n\n`));
                 }
