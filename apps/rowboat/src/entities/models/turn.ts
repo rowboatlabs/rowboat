@@ -18,6 +18,11 @@ export const Turn = z.object({
     updatedAt: z.string().datetime().optional(),
 });
 
+export const CachedTurnRequest = z.object({
+    conversationId: z.string(),
+    input: Turn.shape.input,
+});
+
 export const TurnEvent = z.discriminatedUnion("type", [
     z.object({
         type: z.literal("message"),

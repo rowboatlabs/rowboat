@@ -1,16 +1,12 @@
 'use server';
 import { z } from 'zod';
 import { Workflow } from "../lib/types/workflow_types";
-import { Message } from "@/app/lib/types/types";
+import { Message, ZRunConversationTurnStreamPayload } from "@/app/lib/types/types";
 import { authCheck } from './auth_actions';
 import { container } from '@/di/container';
-import { BillingError } from '@/src/entities/errors/common';
-import { Turn } from '@/src/entities/models/turn';
 import { Conversation } from '@/src/entities/models/conversation';
 import { ICreateConversationController } from '@/src/interface-adapters/controllers/conversations/create-conversation.controller';
-import { IRunPlaygroundChatTurnController } from '@/src/interface-adapters/controllers/conversations/run-playground-chat-turn.controller';
-import { projectAuthCheck } from './project_actions';
-import { getAgenticResponseStreamId } from '../lib/utils';
+import { redisClient } from '../lib/redis';
 
 export async function createConversation({
     projectId,
@@ -29,21 +25,30 @@ export async function createConversation({
 }
 
 export async function createRunConversationTurnStreamId({
-    projectId,
     conversationId,
     workflow,
     messages,
 }: {
-    projectId: string;
-    conversationId?: string;
+    conversationId: string;
     workflow: z.infer<typeof Workflow>;
     messages: z.infer<typeof Message>[];
-}): Promise<z.infer<typeof Turn> | { billingError: string }> {
-    await projectAuthCheck(projectId);
+}): Promise<{ streamId: string }> {
+    const payload: z.infer<typeof ZRunConversationTurnStreamPayload> = {
+        conversationId,
+        workflow,
+        messages,
+    }
 
-    const { streamId } = await getAgenticResponseStreamId(projectId, workflow, messages);
+    // serialize the request
+    const serialized = JSON.stringify(payload);
+
+    // create a uuid for the stream
+    const streamId = crypto.randomUUID();
+
+    // store payload in redis
+    await redisClient.set(`chat-stream-${streamId}`, serialized, 'EX', 60 * 10); // expire in 10 minutes
 
     return {
         streamId,
-    };
+    }
 }

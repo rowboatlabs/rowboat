@@ -199,8 +199,8 @@ export function convertMcpServerToolToWorkflowTool(
 
     return converted;
 }
-export const ZStreamAgentResponsePayload = z.object({
-  projectId: z.string(),
-  workflow: Workflow,
-  messages: z.array(Message),
+export const ZRunConversationTurnStreamPayload = z.object({
+    conversationId: z.string(),
+    workflow: Workflow,
+    messages: z.array(Message),
 });

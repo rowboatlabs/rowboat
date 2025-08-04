@@ -1,9 +1,9 @@
 import { container } from "@/di/container";
-import { IRunPlaygroundChatTurnController } from "@/src/interface-adapters/controllers/conversations/run-playground-chat-turn.controller";
+import { IRunCachedTurnController } from "@/src/interface-adapters/controllers/conversations/run-cached-turn.controller";
 import { auth0 } from "@/app/lib/auth0";
 import { requireAuth } from "@/app/lib/auth";
 
-const streamTurnController = container.resolve<IRunPlaygroundChatTurnController>("streamTurnController");
+const streamTurnController = container.resolve<IRunCachedTurnController>("streamTurnController");
 
 export async function GET(request: Request, props: { params: Promise<{ turnId: string }> }) {
   const { turnId } = await props.params;

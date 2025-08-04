@@ -11,7 +11,7 @@ const DocSchema = Conversation
         id: true,
     });
 
-export class ConversationsRepositoryMongodb implements IConversationsRepository {
+export class MongoDBConversationsRepository implements IConversationsRepository {
     private readonly collection = db.collection<z.infer<typeof DocSchema>>("conversations");
 
     async createConversation(data: z.infer<typeof CreateConversationData>): Promise<z.infer<typeof Conversation>> {
