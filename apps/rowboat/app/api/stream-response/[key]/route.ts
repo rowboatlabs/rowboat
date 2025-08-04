@@ -21,12 +21,7 @@ export async function GET(request: Request, props: { params: Promise<{ key: stri
                     userId: user._id,
                     cachedTurnKey: params.key,
                 })) {
-                    // Check if this is a message event (has role property)
-                    if ('role' in event) {
-                        controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(event)}\n\n`));
-                    } else {
-                        controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify(event)}\n\n`));
-                    }
+                    controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(event)}\n\n`));
                 }
                 controller.close();
             } catch (error) {

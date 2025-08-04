@@ -230,7 +230,7 @@ export function Chat({
 
                 // handle events
                 eventSource.addEventListener("message", (event) => {
-                    console.log(`chat.tsx: got message: ${event.data}`);
+                    console.log(`chat.tsx: got message: ${JSON.stringify(event.data)}`);
                     if (ignore) {
                         return;
                     }
@@ -238,54 +238,76 @@ export function Chat({
                     try {
                         const data = JSON.parse(event.data);
                         const turnEvent = TurnEvent.parse(data);
+                        console.log(`chat.tsx: got event: ${turnEvent}`);
 
-                        if (turnEvent.type === "message") {
-                            // Handle regular message events
-                            const generatedMessage = turnEvent.data;
-                            // Update optimistic messages immediately for real-time streaming UX
-                            setOptimisticMessages(prev => [...prev, generatedMessage]);
-                        } else if (turnEvent.type === "done") {
-                            // Handle completion event
-                            console.log(`chat.tsx: got done event`);
-                            if (eventSource) {
-                                eventSource.close();
-                                eventSourceRef.current = null;
+                        switch (turnEvent.type) {
+                            case "message": {
+                                // Handle regular message events
+                                const generatedMessage = turnEvent.data;
+                                // Update optimistic messages immediately for real-time streaming UX
+                                setOptimisticMessages(prev => [...prev, generatedMessage]);
+                                break;
                             }
-
-                            // Combine state and collected messages in the response
-                            setLastAgenticResponse({
-                                turn: turnEvent.turn,
-                                messages: turnEvent.turn.output,
-                            });
-
-                            // Commit all streamed messages atomically to the source of truth
-                            setMessages([...messages, ...turnEvent.turn.output]);
-                            setLoading(false);
-                        } else if (turnEvent.type === "error") {
-                            // Handle error event
-                            console.log(`chat.tsx: got error event: ${turnEvent.error}`);
-                            if (eventSource) {
-                                eventSource.close();
-                                eventSourceRef.current = null;
-                            }
-
-                            console.error('Turn Error:', turnEvent.error);
-                            if (!ignore) {
-                                setLoading(false);
-                                setError('Error: ' + turnEvent.error);
-                                // Rollback to last known good state on stream errors
-                                setOptimisticMessages(messages);
-
-                                // check if billing error
-                                if (turnEvent.isBillingError) {
-                                    setBillingError(turnEvent.error);
+                            case "done": {
+                                // Handle completion event
+                                if (eventSource) {
+                                    eventSource.close();
+                                    eventSourceRef.current = null;
                                 }
+
+                                // Combine state and collected messages in the response
+                                setLastAgenticResponse({
+                                    turn: turnEvent.turn,
+                                    messages: turnEvent.turn.output,
+                                });
+
+                                // Commit all streamed messages atomically to the source of truth
+                                setMessages([...messages, ...turnEvent.turn.output]);
+                                setLoading(false);
+                                break;
+                            }
+                            case "error": {
+                                // Handle error event
+                                if (eventSource) {
+                                    eventSource.close();
+                                    eventSourceRef.current = null;
+                                }
+
+                                console.error('Turn Error:', turnEvent.error);
+                                if (!ignore) {
+                                    setLoading(false);
+                                    setError('Error: ' + turnEvent.error);
+                                    // Rollback to last known good state on stream errors
+                                    setOptimisticMessages(messages);
+
+                                    // check if billing error
+                                    if (turnEvent.isBillingError) {
+                                        setBillingError(turnEvent.error);
+                                    }
+                                }
+                                break;
                             }
                         }
                     } catch (err) {
                         console.error('Failed to parse SSE message:', err);
                         setError(`Failed to parse SSE message: ${err instanceof Error ? err.message : 'Unknown error'}`);
                         // Rollback to last known good state on parsing errors
+                        setOptimisticMessages(messages);
+                    }
+                });
+
+                eventSource.addEventListener('stream_error', (event) => {
+                    console.log(`chat.tsx: got stream_error event: ${event.data}`);
+                    if (eventSource) {
+                        eventSource.close();
+                        eventSourceRef.current = null;
+                    }
+    
+                    console.error('SSE Error:', event);
+                    if (!ignore) {
+                        setLoading(false);
+                        setError('Error: ' + JSON.parse(event.data).error);
+                        // Rollback to last known good state on stream errors
                         setOptimisticMessages(messages);
                     }
                 });
