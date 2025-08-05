@@ -1053,9 +1053,8 @@ function handlePipelineAgentExecution(
     logger: PrefixLogger,
     turnMsgs: z.infer<typeof Message>[],
     transferCounter: AgentTransferCounter,
-    createTransferEvents: (fromAgent: string, toAgent: string) => [z.infer<typeof AssistantMessageWithToolCalls>, z.infer<typeof ToolMessage>],
-    emitEvent: (logger: PrefixLogger, event: z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>) => AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>>
-): { nextAgentName: string | null; shouldContinue: boolean } {
+    createTransferEvents: (fromAgent: string, toAgent: string) => [z.infer<typeof AssistantMessageWithToolCalls>, z.infer<typeof ToolMessage>]
+): { nextAgentName: string | null; shouldContinue: boolean; transferEvents?: [z.infer<typeof AssistantMessageWithToolCalls>, z.infer<typeof ToolMessage>] } {
     const pipelineName = (currentAgent as any).pipelineName;
     const pipelineIndex = (currentAgent as any).pipelineIndex;
     const isLastInPipeline = (currentAgent as any).isLastInPipeline;
@@ -1084,23 +1083,20 @@ function handlePipelineAgentExecution(
     }
     
     if (nextAgentName) {
-        // Emit transfer events for pipeline continuation
-        const [transferStart, transferComplete] = createTransferEvents(currentAgentName, nextAgentName);
+        // Create transfer events for pipeline continuation
+        const transferEvents = createTransferEvents(currentAgentName, nextAgentName);
+        const [transferStart, transferComplete] = transferEvents;
         
         // Add messages to turn
         turnMsgs.push(transferStart);
         turnMsgs.push(transferComplete);
-        
-        // Emit events
-        emitEvent(logger, transferStart);
-        emitEvent(logger, transferComplete);
         
         // Update transfer counter
         transferCounter.increment(currentAgentName, nextAgentName);
         
         logger.log(`switched to agent: ${nextAgentName} || reason: pipeline controller transfer`);
         
-        return { nextAgentName, shouldContinue: true };
+        return { nextAgentName, shouldContinue: true, transferEvents };
     }
     
     return { nextAgentName: null, shouldContinue: false };
@@ -1369,9 +1365,15 @@ export async function* streamResponse(
                                     loopLogger,
                                     turnMsgs,
                                     transferCounter,
-                                    createTransferEvents,
-                                    emitEvent
+                                    createTransferEvents
                                 );
+                                
+                                // Emit transfer events if they exist
+                                if (result.transferEvents) {
+                                    const [transferStart, transferComplete] = result.transferEvents;
+                                    yield* emitEvent(eventLogger, transferStart);
+                                    yield* emitEvent(eventLogger, transferComplete);
+                                }
                                 
                                 if (result.shouldContinue) {
                                     agentName = result.nextAgentName!;
