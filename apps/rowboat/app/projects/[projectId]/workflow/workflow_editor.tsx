@@ -460,9 +460,45 @@ function reducer(state: State, action: Action): State {
                             if (isLive) {
                                 break;
                             }
+                            // Remove the agent
                             draft.workflow.agents = draft.workflow.agents.filter(
                                 (agent) => agent.name !== action.name
                             );
+                            
+                            // Update references to deleted agent in other agents' instructions
+                            draft.workflow.agents = draft.workflow.agents.map(agent => ({
+                                ...agent,
+                                instructions: agent.instructions.replace(
+                                    new RegExp(`\\[@agent:${action.name}\\]\\(#mention\\)`, 'g'),
+                                    ''
+                                )
+                            }));
+                            
+                            // Update references in prompts
+                            draft.workflow.prompts = draft.workflow.prompts.map(prompt => ({
+                                ...prompt,
+                                prompt: prompt.prompt.replace(
+                                    new RegExp(`\\[@agent:${action.name}\\]\\(#mention\\)`, 'g'),
+                                    ''
+                                )
+                            }));
+                            
+                            // Update references in pipelines
+                            if (draft.workflow.pipelines) {
+                                draft.workflow.pipelines = draft.workflow.pipelines.map(pipeline => ({
+                                    ...pipeline,
+                                    agents: pipeline.agents.filter(agentName => agentName !== action.name)
+                                }));
+                            }
+                            
+                            // Update start agent if it was the deleted agent
+                            if (draft.workflow.startAgent === action.name) {
+                                // Set to first available agent, or empty string if no agents left
+                                draft.workflow.startAgent = draft.workflow.agents.length > 0 
+                                    ? draft.workflow.agents[0].name 
+                                    : '';
+                            }
+                            
                             draft.selection = null;
                             draft.pendingChanges = true;
                             draft.chatKey++;
@@ -494,6 +530,52 @@ function reducer(state: State, action: Action): State {
                                 break;
                             }
                             if (draft.workflow.pipelines) {
+                                // Find the pipeline to get its associated agents
+                                const pipelineToDelete = draft.workflow.pipelines.find(
+                                    (pipeline) => pipeline.name === action.name
+                                );
+                                
+                                if (pipelineToDelete) {
+                                    // Remove all agents that belong to this pipeline
+                                    const agentsToDelete = pipelineToDelete.agents || [];
+                                    
+                                    // Check if startAgent is one of the agents being deleted
+                                    const startAgentBeingDeleted = agentsToDelete.includes(draft.workflow.startAgent);
+                                    
+                                    draft.workflow.agents = draft.workflow.agents.filter(
+                                        (agent) => !agentsToDelete.includes(agent.name)
+                                    );
+                                    
+                                    // Update references to deleted agents in other agents' instructions
+                                    agentsToDelete.forEach(agentName => {
+                                        draft.workflow.agents = draft.workflow.agents.map(agent => ({
+                                            ...agent,
+                                            instructions: agent.instructions.replace(
+                                                new RegExp(`\\[@agent:${agentName}\\]\\(#mention\\)`, 'g'),
+                                                ''
+                                            )
+                                        }));
+                                        
+                                        // Update references in prompts
+                                        draft.workflow.prompts = draft.workflow.prompts.map(prompt => ({
+                                            ...prompt,
+                                            prompt: prompt.prompt.replace(
+                                                new RegExp(`\\[@agent:${agentName}\\]\\(#mention\\)`, 'g'),
+                                                ''
+                                            )
+                                        }));
+                                    });
+                                    
+                                    // Update start agent if it was one of the deleted agents (same logic as regular agent deletion)
+                                    if (startAgentBeingDeleted) {
+                                        // Set to first available agent, or empty string if no agents left
+                                        draft.workflow.startAgent = draft.workflow.agents.length > 0 
+                                            ? draft.workflow.agents[0].name 
+                                            : '';
+                                    }
+                                }
+                                
+                                // Remove the pipeline itself
                                 draft.workflow.pipelines = draft.workflow.pipelines.filter(
                                     (pipeline) => pipeline.name !== action.name
                                 );
