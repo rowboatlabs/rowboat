@@ -691,7 +691,7 @@ export const EntityList = forwardRef<
                                         }}
                                         className={`group ${buttonClasses}`}
                                         showHoverContent={true}
-                                        hoverContent="Add Agent or Pipeline"
+                                        hoverContent="Add Agent"
                                     >
                                         <PlusIcon className="w-4 h-4" />
                                     </Button>
@@ -1728,39 +1728,39 @@ function AgentTypeModal({ isOpen, onClose, onConfirm, onCreatePipeline }: AgentT
                         <span>Create New Agent or Pipeline</span>
                     </div>
                 </ModalHeader>
-                <ModalBody>
-                    <div className="space-y-6">
+                <ModalBody className="p-8">
+                    <div className="space-y-8">
                         <p className="text-sm text-gray-600 dark:text-gray-400">
                             Choose what you want to create:
                         </p>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                             {/* Task Agent (Internal) */}
                             <button
                                 type="button"
                                 onClick={() => setSelectedType('internal')}
                                 className={clsx(
-                                    "relative group p-6 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
+                                    "relative group p-4 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
                                     selectedType === 'internal'
                                         ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 shadow-lg scale-[1.03]"
                                         : "border-gray-200 dark:border-gray-700 hover:border-indigo-400 hover:shadow-md bg-white dark:bg-gray-900"
                                 )}
                             >
-                                <div className="flex items-center gap-4 w-full mb-2">
+                                <div className="flex items-center gap-3 w-full mb-1">
                                     <div className={clsx(
-                                        "flex items-center justify-center w-12 h-12 rounded-lg transition-colors",
+                                        "flex items-center justify-center w-10 h-10 rounded-lg transition-colors",
                                         selectedType === 'internal'
                                             ? "bg-indigo-100 dark:bg-indigo-900/60"
                                             : "bg-gray-100 dark:bg-gray-800"
                                     )}>
                                         <Cog className={clsx(
-                                            "w-6 h-6 transition-colors",
+                                            "w-5 h-5 transition-colors",
                                             selectedType === 'internal'
                                                 ? "text-indigo-600 dark:text-indigo-400"
                                                 : "text-gray-600 dark:text-gray-400"
                                         )} />
                                     </div>
                                     <div className="flex-1">
-                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
                                             Task Agent
                                         </h3>
                                         <span className="inline-block align-middle">
@@ -1770,7 +1770,7 @@ function AgentTypeModal({ isOpen, onClose, onConfirm, onCreatePipeline }: AgentT
                                         </span>
                                     </div>
                                 </div>
-                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mt-1 list-disc pl-5 space-y-1">
+                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-snug mt-0 list-disc pl-4 space-y-0.5">
                                   <li>Perform specific internal tasks, such as parts of workflows, pipelines, and data processing</li>
                                   <li>Cannot put out user-facing responses directly</li>
                                   <li>Can call other agents (both conversation and task agents)</li>
@@ -1782,28 +1782,28 @@ function AgentTypeModal({ isOpen, onClose, onConfirm, onCreatePipeline }: AgentT
                                 type="button"
                                 onClick={() => setSelectedType('user_facing')}
                                 className={clsx(
-                                    "relative group p-6 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
+                                    "relative group p-4 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
                                     selectedType === 'user_facing'
                                         ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 shadow-lg scale-[1.03]"
                                         : "border-gray-200 dark:border-gray-700 hover:border-indigo-400 hover:shadow-md bg-white dark:bg-gray-900"
                                 )}
                             >
-                                <div className="flex items-center gap-4 w-full mb-2">
+                                <div className="flex items-center gap-3 w-full mb-1">
                                     <div className={clsx(
-                                        "flex items-center justify-center w-12 h-12 rounded-lg transition-colors",
+                                        "flex items-center justify-center w-10 h-10 rounded-lg transition-colors",
                                         selectedType === 'user_facing'
                                             ? "bg-indigo-100 dark:bg-indigo-900/60"
                                             : "bg-gray-100 dark:bg-gray-800"
                                     )}>
                                         <Users className={clsx(
-                                            "w-6 h-6 transition-colors",
+                                            "w-5 h-5 transition-colors",
                                             selectedType === 'user_facing'
                                                 ? "text-indigo-600 dark:text-indigo-400"
                                                 : "text-gray-600 dark:text-gray-400"
                                         )} />
                                     </div>
                                     <div className="flex-1">
-                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
                                             Conversation Agent
                                         </h3>
                                         <span className="inline-block align-middle">
@@ -1813,7 +1813,7 @@ function AgentTypeModal({ isOpen, onClose, onConfirm, onCreatePipeline }: AgentT
                                         </span>
                                     </div>
                                 </div>
-                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mt-1 list-disc pl-5 space-y-1">
+                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-snug mt-0 list-disc pl-4 space-y-0.5">
                                   <li>Interact directly with users</li>
                                   <li>Ideal for specific roles in customer support, chat interfaces, and other end-user interactions</li>
                                   <li>Can call other agents (both conversation and task agents)</li>
@@ -1825,28 +1825,28 @@ function AgentTypeModal({ isOpen, onClose, onConfirm, onCreatePipeline }: AgentT
                                 type="button"
                                 onClick={() => setSelectedType('pipeline')}
                                 className={clsx(
-                                    "relative group p-6 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
+                                    "relative group p-4 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
                                     selectedType === 'pipeline'
                                         ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 shadow-lg scale-[1.03]"
                                         : "border-gray-200 dark:border-gray-700 hover:border-indigo-400 hover:shadow-md bg-white dark:bg-gray-900"
                                 )}
                             >
-                                <div className="flex items-center gap-4 w-full mb-2">
+                                <div className="flex items-center gap-3 w-full mb-1">
                                     <div className={clsx(
-                                        "flex items-center justify-center w-12 h-12 rounded-lg transition-colors",
+                                        "flex items-center justify-center w-10 h-10 rounded-lg transition-colors",
                                         selectedType === 'pipeline'
                                             ? "bg-indigo-100 dark:bg-indigo-900/60"
                                             : "bg-gray-100 dark:bg-gray-800"
                                     )}>
                                         <Component className={clsx(
-                                            "w-6 h-6 transition-colors",
+                                            "w-5 h-5 transition-colors",
                                             selectedType === 'pipeline'
                                                 ? "text-indigo-600 dark:text-indigo-400"
                                                 : "text-gray-600 dark:text-gray-400"
                                         )} />
                                     </div>
                                     <div className="flex-1">
-                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
                                             Pipeline
                                         </h3>
                                         <span className="inline-block align-middle">
@@ -1856,7 +1856,7 @@ function AgentTypeModal({ isOpen, onClose, onConfirm, onCreatePipeline }: AgentT
                                         </span>
                                     </div>
                                 </div>
-                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mt-1 list-disc pl-5 space-y-1">
+                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-snug mt-0 list-disc pl-4 space-y-0.5">
                                   <li>Create a sequential workflow of agents</li>
                                   <li>Agents execute one after another in order</li>
                                   <li>Add individual agents to the pipeline after creation</li>
@@ -1865,7 +1865,7 @@ function AgentTypeModal({ isOpen, onClose, onConfirm, onCreatePipeline }: AgentT
                         </div>
                     </div>
                 </ModalBody>
-                <ModalFooter>
+                <ModalFooter className="px-8 pb-8">
                     <Button
                         variant="secondary"
                         onClick={onClose}
