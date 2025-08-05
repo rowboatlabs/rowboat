@@ -69,6 +69,8 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     const {
         streamingResponse,
         loading: loadingResponse,
+        toolCalling,
+        toolQuery,
         error: responseError,
         clearError: clearResponseError,
         billingError,
@@ -213,6 +215,16 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         onStatusBarChange={handleStatusBarChange}
                     />
                 </div>
+                {toolCalling && (
+                    <div className="shrink-0 px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm dark:shadow-gray-950/20 rounded-2xl mx-1 mb-2">
+                        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                            <Spinner size="sm" className="ml-2" />
+                            <span>
+                                Searching for tools{toolQuery ? ` to ${toolQuery}` : '...'}
+                            </span>
+                        </div>
+                    </div>
+                )}
                 <div className="shrink-0 px-1 pb-6">
                     {responseError && (
                         <div className="mb-4 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex gap-2 justify-between items-center text-sm">

@@ -39,6 +39,10 @@ export async function GET(request: Request, props: { params: Promise<{ streamId:
           if ('content' in event) {
             messageCount++;
             controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(event)}\n\n`));
+          } else if ('type' in event && event.type === 'tool-call') {
+            controller.enqueue(encoder.encode(`event: tool-call\ndata: ${JSON.stringify(event)}\n\n`));
+          } else if ('type' in event && event.type === 'tool-result') {
+            controller.enqueue(encoder.encode(`event: tool-result\ndata: ${JSON.stringify(event)}\n\n`));
           } else {
             controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify(event)}\n\n`));
           }

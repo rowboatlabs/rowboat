@@ -16,6 +16,8 @@ interface UseCopilotParams {
 interface UseCopilotResult {
     streamingResponse: string;
     loading: boolean;
+    toolCalling: boolean;
+    toolQuery: string | null;
     error: string | null;
     clearError: () => void;
     billingError: string | null;
@@ -30,6 +32,8 @@ interface UseCopilotResult {
 export function useCopilot({ projectId, workflow, context, dataSources }: UseCopilotParams): UseCopilotResult {
     const [streamingResponse, setStreamingResponse] = useState('');
     const [loading, setLoading] = useState(false);
+    const [toolCalling, setToolCalling] = useState(false);
+    const [toolQuery, setToolQuery] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [billingError, setBillingError] = useState<string | null>(null);
     const cancelRef = useRef<() => void>(() => { });
@@ -52,6 +56,8 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
         setStreamingResponse('');
         responseRef.current = '';
         setError(null);
+        setToolCalling(false);
+        setToolQuery(null);
         setLoading(true);
 
         try {
@@ -69,13 +75,30 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
 
             eventSource.onmessage = (event) => {
                 try {
-                    const { content } = JSON.parse(event.data);
-                    responseRef.current += content;
-                    setStreamingResponse(prev => prev + content);
+                    const data = JSON.parse(event.data);
+                    if ('content' in data) {
+                        responseRef.current += data.content;
+                        setStreamingResponse(prev => prev + data.content);
+                    }
                 } catch (e) {
                     setError('Failed to parse stream message');
                 }
             };
+
+            eventSource.addEventListener('tool-call', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    setToolCalling(true);
+                    setToolQuery(data.query || null);
+                } catch (e) {
+                    setToolCalling(true);
+                    setToolQuery(null);
+                }
+            });
+
+            eventSource.addEventListener('tool-result', (event) => {
+                setToolCalling(false);
+            });
 
             eventSource.addEventListener('done', () => {
                 eventSource.close();
@@ -104,6 +127,8 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
     return {
         streamingResponse,
         loading,
+        toolCalling,
+        toolQuery,
         error,
         clearError,
         billingError,

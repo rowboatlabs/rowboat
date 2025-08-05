@@ -40,11 +40,25 @@ const ZTextEvent = z.object({
     content: z.string(),
 });
 
+const ZToolCallEvent = z.object({
+    type: z.literal('tool-call'),
+    toolName: z.string(),
+    toolCallId: z.string(),
+    args: z.record(z.any()),
+    query: z.string().optional(),
+});
+
+const ZToolResultEvent = z.object({
+    type: z.literal('tool-result'),
+    toolCallId: z.string(),
+    result: z.any(),
+});
+
 const ZDoneEvent = z.object({
     done: z.literal(true),
 });
 
-const ZEvent = z.union([ZTextEvent, ZDoneEvent]);
+const ZEvent = z.union([ZTextEvent, ZToolCallEvent, ZToolResultEvent, ZDoneEvent]);
 
 function getContextPrompt(context: z.infer<typeof CopilotChatContext> | null): string {
     let prompt = '';
@@ -211,7 +225,10 @@ export async function getEditAgentInstructionsResponse(
                 role: 'system',
                 content: SYSTEM_PROMPT,
             },
-            ...messages,
+            ...messages.map(msg => ({
+                role: msg.role,
+                content: msg.content,
+            })),
         ],
         schema: z.object({
             agent_instructions: z.string(),
@@ -258,7 +275,7 @@ export async function* streamMultiAgentResponse(
         availableTools: ["search_relevant_tools"]
     });
     
-    const { textStream } = streamText({
+    const { fullStream } = await streamText({
         model: openai(COPILOT_MODEL),
         maxSteps: 5,
         tools: {
@@ -283,20 +300,40 @@ export async function* streamMultiAgentResponse(
                 role: 'system',
                 content: SYSTEM_PROMPT,
             },
-            ...messages,
+            ...messages.map(msg => ({
+                role: msg.role,
+                content: msg.content,
+            })),
         ],
     });
 
     // emit response chunks
     let chunkCount = 0;
-    for await (const chunk of textStream) {
+    for await (const event of fullStream) {
         chunkCount++;
         if (chunkCount === 1) {
             console.log("📤 FIRST RESPONSE CHUNK SENT");
         }
-        yield {
-            content: chunk,
-        };
+        
+        if (event.type === "text-delta") {
+            yield {
+                content: event.textDelta,
+            };
+        } else if (event.type === "tool-call") {
+            yield {
+                type: 'tool-call',
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                args: event.args,
+                query: event.args.query || event.args.query || undefined,
+            };
+        } else if (event.type === "tool-result") {
+            yield {
+                type: 'tool-result',
+                toolCallId: event.toolCallId,
+                result: event.result,
+            };
+        }
     }
 
     console.log("✅ COPILOT STREAM COMPLETED", { 
