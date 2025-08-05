@@ -1,10 +1,10 @@
-import { IUsageQuotaPolicyService } from "@/src/application/services/usage-quota-policy.service.interface";
+import { IUsageQuotaPolicy } from "@/src/application/policies/usage-quota.policy.interface";
 import { redisClient } from "@/app/lib/redis";
 import { QuotaExceededError } from "@/src/entities/errors/common";
 
 const MAX_QUERIES_PER_MINUTE = Number(process.env.MAX_QUERIES_PER_MINUTE) || 0;
 
-export class RedisUsageQuotaPolicyService implements IUsageQuotaPolicyService {
+export class RedisUsageQuotaPolicy implements IUsageQuotaPolicy {
     async assertAndConsume(projectId: string): Promise<void> {
         if (MAX_QUERIES_PER_MINUTE === 0) {
             return;

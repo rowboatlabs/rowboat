@@ -1,10 +1,11 @@
-import { BadRequestError, NotAuthorizedError, NotFoundError } from '@/src/entities/errors/common';
-import { apiKeysCollection, projectMembersCollection, projectsCollection } from "@/app/lib/mongodb";
+import { BadRequestError, NotFoundError } from '@/src/entities/errors/common';
+import { projectsCollection } from "@/app/lib/mongodb";
 import { IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
 import { z } from "zod";
 import { Conversation } from "@/src/entities/models/conversation";
 import { Workflow } from "@/app/lib/types/workflow_types";
-import { IUsageQuotaPolicyService } from '../../services/usage-quota-policy.service.interface';
+import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
+import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
@@ -21,17 +22,21 @@ export interface ICreateConversationUseCase {
 
 export class CreateConversationUseCase implements ICreateConversationUseCase {
     private readonly conversationsRepository: IConversationsRepository;
-    private readonly usageQuotaPolicyService: IUsageQuotaPolicyService;
+    private readonly usageQuotaPolicy: IUsageQuotaPolicy;
+    private readonly projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy;
 
     constructor({
         conversationsRepository,
-        usageQuotaPolicyService,
+        usageQuotaPolicy,
+        projectActionAuthorizationPolicy,
     }: {
         conversationsRepository: IConversationsRepository,
-        usageQuotaPolicyService: IUsageQuotaPolicyService,
+        usageQuotaPolicy: IUsageQuotaPolicy,
+        projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy,
     }) {
         this.conversationsRepository = conversationsRepository;
-        this.usageQuotaPolicyService = usageQuotaPolicyService;
+        this.usageQuotaPolicy = usageQuotaPolicy;
+        this.projectActionAuthorizationPolicy = projectActionAuthorizationPolicy;
     }
 
     async execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Conversation>> {
@@ -39,39 +44,17 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
         let isLiveWorkflow = Boolean(data.isLiveWorkflow);
         let workflow = data.workflow;
 
+        // authz check
+        await this.projectActionAuthorizationPolicy.authorize({
+            caller,
+            userId,
+            apiKey,
+            projectId,
+        });
+
         // assert and consume quota
-        await this.usageQuotaPolicyService.assertAndConsume(projectId);
-
-        // if caller is a user, ensure they are a member of project
-        if (caller === "user") {
-            if (!userId) {
-                throw new BadRequestError('User ID is required');
-            }
-            const membership = await projectMembersCollection.findOne({
-                projectId,
-                userId,
-            });
-            if (!membership) {
-                throw new NotAuthorizedError('User not a member of project');
-            }
-        } else {
-            if (!apiKey) {
-                throw new BadRequestError('API key is required');
-            }
-            // check if api key is valid
-            // while also updating last used timestamp
-            const result = await apiKeysCollection.findOneAndUpdate(
-                {
-                    projectId,
-                    key: apiKey,
-                },
-                { $set: { lastUsedAt: new Date().toISOString() } }
-            );
-            if (!result) {
-                throw new NotAuthorizedError('Invalid API key');
-            }
-        }
-
+        await this.usageQuotaPolicy.assertAndConsume(projectId);
+ 
         // if workflow is not provided, fetch workflow
         if (!workflow) {
             const project = await projectsCollection.findOne({

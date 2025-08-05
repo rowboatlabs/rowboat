@@ -9,7 +9,7 @@ import { authorize, getCustomerIdForProject, logUsage } from "@/app/lib/billing"
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { getResponse } from "@/app/lib/agents";
 import { Message, AssistantMessage, AssistantMessageWithToolCalls, ToolMessage } from "@/app/lib/types/types";
-import { IUsageQuotaPolicyService } from "@/src/application/services/usage-quota-policy.service.interface";
+import { IUsageQuotaPolicy } from "@/src/application/policies/usage-quota.policy.interface";
 import { container } from "@/di/container";
 
 function convert(messages: z.infer<typeof apiV1.ChatMessage>[]): z.infer<typeof Message>[] {
@@ -125,8 +125,8 @@ export async function POST(
         }
 
         // assert and consume quota
-        const usageQuotaPolicyService = container.resolve<IUsageQuotaPolicyService>('usageQuotaPolicyService');
-        await usageQuotaPolicyService.assertAndConsume(session.projectId);
+        const usageQuotaPolicy = container.resolve<IUsageQuotaPolicy>('usageQuotaPolicy');
+        await usageQuotaPolicy.assertAndConsume(session.projectId);
 
         // parse and validate the request body
         let body;

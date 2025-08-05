@@ -1,13 +1,13 @@
 import { Turn, TurnEvent } from "@/src/entities/models/turn";
 import { USE_BILLING } from "@/app/lib/feature_flags";
-import { authorize, getCustomerIdForProject } from "@/app/lib/billing";
-import { BadRequestError, BillingError, NotAuthorizedError, NotFoundError } from '@/src/entities/errors/common';
-import { apiKeysCollection, projectMembersCollection } from "@/app/lib/mongodb";
+import { authorize, getCustomerIdForProject, logUsage } from "@/app/lib/billing";
+import { NotFoundError } from '@/src/entities/errors/common';
 import { IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
 import { streamResponse } from "@/app/lib/agents";
 import { z } from "zod";
 import { Message } from "@/app/lib/types/types";
-import { IUsageQuotaPolicyService } from '../../services/usage-quota-policy.service.interface';
+import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
+import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
@@ -24,17 +24,21 @@ export interface IRunConversationTurnUseCase {
 
 export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
     private readonly conversationsRepository: IConversationsRepository;
-    private readonly usageQuotaPolicyService: IUsageQuotaPolicyService;
+    private readonly usageQuotaPolicy: IUsageQuotaPolicy;
+    private readonly projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy;
 
     constructor({
         conversationsRepository,
-        usageQuotaPolicyService,
+        usageQuotaPolicy,
+        projectActionAuthorizationPolicy,
     }: {
         conversationsRepository: IConversationsRepository,
-        usageQuotaPolicyService: IUsageQuotaPolicyService,
+        usageQuotaPolicy: IUsageQuotaPolicy,
+        projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy,
     }) {
         this.conversationsRepository = conversationsRepository;
-        this.usageQuotaPolicyService = usageQuotaPolicyService;
+        this.usageQuotaPolicy = usageQuotaPolicy;
+        this.projectActionAuthorizationPolicy = projectActionAuthorizationPolicy;
     }
 
     async *execute(data: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof TurnEvent>, void, unknown> {
@@ -47,48 +51,27 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
         // extract projectid from conversation
         const { id: conversationId, projectId } = conversation;
 
-        // assert and consume quota
-        await this.usageQuotaPolicyService.assertAndConsume(projectId);
+        // authz check
+        await this.projectActionAuthorizationPolicy.authorize({
+            caller: data.caller,
+            userId: data.userId,
+            apiKey: data.apiKey,
+            projectId,
+        });
 
-        // if caller is a user, ensure they are a member of project
-        if (data.caller === "user") {
-            if (!data.userId) {
-                throw new BadRequestError('User ID is required');
-            }
-            const membership = await projectMembersCollection.findOne({
-                projectId,
-                userId: data.userId,
-            });
-            if (!membership) {
-                throw new NotAuthorizedError('User not a member of project');
-            }
-        } else {
-            if (!data.apiKey) {
-                throw new BadRequestError('API key is required');
-            }
-            // check if api key is valid
-            // while also updating last used timestamp
-            const result = await apiKeysCollection.findOneAndUpdate(
-                {
-                    projectId,
-                    key: data.apiKey,
-                },
-                { $set: { lastUsedAt: new Date().toISOString() } }
-            );
-            if (!result) {
-                throw new NotAuthorizedError('Invalid API key');
-            }
-        }
+        // assert and consume quota
+        await this.usageQuotaPolicy.assertAndConsume(projectId);
 
         // Check billing auth
+        let billingCustomerId: string | null = null;
         if (USE_BILLING) {
             // get billing customer id for project
-            const customerId = await getCustomerIdForProject(projectId);
+            billingCustomerId = await getCustomerIdForProject(projectId);
             const agentModels = conversation.workflow.agents.reduce((acc, agent) => {
                 acc.push(agent.model);
                 return acc;
             }, [] as string[]);
-            const response = await authorize(customerId, {
+            const response = await authorize(billingCustomerId, {
                 type: 'agent_response',
                 data: {
                     agentModels,
@@ -148,7 +131,7 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
                 const turn = await this.conversationsRepository.addTurn(data.conversationId, {
                     trigger: data.trigger,
                     input: data.input,
-                    output: outputMessages, 
+                    output: outputMessages,
                 });
 
                 // yield event
@@ -158,6 +141,14 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
                     conversationId,
                 }
             }
+        }
+
+        // Log billing usage
+        if (USE_BILLING && billingCustomerId) {
+            await logUsage(billingCustomerId, {
+                type: "agent_messages",
+                amount: outputMessages.length,
+            });
         }
     }
 }

@@ -14,9 +14,9 @@ import { USE_BILLING } from "../lib/feature_flags";
 import { WithStringId } from "../lib/types/types";
 import { getEditAgentInstructionsResponse } from "../lib/copilot/copilot";
 import { container } from "@/di/container";
-import { IUsageQuotaPolicyService } from "@/src/application/services/usage-quota-policy.service.interface";
+import { IUsageQuotaPolicy } from "@/src/application/policies/usage-quota.policy.interface";
 
-const usageQuotaPolicyService = container.resolve<IUsageQuotaPolicyService>('usageQuotaPolicyService');
+const usageQuotaPolicy = container.resolve<IUsageQuotaPolicy>('usageQuotaPolicy');
 
 export async function getCopilotResponseStream(
     projectId: string,
@@ -28,7 +28,7 @@ export async function getCopilotResponseStream(
     streamId: string;
 } | { billingError: string }> {
     await projectAuthCheck(projectId);
-    await usageQuotaPolicyService.assertAndConsume(projectId);
+    await usageQuotaPolicy.assertAndConsume(projectId);
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
@@ -39,7 +39,7 @@ export async function getCopilotResponseStream(
         return { billingError: authResponse.error || 'Billing error' };
     }
 
-    await usageQuotaPolicyService.assertAndConsume(projectId);
+    await usageQuotaPolicy.assertAndConsume(projectId);
     
     // prepare request
     const request: z.infer<typeof CopilotAPIRequest> = {
@@ -71,7 +71,7 @@ export async function getCopilotAgentInstructions(
     agentName: string,
 ): Promise<string | { billingError: string }> {
     await projectAuthCheck(projectId);
-    await usageQuotaPolicyService.assertAndConsume(projectId);
+    await usageQuotaPolicy.assertAndConsume(projectId);
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
