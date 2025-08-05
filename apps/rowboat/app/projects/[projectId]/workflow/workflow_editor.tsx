@@ -6,6 +6,7 @@ import { DataSource } from "../../../lib/types/datasource_types";
 import { Project } from "../../../lib/types/project_types";
 import { produce, applyPatches, enablePatches, produceWithPatches, Patch } from 'immer';
 import { AgentConfig } from "../entities/agent_config";
+import { PipelineConfig } from "../entities/pipeline_config";
 import { ToolConfig } from "../entities/tool_config";
 import { App as ChatApp } from "../playground/app";
 import { z } from "zod";
@@ -25,7 +26,7 @@ import { publishWorkflow } from "@/app/actions/project_actions";
 import { saveWorkflow } from "@/app/actions/project_actions";
 import { updateProjectName } from "@/app/actions/project_actions";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
-import { CopyIcon, ImportIcon, Layers2Icon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon, SettingsIcon, ChevronDownIcon, PhoneIcon, MessageCircleIcon } from "lucide-react";
+import { CopyIcon, ImportIcon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon, SettingsIcon, ChevronDownIcon, PhoneIcon, MessageCircleIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
 import { ProductTour } from "@/components/common/product-tour";
 import { ModelsResponse } from "@/app/lib/types/billing_types";
@@ -1043,6 +1044,10 @@ export function WorkflowEditor({
         dispatch({ type: "update_agent", name, agent });
     }
 
+    function handleUpdatePipeline(name: string, pipeline: Partial<z.infer<typeof WorkflowPipeline>>) {
+        dispatch({ type: "update_pipeline", name, pipeline });
+    }
+
     function handleDeleteAgent(name: string) {
         if (window.confirm(`Are you sure you want to delete the agent "${name}"?`)) {
             dispatch({ type: "delete_agent", name });
@@ -1441,6 +1446,7 @@ export function WorkflowEditor({
                             workflow={state.present.workflow}
                             agent={state.present.workflow.agents.find((agent) => agent.name === state.present.selection!.name)!}
                             usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
+                            usedPipelineNames={new Set((state.present.workflow.pipelines || []).map((pipeline) => pipeline.name))}
                             agents={state.present.workflow.agents}
                             tools={state.present.workflow.tools}
                             prompts={state.present.workflow.prompts}
@@ -1482,35 +1488,18 @@ export function WorkflowEditor({
                             handleClose={() => dispatch({ type: "unselect_datasource" })}
                             onDataSourceUpdate={onDataSourcesUpdated}
                         />}
-                        {state.present.selection?.type === "pipeline" && (
-                            <Panel 
-                                title={
-                                    <div className="flex items-center justify-between w-full">
-                                        <div className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                                            Pipeline Configuration
-                                        </div>
-                                        <CustomButton
-                                            variant="secondary"
-                                            size="sm"
-                                            onClick={() => dispatch({ type: "unselect_pipeline" })}
-                                            className="text-sm px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:hover:bg-indigo-900 dark:text-indigo-400"
-                                        >
-                                            Close
-                                        </CustomButton>
-                                    </div>
-                                }
-                                className="p-6"
-                            >
-                                <div className="text-center text-gray-500 dark:text-gray-400">
-                                    <Layers2Icon className="w-12 h-12 mx-auto mb-4 text-indigo-400" />
-                                    <h3 className="text-lg font-medium mb-2">Pipeline Configuration</h3>
-                                    <p className="text-sm">
-                                        Pipeline configuration interface coming soon. 
-                                        For now, you can create and reference pipelines using the @ mention system.
-                                    </p>
-                                </div>
-                            </Panel>
-                        )}
+                        {state.present.selection?.type === "pipeline" && <PipelineConfig
+                            key={state.present.selection.name}
+                            projectId={projectId}
+                            workflow={state.present.workflow}
+                            pipeline={state.present.workflow.pipelines?.find((pipeline) => pipeline.name === state.present.selection!.name)!}
+                            usedPipelineNames={new Set((state.present.workflow.pipelines || []).filter((pipeline) => pipeline.name !== state.present.selection!.name).map((pipeline) => pipeline.name))}
+                            usedAgentNames={new Set(state.present.workflow.agents.map((agent) => agent.name))}
+                            agents={state.present.workflow.agents}
+                            pipelines={state.present.workflow.pipelines || []}
+                            handleUpdate={handleUpdatePipeline.bind(null, state.present.selection.name)}
+                            handleClose={() => dispatch({ type: "unselect_pipeline" })}
+                        />}
                         {state.present.selection?.type === "visualise" && (
                             <Panel 
                                 title={

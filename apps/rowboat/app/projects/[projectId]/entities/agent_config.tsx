@@ -39,6 +39,7 @@ export function AgentConfig({
     workflow,
     agent,
     usedAgentNames,
+    usedPipelineNames,
     agents,
     tools,
     prompts,
@@ -54,6 +55,7 @@ export function AgentConfig({
     workflow: z.infer<typeof Workflow>,
     agent: z.infer<typeof WorkflowAgent>,
     usedAgentNames: Set<string>,
+    usedPipelineNames: Set<string>,
     agents: z.infer<typeof WorkflowAgent>[],
     tools: z.infer<typeof WorkflowTool>[],
     prompts: z.infer<typeof WorkflowPrompt>[],
@@ -168,7 +170,12 @@ export function AgentConfig({
             return false;
         }
         if (value !== agent.name && usedAgentNames.has(value)) {
-            setNameError("This name is already taken");
+            setNameError("This name is already taken by another agent");
+            return false;
+        }
+        // Check for conflicts with pipeline names
+        if (usedPipelineNames.has(value)) {
+            setNameError("This name is already taken by a pipeline");
             return false;
         }
         if (!/^[a-zA-Z0-9_-\s]+$/.test(value)) {
@@ -536,27 +543,6 @@ export function AgentConfig({
                                             />
                                         </div>
                                     </div>
-                                    {agent.outputVisibility === "pipeline" && (
-                                        <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
-                                            <div className="md:w-32"></div>
-                                            <div className="flex-1">
-                                                <div className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
-                                                    <div className="flex items-start gap-2">
-                                                        <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                                                        <div>
-                                                            <div className="font-medium mb-1">Pipeline Agent Constraints</div>
-                                                            <ul className="text-xs space-y-1 list-disc list-inside">
-                                                                <li>Can only reference tools (no agent or pipeline transfers)</li>
-                                                                <li>Executes as one step in a sequential pipeline</li>
-                                                                <li>No conversation control - output flows to next step</li>
-                                                                <li>Focus on your specific task in the pipeline</li>
-                                                            </ul>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
                                     <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                         <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Model</label>
                                         <div className="flex-1">

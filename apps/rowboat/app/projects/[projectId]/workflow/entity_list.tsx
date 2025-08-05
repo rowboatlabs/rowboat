@@ -321,21 +321,25 @@ const PipelineCard = ({
         <div className="mb-1 group">
             <div className="flex items-center gap-2 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors">
                 {dragHandle}
+                {/* Chevron button for expand/collapse - only show when has agents and on hover */}
                 <button
                     onClick={() => setIsExpanded(!isExpanded)}
+                    className={`w-4 h-4 flex items-center justify-center transition-opacity rounded ${
+                        pipelineAgents.length > 0 ? 'group-hover:opacity-100 opacity-60 hover:bg-gray-200 dark:hover:bg-gray-700' : 'opacity-0 pointer-events-none'
+                    }`}
+                >
+                    {pipelineAgents.length > 0 && (isExpanded ? (
+                        <ChevronDown className="w-3 h-3 text-gray-500" />
+                    ) : (
+                        <ChevronRight className="w-3 h-3 text-gray-500" />
+                    ))}
+                </button>
+                
+                {/* Pipeline name button for configuration */}
+                <button
+                    onClick={() => onSelectPipeline(pipeline.name)}
                     className="flex-1 flex items-center gap-2 text-sm text-left min-h-[28px]"
                 >
-                    {/* Chevron - only show when has agents and on hover */}
-                    <div className={`w-4 h-4 flex items-center justify-center transition-opacity ${
-                        pipelineAgents.length > 0 ? 'group-hover:opacity-100 opacity-60' : 'opacity-0'
-                    }`}>
-                        {pipelineAgents.length > 0 && (isExpanded ? (
-                            <ChevronDown className="w-3 h-3 text-gray-500" />
-                        ) : (
-                            <ChevronRight className="w-3 h-3 text-gray-500" />
-                        ))}
-                    </div>
-                    
                     <div className="flex items-center gap-2">
                         <span className="text-xs">{pipeline.name}</span>
                         <span className="text-xs text-gray-500">({pipelineAgents.length} steps)</span>
@@ -352,14 +356,11 @@ const PipelineCard = ({
                         </DropdownTrigger>
                         <DropdownMenu
                             onAction={(key) => {
-                                if (key === 'select') {
-                                    onSelectPipeline(pipeline.name);
-                                } else if (key === 'delete') {
+                                if (key === 'delete') {
                                     onDeletePipeline(pipeline.name);
                                 }
                             }}
                         >
-                            <DropdownItem key="select">Edit Pipeline</DropdownItem>
                             <DropdownItem key="delete" className="text-danger">Delete Pipeline</DropdownItem>
                         </DropdownMenu>
                     </Dropdown>
