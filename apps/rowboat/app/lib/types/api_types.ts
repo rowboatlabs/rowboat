@@ -4,9 +4,9 @@ import { z } from "zod";
 
 export const ApiRequest = z.object({
     messages: z.array(Message),
-    conversationId: z.string().optional(),
+    conversationId: z.string().nullable().optional(),
     mockTools: z.record(z.string(), z.string()).nullable().optional(),
-    stream: z.boolean().optional().default(false),
+    stream: z.boolean().optional().nullable().default(false),
 });export const ApiResponse = z.object({
     turn: Turn,
     conversationId: z.string().optional(),

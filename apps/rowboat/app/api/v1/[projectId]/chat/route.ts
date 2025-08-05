@@ -37,8 +37,8 @@ export async function POST(
             messages,
             mockTools,
         },
-        conversationId,
-        stream,
+        conversationId: conversationId || undefined,
+        stream: Boolean(stream),
     });
 
     // if streaming is requested, return SSE stream

@@ -1,4 +1,4 @@
-from typing import List, Optional, Union, Any, Literal, Dict
+from typing import List, Optional, Union, Literal, Dict
 from pydantic import BaseModel
 
 class SystemMessage(BaseModel):
@@ -44,13 +44,15 @@ ApiMessage = Union[
     ToolMessage
 ]
 
+class Turn(BaseModel):
+    id: str
+    output: List[ApiMessage]
+
 class ApiRequest(BaseModel):
+    conversationId: Optional[str] = None
     messages: List[ApiMessage]
-    state: Any
-    workflowId: Optional[str] = None
-    testProfileId: Optional[str] = None
     mockTools: Optional[Dict[str, str]] = None
 
 class ApiResponse(BaseModel):
-    messages: List[ApiMessage]
-    state: Optional[Any] = None
+    conversationId: str
+    turn: Turn
