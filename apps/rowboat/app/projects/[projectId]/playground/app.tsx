@@ -16,6 +16,7 @@ export function App({
     messageSubscriber,
     onPanelClick,
     triggerCopilotChat,
+    isLiveWorkflow,
 }: {
     hidden?: boolean;
     projectId: string;
@@ -23,6 +24,7 @@ export function App({
     messageSubscriber?: (messages: z.infer<typeof Message>[]) => void;
     onPanelClick?: () => void;
     triggerCopilotChat?: (message: string) => void;
+    isLiveWorkflow: boolean;
 }) {
     const [counter, setCounter] = useState<number>(0);
     const [showDebugMessages, setShowDebugMessages] = useState<boolean>(true);
@@ -118,6 +120,7 @@ export function App({
                         onCopyClick={(fn) => { getCopyContentRef.current = fn; }}
                         showDebugMessages={showDebugMessages}
                         triggerCopilotChat={triggerCopilotChat}
+                        isLiveWorkflow={isLiveWorkflow}
                     />
                 </div>
             </Panel>

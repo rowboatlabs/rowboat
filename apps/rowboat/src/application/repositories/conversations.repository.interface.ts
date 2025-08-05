@@ -4,6 +4,8 @@ import { Turn } from "@/src/entities/models/turn";
 
 export const CreateConversationData = Conversation.pick({
     projectId: true,
+    workflow: true,
+    isLiveWorkflow: true,
 });
 
 export const AddTurnData = Turn.omit({

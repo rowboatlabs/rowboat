@@ -2,7 +2,7 @@ import { RunConversationTurnUseCase } from "@/src/application/use-cases/conversa
 import { MongoDBConversationsRepository } from "@/src/infrastructure/repositories/mongodb.conversations.repository";
 import { RunCachedTurnController } from "@/src/interface-adapters/controllers/conversations/run-cached-turn.controller";
 import { asClass, createContainer, InjectionMode } from "awilix";
-import { CreateConversationController } from "@/src/interface-adapters/controllers/conversations/create-conversation.controller";
+import { CreatePlaygroundConversationController } from "@/src/interface-adapters/controllers/conversations/create-playground-conversation.controller";
 import { CreateConversationUseCase } from "@/src/application/use-cases/conversations/create-conversation.use-case";
 import { RedisCacheService } from "@/src/infrastructure/services/redis.cache.service";
 import { CreateCachedTurnUseCase } from "@/src/application/use-cases/conversations/create-cached-turn.use-case";
@@ -28,7 +28,7 @@ container.register({
     fetchCachedTurnUseCase: asClass(FetchCachedTurnUseCase).singleton(),
     runConversationTurnUseCase: asClass(RunConversationTurnUseCase).singleton(),
 
-    createConversationController: asClass(CreateConversationController).singleton(),
+    createPlaygroundConversationController: asClass(CreatePlaygroundConversationController).singleton(),
     createCachedTurnController: asClass(CreateCachedTurnController).singleton(),
     runCachedTurnController: asClass(RunCachedTurnController).singleton(),
 });

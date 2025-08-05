@@ -5,32 +5,35 @@ import { Message } from "@/app/lib/types/types";
 import { authCheck } from './auth_actions';
 import { container } from '@/di/container';
 import { Conversation } from '@/src/entities/models/conversation';
-import { ICreateConversationController } from '@/src/interface-adapters/controllers/conversations/create-conversation.controller';
+import { ICreatePlaygroundConversationController } from '@/src/interface-adapters/controllers/conversations/create-playground-conversation.controller';
 import { ICreateCachedTurnController } from '@/src/interface-adapters/controllers/conversations/create-cached-turn.controller';
 
 export async function createConversation({
     projectId,
+    workflow,
+    isLiveWorkflow,
 }: {
     projectId: string;
+    workflow: z.infer<typeof Workflow>;
+    isLiveWorkflow: boolean;
 }): Promise<z.infer<typeof Conversation>> {
     const user = await authCheck();
 
-    const controller = container.resolve<ICreateConversationController>("createConversationController");
+    const controller = container.resolve<ICreatePlaygroundConversationController>("createPlaygroundConversationController");
 
     return await controller.execute({
-        caller: "user",
         userId: user._id,
         projectId,
+        workflow,
+        isLiveWorkflow,
     });
 }
 
 export async function createCachedTurn({
     conversationId,
-    workflow,
     messages,
 }: {
     conversationId: string;
-    workflow: z.infer<typeof Workflow>;
     messages: z.infer<typeof Message>[];
 }): Promise<{ key: string }> {
     const user = await authCheck();
@@ -42,7 +45,6 @@ export async function createCachedTurn({
         conversationId,
         input: {
             messages,
-            workflow,
         },
     });
 

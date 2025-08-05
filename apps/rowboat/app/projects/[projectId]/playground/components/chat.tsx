@@ -21,6 +21,7 @@ export function Chat({
     showDebugMessages = true,
     showJsonMode = false,
     triggerCopilotChat,
+    isLiveWorkflow,
 }: {
     projectId: string;
     workflow: z.infer<typeof Workflow>;
@@ -29,6 +30,7 @@ export function Chat({
     showDebugMessages?: boolean;
     showJsonMode?: boolean;
     triggerCopilotChat?: (message: string) => void;
+    isLiveWorkflow: boolean;
 }) {
     const conversationId = useRef<string | null>(null);
     const [messages, setMessages] = useState<z.infer<typeof Message>[]>([]);
@@ -203,6 +205,8 @@ export function Chat({
                 if (!conversationId.current) {
                     const response = await createConversation({
                         projectId,
+                        workflow,
+                        isLiveWorkflow,
                     });
                     conversationId.current = response.id;
                 }
@@ -210,7 +214,6 @@ export function Chat({
                 // set up a cached turn
                 const response = await createCachedTurn({
                     conversationId: conversationId.current,
-                    workflow,
                     messages: messages.slice(-1), // only send the last message
                 });
                 if (ignore) {
@@ -358,6 +361,7 @@ export function Chat({
         messages,
         projectId,
         workflow,
+        isLiveWorkflow,
         error,
     ]);
 

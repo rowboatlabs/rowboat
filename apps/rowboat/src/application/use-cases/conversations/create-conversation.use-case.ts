@@ -5,12 +5,15 @@ import { apiKeysCollection, projectMembersCollection } from "@/app/lib/mongodb";
 import { IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
 import { z } from "zod";
 import { Conversation } from "@/src/entities/models/conversation";
+import { Workflow } from "@/app/lib/types/workflow_types";
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
     projectId: z.string(),
+    workflow: Workflow,
+    isLiveWorkflow: z.boolean(),
 });
 
 export interface ICreateConversationUseCase {
@@ -29,7 +32,7 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
     }
 
     async execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Conversation>> {
-        const { projectId } = data;
+        const { caller, userId, apiKey, projectId, workflow, isLiveWorkflow } = data;
 
         // check query limit for project
         if (!await check_query_limit(projectId)) {
@@ -37,19 +40,19 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
         }
 
         // if caller is a user, ensure they are a member of project
-        if (data.caller === "user") {
-            if (!data.userId) {
+        if (caller === "user") {
+            if (!userId) {
                 throw new BadRequestError('User ID is required');
             }
             const membership = await projectMembersCollection.findOne({
                 projectId,
-                userId: data.userId,
+                userId,
             });
             if (!membership) {
                 throw new NotAuthorizedError('User not a member of project');
             }
         } else {
-            if (!data.apiKey) {
+            if (!apiKey) {
                 throw new BadRequestError('API key is required');
             }
             // check if api key is valid
@@ -57,7 +60,7 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
             const result = await apiKeysCollection.findOneAndUpdate(
                 {
                     projectId,
-                    key: data.apiKey,
+                    key: apiKey,
                 },
                 { $set: { lastUsedAt: new Date().toISOString() } }
             );
@@ -69,6 +72,8 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
         // create conversation
         return await this.conversationsRepository.createConversation({
             projectId,
+            workflow,
+            isLiveWorkflow,
         });
     }
 }

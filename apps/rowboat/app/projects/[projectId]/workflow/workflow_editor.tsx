@@ -1160,6 +1160,7 @@ export function WorkflowEditor({
                             messageSubscriber={updateChatMessages}
                             onPanelClick={handlePlaygroundClick}
                             triggerCopilotChat={triggerCopilotChat}
+                            isLiveWorkflow={isLive}
                         />
                         {state.present.selection?.type === "agent" && <AgentConfig
                             key={`agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}`}

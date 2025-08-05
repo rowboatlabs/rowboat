@@ -10,7 +10,6 @@ export const Turn = z.object({
     ]),
     input: z.object({
         messages: z.array(Message),
-        workflow: Workflow,
     }),
     output: z.array(Message),
     error: z.string().optional(),

@@ -83,7 +83,7 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
         if (USE_BILLING) {
             // get billing customer id for project
             const customerId = await getCustomerIdForProject(projectId);
-            const agentModels = data.input.workflow.agents.reduce((acc, agent) => {
+            const agentModels = conversation.workflow.agents.reduce((acc, agent) => {
                 acc.push(agent.model);
                 return acc;
             }, [] as string[]);
@@ -122,7 +122,7 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
 
         // call agents runtime and handle generated messages
         const outputMessages: z.infer<typeof Message>[] = [];
-        for await (const event of streamResponse(projectId, data.input.workflow, inputMessages)) {
+        for await (const event of streamResponse(projectId, conversation.workflow, inputMessages)) {
             // handle msg events
             if ("role" in event) {
                 // collect generated message
