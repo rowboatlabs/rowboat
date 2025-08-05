@@ -743,21 +743,20 @@ function ensureSystemMessage(logger: PrefixLogger, messages: z.infer<typeof Mess
     logger = logger.child(`ensureSystemMessage`);
 
     // ensure that a system message is set
-    if (messages.length > 0 && messages[0]?.role !== 'system') {
+    if (messages[0]?.role !== 'system') {
         messages.unshift({
             role: 'system',
-            content: 'You are a helpful assistant.',
+            content: '',
         });
         logger.log(`added system message: ${messages[0]?.content}`);
     }
 
     // ensure that system message isn't blank
-    if (messages.length > 0 && messages[0]?.role === 'system' && !messages[0].content) {
+    if (!messages[0].content) {
         const defaultContext = `You are a helpful assistant.
 
 Basic context:
-    - Today's date is ${new Date().toLocaleDateString()}
-    - Current time is ${new Date().toLocaleTimeString()}.`;
+    - The date-time right now is ${new Date().toISOString()}`;
         
         messages[0].content = defaultContext;
         logger.log(`updated system message with default context: ${messages[0].content}`);

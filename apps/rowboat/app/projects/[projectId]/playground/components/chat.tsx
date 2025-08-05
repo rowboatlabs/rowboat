@@ -1,63 +1,73 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getAssistantResponseStreamId } from "@/app/actions/actions";
+import { createCachedTurn, createConversation } from "@/app/actions/playground-chat.actions";
 import { Messages } from "./messages";
-import z from "zod";
-import { MCPServer, Message, PlaygroundChat, ToolMessage } from "@/app/lib/types/types";
-import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
+import { z } from "zod";
+import { Message, ToolMessage } from "@/app/lib/types/types";
+import { Workflow } from "@/app/lib/types/workflow_types";
 import { ComposeBoxPlayground } from "@/components/common/compose-box-playground";
 import { Button } from "@heroui/react";
-import { WithStringId } from "@/app/lib/types/types";
-import { ProfileContextBox } from "./profile-context-box";
 import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { ChevronDownIcon } from "@heroicons/react/24/outline";
 import { FeedbackModal } from "./feedback-modal";
 import { FIX_WORKFLOW_PROMPT, FIX_WORKFLOW_PROMPT_WITH_FEEDBACK, EXPLAIN_WORKFLOW_PROMPT_ASSISTANT, EXPLAIN_WORKFLOW_PROMPT_TOOL, EXPLAIN_WORKFLOW_PROMPT_TRANSITION } from "../copilot-prompts";
+import { TurnEvent } from "@/src/entities/models/turn";
 
 export function Chat({
-    chat,
     projectId,
     workflow,
     messageSubscriber,
-    systemMessage,
-    onSystemMessageChange,
-    mcpServerUrls,
     onCopyClick,
     showDebugMessages = true,
     showJsonMode = false,
     triggerCopilotChat,
+    isLiveWorkflow,
 }: {
-    chat: z.infer<typeof PlaygroundChat>;
     projectId: string;
     workflow: z.infer<typeof Workflow>;
     messageSubscriber?: (messages: z.infer<typeof Message>[]) => void;
-    systemMessage: string;
-    onSystemMessageChange: (message: string) => void;
-    mcpServerUrls: Array<z.infer<typeof MCPServer>>;
     onCopyClick: (fn: () => string) => void;
     showDebugMessages?: boolean;
     showJsonMode?: boolean;
     triggerCopilotChat?: (message: string) => void;
+    isLiveWorkflow: boolean;
 }) {
-    const [messages, setMessages] = useState<z.infer<typeof Message>[]>(chat.messages);
-    const [loadingAssistantResponse, setLoadingAssistantResponse] = useState<boolean>(false);
-    const [fetchResponseError, setFetchResponseError] = useState<string | null>(null);
+    const conversationId = useRef<string | null>(null);
+    const [messages, setMessages] = useState<z.infer<typeof Message>[]>([]);
+    const [loading, setLoading] = useState<boolean>(false);
+    const [error, setError] = useState<string | null>(null);
     const [billingError, setBillingError] = useState<string | null>(null);
     const [lastAgenticRequest, setLastAgenticRequest] = useState<unknown | null>(null);
     const [lastAgenticResponse, setLastAgenticResponse] = useState<unknown | null>(null);
-    const [optimisticMessages, setOptimisticMessages] = useState<z.infer<typeof Message>[]>(chat.messages);
+
+    // Optimistic messages for real-time streaming UX:
+    // - messages: source of truth, only updated when responses are complete
+    // - optimisticMessages: what user sees, updated in real-time during streaming
+    // This separation allows immediate visual feedback while maintaining data integrity
+    // and clean error recovery (rollback to last known good state on failures)
+    const [optimisticMessages, setOptimisticMessages] = useState<z.infer<typeof Message>[]>([]);
     const [isLastInteracted, setIsLastInteracted] = useState(false);
     const [showFeedbackModal, setShowFeedbackModal] = useState(false);
     const [pendingFixMessage, setPendingFixMessage] = useState<string | null>(null);
     const [showSuccessMessage, setShowSuccessMessage] = useState(false);
     // Add state for explain (no modal needed, just direct trigger)
     const [showExplainSuccess, setShowExplainSuccess] = useState(false);
+    const [pendingFixIndex, setPendingFixIndex] = useState<number | null>(null);
 
     // --- Scroll/auto-scroll/unread bubble logic ---
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
     const [autoScroll, setAutoScroll] = useState(true);
     const [showUnreadBubble, setShowUnreadBubble] = useState(false);
+
+    // collect published tool call results
+    const toolCallResults: Record<string, z.infer<typeof ToolMessage>> = {};
+    optimisticMessages
+        .filter((message) => message.role == 'tool')
+        .forEach((message) => {
+            toolCallResults[message.toolCallId] = message;
+        });
+
 
     const handleScroll = useCallback(() => {
         const container = scrollContainerRef.current;
@@ -68,41 +78,15 @@ export function Chat({
         if (atBottom) setShowUnreadBubble(false);
     }, []);
 
-    useEffect(() => {
-        const container = scrollContainerRef.current;
-        if (!container) return;
-        if (autoScroll) {
-            container.scrollTop = container.scrollHeight;
-            setShowUnreadBubble(false);
-        } else {
-            setShowUnreadBubble(true);
-        }
-    }, [optimisticMessages, loadingAssistantResponse, autoScroll]);
-    // --- End scroll/auto-scroll logic ---
-
     const getCopyContent = useCallback(() => {
         return JSON.stringify({
-            messages: [{
-                role: 'system',
-                content: systemMessage,
-            }, ...messages],
+            messages,
             lastRequest: lastAgenticRequest,
             lastResponse: lastAgenticResponse,
         }, null, 2);
-    }, [messages, systemMessage, lastAgenticRequest, lastAgenticResponse]);
-
-    // Expose copy function to parent
-    useEffect(() => {
-        onCopyClick(getCopyContent);
-    }, [getCopyContent, onCopyClick]);
-
-    // reset optimistic messages when messages change
-    useEffect(() => {
-        setOptimisticMessages(messages);
-    }, [messages]);
+    }, [messages, lastAgenticRequest, lastAgenticResponse]);
 
     // Handle fix functionality
-    const [pendingFixIndex, setPendingFixIndex] = useState<number | null>(null);
     const handleFix = useCallback((message: string, index: number) => {
         setPendingFixMessage(message);
         setPendingFixIndex(index);
@@ -157,13 +141,14 @@ export function Chat({
         }
     }, [projectId, triggerCopilotChat]);
 
-    // collect published tool call results
-    const toolCallResults: Record<string, z.infer<typeof ToolMessage>> = {};
-    optimisticMessages
-        .filter((message) => message.role == 'tool')
-        .forEach((message) => {
-            toolCallResults[message.toolCallId] = message;
-        });
+    // Add a stop handler function
+    const handleStop = useCallback(() => {
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+            setLoading(false);
+        }
+    }, []);
 
     function handleUserMessage(prompt: string) {
         const updatedMessages: z.infer<typeof Message>[] = [...messages, {
@@ -171,9 +156,31 @@ export function Chat({
             content: prompt,
         }];
         setMessages(updatedMessages);
-        setFetchResponseError(null);
+        setError(null);
         setIsLastInteracted(true);
     }
+
+    useEffect(() => {
+        const container = scrollContainerRef.current;
+        if (!container) return;
+        if (autoScroll) {
+            container.scrollTop = container.scrollHeight;
+            setShowUnreadBubble(false);
+        } else {
+            setShowUnreadBubble(true);
+        }
+    }, [optimisticMessages, loading, autoScroll]);
+
+    // Expose copy function to parent
+    useEffect(() => {
+        onCopyClick(getCopyContent);
+    }, [getCopyContent, onCopyClick]);
+
+    // Keep optimistic messages in sync with committed messages
+    // This ensures UI shows the latest confirmed state when messages are updated
+    useEffect(() => {
+        setOptimisticMessages(messages);
+    }, [messages]);
 
     // reset state when workflow changes
     useEffect(() => {
@@ -187,161 +194,176 @@ export function Chat({
         }
     }, [messages, messageSubscriber]);
 
-    // get assistant response
+    // get agent response
     useEffect(() => {
         let ignore = false;
         let eventSource: EventSource | null = null;
-        let msgs: z.infer<typeof Message>[] = [];
 
         async function process() {
-            setLoadingAssistantResponse(true);
-            setFetchResponseError(null);
-
-            // Reset request/response state before making new request
-            setLastAgenticRequest(null);
-            setLastAgenticResponse(null);
-            
-            let streamId: string | null = null;
             try {
-                const response = await getAssistantResponseStreamId(
-                    projectId,
-                    workflow,
-                    [
-                        {
-                            role: 'system',
-                            content: systemMessage || '',
-                        },
-                        ...messages,
-                    ],
-                );
+                // first, if there is no conversation id, create it
+                if (!conversationId.current) {
+                    const response = await createConversation({
+                        projectId,
+                        workflow,
+                        isLiveWorkflow,
+                    });
+                    conversationId.current = response.id;
+                }
+
+                // set up a cached turn
+                const response = await createCachedTurn({
+                    conversationId: conversationId.current,
+                    messages: messages.slice(-1), // only send the last message
+                });
                 if (ignore) {
                     return;
                 }
-                if ('billingError' in response) {
-                    setBillingError(response.billingError);
-                    setFetchResponseError(response.billingError);
-                    setLoadingAssistantResponse(false);
-                    console.log('returning from getAssistantResponseStreamId due to billing error'); 
-                    return;
-                }
-                streamId = response.streamId;
-            } catch (err) {
-                if (!ignore) {
-                    setFetchResponseError(`Failed to get assistant response: ${err instanceof Error ? err.message : 'Unknown error'}`);
-                    setLoadingAssistantResponse(false);
-                }
-            }
+                // if ('billingError' in response) {
+                //     setBillingError(response.billingError);
+                //     setError(response.billingError);
+                //     setLoading(false);
+                //     console.log('returning from createRun due to billing error');
+                //     return;
+                // }
 
-            if (ignore || !streamId) {
-                return;
-            }
+                // stream events
+                eventSource = new EventSource(`/api/stream-response/${response.key}`);
+                eventSourceRef.current = eventSource;
 
-            console.log(`chat.tsx: got streamid: ${streamId}`);
-            eventSource = new EventSource(`/api/stream-response/${streamId}`);
-            eventSourceRef.current = eventSource;
+                // handle events
+                eventSource.addEventListener("message", (event) => {
+                    console.log(`chat.tsx: got message: ${JSON.stringify(event.data)}`);
+                    if (ignore) {
+                        return;
+                    }
 
-            eventSource.addEventListener("message", (event) => {
-                console.log(`chat.tsx: got message: ${event.data}`);
-                if (ignore) {
-                    return;
-                }
+                    try {
+                        const data = JSON.parse(event.data);
+                        const turnEvent = TurnEvent.parse(data);
+                        console.log(`chat.tsx: got event: ${turnEvent}`);
 
-                try {
-                    const data = JSON.parse(event.data);
-                    const parsedMsg = Message.parse(data);
-                    msgs.push(parsedMsg);
-                    setOptimisticMessages(prev => [...prev, parsedMsg]);
-                } catch (err) {
-                    console.error('Failed to parse SSE message:', err);
-                    setFetchResponseError(`Failed to parse SSE message: ${err instanceof Error ? err.message : 'Unknown error'}`);
-                    setOptimisticMessages(messages);
-                }
-            });
+                        switch (turnEvent.type) {
+                            case "message": {
+                                // Handle regular message events
+                                const generatedMessage = turnEvent.data;
+                                // Update optimistic messages immediately for real-time streaming UX
+                                setOptimisticMessages(prev => [...prev, generatedMessage]);
+                                break;
+                            }
+                            case "done": {
+                                // Handle completion event
+                                if (eventSource) {
+                                    eventSource.close();
+                                    eventSourceRef.current = null;
+                                }
 
-            eventSource.addEventListener('done', (event) => {
-                console.log(`chat.tsx: got done event: ${event.data}`);
-                if (eventSource) {
-                    eventSource.close();
-                    eventSourceRef.current = null;
-                }
+                                // Combine state and collected messages in the response
+                                setLastAgenticResponse({
+                                    turn: turnEvent.turn,
+                                    messages: turnEvent.turn.output,
+                                });
 
-                const parsed = JSON.parse(event.data);
+                                // Commit all streamed messages atomically to the source of truth
+                                setMessages([...messages, ...turnEvent.turn.output]);
+                                setLoading(false);
+                                break;
+                            }
+                            case "error": {
+                                // Handle error event
+                                if (eventSource) {
+                                    eventSource.close();
+                                    eventSourceRef.current = null;
+                                }
 
-                // Combine state and collected messages in the response
-                setLastAgenticResponse({
-                    ...parsed,
-                    messages: msgs
+                                console.error('Turn Error:', turnEvent.error);
+                                if (!ignore) {
+                                    setLoading(false);
+                                    setError('Error: ' + turnEvent.error);
+                                    // Rollback to last known good state on stream errors
+                                    setOptimisticMessages(messages);
+
+                                    // check if billing error
+                                    if (turnEvent.isBillingError) {
+                                        setBillingError(turnEvent.error);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Failed to parse SSE message:', err);
+                        setError(`Failed to parse SSE message: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                        // Rollback to last known good state on parsing errors
+                        setOptimisticMessages(messages);
+                    }
                 });
 
-                setMessages([...messages, ...msgs]);
-                setLoadingAssistantResponse(false);
-            });
+                eventSource.addEventListener('stream_error', (event) => {
+                    console.log(`chat.tsx: got stream_error event: ${event.data}`);
+                    if (eventSource) {
+                        eventSource.close();
+                        eventSourceRef.current = null;
+                    }
+    
+                    console.error('SSE Error:', event);
+                    if (!ignore) {
+                        setLoading(false);
+                        setError('Error: ' + JSON.parse(event.data).error);
+                        // Rollback to last known good state on stream errors
+                        setOptimisticMessages(messages);
+                    }
+                });
 
-            eventSource.addEventListener('stream_error', (event) => {
-                console.log(`chat.tsx: got stream_error event: ${event.data}`);
-                if (eventSource) {
-                    eventSource.close();
-                    eventSourceRef.current = null;
-                }
-
-                console.error('SSE Error:', event);
+                eventSource.onerror = (error) => {
+                    console.error('SSE Error:', error);
+                    if (!ignore) {
+                        setLoading(false);
+                        setError('Stream connection failed');
+                        // Rollback to last known good state on connection errors
+                        setOptimisticMessages(messages);
+                    }
+                };
+            } catch (err) {
                 if (!ignore) {
-                    setLoadingAssistantResponse(false);
-                    setFetchResponseError('Error: ' + JSON.parse(event.data).error);
-                    setOptimisticMessages(messages);
+                    setError(`Failed to create run: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                    setLoading(false);
                 }
-            });
-
-            eventSource.onerror = (error) => {
-                console.error('SSE Error:', error);
-                if (!ignore) {
-                    setLoadingAssistantResponse(false);
-                    setFetchResponseError('Stream connection failed');
-                    setOptimisticMessages(messages);
-                }
-            };
-        }
-
-        // if last message is not a user message, return
-        if (messages.length > 0) {
-            const last = messages[messages.length - 1];
-            if (last.role !== 'user') {
-                return;
             }
         }
 
-        // if there is an error, return
-        if (fetchResponseError) {
+        // if there are no messages yet, return
+        if (messages.length === 0) {
             return;
         }
 
-        console.log(`executing response process: fetchresponseerr: ${fetchResponseError}`);
+        // if last message is not a user message, return
+        const last = messages[messages.length - 1];
+        if (last.role !== 'user') {
+            return;
+        }
+
+        // if there is an error, return
+        if (error) {
+            return;
+        }
+
+        console.log(`chat.tsx: fetching agent response`);
+        setLoading(true);
+        setError(null);
         process();
 
         return () => {
             ignore = true;
-            if (eventSource) {
-                eventSource.close();
-                eventSourceRef.current = null;
-            }
         };
     }, [
+        conversationId,
         messages,
         projectId,
         workflow,
-        systemMessage,
-        mcpServerUrls,
-        fetchResponseError,
+        isLiveWorkflow,
+        error,
     ]);
-
-    // Add a stop handler function
-    const handleStop = useCallback(() => {
-        if (eventSourceRef.current) {
-            eventSourceRef.current.close();
-            eventSourceRef.current = null;
-            setLoadingAssistantResponse(false);
-        }
-    }, []);
 
     return (
         <div className="w-11/12 max-w-6xl mx-auto h-full flex flex-col relative">
@@ -358,13 +380,18 @@ export function Chat({
                 >
                     <Messages
                         projectId={projectId}
-                        messages={optimisticMessages}
+                        messages={[
+                            {
+                                role: 'assistant',
+                                content: 'Hi, how can I help you today?',
+                                agentName: 'assistant',
+                                responseType: 'external',
+                            },
+                            ...optimisticMessages,
+                        ]}
                         toolCallResults={toolCallResults}
-                        loadingAssistantResponse={loadingAssistantResponse}
+                        loadingAssistantResponse={loading}
                         workflow={workflow}
-                        systemMessage={systemMessage}
-                        onSystemMessageChange={onSystemMessageChange}
-                        showSystemMessage={false}
                         showDebugMessages={showDebugMessages}
                         showJsonMode={showJsonMode}
                         onFix={handleFix}
@@ -415,15 +442,15 @@ export function Chat({
                             </Button>
                         </div>
                     )}
-                    {fetchResponseError && (
+                    {error && (
                         <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 
                                       rounded-lg flex gap-2 justify-between items-center">
-                            <p className="text-red-600 dark:text-red-400 text-sm">{fetchResponseError}</p>
+                            <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
                             <Button
                                 size="sm"
                                 color="danger"
                                 onPress={() => {
-                                    setFetchResponseError(null);
+                                    setError(null);
                                     setBillingError(null);
                                 }}
                             >
@@ -435,7 +462,7 @@ export function Chat({
                     <ComposeBoxPlayground
                         handleUserMessage={handleUserMessage}
                         messages={messages.filter(msg => msg.content !== undefined) as any}
-                        loading={loadingAssistantResponse}
+                        loading={loading}
                         shouldAutoFocus={isLastInteracted}
                         onFocus={() => setIsLastInteracted(true)}
                         onCancel={handleStop}

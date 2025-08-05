@@ -1158,10 +1158,9 @@ export function WorkflowEditor({
                             projectId={projectId}
                             workflow={state.present.workflow}
                             messageSubscriber={updateChatMessages}
-                            mcpServerUrls={mcpServerUrls}
-                            isInitialState={isInitialState}
                             onPanelClick={handlePlaygroundClick}
                             triggerCopilotChat={triggerCopilotChat}
+                            isLiveWorkflow={isLive}
                         />
                         {state.present.selection?.type === "agent" && <AgentConfig
                             key={`agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}`}

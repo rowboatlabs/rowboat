@@ -7,14 +7,16 @@ import {
     Workflow} from "../lib/types/workflow_types";
 import { DataSource } from "../lib/types/datasource_types";
 import { z } from 'zod';
-import { check_query_limit } from "../lib/rate_limiting";
-import { QueryLimitError } from "../lib/client_utils";
 import { projectAuthCheck } from "./project_actions";
 import { redisClient } from "../lib/redis";
 import { authorizeUserAction, logUsage } from "./billing_actions";
 import { USE_BILLING } from "../lib/feature_flags";
 import { WithStringId } from "../lib/types/types";
 import { getEditAgentInstructionsResponse } from "../lib/copilot/copilot";
+import { container } from "@/di/container";
+import { IUsageQuotaPolicyService } from "@/src/application/services/usage-quota-policy.service.interface";
+
+const usageQuotaPolicyService = container.resolve<IUsageQuotaPolicyService>('usageQuotaPolicyService');
 
 export async function getCopilotResponseStream(
     projectId: string,
@@ -26,9 +28,7 @@ export async function getCopilotResponseStream(
     streamId: string;
 } | { billingError: string }> {
     await projectAuthCheck(projectId);
-    if (!await check_query_limit(projectId)) {
-        throw new QueryLimitError();
-    }
+    await usageQuotaPolicyService.assertAndConsume(projectId);
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
@@ -39,9 +39,7 @@ export async function getCopilotResponseStream(
         return { billingError: authResponse.error || 'Billing error' };
     }
 
-    if (!await check_query_limit(projectId)) {
-        throw new QueryLimitError();
-    }
+    await usageQuotaPolicyService.assertAndConsume(projectId);
     
     // prepare request
     const request: z.infer<typeof CopilotAPIRequest> = {
@@ -73,9 +71,7 @@ export async function getCopilotAgentInstructions(
     agentName: string,
 ): Promise<string | { billingError: string }> {
     await projectAuthCheck(projectId);
-    if (!await check_query_limit(projectId)) {
-        throw new QueryLimitError();
-    }
+    await usageQuotaPolicyService.assertAndConsume(projectId);
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({

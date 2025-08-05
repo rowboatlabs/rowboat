@@ -212,7 +212,6 @@ function ToolCalls({
     messages,
     sender,
     workflow,
-    systemMessage,
     delta,
     onFix,
     onExplain,
@@ -226,7 +225,6 @@ function ToolCalls({
     messages: z.infer<typeof Message>[];
     sender: string | null | undefined;
     workflow: z.infer<typeof Workflow>;
-    systemMessage: string | undefined;
     delta: number;
     onFix?: (message: string, index: number) => void;
     onExplain?: (type: 'tool' | 'transition', message: string, index: number) => void;
@@ -672,9 +670,6 @@ export function Messages({
     toolCallResults,
     loadingAssistantResponse,
     workflow,
-    systemMessage,
-    onSystemMessageChange,
-    showSystemMessage,
     showDebugMessages = true,
     showJsonMode = false,
     onFix,
@@ -685,9 +680,6 @@ export function Messages({
     toolCallResults: Record<string, z.infer<typeof ToolMessage>>;
     loadingAssistantResponse: boolean;
     workflow: z.infer<typeof Workflow>;
-    systemMessage: string | undefined;
-    onSystemMessageChange: (message: string) => void;
-    showSystemMessage: boolean;
     showDebugMessages?: boolean;
     showJsonMode?: boolean;
     onFix?: (message: string, index: number) => void;
@@ -726,7 +718,6 @@ export function Messages({
                         messages={messages}
                         sender={message.agentName ?? ''}
                         workflow={workflow}
-                        systemMessage={systemMessage}
                         delta={latency}
                         onFix={onFix}
                         onExplain={onExplain}
@@ -791,15 +782,6 @@ export function Messages({
     const isAssistantMessage = (message: z.infer<typeof Message>) => {
         return message.role === 'assistant' && (!('toolCalls' in message) || !Array.isArray(message.toolCalls) || !message.toolCalls.some(tc => tc.function.name.startsWith('transfer_to_')));
     };
-
-    if (showSystemMessage) {
-        return (
-            <ProfileContextBox
-                content={systemMessage || ''}
-                onChange={onSystemMessageChange}
-            />
-        );
-    }
 
     // Just render the messages, no scroll container or unread bubble
     return (

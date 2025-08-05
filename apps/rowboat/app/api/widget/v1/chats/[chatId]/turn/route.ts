@@ -4,12 +4,13 @@ import { projectsCollection, chatsCollection, chatMessagesCollection } from "../
 import { z } from "zod";
 import { ObjectId, WithId } from "mongodb";
 import { authCheck } from "../../../utils";
-import { check_query_limit } from "../../../../../../lib/rate_limiting";
 import { PrefixLogger } from "../../../../../../lib/utils";
 import { authorize, getCustomerIdForProject, logUsage } from "@/app/lib/billing";
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { getResponse } from "@/app/lib/agents";
 import { Message, AssistantMessage, AssistantMessageWithToolCalls, ToolMessage } from "@/app/lib/types/types";
+import { IUsageQuotaPolicyService } from "@/src/application/services/usage-quota-policy.service.interface";
+import { container } from "@/di/container";
 
 function convert(messages: z.infer<typeof apiV1.ChatMessage>[]): z.infer<typeof Message>[] {
     const result: z.infer<typeof Message>[] = [];
@@ -123,11 +124,9 @@ export async function POST(
             billingCustomerId = await getCustomerIdForProject(session.projectId);
         }
 
-        // check query limit
-        if (!await check_query_limit(session.projectId)) {
-            logger.log(`Query limit exceeded for project ${session.projectId}`);
-            return Response.json({ error: "Query limit exceeded" }, { status: 429 });
-        }
+        // assert and consume quota
+        const usageQuotaPolicyService = container.resolve<IUsageQuotaPolicyService>('usageQuotaPolicyService');
+        await usageQuotaPolicyService.assertAndConsume(session.projectId);
 
         // parse and validate the request body
         let body;

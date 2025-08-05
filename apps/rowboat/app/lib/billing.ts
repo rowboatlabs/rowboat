@@ -23,13 +23,6 @@ const GUEST_BILLING_CUSTOMER = {
     updatedAt: new Date().toISOString(),
 };
 
-export class BillingError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = 'BillingError';
-    }
-}
-
 export async function getCustomerIdForProject(projectId: string): Promise<string> {
     const project = await projectsCollection.findOne({ _id: projectId });
     if (!project) {
