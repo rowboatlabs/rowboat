@@ -1,5 +1,4 @@
 import { Message } from "@/app/lib/types/types";
-import { Workflow } from "@/app/lib/types/workflow_types";
 import { z } from "zod";
 
 export const Turn = z.object({
@@ -10,6 +9,7 @@ export const Turn = z.object({
     ]),
     input: z.object({
         messages: z.array(Message),
+        mockTools: z.record(z.string(), z.string()).nullable().optional(),
     }),
     output: z.array(Message),
     error: z.string().optional(),
@@ -35,6 +35,7 @@ export const TurnEvent = z.discriminatedUnion("type", [
     }),
     z.object({
         type: z.literal("done"),
+        conversationId: z.string(),
         turn: Turn,
     }),
 ]);

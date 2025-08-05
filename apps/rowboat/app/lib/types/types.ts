@@ -147,18 +147,6 @@ export const ChatClientId = z.object({
 
 export type WithStringId<T> = T & { _id: string };
 
-export const ApiRequest = z.object({
-    messages: z.array(Message),
-    state: z.unknown(),
-    testProfileId: z.string().nullable().optional(),
-    mockTools: z.record(z.string(), z.string()).nullable().optional(),
-});
-
-export const ApiResponse = z.object({
-    messages: z.array(Message),
-    state: z.unknown(),
-});
-
 // Helper function to convert MCP server tool to WorkflowTool
 export function convertMcpServerToolToWorkflowTool(
     mcpTool: z.infer<typeof McpServerTool>,

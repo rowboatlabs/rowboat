@@ -8,6 +8,7 @@ import { RedisCacheService } from "@/src/infrastructure/services/redis.cache.ser
 import { CreateCachedTurnUseCase } from "@/src/application/use-cases/conversations/create-cached-turn.use-case";
 import { FetchCachedTurnUseCase } from "@/src/application/use-cases/conversations/fetch-cached-turn.use-case";
 import { CreateCachedTurnController } from "@/src/interface-adapters/controllers/conversations/create-cached-turn.controller";
+import { RunTurnController } from "@/src/interface-adapters/controllers/conversations/run-turn.controller";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -31,4 +32,5 @@ container.register({
     createPlaygroundConversationController: asClass(CreatePlaygroundConversationController).singleton(),
     createCachedTurnController: asClass(CreateCachedTurnController).singleton(),
     runCachedTurnController: asClass(RunCachedTurnController).singleton(),
+    runTurnController: asClass(RunTurnController).singleton(),
 });

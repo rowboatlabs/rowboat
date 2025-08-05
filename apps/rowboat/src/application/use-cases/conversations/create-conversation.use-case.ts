@@ -1,7 +1,7 @@
-import { BadRequestError, NotAuthorizedError } from '@/src/entities/errors/common';
+import { BadRequestError, NotAuthorizedError, NotFoundError } from '@/src/entities/errors/common';
 import { check_query_limit } from "@/app/lib/rate_limiting";
 import { QueryLimitError } from "@/src/entities/errors/common";
-import { apiKeysCollection, projectMembersCollection } from "@/app/lib/mongodb";
+import { apiKeysCollection, projectMembersCollection, projectsCollection } from "@/app/lib/mongodb";
 import { IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
 import { z } from "zod";
 import { Conversation } from "@/src/entities/models/conversation";
@@ -12,8 +12,8 @@ const inputSchema = z.object({
     userId: z.string().optional(),
     apiKey: z.string().optional(),
     projectId: z.string(),
-    workflow: Workflow,
-    isLiveWorkflow: z.boolean(),
+    workflow: Workflow.optional(),
+    isLiveWorkflow: z.boolean().optional(),
 });
 
 export interface ICreateConversationUseCase {
@@ -32,7 +32,9 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
     }
 
     async execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Conversation>> {
-        const { caller, userId, apiKey, projectId, workflow, isLiveWorkflow } = data;
+        const { caller, userId, apiKey, projectId } = data;
+        let isLiveWorkflow = Boolean(data.isLiveWorkflow);
+        let workflow = data.workflow;
 
         // check query limit for project
         if (!await check_query_limit(projectId)) {
@@ -67,6 +69,21 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
             if (!result) {
                 throw new NotAuthorizedError('Invalid API key');
             }
+        }
+
+        // if workflow is not provided, fetch workflow
+        if (!workflow) {
+            const project = await projectsCollection.findOne({
+                _id: projectId,
+            });
+            if (!project) {
+                throw new NotFoundError('Project not found');
+            }
+            if (!project.liveWorkflow) {
+                throw new BadRequestError('Project does not have a live workflow');
+            }
+            workflow = project.liveWorkflow;
+            isLiveWorkflow = true;
         }
 
         // create conversation

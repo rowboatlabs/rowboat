@@ -42,7 +42,7 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
         }
 
         // extract projectid from conversation
-        const { projectId } = conversation;
+        const { id: conversationId, projectId } = conversation;
 
         // check query limit for project
         if (!await check_query_limit(projectId)) {
@@ -120,6 +120,11 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
             ...data.input.messages,
         ]
 
+        // override mock tools if requested
+        if (data.input.mockTools) {
+            conversation.workflow.mockTools = data.input.mockTools;
+        }
+
         // call agents runtime and handle generated messages
         const outputMessages: z.infer<typeof Message>[] = [];
         for await (const event of streamResponse(projectId, conversation.workflow, inputMessages)) {
@@ -149,6 +154,7 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
                 yield {
                     type: "done",
                     turn,
+                    conversationId,
                 }
             }
         }

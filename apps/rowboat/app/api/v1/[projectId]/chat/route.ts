@@ -1,14 +1,10 @@
 import { NextRequest } from "next/server";
-import { projectsCollection } from "../../../../lib/mongodb";
 import { z } from "zod";
-import { ObjectId } from "mongodb";
-import { authCheck } from "../../utils";
-import { ApiRequest, ApiResponse } from "../../../../lib/types/types";
-import { check_query_limit } from "../../../../lib/rate_limiting";
+import { ApiResponse } from "@/app/lib/types/api_types";
+import { ApiRequest } from "@/app/lib/types/api_types";
 import { PrefixLogger } from "../../../../lib/utils";
-import { authorize, getCustomerIdForProject, logUsage } from "@/app/lib/billing";
-import { USE_BILLING } from "@/app/lib/feature_flags";
-import { getResponse } from "@/app/lib/agents";
+import { container } from "@/di/container";
+import { IRunTurnController } from "@/src/interface-adapters/controllers/conversations/run-turn.controller";
 
 // get next turn / agent response
 export async function POST(
@@ -19,91 +15,69 @@ export async function POST(
     const requestId = crypto.randomUUID();
     const logger = new PrefixLogger(`${requestId}`);
 
-    logger.log(`Got chat request for project ${projectId}`);
+    // parse and validate the request body
+    let data;
+    try {
+        const body = await req.json();
+        data = ApiRequest.parse(body);
+    } catch (e) {
+        logger.log(`Invalid JSON in request body: ${e}`);
+        return Response.json({ error: "Invalid request" }, { status: 400 });
+    }
+    const { conversationId, messages, mockTools, stream } = data;
 
-    // check query limit
-    if (!await check_query_limit(projectId)) {
-        logger.log(`Query limit exceeded for project ${projectId}`);
-        return Response.json({ error: "Query limit exceeded" }, { status: 429 });
+    const runTurnController = container.resolve<IRunTurnController>("runTurnController");
+
+    // get assistant response
+    const response = await runTurnController.execute({
+        caller: "api",
+        apiKey: req.headers.get("Authorization")?.split(" ")[1],
+        projectId,
+        input: {
+            messages,
+            mockTools,
+        },
+        conversationId,
+        stream,
+    });
+
+    // if streaming is requested, return SSE stream
+    if (stream && 'stream' in response) {
+        const encoder = new TextEncoder();
+        
+        const readableStream = new ReadableStream({
+            async start(controller) {
+                try {
+                    // Iterate over the generator
+                    for await (const event of response.stream) {
+                        controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(event)}\n\n`));
+                    }
+                    controller.close();
+                } catch (error) {
+                    logger.log(`Error processing stream: ${error}`);
+                    controller.error(error);
+                }
+            },
+        });
+        
+        return new Response(readableStream, {
+            headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        });
     }
 
-    return await authCheck(projectId, req, async () => {
-        // fetch billing customer id
-        let billingCustomerId: string | null = null;
-        if (USE_BILLING) {
-            billingCustomerId = await getCustomerIdForProject(projectId);
-        }
+    // non-streaming response (existing behavior)
+    if (!('turn' in response)) {
+        logger.log(`No turn data found in response`);
+        return Response.json({ error: "No turn data found in response" }, { status: 500 });
+    }
 
-        // parse and validate the request body
-        let body;
-        try {
-            body = await req.json();
-        } catch (e) {
-            logger.log(`Invalid JSON in request body: ${e}`);
-            return Response.json({ error: "Invalid JSON in request body" }, { status: 400 });
-        }
-        logger.log(`Request json: ${JSON.stringify(body, null, 2)}`);
-        const result = ApiRequest.safeParse(body);
-        if (!result.success) {
-            logger.log(`Invalid request body: ${result.error.message}`);
-            return Response.json({ error: `Invalid request body: ${result.error.message}` }, { status: 400 });
-        }
-        const reqMessages = result.data.messages;
-        const mockToolOverrides = result.data.mockTools;
-
-        // fetch published workflow id
-        const project = await projectsCollection.findOne({
-            _id: projectId,
-        });
-        if (!project) {
-            logger.log(`Project ${projectId} not found`);
-            return Response.json({ error: "Project not found" }, { status: 404 });
-        }
-
-        // fetch workflow
-        const workflow = project.liveWorkflow;
-        if (!workflow) {
-            logger.log(`Workflow not found for project ${projectId}`);
-            return Response.json({ error: "Workflow not found" }, { status: 404 });
-        }
-
-        // override mock instructions
-        if (mockToolOverrides) {
-            workflow.mockTools = mockToolOverrides;
-        }
-
-        // check billing authorization
-        if (USE_BILLING && billingCustomerId) {
-            const agentModels = workflow.agents.reduce((acc, agent) => {
-                acc.push(agent.model);
-                return acc;
-            }, [] as string[]);
-            const response = await authorize(billingCustomerId, {
-                type: 'agent_response',
-                data: {
-                    agentModels,
-                },
-            });
-            if (!response.success) {
-                return Response.json({ error: response.error || 'Billing error' }, { status: 402 });
-            }
-        }
-
-        // get assistant response
-        const { messages } = await getResponse(projectId, workflow, reqMessages);
-
-        // log billing usage
-        if (USE_BILLING && billingCustomerId) {
-            const agentMessageCount = messages.filter(m => m.role === 'assistant').length;
-            await logUsage(billingCustomerId, {
-                type: 'agent_messages',
-                amount: agentMessageCount,
-            });
-        }
-
-        const responseBody: z.infer<typeof ApiResponse> = {
-            messages,
-        };
-        return Response.json(responseBody);
-    });
+    const responseBody: z.infer<typeof ApiResponse> = {
+        conversationId: response.conversationId,
+        turn: response.turn,
+    };
+    return Response.json(responseBody);
 }
