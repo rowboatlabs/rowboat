@@ -40,7 +40,7 @@ export const Project = z.object({
     testRunCounter: z.number().default(0),
     mcpServers: z.array(MCPServer).optional(),
     composioConnectedAccounts: z.record(z.string(), ComposioConnectedAccount).optional(),
-    composioTriggers: z.array(ComposioTrigger).optional(),
+    composioTriggers: z.record(z.string(), ComposioTrigger).optional(),
     customMcpServers: z.record(z.string(), CustomMcpServer).optional(),
 });
 

@@ -233,34 +233,40 @@ export async function listTriggerTypes(projectId: string, toolkitSlug: string, c
     return await libListTriggerTypes(toolkitSlug, cursor);
 }
 
-export async function createTrigger(projectId: string, toolkitSlug: string, triggerTypeSlug: string, triggerConfig: Record<string, any>): Promise<z.infer<typeof ComposioTrigger>> {
-    await projectAuthCheck(projectId);
+export async function createTrigger(request: {
+    projectId: string,
+    toolkitSlug: string,
+    connectedAccountId: string,
+    triggerTypeSlug: string,
+    triggerConfig: Record<string, any>,
+}): Promise<z.infer<typeof ComposioTrigger>> {
+    await projectAuthCheck(request.projectId);
 
     // ensure that the connected account belongs to this project
-    const project = await getProjectConfig(projectId);
-    const account = project.composioConnectedAccounts?.[toolkitSlug];
-    if (!account) {
-        throw new Error(`Connected account not found in project ${projectId} for toolkit ${toolkitSlug}`);
+    const project = await getProjectConfig(request.projectId);
+    const account = project.composioConnectedAccounts?.[request.toolkitSlug];
+    if (!account || account.id !== request.connectedAccountId) {
+        throw new Error(`Connected account ${request.connectedAccountId} not found in project ${request.projectId} for toolkit ${request.toolkitSlug}`);
     }
 
     // ensure that trigger doesn't already exist
-    const existingTrigger = project.composioTriggers?.find(t => t.triggerId === triggerTypeSlug);
+    const existingTrigger = project.composioTriggers?.[request.triggerTypeSlug];
     if (existingTrigger) {
-        throw new Error(`Trigger ${triggerTypeSlug} already exists in project ${projectId} for toolkit ${toolkitSlug}`);
+        throw new Error(`Trigger ${request.triggerTypeSlug} already exists in project ${request.projectId} for toolkit ${request.toolkitSlug}`);
     }
 
     // create the trigger
-    const trigger = await libCreateTrigger(triggerTypeSlug, projectId, account.id, triggerConfig);
+    const trigger = await libCreateTrigger(request.triggerTypeSlug, request.projectId, account.id, request.triggerConfig);
 
     // update project with new trigger
-    const key = `composioTriggers`;
+    const key = `composioTriggers.${request.triggerTypeSlug}`;
     const data: z.infer<typeof ComposioTrigger> = {
         id: trigger.triggerId,
         triggerId: trigger.triggerId,
         connectedAccountId: account.id,
         createdAt: new Date().toISOString(),
     }
-    await projectsCollection.updateOne({ _id: projectId }, { $push: { [key]: data } });
+    await projectsCollection.updateOne({ _id: request.projectId }, { $set: { [key]: data } });
 
     return data;
 }
@@ -275,8 +281,8 @@ export async function deleteTrigger(projectId: string, triggerId: string): Promi
     }
 
     // delete trigger from project record in db
-    const key = `composioTriggers`;
-    await projectsCollection.updateOne({ _id: projectId }, { $pull: { [key]: { triggerId } } });
+    const key = `composioTriggers.${triggerId}`;
+    await projectsCollection.updateOne({ _id: projectId }, { $unset: { [key]: "" } });
 
     return true;
 }
