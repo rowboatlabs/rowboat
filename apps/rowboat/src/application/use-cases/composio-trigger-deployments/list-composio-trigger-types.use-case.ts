@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { listTriggerTypes } from '../../../../app/lib/composio/composio';
+import { listTriggersTypes } from '../../../../app/lib/composio/composio';
 import { PaginatedList } from '@/src/entities/common/paginated-list';
 import { ComposioTriggerType } from '@/src/entities/models/composio-trigger-type';
 
@@ -15,7 +15,7 @@ export interface IListComposioTriggerTypesUseCase {
 export class ListComposioTriggerTypesUseCase implements IListComposioTriggerTypesUseCase {
     async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ComposioTriggerType>>>> {
         // call composio api to fetch trigger types
-        const result = await listTriggerTypes(request.toolkitSlug, request.cursor);
+        const result = await listTriggersTypes(request.toolkitSlug, request.cursor);
 
         // return paginated list of trigger types
         return {

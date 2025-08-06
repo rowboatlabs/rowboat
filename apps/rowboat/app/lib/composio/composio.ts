@@ -36,6 +36,7 @@ export const ZToolkit = z.object({
         description: z.string(),
         logo: z.string(),
         tools_count: z.number(),
+        triggers_count: z.number(),
     }),
     no_auth: z.boolean(),
     auth_schemes: z.array(ZAuthScheme),
@@ -432,8 +433,8 @@ export async function deleteConnectedAccount(connectedAccountId: string): Promis
     });
 }
 
-export async function listTriggerTypes(toolkitSlug: string, cursor?: string): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTriggerType>>>> {
-    const url = new URL(`${BASE_URL}/trigger_types`);
+export async function listTriggersTypes(toolkitSlug: string, cursor?: string): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTriggerType>>>> {
+    const url = new URL(`${BASE_URL}/triggers_types`);
 
     // set params
     url.searchParams.set("toolkit_slugs", toolkitSlug);

@@ -26,7 +26,7 @@ import { publishWorkflow } from "@/app/actions/project_actions";
 import { saveWorkflow } from "@/app/actions/project_actions";
 import { updateProjectName } from "@/app/actions/project_actions";
 import { BackIcon, HamburgerIcon, WorkflowIcon } from "../../../lib/components/icons";
-import { CopyIcon, ImportIcon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon, SettingsIcon, ChevronDownIcon, PhoneIcon, MessageCircleIcon } from "lucide-react";
+import { CopyIcon, ImportIcon, RadioIcon, RedoIcon, ServerIcon, Sparkles, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, XIcon, SettingsIcon, ChevronDownIcon, PhoneIcon, MessageCircleIcon, ZapIcon } from "lucide-react";
 import { EntityList } from "./entity_list";
 import { ProductTour } from "@/components/common/product-tour";
 import { ModelsResponse } from "@/app/lib/types/billing_types";
@@ -37,6 +37,7 @@ import { ConfigApp } from "../config/app";
 import { InputField } from "@/app/lib/components/input-field";
 import { VoiceSection } from "../config/components/voice";
 import { ChatWidgetSection } from "../config/components/project";
+import { TriggersModal } from "./components/TriggersModal";
 
 enablePatches();
 
@@ -882,6 +883,9 @@ export function WorkflowEditor({
     // Modal state for chat widget configuration
     const { isOpen: isChatWidgetModalOpen, onOpen: onChatWidgetModalOpen, onClose: onChatWidgetModalClose } = useDisclosure();
     
+    // Modal state for triggers management
+    const { isOpen: isTriggersModalOpen, onOpen: onTriggersModalOpen, onClose: onTriggersModalClose } = useDisclosure();
+    
     // Project name state
     const [localProjectName, setLocalProjectName] = useState<string>(projectConfig.name || '');
     const [projectNameError, setProjectNameError] = useState<string | null>(null);
@@ -1359,6 +1363,13 @@ export function WorkflowEditor({
                                         >
                                             Chat widget
                                         </DropdownItem>
+                                        <DropdownItem
+                                            key="manage-triggers"
+                                            startContent={<ZapIcon size={16} />}
+                                            onPress={onTriggersModalOpen}
+                                        >
+                                            Manage triggers
+                                        </DropdownItem>
                                     </DropdownMenu>
                                 </Dropdown>
                             </div>
@@ -1647,6 +1658,15 @@ export function WorkflowEditor({
                         </ModalBody>
                     </ModalContent>
                 </Modal>
+                
+                {/* Triggers Management Modal */}
+                <TriggersModal
+                    isOpen={isTriggersModalOpen}
+                    onClose={onTriggersModalClose}
+                    projectId={projectId}
+                    projectConfig={projectConfig}
+                    onProjectConfigUpdated={onProjectConfigUpdated}
+                />
             </div>
         </EntitySelectionContext.Provider>
     );
