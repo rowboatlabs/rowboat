@@ -80,6 +80,11 @@ export function AgentConfig({
     const [billingError, setBillingError] = useState<string | null>(null);
     const [showSavedBanner, setShowSavedBanner] = useState(false);
 
+    // Check if this agent is part of any pipeline
+    const isPartOfPipeline = workflow.pipelines?.some(pipeline => 
+        pipeline.agents.includes(agent.name)
+    ) || false;
+
     const {
         start: startCopilotChat,
     } = useCopilot({
@@ -526,21 +531,30 @@ export function AgentConfig({
                                     <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                         <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Agent Type</label>
                                         <div className="flex-1">
-                                            <CustomDropdown
-                                                value={agent.outputVisibility}
-                                                options={[
-                                                    { key: "user_facing", label: "Conversation Agent" },
-                                                    { key: "internal", label: "Task Agent" },
-                                                    { key: "pipeline", label: "Pipeline Agent" }
-                                                ]}
-                                                onChange={(value) => {
-                                                    handleUpdate({
-                                                        ...agent,
-                                                        outputVisibility: value as z.infer<typeof WorkflowAgent>["outputVisibility"]
-                                                    });
-                                                    showSavedMessage();
-                                                }}
-                                            />
+                                            {isPartOfPipeline ? (
+                                                // For pipeline agents, show read-only display
+                                                <div className="flex items-center gap-2 px-3 py-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 rounded-lg">
+                                                    <span className="text-sm text-gray-900 dark:text-gray-100">
+                                                        Pipeline Agent
+                                                    </span>
+                                                </div>
+                                            ) : (
+                                                // For non-pipeline agents, show dropdown without pipeline option
+                                                <CustomDropdown
+                                                    value={agent.outputVisibility}
+                                                    options={[
+                                                        { key: "user_facing", label: "Conversation Agent" },
+                                                        { key: "internal", label: "Task Agent" }
+                                                    ]}
+                                                    onChange={(value) => {
+                                                        handleUpdate({
+                                                            ...agent,
+                                                            outputVisibility: value as z.infer<typeof WorkflowAgent>["outputVisibility"]
+                                                        });
+                                                        showSavedMessage();
+                                                    }}
+                                                />
+                                            )}
                                         </div>
                                     </div>
                                     <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
@@ -612,7 +626,7 @@ export function AgentConfig({
                                             }
                                         </div>
                                     </div>
-                                    {agent.outputVisibility === "internal" && (
+                                    {agent.outputVisibility === "internal" && !isPartOfPipeline && (
                                         <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                             <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Max Calls From Parent</label>
                                             <div className="flex-1">
@@ -649,7 +663,7 @@ export function AgentConfig({
                                             </div>
                                         </div>
                                     )}
-                                    {USE_TRANSFER_CONTROL_OPTIONS && (
+                                    {USE_TRANSFER_CONTROL_OPTIONS && !isPartOfPipeline && (
                                         <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                             <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">After Turn</label>
                                             <div className="flex-1">
