@@ -13,6 +13,7 @@ import { RedisUsageQuotaPolicy } from "@/src/infrastructure/policies/redis.usage
 import { ProjectActionAuthorizationPolicy } from "@/src/application/policies/project-action-authorization.policy";
 import { MongoDBProjectMembersRepository } from "@/src/infrastructure/repositories/mongodb.project-members.repository";
 import { MongoDBApiKeysRepository } from "@/src/infrastructure/repositories/mongodb.api-keys.repository";
+import { MongodbProjectsRepository } from "@/src/infrastructure/repositories/mongodb.projects.repository";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -28,6 +29,10 @@ container.register({
     // ---
     usageQuotaPolicy: asClass(RedisUsageQuotaPolicy).singleton(),
     projectActionAuthorizationPolicy: asClass(ProjectActionAuthorizationPolicy).singleton(),
+
+    // projects
+    // ---
+    projectsRepository: asClass(MongodbProjectsRepository).singleton(),
 
     // project members
     // ---

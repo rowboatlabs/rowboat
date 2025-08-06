@@ -4,7 +4,7 @@ import { Composio } from "@composio/core";
 
 const BASE_URL = 'https://backend.composio.dev/api/v3';
 const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || "";
-const composio = new Composio();
+export const composio = new Composio();
 
 export const ZAuthScheme = z.enum([
     'API_KEY',
