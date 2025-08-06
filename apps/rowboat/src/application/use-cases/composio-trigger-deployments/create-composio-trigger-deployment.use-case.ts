@@ -4,14 +4,17 @@ import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
 import { CreateDeploymentSchema, IComposioTriggerDeploymentsRepository } from '../../repositories/composio-trigger-deployments.repository.interface';
 import { IProjectsRepository } from '../../repositories/projects.repository.interface';
-import { composio } from '../../../../app/lib/composio/composio';
+import { composio, getToolkit } from '../../../../app/lib/composio/composio';
 import { ComposioTriggerDeployment } from '@/src/entities/models/composio-trigger-deployment';
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
-    data: CreateDeploymentSchema.omit({ triggerId: true }),
+    data: CreateDeploymentSchema.omit({
+        triggerId: true,
+        logo: true,
+    }),
 });
 
 export interface ICreateComposioTriggerDeploymentUseCase {
@@ -56,6 +59,9 @@ export class CreateComposioTriggerDeploymentUseCase implements ICreateComposioTr
         // assert and consume quota
         await this.usageQuotaPolicy.assertAndConsume(projectId);
 
+        // get toolkit info
+        const toolkit = await getToolkit(request.data.toolkitSlug);
+
         // ensure that connected account exists on project
         const project = await this.projectsRepository.fetch(projectId);
         if (!project) {
@@ -84,6 +90,7 @@ export class CreateComposioTriggerDeploymentUseCase implements ICreateComposioTr
         return await this.composioTriggerDeploymentsRepository.create({
             projectId,
             toolkitSlug: request.data.toolkitSlug,
+            logo: toolkit.meta.logo,
             triggerId: result.triggerId,
             connectedAccountId: request.data.connectedAccountId,
             triggerTypeSlug: request.data.triggerTypeSlug,

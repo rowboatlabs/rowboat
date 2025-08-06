@@ -29,15 +29,17 @@ export const ZConnectedAccountStatus = z.enum([
     'INACTIVE',
 ]);
 
+const ZToolkitMeta = z.object({
+    description: z.string(),
+    logo: z.string(),
+    tools_count: z.number(),
+    triggers_count: z.number(),
+});
+
 export const ZToolkit = z.object({
     slug: z.string(),
     name: z.string(),
-    meta: z.object({
-        description: z.string(),
-        logo: z.string(),
-        tools_count: z.number(),
-        triggers_count: z.number(),
-    }),
+    meta: ZToolkitMeta,
     no_auth: z.boolean(),
     auth_schemes: z.array(ZAuthScheme),
     composio_managed_auth_schemes: z.array(ZAuthScheme),
@@ -56,6 +58,7 @@ export const ZGetToolkitResponse = z.object({
     slug: z.string(),
     name: z.string(),
     composio_managed_auth_schemes: z.array(ZAuthScheme),
+    meta: ZToolkitMeta,
     auth_config_details: z.array(z.object({
         name: z.string(),
         mode: ZAuthScheme,
