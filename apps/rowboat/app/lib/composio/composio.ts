@@ -3,8 +3,10 @@ import { PrefixLogger } from "../utils";
 import { Composio } from "@composio/core";
 
 const BASE_URL = 'https://backend.composio.dev/api/v3';
-const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || "";
-export const composio = new Composio();
+const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || "test";
+export const composio = new Composio({
+    apiKey: COMPOSIO_API_KEY,
+});
 
 export const ZAuthScheme = z.enum([
     'API_KEY',
