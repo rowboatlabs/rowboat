@@ -11,7 +11,7 @@ const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
-    data: CreateDeploymentSchema,
+    data: CreateDeploymentSchema.omit({ triggerId: true }),
 });
 
 export interface ICreateComposioTriggerDeploymentUseCase {

@@ -14,6 +14,12 @@ import { ProjectActionAuthorizationPolicy } from "@/src/application/policies/pro
 import { MongoDBProjectMembersRepository } from "@/src/infrastructure/repositories/mongodb.project-members.repository";
 import { MongoDBApiKeysRepository } from "@/src/infrastructure/repositories/mongodb.api-keys.repository";
 import { MongodbProjectsRepository } from "@/src/infrastructure/repositories/mongodb.projects.repository";
+import { MongodbComposioTriggerDeploymentsRepository } from "@/src/infrastructure/repositories/mongodb.composio-trigger-deployments.repository";
+import { CreateComposioTriggerDeploymentUseCase } from "@/src/application/use-cases/composio-trigger-deployments/create-composio-trigger-deployment.use-case";
+import { ListComposioTriggerDeploymentsUseCase } from "@/src/application/use-cases/composio-trigger-deployments/list-composio-trigger-deployments.use-case";
+import { DeleteComposioTriggerDeploymentUseCase } from "@/src/application/use-cases/composio-trigger-deployments/delete-composio-trigger-deployment.use-case";
+import { listComposioTriggerTypes } from "@/app/actions/composio_actions";
+import { ListComposioTriggerTypesUseCase } from "@/src/application/use-cases/composio-trigger-deployments/list-composio-trigger-types.use-case";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -41,6 +47,15 @@ container.register({
     // api keys
     // ---
     apiKeysRepository: asClass(MongoDBApiKeysRepository).singleton(),
+
+    // composio trigger deployments
+    // ---
+    composioTriggerDeploymentsRepository: asClass(MongodbComposioTriggerDeploymentsRepository).singleton(),
+
+    listComposioTriggerTypesUseCase: asClass(ListComposioTriggerTypesUseCase).singleton(),
+    createComposioTriggerDeploymentUseCase: asClass(CreateComposioTriggerDeploymentUseCase).singleton(),
+    listComposioTriggerDeploymentsUseCase: asClass(ListComposioTriggerDeploymentsUseCase).singleton(),
+    deleteComposioTriggerDeploymentUseCase: asClass(DeleteComposioTriggerDeploymentUseCase).singleton(),
 
     // conversations
     // ---
