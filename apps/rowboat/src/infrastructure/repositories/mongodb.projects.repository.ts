@@ -23,4 +23,9 @@ export class MongodbProjectsRepository implements IProjectsRepository {
             id: _id.toString(),
         }
     }
+
+    async deleteComposioConnectedAccount(projectId: string, toolkitSlug: string): Promise<boolean> {
+        const result = await projectsCollection.updateOne({ _id: projectId }, { $unset: { [`composioConnectedAccounts.${toolkitSlug}`]: "" } });
+        return result.modifiedCount > 0;
+    }
 }

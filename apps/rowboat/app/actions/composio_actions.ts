@@ -27,12 +27,14 @@ import { ICreateComposioTriggerDeploymentUseCase } from "@/src/application/use-c
 import { IListComposioTriggerDeploymentsUseCase } from "@/src/application/use-cases/composio-trigger-deployments/list-composio-trigger-deployments.use-case";
 import { IDeleteComposioTriggerDeploymentUseCase } from "@/src/application/use-cases/composio-trigger-deployments/delete-composio-trigger-deployment.use-case";
 import { IListComposioTriggerTypesUseCase } from "@/src/application/use-cases/composio-trigger-deployments/list-composio-trigger-types.use-case";
+import { IDeleteComposioConnectedAccountUseCase } from "@/src/application/use-cases/composio/delete-composio-connected-account.use-case";
 import { authCheck } from "./auth_actions";
 
 const createComposioTriggerDeploymentUseCase = container.resolve<ICreateComposioTriggerDeploymentUseCase>("createComposioTriggerDeploymentUseCase");
 const listComposioTriggerDeploymentsUseCase = container.resolve<IListComposioTriggerDeploymentsUseCase>("listComposioTriggerDeploymentsUseCase");
 const deleteComposioTriggerDeploymentUseCase = container.resolve<IDeleteComposioTriggerDeploymentUseCase>("deleteComposioTriggerDeploymentUseCase");
 const listComposioTriggerTypesUseCase = container.resolve<IListComposioTriggerTypesUseCase>("listComposioTriggerTypesUseCase");
+const deleteComposioConnectedAccountUseCase = container.resolve<IDeleteComposioConnectedAccountUseCase>("deleteComposioConnectedAccountUseCase");
 
 const ZCreateCustomConnectedAccountRequest = z.object({
     toolkitSlug: z.string(),
@@ -202,35 +204,15 @@ export async function syncConnectedAccount(projectId: string, toolkitSlug: strin
 }
 
 export async function deleteConnectedAccount(projectId: string, toolkitSlug: string, connectedAccountId: string): Promise<boolean> {
-    await projectAuthCheck(projectId);
+    const user = await authCheck();
 
-    // ensure that the connected account belongs to this project
-    const project = await getProjectConfig(projectId);
-    const account = project.composioConnectedAccounts?.[toolkitSlug];
-    if (!account || account.id !== connectedAccountId) {
-        throw new Error(`Connected account ${connectedAccountId} not found in project ${projectId} for toolkit ${toolkitSlug}`);
-    }
-
-    // delete the connected account
-    const result = await libDeleteConnectedAccount(connectedAccountId);
-    if (!result.success) {
-        throw new Error(`Failed to delete connected account ${connectedAccountId}`);
-    }
-
-    // get auth config data
-    const authConfig = await libGetAuthConfig(account.authConfigId);
-
-    // delete the auth config if it is NOT managed by composio
-    if (!authConfig.is_composio_managed) {
-        const result = await libDeleteAuthConfig(account.authConfigId);
-        if (!result.success) {
-            throw new Error(`Failed to delete auth config ${account.authConfigId}`);
-        }
-    }
-
-    // update project with deleted connected account
-    const key = `composioConnectedAccounts.${toolkitSlug}`;
-    await projectsCollection.updateOne({ _id: projectId }, { $unset: { [key]: "" } });
+    await deleteComposioConnectedAccountUseCase.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId,
+        toolkitSlug,
+        connectedAccountId,
+    });
 
     return true;
 }

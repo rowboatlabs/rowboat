@@ -18,8 +18,8 @@ import { MongodbComposioTriggerDeploymentsRepository } from "@/src/infrastructur
 import { CreateComposioTriggerDeploymentUseCase } from "@/src/application/use-cases/composio-trigger-deployments/create-composio-trigger-deployment.use-case";
 import { ListComposioTriggerDeploymentsUseCase } from "@/src/application/use-cases/composio-trigger-deployments/list-composio-trigger-deployments.use-case";
 import { DeleteComposioTriggerDeploymentUseCase } from "@/src/application/use-cases/composio-trigger-deployments/delete-composio-trigger-deployment.use-case";
-import { listComposioTriggerTypes } from "@/app/actions/composio_actions";
 import { ListComposioTriggerTypesUseCase } from "@/src/application/use-cases/composio-trigger-deployments/list-composio-trigger-types.use-case";
+import { DeleteComposioConnectedAccountUseCase } from "@/src/application/use-cases/composio/delete-composio-connected-account.use-case";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -47,6 +47,10 @@ container.register({
     // api keys
     // ---
     apiKeysRepository: asClass(MongoDBApiKeysRepository).singleton(),
+
+    // composio
+    // ---
+    deleteComposioConnectedAccountUseCase: asClass(DeleteComposioConnectedAccountUseCase).singleton(),
 
     // composio trigger deployments
     // ---
