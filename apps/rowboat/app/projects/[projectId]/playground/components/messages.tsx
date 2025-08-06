@@ -730,10 +730,10 @@ export function Messages({
             }
 
             // Then check for internal messages (including pipeline agents)
-            // Check both responseType === 'internal' and pipeline agents by outputVisibility
+            // Check both responseType === 'internal' and pipeline agents by type
             const agentConfig = workflow.agents.find(a => a.name === message.agentName);
             const isInternalOrPipeline = message.responseType === 'internal' || 
-                                       (agentConfig && (agentConfig.outputVisibility === 'internal' || agentConfig.outputVisibility === 'pipeline'));
+                                       (agentConfig && (agentConfig.outputVisibility === 'internal' || agentConfig.type === 'pipeline'));
             
             if (message.content && isInternalOrPipeline) {
                 // Skip internal/pipeline messages if debug mode is off

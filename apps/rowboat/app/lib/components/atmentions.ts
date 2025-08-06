@@ -17,13 +17,13 @@ export function createAtMentions({ agents, prompts, tools, pipelines = [], curre
     const atMentions: AtMentionItem[] = [];
 
     // For pipeline agents, only add tools and prompts - no agents or pipelines
-    const isCurrentAgentPipeline = currentAgent?.outputVisibility === 'pipeline';
+    const isCurrentAgentPipeline = currentAgent?.type === 'pipeline';
 
     // Add agents (excluding pipeline agents and disabled agents)
     // Also exclude ALL agents if current agent is a pipeline agent
     if (!isCurrentAgentPipeline) {
         for (const a of agents) {
-            if (a.disabled || a.name === currentAgentName || a.outputVisibility === 'pipeline') {
+            if (a.disabled || a.name === currentAgentName || a.type === 'pipeline') {
                 continue;
             }
             const id = `agent:${a.name}`;

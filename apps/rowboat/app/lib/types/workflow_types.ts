@@ -6,6 +6,7 @@ export const WorkflowAgent = z.object({
         'conversation',
         'post_process',
         'escalation',
+        'pipeline',
     ]),
     description: z.string(),
     disabled: z.boolean().default(false).optional(),
@@ -18,7 +19,7 @@ export const WorkflowAgent = z.object({
     ragDataSources: z.array(z.string()).optional(),
     ragReturnType: z.enum(['chunks', 'content']).default('chunks'),
     ragK: z.number().default(3),
-    outputVisibility: z.enum(['user_facing', 'internal', 'pipeline']).default('user_facing').optional(),
+    outputVisibility: z.enum(['user_facing', 'internal']).default('user_facing').optional(),
     controlType: z.enum([
         'retain',
         'relinquish_to_parent',
@@ -26,8 +27,11 @@ export const WorkflowAgent = z.object({
     ]).optional().describe('Whether this agent retains control after a turn, relinquishes to the parent agent, or relinquishes to the start agent'),
     maxCallsPerParentAgent: z.number().default(3).describe('Maximum number of times this agent can be called by a parent agent in a single turn').optional(),
 }).refine((data) => {
-    // Pipeline agents should have relinquish_to_parent control type
-    if (data.outputVisibility === 'pipeline' && data.controlType !== 'relinquish_to_parent') {
+    // Pipeline agents should have internal output visibility and relinquish_to_parent control type
+    if (data.type === 'pipeline' && data.outputVisibility !== 'internal') {
+        return false;
+    }
+    if (data.type === 'pipeline' && data.controlType !== 'relinquish_to_parent') {
         return false;
     }
     // Internal agents should have relinquish_to_parent control type
@@ -44,8 +48,8 @@ export const WorkflowAgent = z.object({
     }
     return true;
 }, {
-    message: "Pipeline agents must have 'relinquish_to_parent' control type, while other agents must have appropriate control types",
-    path: ["controlType"]
+    message: "Pipeline agents must have 'internal' output visibility and 'relinquish_to_parent' control type, while other agents must have appropriate control types",
+    path: ["controlType", "outputVisibility"]
 });
 export const WorkflowPrompt = z.object({
     name: z.string(),
@@ -147,14 +151,14 @@ export function sanitizeTextWithMentions(
             seen.add(entity.name);
             
             // For pipeline agents, only allow tool and prompt mentions
-            if (currentAgent?.outputVisibility === 'pipeline') {
+            if (currentAgent?.type === 'pipeline') {
                 return entity.type === 'tool' || entity.type === 'prompt';
             }
             
             if (entity.type === 'agent') {
                 // Filter out pipeline agents - they should not be @ referenceable
                 const agent = workflow.agents.find(a => a.name === entity.name);
-                return agent && agent.outputVisibility !== 'pipeline';
+                return agent && agent.type !== 'pipeline';
             } else if (entity.type === 'tool') {
                 return workflow.tools.some(t => t.name === entity.name);
             } else if (entity.type === 'prompt') {

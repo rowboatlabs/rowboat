@@ -426,7 +426,7 @@ function reducer(state: State, action: Action): State {
                             const firstAgentName = `${action.pipeline.name || newPipelineName} Step 1`;
                             draft.workflow.agents.push({
                                 name: firstAgentName,
-                                type: "conversation",
+                                type: "pipeline",
                                 description: "",
                                 disabled: false,
                                 instructions: "",
@@ -436,7 +436,7 @@ function reducer(state: State, action: Action): State {
                                 ragReturnType: "chunks",
                                 ragK: 3,
                                 controlType: "relinquish_to_parent",
-                                outputVisibility: "pipeline",
+                                outputVisibility: "internal",
                                 maxCallsPerParentAgent: 3,
                             });
                             
@@ -1016,7 +1016,8 @@ export function WorkflowEditor({
         
         const agentWithModel = {
             name: newAgentName,
-            outputVisibility: 'pipeline' as const,
+            type: 'pipeline' as const,
+            outputVisibility: 'internal' as const,
             model: defaultModel || "gpt-4o"
         };
         

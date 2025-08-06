@@ -80,10 +80,8 @@ export function AgentConfig({
     const [billingError, setBillingError] = useState<string | null>(null);
     const [showSavedBanner, setShowSavedBanner] = useState(false);
 
-    // Check if this agent is part of any pipeline
-    const isPartOfPipeline = workflow.pipelines?.some(pipeline => 
-        pipeline.agents.includes(agent.name)
-    ) || false;
+    // Check if this agent is a pipeline agent
+    const isPipelineAgent = agent.type === 'pipeline';
 
     const {
         start: startCopilotChat,
@@ -128,8 +126,8 @@ export function AgentConfig({
     useEffect(() => {
         let correctControlType: "retain" | "relinquish_to_parent" | "relinquish_to_start" | undefined = undefined;
 
-        // Determine the correct control type based on output visibility
-        if (agent.outputVisibility === "pipeline") {
+        // Determine the correct control type based on agent type and output visibility
+        if (agent.type === "pipeline") {
             correctControlType = "relinquish_to_parent";
         } else if (agent.outputVisibility === "internal") {
             correctControlType = "relinquish_to_parent";
@@ -207,7 +205,7 @@ export function AgentConfig({
         agents: agents,
         prompts,
         tools,
-        pipelines: agent.outputVisibility === "pipeline" ? [] : (workflow.pipelines || []), // Pipeline agents can't reference pipelines
+        pipelines: agent.type === "pipeline" ? [] : (workflow.pipelines || []), // Pipeline agents can't reference pipelines
         currentAgentName: agent.name,
         currentAgent: agent
     });
@@ -531,7 +529,7 @@ export function AgentConfig({
                                     <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                         <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Agent Type</label>
                                         <div className="flex-1">
-                                            {isPartOfPipeline ? (
+                                            {isPipelineAgent ? (
                                                 // For pipeline agents, show read-only display
                                                 <div className="flex items-center gap-2 px-3 py-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 rounded-lg">
                                                     <span className="text-sm text-gray-900 dark:text-gray-100">
@@ -626,7 +624,7 @@ export function AgentConfig({
                                             }
                                         </div>
                                     </div>
-                                    {agent.outputVisibility === "internal" && !isPartOfPipeline && (
+                                    {agent.outputVisibility === "internal" && !isPipelineAgent && (
                                         <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                             <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">Max Calls From Parent</label>
                                             <div className="flex-1">
@@ -663,14 +661,14 @@ export function AgentConfig({
                                             </div>
                                         </div>
                                     )}
-                                    {USE_TRANSFER_CONTROL_OPTIONS && !isPartOfPipeline && (
+                                    {USE_TRANSFER_CONTROL_OPTIONS && !isPipelineAgent && (
                                         <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-0">
                                             <label className="text-sm font-semibold text-gray-600 dark:text-gray-300 md:w-32 mb-1 md:mb-0 md:pr-4">After Turn</label>
                                             <div className="flex-1">
                                                 <CustomDropdown
                                                     value={agent.controlType || 'retain'}
                                                     options={
-                                                        agent.outputVisibility === "pipeline"
+                                                        agent.type === "pipeline"
                                                             ? [
                                                                 { key: "relinquish_to_parent", label: "Relinquish to parent" }
                                                             ]

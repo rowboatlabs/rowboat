@@ -521,7 +521,7 @@ ${config.description}
 
 ${config.outputVisibility === 'user_facing' 
     ? CONVERSATION_TYPE_INSTRUCTIONS() 
-    : config.outputVisibility === 'pipeline' 
+    : config.type === 'pipeline' 
         ? PIPELINE_TYPE_INSTRUCTIONS() 
         : TASK_TYPE_INSTRUCTIONS()}
 
@@ -539,7 +539,7 @@ ${CHILD_TRANSFER_RELATED_INSTRUCTIONS}
     let { sanitized, entities } = sanitizeTextWithMentions(instructions, workflow, config);
     
     // Remove agent transfer instructions for pipeline agents
-    if (config.outputVisibility === 'pipeline') {
+    if (config.type === 'pipeline') {
         sanitized = sanitized.replace(CHILD_TRANSFER_RELATED_INSTRUCTIONS, '');
     }
     
@@ -890,7 +890,7 @@ function createAgents(
         // Add pipeline entities to the agent's available mentions (unless it's a pipeline agent itself)
         // Pipeline agents cannot reference other agents or pipelines, only tools
         let agentEntities = entities;
-        if (config.outputVisibility !== 'pipeline') {
+        if (config.type !== 'pipeline') {
             agentEntities = [...entities, ...pipelineEntities];
             agentsLogger.log(`${agentName} can reference: ${entities.length} entities + ${pipelineEntities.length} pipelines`);
         } else {
@@ -916,7 +916,7 @@ function createAgents(
         // Only allow handoffs to non-pipeline agents
         const validAgentNames = connectedAgentNames.filter(name => {
             const targetConfig = agentConfig[name];
-            return targetConfig && targetConfig.outputVisibility !== 'pipeline';
+            return targetConfig && targetConfig.type !== 'pipeline';
         });
         
         // Convert pipeline mentions to handoffs to the first agent in each pipeline
@@ -972,7 +972,7 @@ function createAgents(
             
             // Configure pipeline agents to relinquish control after completing their task
             const agentConfigObj = agentConfig[currentAgentName];
-            if (agentConfigObj && agentConfigObj.outputVisibility === 'pipeline') {
+            if (agentConfigObj && agentConfigObj.type === 'pipeline') {
                 agentsLogger.log(`configuring pipeline agent ${currentAgentName} to relinquish control after task completion`);
             }
         }
@@ -1019,7 +1019,7 @@ function maybeInjectGiveUpControlInstructions(
 
     const agentConfigObj = agentConfig[childAgentName];
     const isInternal = agentConfigObj?.outputVisibility === 'internal';
-    const isPipeline = agentConfigObj?.outputVisibility === 'pipeline';
+    const isPipeline = agentConfigObj?.type === 'pipeline';
     const isRetain = agentConfigObj?.controlType === 'retain';
     const injectLogger = logger.child(`inject`);
     injectLogger.log(`isInternal: ${isInternal}`);
@@ -1295,7 +1295,7 @@ export async function* streamResponse(
 
                         // add current agent to stack only if new agent is internal
                         const newAgentConfig = agentConfig[newAgentName];
-                        if (newAgentConfig?.outputVisibility === 'internal' || newAgentConfig?.outputVisibility === 'pipeline') {
+                        if (newAgentConfig?.outputVisibility === 'internal' || newAgentConfig?.type === 'pipeline') {
                             stack.push(agentName);
                             loopLogger.log(`📚 STACK PUSH: ${agentName} (new agent ${newAgentName} is internal/pipeline)`);
                             loopLogger.log(`📚 STACK NOW: [${stack.join(' -> ')}]`);
@@ -1331,7 +1331,7 @@ export async function* streamResponse(
                         event.item.rawItem.status === 'completed') {
                         // check response visibility
                         const agentConfigObj = agentConfig[agentName];
-                        const isInternal = agentConfigObj?.outputVisibility === 'internal' || agentConfigObj?.outputVisibility === 'pipeline';
+                        const isInternal = agentConfigObj?.outputVisibility === 'internal' || agentConfigObj?.type === 'pipeline';
                         for (const content of event.item.rawItem.content) {
                             if (content.type === 'output_text') {
                                 // create message
@@ -1356,7 +1356,7 @@ export async function* streamResponse(
                             const currentAgentConfig = agentConfig[agentName];
 
                             // Check if this is a pipeline agent that needs to continue the pipeline
-                            if (currentAgentConfig?.outputVisibility === 'pipeline') {
+                            if (currentAgentConfig?.type === 'pipeline') {
                                 const result = handlePipelineAgentExecution(
                                     agents[current], // Use the correct agent from agents collection
                                     current,

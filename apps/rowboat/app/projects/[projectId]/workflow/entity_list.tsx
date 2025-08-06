@@ -744,7 +744,7 @@ export const EntityList = forwardRef<
                                                 
                                                 // Filter agents that are not in any pipeline and are not pipeline agents
                                                 const individualAgents = agents.filter(
-                                                    agent => !pipelineAgentNames.has(agent.name) && agent.outputVisibility !== 'pipeline'
+                                                    agent => !pipelineAgentNames.has(agent.name) && agent.type !== 'pipeline'
                                                 );
                                                 
                                                 if (individualAgents.length === 0) return null;
