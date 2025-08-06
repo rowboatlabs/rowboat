@@ -63,7 +63,7 @@ export class CreateComposioTriggerDeploymentUseCase implements ICreateComposioTr
         }
 
         // ensure connected account exists
-        const account = project.composioConnectedAccounts?.[request.data.triggerTypeSlug];
+        const account = project.composioConnectedAccounts?.[request.data.toolkitSlug];
         if (!account || account.id !== request.data.connectedAccountId) {
             throw new BadRequestError('Invalid connected account');
         }
@@ -83,6 +83,7 @@ export class CreateComposioTriggerDeploymentUseCase implements ICreateComposioTr
         // create trigger deployment in db
         return await this.composioTriggerDeploymentsRepository.create({
             projectId,
+            toolkitSlug: request.data.toolkitSlug,
             triggerId: result.triggerId,
             connectedAccountId: request.data.connectedAccountId,
             triggerTypeSlug: request.data.triggerTypeSlug,

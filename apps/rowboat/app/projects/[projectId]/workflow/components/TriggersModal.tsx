@@ -6,10 +6,10 @@ import { Plus, Trash2, ZapIcon } from 'lucide-react';
 import { z } from 'zod';
 import { ComposioTriggerDeployment } from '@/src/entities/models/composio-trigger-deployment';
 import { ComposioTriggerType } from '@/src/entities/models/composio-trigger-type';
-import { listComposioTriggerDeployments, deleteComposioTriggerDeployment } from '@/app/actions/composio_actions';
+import { listComposioTriggerDeployments, deleteComposioTriggerDeployment, createComposioTriggerDeployment } from '@/app/actions/composio_actions';
 import { SelectComposioToolkit } from '../../tools/components/SelectComposioToolkit';
 import { ComposioTriggerTypesPanel } from './ComposioTriggerTypesPanel';
-import { TriggerConfigPlaceholder } from './TriggerConfigPlaceholder';
+import { TriggerConfigForm } from './TriggerConfigForm';
 import { ToolkitAuthModal } from '../../tools/components/ToolkitAuthModal';
 import { ZToolkit } from '@/app/lib/composio/composio';
 import { Project } from '@/app/lib/types/project_types';
@@ -38,6 +38,7 @@ export function TriggersModal({
   const [selectedToolkit, setSelectedToolkit] = useState<z.infer<typeof ZToolkit> | null>(null);
   const [selectedTriggerType, setSelectedTriggerType] = useState<z.infer<typeof ComposioTriggerType> | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isSubmittingTrigger, setIsSubmittingTrigger] = useState(false);
   const [deletingTrigger, setDeletingTrigger] = useState<string | null>(null);
 
   const loadTriggers = useCallback(async () => {
@@ -80,6 +81,7 @@ export function TriggersModal({
     setSelectedToolkit(null);
     setSelectedTriggerType(null);
     setShowAuthModal(false);
+    setIsSubmittingTrigger(false);
     loadTriggers(); // Reload in case any triggers were created
   };
 
@@ -90,6 +92,7 @@ export function TriggersModal({
   const handleBackToToolkitSelection = () => {
     setSelectedToolkit(null);
     setSelectedTriggerType(null);
+    setIsSubmittingTrigger(false);
   };
 
   const handleSelectTriggerType = (triggerType: z.infer<typeof ComposioTriggerType>) => {
@@ -113,6 +116,38 @@ export function TriggersModal({
   const handleAuthComplete = async () => {
     setShowAuthModal(false);
     onProjectConfigUpdated?.();
+  };
+
+  const handleTriggerSubmit = async (triggerConfig: Record<string, unknown>) => {
+    if (!selectedToolkit || !selectedTriggerType) return;
+
+    try {
+      setIsSubmittingTrigger(true);
+      
+      // Get the connected account ID for this toolkit
+      const connectedAccountId = projectConfig?.composioConnectedAccounts?.[selectedToolkit.slug]?.id;
+      
+      if (!connectedAccountId) {
+        throw new Error('No connected account found for this toolkit');
+      }
+
+      // Create the trigger deployment
+      await createComposioTriggerDeployment({
+        projectId,
+        toolkitSlug: selectedToolkit.slug,
+        triggerTypeSlug: selectedTriggerType.slug,
+        connectedAccountId,
+        triggerConfig,
+      });
+
+      // Success! Go back to triggers list and reload
+      handleBackToList();
+    } catch (err: any) {
+      console.error('Error creating trigger:', err);
+      setError('Failed to create trigger. Please try again.');
+    } finally {
+      setIsSubmittingTrigger(false);
+    }
   };
 
   useEffect(() => {
@@ -232,24 +267,13 @@ export function TriggersModal({
       
       if (!needsAuth || hasConnection) {
         return (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Configure Trigger
-              </h3>
-              <Button
-                variant="flat"
-                onPress={handleBackToToolkitSelection}
-              >
-                ← Back to Trigger Types
-              </Button>
-            </div>
-
-            <TriggerConfigPlaceholder
-              toolkit={selectedToolkit}
-              triggerType={selectedTriggerType}
-            />
-          </div>
+          <TriggerConfigForm
+            toolkit={selectedToolkit}
+            triggerType={selectedTriggerType}
+            onBack={handleBackToToolkitSelection}
+            onSubmit={handleTriggerSubmit}
+            isSubmitting={isSubmittingTrigger}
+          />
         );
       }
     }

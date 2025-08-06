@@ -230,7 +230,12 @@ export const ZTriggerType = z.object({
         name: z.string(),
         logo: z.string(),
     }),
-    config: z.object({}).passthrough(),
+    config: z.object({
+        type: z.literal('object'),
+        properties: z.record(z.string(), z.any()),
+        required: z.array(z.string()).optional(),
+        title: z.string().optional(),
+    }),
 });
 
 export const ZListResponse = <T extends z.ZodTypeAny>(schema: T) => z.object({

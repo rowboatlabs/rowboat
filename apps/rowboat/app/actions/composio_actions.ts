@@ -246,18 +246,12 @@ export async function listComposioTriggerTypes(toolkitSlug: string, cursor?: str
 
 export async function createComposioTriggerDeployment(request: {
     projectId: string,
+    toolkitSlug: string,
     triggerTypeSlug: string,
     connectedAccountId: string,
     triggerConfig?: Record<string, unknown>,
 }) {
     const user = await authCheck();
-
-    // ensure that the connected account belongs to this project
-    const project = await getProjectConfig(request.projectId);
-    const account = project.composioConnectedAccounts?.[request.triggerTypeSlug];
-    if (!account || account.id !== request.connectedAccountId) {
-        throw new Error(`Connected account ${request.connectedAccountId} not found in project ${request.projectId} for toolkit ${request.triggerTypeSlug}`);
-    }
 
     // create trigger deployment
     return await createComposioTriggerDeploymentUseCase.execute({
@@ -265,6 +259,7 @@ export async function createComposioTriggerDeployment(request: {
         userId: user._id,
         data: {
             projectId: request.projectId,
+            toolkitSlug: request.toolkitSlug,
             triggerTypeSlug: request.triggerTypeSlug,
             connectedAccountId: request.connectedAccountId,
             triggerConfig: request.triggerConfig ?? {},
