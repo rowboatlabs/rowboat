@@ -14,13 +14,6 @@ export const ComposioConnectedAccount = z.object({
     lastUpdatedAt: z.string().datetime(),
 });
 
-export const ComposioTrigger = z.object({
-    id: z.string(),
-    triggerId: z.string(),
-    connectedAccountId: z.string(),
-    createdAt: z.string().datetime(),
-})
-
 export const CustomMcpServer = z.object({
     serverUrl: z.string(),
 });
@@ -40,7 +33,6 @@ export const Project = z.object({
     testRunCounter: z.number().default(0),
     mcpServers: z.array(MCPServer).optional(),
     composioConnectedAccounts: z.record(z.string(), ComposioConnectedAccount).optional(),
-    composioTriggers: z.record(z.string(), ComposioTrigger).optional(),
     customMcpServers: z.record(z.string(), CustomMcpServer).optional(),
 });
 

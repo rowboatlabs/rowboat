@@ -229,11 +229,7 @@ export const ZTriggerType = z.object({
         name: z.string(),
         logo: z.string(),
     }),
-    config: z.object({
-        type: z.literal('object'),
-        properties: z.record(z.string(), z.any()),
-        required: z.array(z.string()).optional(),
-    }),
+    config: z.object({}).passthrough(),
 });
 
 export const ZListResponse = <T extends z.ZodTypeAny>(schema: T) => z.object({
@@ -436,7 +432,7 @@ export async function deleteConnectedAccount(connectedAccountId: string): Promis
     });
 }
 
-export async function listTriggerTypes(toolkitSlug: string, cursor: string | null = null): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTriggerType>>>> {
+export async function listTriggerTypes(toolkitSlug: string, cursor?: string): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTriggerType>>>> {
     const url = new URL(`${BASE_URL}/trigger_types`);
 
     // set params
@@ -447,18 +443,4 @@ export async function listTriggerTypes(toolkitSlug: string, cursor: string | nul
 
     // fetch
     return composioApiCall(ZListResponse(ZTriggerType), url.toString());
-}
-
-export async function createTrigger(triggerTypeSlug: string, userId: string, connectedAccountId: string, triggerConfig: Record<string, any>): Promise<{ triggerId: string }> {
-    return await composio.triggers.create(triggerTypeSlug, userId, {
-        connectedAccountId,
-        triggerConfig,
-    });
-}
-
-export async function deleteTrigger(triggerId: string): Promise<z.infer<typeof ZDeleteOperationResponse>> {
-    const result = await composio.triggers.delete(triggerId);
-    return {
-        success: !!result.triggerId,
-    };
 }

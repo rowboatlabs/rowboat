@@ -32,6 +32,14 @@ export interface IComposioTriggerDeploymentsRepository {
      * @returns Promise resolving to the created deployment with full details including id, timestamps, and disabled status
      */
     create(data: z.infer<typeof CreateDeploymentSchema>): Promise<z.infer<typeof ComposioTriggerDeployment>>;
+
+    /**
+     * Fetches a trigger deployment by its ID.
+     * 
+     * @param id - The unique identifier of the deployment to fetch
+     * @returns Promise resolving to the deployment if found, null if not found
+     */
+    fetch(id: string): Promise<z.infer<typeof ComposioTriggerDeployment> | null>;
     
     /**
      * Deletes a Composio trigger deployment by its ID.
@@ -40,22 +48,6 @@ export interface IComposioTriggerDeploymentsRepository {
      * @returns Promise resolving to true if the deployment was deleted, false if not found
      */
     delete(id: string): Promise<boolean>;
-
-    /**
-     * Disables a Composio trigger deployment by its ID.
-     * 
-     * @param id - The unique identifier of the deployment to disable
-     * @returns Promise resolving to true if the deployment was disabled, false if not found
-     */
-    disable(id: string): Promise<boolean>;
-
-    /**
-     * Enables a Composio trigger deployment by its ID.
-     * 
-     * @param id - The unique identifier of the deployment to enable  
-     * @returns Promise resolving to true if the deployment was enabled, false if not found
-     */
-    enable(id: string): Promise<boolean>;
 
     /**
      * Fetches a trigger deployment by its trigger type slug and connected account ID.

@@ -7,7 +7,6 @@ export const ComposioTriggerDeployment = z.object({
     triggerTypeSlug: z.string(),
     connectedAccountId: z.string(),
     triggerConfig: z.record(z.string(), z.unknown()),
-    disabled: z.boolean(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
 });

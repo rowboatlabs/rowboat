@@ -75,7 +75,7 @@ export class CreateComposioTriggerDeploymentUseCase implements ICreateComposioTr
         }
 
         // create trigger on composio
-        const result = await composio.triggers.create(request.data.triggerTypeSlug, request.data.projectId, {
+        const result = await composio.triggers.create(request.data.projectId, request.data.triggerTypeSlug, {
             connectedAccountId: request.data.connectedAccountId,
             triggerConfig: request.data.triggerConfig,
         });

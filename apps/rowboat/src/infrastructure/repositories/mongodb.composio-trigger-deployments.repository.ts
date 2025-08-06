@@ -48,7 +48,6 @@ export class MongodbComposioTriggerDeploymentsRepository implements IComposioTri
 
         const doc = {
             ...data,
-            disabled: false,
             createdAt: now,
             updatedAt: now,
         };
@@ -65,6 +64,24 @@ export class MongodbComposioTriggerDeploymentsRepository implements IComposioTri
     }
 
     /**
+     * Fetches a trigger deployment by its ID.
+     */
+    async fetch(id: string): Promise<z.infer<typeof ComposioTriggerDeployment> | null> {
+        const result = await this.collection.findOne({ _id: new ObjectId(id) });
+
+        if (!result) {
+            return null;
+        }
+
+        const { _id, ...rest } = result;
+
+        return {
+            ...rest,
+            id: _id.toString(),
+        };
+    }
+
+    /**
      * Deletes a Composio trigger deployment by its ID.
      */
     async delete(id: string): Promise<boolean> {
@@ -73,36 +90,6 @@ export class MongodbComposioTriggerDeploymentsRepository implements IComposioTri
         });
 
         return result.deletedCount > 0;
-    }
-
-    /**
-     * Disables a Composio trigger deployment by its ID.
-     */
-    async disable(id: string): Promise<boolean> {
-        const result = await this.collection.updateOne({
-            _id: new ObjectId(id),
-        }, {
-            $set: {
-                disabled: true,
-            },
-        });
-
-        return result.matchedCount > 0;
-    }
-
-    /**
-     * Enables a Composio trigger deployment by its ID.
-     */
-    async enable(id: string): Promise<boolean> {
-        const result = await this.collection.updateOne({
-            _id: new ObjectId(id),
-        }, {
-            $set: {
-                disabled: false,
-            },
-        });
-
-        return result.matchedCount > 0;
     }
 
     /**
