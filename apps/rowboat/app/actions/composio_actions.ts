@@ -18,8 +18,12 @@ import {
     ZCreateConnectedAccountResponse,
     ZAuthScheme,
     ZCredentials,
+    ZTriggerType,
+    listTriggerTypes as libListTriggerTypes,
+    createTrigger as libCreateTrigger,
+    deleteTrigger as libDeleteTrigger,
 } from "@/app/lib/composio/composio";
-import { ComposioConnectedAccount } from "@/app/lib/types/project_types";
+import { ComposioConnectedAccount, ComposioTrigger } from "@/app/lib/types/project_types";
 import { getProjectConfig, projectAuthCheck } from "./project_actions";
 import { projectsCollection } from "../lib/mongodb";
 
@@ -201,19 +205,78 @@ export async function deleteConnectedAccount(projectId: string, toolkitSlug: str
     }
 
     // delete the connected account
-    await libDeleteConnectedAccount(connectedAccountId);
+    const result = await libDeleteConnectedAccount(connectedAccountId);
+    if (!result.success) {
+        throw new Error(`Failed to delete connected account ${connectedAccountId}`);
+    }
 
     // get auth config data
     const authConfig = await libGetAuthConfig(account.authConfigId);
 
     // delete the auth config if it is NOT managed by composio
     if (!authConfig.is_composio_managed) {
-        await libDeleteAuthConfig(account.authConfigId);
+        const result = await libDeleteAuthConfig(account.authConfigId);
+        if (!result.success) {
+            throw new Error(`Failed to delete auth config ${account.authConfigId}`);
+        }
     }
 
     // update project with deleted connected account
     const key = `composioConnectedAccounts.${toolkitSlug}`;
     await projectsCollection.updateOne({ _id: projectId }, { $unset: { [key]: "" } });
+
+    return true;
+}
+
+export async function listTriggerTypes(projectId: string, toolkitSlug: string, cursor: string | null = null): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTriggerType>>>> {
+    await projectAuthCheck(projectId);
+    return await libListTriggerTypes(toolkitSlug, cursor);
+}
+
+export async function createTrigger(projectId: string, toolkitSlug: string, triggerTypeSlug: string, triggerConfig: Record<string, any>): Promise<z.infer<typeof ComposioTrigger>> {
+    await projectAuthCheck(projectId);
+
+    // ensure that the connected account belongs to this project
+    const project = await getProjectConfig(projectId);
+    const account = project.composioConnectedAccounts?.[toolkitSlug];
+    if (!account) {
+        throw new Error(`Connected account not found in project ${projectId} for toolkit ${toolkitSlug}`);
+    }
+
+    // ensure that trigger doesn't already exist
+    const existingTrigger = project.composioTriggers?.find(t => t.triggerId === triggerTypeSlug);
+    if (existingTrigger) {
+        throw new Error(`Trigger ${triggerTypeSlug} already exists in project ${projectId} for toolkit ${toolkitSlug}`);
+    }
+
+    // create the trigger
+    const trigger = await libCreateTrigger(triggerTypeSlug, projectId, account.id, triggerConfig);
+
+    // update project with new trigger
+    const key = `composioTriggers`;
+    const data: z.infer<typeof ComposioTrigger> = {
+        id: trigger.triggerId,
+        triggerId: trigger.triggerId,
+        connectedAccountId: account.id,
+        createdAt: new Date().toISOString(),
+    }
+    await projectsCollection.updateOne({ _id: projectId }, { $push: { [key]: data } });
+
+    return data;
+}
+
+export async function deleteTrigger(projectId: string, triggerId: string): Promise<boolean> {
+    await projectAuthCheck(projectId);
+
+    // delete the trigger
+    const result = await libDeleteTrigger(triggerId);
+    if (!result.success) {
+        throw new Error(`Failed to delete trigger ${triggerId}`);
+    }
+
+    // delete trigger from project record in db
+    const key = `composioTriggers`;
+    await projectsCollection.updateOne({ _id: projectId }, { $pull: { [key]: { triggerId } } });
 
     return true;
 }

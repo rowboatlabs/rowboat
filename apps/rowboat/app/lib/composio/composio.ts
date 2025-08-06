@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { PrefixLogger } from "../utils";
+import { Composio } from "@composio/core";
 
 const BASE_URL = 'https://backend.composio.dev/api/v3';
 const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || "";
+const composio = new Composio();
 
 export const ZAuthScheme = z.enum([
     'API_KEY',
@@ -86,6 +88,7 @@ export const ZTool = z.object({
     }),
     no_auth: z.boolean(),
 });
+
 
 export const ZAuthConfig = z.object({
     id: z.string(),
@@ -215,6 +218,22 @@ export const ZError = z.object({
 
 export const ZDeleteOperationResponse = z.object({
     success: z.boolean(),
+});
+
+export const ZTriggerType = z.object({
+    slug: z.string(),
+    name: z.string(),
+    description: z.string(),
+    toolkit: z.object({
+        slug: z.string(),
+        name: z.string(),
+        logo: z.string(),
+    }),
+    config: z.object({
+        type: z.literal('object'),
+        properties: z.record(z.string(), z.any()),
+        required: z.array(z.string()).optional(),
+    }),
 });
 
 export const ZListResponse = <T extends z.ZodTypeAny>(schema: T) => z.object({
@@ -415,4 +434,31 @@ export async function deleteConnectedAccount(connectedAccountId: string): Promis
     return await composioApiCall(ZDeleteOperationResponse, url.toString(), {
         method: 'DELETE',
     });
+}
+
+export async function listTriggerTypes(toolkitSlug: string, cursor: string | null = null): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTriggerType>>>> {
+    const url = new URL(`${BASE_URL}/trigger_types`);
+
+    // set params
+    url.searchParams.set("toolkit_slugs", toolkitSlug);
+    if (cursor) {
+        url.searchParams.set("cursor", cursor);
+    }
+
+    // fetch
+    return composioApiCall(ZListResponse(ZTriggerType), url.toString());
+}
+
+export async function createTrigger(triggerTypeSlug: string, userId: string, connectedAccountId: string, triggerConfig: Record<string, any>): Promise<{ triggerId: string }> {
+    return await composio.triggers.create(triggerTypeSlug, userId, {
+        connectedAccountId,
+        triggerConfig,
+    });
+}
+
+export async function deleteTrigger(triggerId: string): Promise<z.infer<typeof ZDeleteOperationResponse>> {
+    const result = await composio.triggers.delete(triggerId);
+    return {
+        success: !!result.triggerId,
+    };
 }
