@@ -19,11 +19,11 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - MONGODB_CONNECTION_STRING=mongodb://mongo:27017/rowboat
       - USE_AUTH=${USE_AUTH}
-      - AUTH0_SECRET=test_secret
-      - AUTH0_BASE_URL=http://localhost:3000
-      - AUTH0_ISSUER_BASE_URL=https://test.com
-      - AUTH0_CLIENT_ID=test
-      - AUTH0_CLIENT_SECRET=test
+      - AUTH0_SECRET=${AUTH0_SECRET}
+      - AUTH0_BASE_URL=${AUTH0_BASE_URL}
+      - AUTH0_ISSUER_BASE_URL=${AUTH0_ISSUER_BASE_URL}
+      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
+      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET}
       - AGENTS_API_URL=http://rowboat_agents:3001
       - AGENTS_API_KEY=${AGENTS_API_KEY}
       - COPILOT_API_URL=http://copilot:3002
