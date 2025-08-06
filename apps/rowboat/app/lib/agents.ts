@@ -6,7 +6,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { CoreMessage, embed, generateText } from "ai";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
-import { Composio } from '@composio/core';
+import { composio } from "./composio/composio";
 import { SignJWT } from "jose";
 import crypto from "crypto";
 
@@ -310,8 +310,6 @@ async function invokeComposioTool(
             throw new Error(`connected account id not found for project ${projectId} and toolkit ${toolkitSlug}`);
         }
     }
-
-    const composio = new Composio();
 
     const result = await composio.tools.execute(slug, {
         userId: projectId,

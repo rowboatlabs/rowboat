@@ -1,6 +1,5 @@
-import { TriggerEvent, Composio } from "@composio/core";
+import { composio } from "@/app/lib/composio/composio";
 
-const composio = new Composio();
 export async function POST(request: Request) {
     const json = await request.json();
     console.log('compsio webhook received', JSON.stringify(json));

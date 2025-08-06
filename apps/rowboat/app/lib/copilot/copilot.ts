@@ -11,9 +11,8 @@ import { COPILOT_INSTRUCTIONS_EDIT_AGENT } from "./copilot_edit_agent";
 import { COPILOT_INSTRUCTIONS_MULTI_AGENT } from "./copilot_multi_agent";
 import { COPILOT_MULTI_AGENT_EXAMPLE_1 } from "./example_multi_agent_1";
 import { CURRENT_WORKFLOW_PROMPT } from "./current_workflow";
-import { Composio } from '@composio/core';
 import { USE_COMPOSIO_TOOLS } from "../feature_flags";
-import { getTool } from "../composio/composio";
+import { composio, getTool } from "../composio/composio";
 
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
@@ -102,8 +101,6 @@ async function searchRelevantTools(query: string): Promise<string> {
         logger.log("dynamic tool search is disabled");
         return 'No tools found!';
     }
-
-    const composio = new Composio();
 
     // Search for relevant tool slugs
     logger.log('searching for relevant tools...');
