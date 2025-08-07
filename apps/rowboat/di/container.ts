@@ -30,6 +30,14 @@ import { DeleteComposioConnectedAccountController } from "@/src/interface-adapte
 import { HandleComposioWebhookRequestController } from "@/src/interface-adapters/controllers/composio/webhook/handle-composio-webhook-request.controller";
 import { RedisPubSubService } from "@/src/infrastructure/services/redis.pub-sub.service";
 import { JobsWorker } from "@/src/application/workers/jobs.worker";
+import { ListJobsUseCase } from "@/src/application/use-cases/jobs/list-jobs.use-case";
+import { ListJobsController } from "@/src/interface-adapters/controllers/jobs/list-jobs.controller";
+import { ListConversationsUseCase } from "@/src/application/use-cases/conversations/list-conversations.use-case";
+import { ListConversationsController } from "@/src/interface-adapters/controllers/conversations/list-conversations.controller";
+import { FetchJobUseCase } from "@/src/application/use-cases/jobs/fetch-job.use-case";
+import { FetchJobController } from "@/src/interface-adapters/controllers/jobs/fetch-job.controller";
+import { FetchConversationUseCase } from "@/src/application/use-cases/conversations/fetch-conversation.use-case";
+import { FetchConversationController } from "@/src/interface-adapters/controllers/conversations/fetch-conversation.controller";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -66,24 +74,25 @@ container.register({
     // jobs
     // ---
     jobsRepository: asClass(MongoDBJobsRepository).singleton(),
+    listJobsUseCase: asClass(ListJobsUseCase).singleton(),
+    listJobsController: asClass(ListJobsController).singleton(),
+    fetchJobUseCase: asClass(FetchJobUseCase).singleton(),
+    fetchJobController: asClass(FetchJobController).singleton(),
 
     // composio
     // ---
     deleteComposioConnectedAccountUseCase: asClass(DeleteComposioConnectedAccountUseCase).singleton(),
     handleCompsioWebhookRequestUseCase: asClass(HandleCompsioWebhookRequestUseCase).singleton(),
-
     deleteComposioConnectedAccountController: asClass(DeleteComposioConnectedAccountController).singleton(),
     handleComposioWebhookRequestController: asClass(HandleComposioWebhookRequestController).singleton(),
 
     // composio trigger deployments
     // ---
     composioTriggerDeploymentsRepository: asClass(MongodbComposioTriggerDeploymentsRepository).singleton(),
-
     listComposioTriggerTypesUseCase: asClass(ListComposioTriggerTypesUseCase).singleton(),
     createComposioTriggerDeploymentUseCase: asClass(CreateComposioTriggerDeploymentUseCase).singleton(),
     listComposioTriggerDeploymentsUseCase: asClass(ListComposioTriggerDeploymentsUseCase).singleton(),
     deleteComposioTriggerDeploymentUseCase: asClass(DeleteComposioTriggerDeploymentUseCase).singleton(),
-
     createComposioTriggerDeploymentController: asClass(CreateComposioTriggerDeploymentController).singleton(),
     deleteComposioTriggerDeploymentController: asClass(DeleteComposioTriggerDeploymentController).singleton(),
     listComposioTriggerDeploymentsController: asClass(ListComposioTriggerDeploymentsController).singleton(),
@@ -92,14 +101,16 @@ container.register({
     // conversations
     // ---
     conversationsRepository: asClass(MongoDBConversationsRepository).singleton(),
-
     createConversationUseCase: asClass(CreateConversationUseCase).singleton(),
     createCachedTurnUseCase: asClass(CreateCachedTurnUseCase).singleton(),
     fetchCachedTurnUseCase: asClass(FetchCachedTurnUseCase).singleton(),
     runConversationTurnUseCase: asClass(RunConversationTurnUseCase).singleton(),
-
+    listConversationsUseCase: asClass(ListConversationsUseCase).singleton(),
+    fetchConversationUseCase: asClass(FetchConversationUseCase).singleton(),
     createPlaygroundConversationController: asClass(CreatePlaygroundConversationController).singleton(),
     createCachedTurnController: asClass(CreateCachedTurnController).singleton(),
     runCachedTurnController: asClass(RunCachedTurnController).singleton(),
     runTurnController: asClass(RunTurnController).singleton(),
+    listConversationsController: asClass(ListConversationsController).singleton(),
+    fetchConversationController: asClass(FetchConversationController).singleton(),
 });

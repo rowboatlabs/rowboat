@@ -5,6 +5,7 @@ import { AddTurnData, CreateConversationData, IConversationsRepository } from "@
 import { Conversation } from "@/src/entities/models/conversation";
 import { nanoid } from "nanoid";
 import { Turn } from "@/src/entities/models/turn";
+import { PaginatedList } from "@/src/entities/common/paginated-list";
 
 const DocSchema = Conversation
     .omit({
@@ -72,5 +73,33 @@ export class MongoDBConversationsRepository implements IConversationsRepository 
         });
 
         return turn;
+    }
+
+    async list(projectId: string, cursor?: string, limit: number = 50): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Conversation>>>> {
+        const query: any = { projectId };
+
+        if (cursor) {
+            query._id = { $gt: new ObjectId(cursor) };
+        }
+
+        const results = await this.collection
+            .find(query)
+            .sort({ _id: 1 })
+            .limit(limit + 1) // Fetch one extra to determine if there's a next page
+            .toArray();
+
+        const hasNextPage = results.length > limit;
+        const items = results.slice(0, limit).map(doc => {
+            const { _id, ...rest } = doc;
+            return {
+                ...rest,
+                id: _id.toString(),
+            };
+        });
+
+        return {
+            items,
+            nextCursor: hasNextPage ? results[limit - 1]._id.toString() : null,
+        };
     }
 }

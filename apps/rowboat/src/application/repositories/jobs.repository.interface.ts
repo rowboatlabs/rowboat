@@ -2,6 +2,7 @@ import { Job } from "@/src/entities/models/job";
 import { JobAcquisitionError } from "@/src/entities/errors/job-errors";
 import { NotFoundError } from "@/src/entities/errors/common";
 import { z } from "zod";
+import { PaginatedList } from "@/src/entities/common/paginated-list";
 
 /**
  * Schema for creating a new job.
@@ -37,6 +38,14 @@ export interface IJobsRepository {
      * @returns Promise resolving to the created job with all fields populated
      */
     create(data: z.infer<typeof createJobSchema>): Promise<z.infer<typeof Job>>;
+
+    /**
+     * Fetches a job by its unique identifier.
+     * 
+     * @param id - The unique identifier of the job to fetch
+     * @returns Promise resolving to the job or null if not found
+     */
+    fetch(id: string): Promise<z.infer<typeof Job> | null>;
 
     /**
      * Polls for the next available job that can be processed by a worker.
@@ -82,4 +91,14 @@ export interface IJobsRepository {
      * @returns Promise that resolves when the job has been released
      */
     release(id: string): Promise<void>;
+
+    /**
+     * Lists jobs for a specific project with pagination.
+     * 
+     * @param projectId - The unique identifier of the project
+     * @param cursor - Optional cursor for pagination
+     * @param limit - Maximum number of jobs to return (default: 50)
+     * @returns Promise resolving to a paginated list of jobs
+     */
+    list(projectId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Job>>>>;
 }

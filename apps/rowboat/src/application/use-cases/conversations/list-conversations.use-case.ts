@@ -2,8 +2,8 @@ import { BadRequestError, NotFoundError } from '@/src/entities/errors/common';
 import { z } from "zod";
 import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
-import { IComposioTriggerDeploymentsRepository } from '../../repositories/composio-trigger-deployments.repository.interface';
-import { ComposioTriggerDeployment } from '@/src/entities/models/composio-trigger-deployment';
+import { IConversationsRepository } from '../../repositories/conversations.repository.interface';
+import { Conversation } from '@/src/entities/models/conversation';
 import { PaginatedList } from '@/src/entities/common/paginated-list';
 
 const inputSchema = z.object({
@@ -15,31 +15,31 @@ const inputSchema = z.object({
     limit: z.number().optional(),
 });
 
-export interface IListComposioTriggerDeploymentsUseCase {
-    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ComposioTriggerDeployment>>>>;
+export interface IListConversationsUseCase {
+    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Conversation>>>>;
 }
 
-export class ListComposioTriggerDeploymentsUseCase implements IListComposioTriggerDeploymentsUseCase {
-    private readonly composioTriggerDeploymentsRepository: IComposioTriggerDeploymentsRepository;   
+export class ListConversationsUseCase implements IListConversationsUseCase {
+    private readonly conversationsRepository: IConversationsRepository;   
     private readonly usageQuotaPolicy: IUsageQuotaPolicy;
     private readonly projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy;
 
     constructor({
-        composioTriggerDeploymentsRepository,
+        conversationsRepository,
         usageQuotaPolicy,
         projectActionAuthorizationPolicy,
     }: {
-        composioTriggerDeploymentsRepository: IComposioTriggerDeploymentsRepository,
+        conversationsRepository: IConversationsRepository,
         usageQuotaPolicy: IUsageQuotaPolicy,
         projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy,
     }) {
-        this.composioTriggerDeploymentsRepository = composioTriggerDeploymentsRepository;
+        this.conversationsRepository = conversationsRepository;
         this.usageQuotaPolicy = usageQuotaPolicy;
         this.projectActionAuthorizationPolicy = projectActionAuthorizationPolicy;
     }
 
-    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ComposioTriggerDeployment>>>> {
-        // extract projectid from conversation
+    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Conversation>>>> {
+        // extract projectid from request
         const { projectId, limit } = request;
 
         // authz check
@@ -53,7 +53,7 @@ export class ListComposioTriggerDeploymentsUseCase implements IListComposioTrigg
         // assert and consume quota
         await this.usageQuotaPolicy.assertAndConsume(projectId);
 
-        // fetch deployments for project
-        return await this.composioTriggerDeploymentsRepository.listByProjectId(projectId, request.cursor, limit);
+        // fetch conversations for project
+        return await this.conversationsRepository.list(projectId, request.cursor, limit);
     }
 }

@@ -2,8 +2,8 @@ import { BadRequestError, NotFoundError } from '@/src/entities/errors/common';
 import { z } from "zod";
 import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
-import { IComposioTriggerDeploymentsRepository } from '../../repositories/composio-trigger-deployments.repository.interface';
-import { ComposioTriggerDeployment } from '@/src/entities/models/composio-trigger-deployment';
+import { IJobsRepository } from '../../repositories/jobs.repository.interface';
+import { Job } from '@/src/entities/models/job';
 import { PaginatedList } from '@/src/entities/common/paginated-list';
 
 const inputSchema = z.object({
@@ -15,31 +15,31 @@ const inputSchema = z.object({
     limit: z.number().optional(),
 });
 
-export interface IListComposioTriggerDeploymentsUseCase {
-    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ComposioTriggerDeployment>>>>;
+export interface IListJobsUseCase {
+    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Job>>>>;
 }
 
-export class ListComposioTriggerDeploymentsUseCase implements IListComposioTriggerDeploymentsUseCase {
-    private readonly composioTriggerDeploymentsRepository: IComposioTriggerDeploymentsRepository;   
+export class ListJobsUseCase implements IListJobsUseCase {
+    private readonly jobsRepository: IJobsRepository;   
     private readonly usageQuotaPolicy: IUsageQuotaPolicy;
     private readonly projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy;
 
     constructor({
-        composioTriggerDeploymentsRepository,
+        jobsRepository,
         usageQuotaPolicy,
         projectActionAuthorizationPolicy,
     }: {
-        composioTriggerDeploymentsRepository: IComposioTriggerDeploymentsRepository,
+        jobsRepository: IJobsRepository,
         usageQuotaPolicy: IUsageQuotaPolicy,
         projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy,
     }) {
-        this.composioTriggerDeploymentsRepository = composioTriggerDeploymentsRepository;
+        this.jobsRepository = jobsRepository;
         this.usageQuotaPolicy = usageQuotaPolicy;
         this.projectActionAuthorizationPolicy = projectActionAuthorizationPolicy;
     }
 
-    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ComposioTriggerDeployment>>>> {
-        // extract projectid from conversation
+    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Job>>>> {
+        // extract projectid from request
         const { projectId, limit } = request;
 
         // authz check
@@ -53,7 +53,7 @@ export class ListComposioTriggerDeploymentsUseCase implements IListComposioTrigg
         // assert and consume quota
         await this.usageQuotaPolicy.assertAndConsume(projectId);
 
-        // fetch deployments for project
-        return await this.composioTriggerDeploymentsRepository.listByProjectId(projectId, request.cursor, limit);
+        // fetch jobs for project
+        return await this.jobsRepository.list(projectId, request.cursor, limit);
     }
 }

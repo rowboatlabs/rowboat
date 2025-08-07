@@ -10,6 +10,7 @@ const inputSchema = z.object({
     apiKey: z.string().optional(),
     projectId: z.string(),
     cursor: z.string().optional(),
+    limit: z.number().optional(),
 });
 
 export interface IListComposioTriggerDeploymentsController {
@@ -33,7 +34,7 @@ export class ListComposioTriggerDeploymentsController implements IListComposioTr
         if (!result.success) {
             throw new BadRequestError(`Invalid request: ${JSON.stringify(result.error)}`);
         }
-        const { caller, userId, apiKey, projectId, cursor } = result.data;
+        const { caller, userId, apiKey, projectId, cursor, limit } = result.data;
 
         // execute use case
         return await this.listComposioTriggerDeploymentsUseCase.execute({
@@ -42,6 +43,7 @@ export class ListComposioTriggerDeploymentsController implements IListComposioTr
             apiKey,
             projectId,
             cursor,
+            limit,
         });
     }
 }

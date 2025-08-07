@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Conversation } from "@/src/entities/models/conversation";
 import { Turn } from "@/src/entities/models/turn";
+import { PaginatedList } from "@/src/entities/common/paginated-list";
 
 export const CreateConversationData = Conversation.pick({
     projectId: true,
@@ -20,6 +21,9 @@ export interface IConversationsRepository {
 
     // get conversation
     fetch(id: string): Promise<z.infer<typeof Conversation> | null>;
+
+    // list conversations for project
+    list(projectId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Conversation>>>>;
 
     // add turn data to conversation
     // returns the created turn

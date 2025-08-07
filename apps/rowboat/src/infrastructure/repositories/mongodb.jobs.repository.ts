@@ -5,6 +5,7 @@ import { IJobsRepository } from "@/src/application/repositories/jobs.repository.
 import { Job } from "@/src/entities/models/job";
 import { JobAcquisitionError } from "@/src/entities/errors/job-errors";
 import { NotFoundError } from "@/src/entities/errors/common";
+import { PaginatedList } from "@/src/entities/common/paginated-list";
 
 /**
  * MongoDB document schema for Job.
@@ -62,6 +63,24 @@ export class MongoDBJobsRepository implements IJobsRepository {
 
         return {
             ...doc,
+            id: _id.toString(),
+        };
+    }
+
+    /**
+     * Fetches a job by its unique identifier.
+     */
+    async fetch(id: string): Promise<z.infer<typeof Job> | null> {
+        const result = await this.collection.findOne({ _id: new ObjectId(id) });
+
+        if (!result) {
+            return null;
+        }
+
+        const { _id, ...rest } = result;
+
+        return {
+            ...rest,
             id: _id.toString(),
         };
     }
@@ -193,5 +212,36 @@ export class MongoDBJobsRepository implements IJobsRepository {
         if (result.matchedCount === 0) {
             throw new NotFoundError(`Job ${id} not found`);
         }
+    }
+
+    /**
+     * Lists jobs for a specific project with pagination.
+     */
+    async list(projectId: string, cursor?: string, limit: number = 50): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Job>>>> {
+        const query: any = { projectId };
+
+        if (cursor) {
+            query._id = { $gt: new ObjectId(cursor) };
+        }
+
+        const results = await this.collection
+            .find(query)
+            .sort({ _id: 1 })
+            .limit(limit + 1) // Fetch one extra to determine if there's a next page
+            .toArray();
+
+        const hasNextPage = results.length > limit;
+        const items = results.slice(0, limit).map(doc => {
+            const { _id, ...rest } = doc;
+            return {
+                ...rest,
+                id: _id.toString(),
+            };
+        });
+
+        return {
+            items,
+            nextCursor: hasNextPage ? results[limit - 1]._id.toString() : null,
+        };
     }
 }
