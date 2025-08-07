@@ -15,7 +15,6 @@ import {
   Sun,
   HelpCircle,
   MessageSquareIcon,
-  ClockIcon,
   LogsIcon
 } from "lucide-react";
 import { getProjectConfig } from "@/app/actions/project_actions";
