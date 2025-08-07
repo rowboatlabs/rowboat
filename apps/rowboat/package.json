@@ -13,7 +13,7 @@
     "ragUrlsWorker": "tsx app/scripts/rag_urls_worker.ts",
     "ragFilesWorker": "tsx app/scripts/rag_files_worker.ts",
     "ragTextWorker": "tsx app/scripts/rag_text_worker.ts",
-    "worker": "tsx app/scripts/worker.ts"
+    "jobs-worker": "tsx app/scripts/jobs-worker.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.3.21",
