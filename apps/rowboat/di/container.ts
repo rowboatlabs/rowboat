@@ -28,6 +28,7 @@ import { ListComposioTriggerDeploymentsController } from "@/src/interface-adapte
 import { ListComposioTriggerTypesController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/list-composio-trigger-types.controller";
 import { DeleteComposioConnectedAccountController } from "@/src/interface-adapters/controllers/composio/delete-composio-connected-account.controller";
 import { HandleComposioWebhookRequestController } from "@/src/interface-adapters/controllers/composio/webhook/handle-composio-webhook-request.controller";
+import { RedisPubSubService } from "@/src/infrastructure/services/redis.pub-sub.service";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -38,6 +39,7 @@ container.register({
     // services
     // ---
     cacheService: asClass(RedisCacheService).singleton(),
+    pubSubService: asClass(RedisPubSubService).singleton(),
 
     // policies
     // ---
