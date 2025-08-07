@@ -3,6 +3,7 @@ import z from "zod";
 import { IListConversationsUseCase } from "@/src/application/use-cases/conversations/list-conversations.use-case";
 import { Conversation } from "@/src/entities/models/conversation";
 import { PaginatedList } from "@/src/entities/common/paginated-list";
+import { ListedConversationItem } from "@/src/application/repositories/conversations.repository.interface";
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
@@ -14,7 +15,7 @@ const inputSchema = z.object({
 });
 
 export interface IListConversationsController {
-    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Conversation>>>>;
+    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedConversationItem>>>>;
 }
 
 export class ListConversationsController implements IListConversationsController {
@@ -28,7 +29,7 @@ export class ListConversationsController implements IListConversationsController
         this.listConversationsUseCase = listConversationsUseCase;
     }
 
-    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Conversation>>>> {
+    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedConversationItem>>>> {
         // parse input
         const result = inputSchema.safeParse(request);
         if (!result.success) {

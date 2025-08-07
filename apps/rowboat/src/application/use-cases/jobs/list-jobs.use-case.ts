@@ -2,7 +2,7 @@ import { BadRequestError, NotFoundError } from '@/src/entities/errors/common';
 import { z } from "zod";
 import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
-import { IJobsRepository } from '../../repositories/jobs.repository.interface';
+import { IJobsRepository, ListedJobItem } from '../../repositories/jobs.repository.interface';
 import { Job } from '@/src/entities/models/job';
 import { PaginatedList } from '@/src/entities/common/paginated-list';
 
@@ -16,7 +16,7 @@ const inputSchema = z.object({
 });
 
 export interface IListJobsUseCase {
-    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Job>>>>;
+    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedJobItem>>>>;
 }
 
 export class ListJobsUseCase implements IListJobsUseCase {
@@ -38,7 +38,7 @@ export class ListJobsUseCase implements IListJobsUseCase {
         this.projectActionAuthorizationPolicy = projectActionAuthorizationPolicy;
     }
 
-    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Job>>>> {
+    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedJobItem>>>> {
         // extract projectid from request
         const { projectId, limit } = request;
 

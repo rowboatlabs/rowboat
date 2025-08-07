@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { db } from "@/app/lib/mongodb";
 import { ObjectId } from "mongodb";
-import { AddTurnData, CreateConversationData, IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
+import { AddTurnData, CreateConversationData, IConversationsRepository, ListedConversationItem } from "@/src/application/repositories/conversations.repository.interface";
 import { Conversation } from "@/src/entities/models/conversation";
 import { nanoid } from "nanoid";
 import { Turn } from "@/src/entities/models/turn";
@@ -75,7 +75,7 @@ export class MongoDBConversationsRepository implements IConversationsRepository 
         return turn;
     }
 
-    async list(projectId: string, cursor?: string, limit: number = 50): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Conversation>>>> {
+    async list(projectId: string, cursor?: string, limit: number = 50): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedConversationItem>>>> {
         const query: any = { projectId };
 
         if (cursor) {
@@ -86,6 +86,12 @@ export class MongoDBConversationsRepository implements IConversationsRepository 
             .find(query)
             .sort({ _id: 1 })
             .limit(limit + 1) // Fetch one extra to determine if there's a next page
+            .project<z.infer<typeof ListedConversationItem> & { _id: ObjectId }>({
+                _id: 1,
+                projectId: 1,
+                createdAt: 1,
+                updatedAt: 1,
+            })
             .toArray();
 
         const hasNextPage = results.length > limit;

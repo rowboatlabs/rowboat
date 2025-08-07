@@ -3,6 +3,7 @@ import z from "zod";
 import { IListJobsUseCase } from "@/src/application/use-cases/jobs/list-jobs.use-case";
 import { Job } from "@/src/entities/models/job";
 import { PaginatedList } from "@/src/entities/common/paginated-list";
+import { ListedJobItem } from "@/src/application/repositories/jobs.repository.interface";
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
@@ -14,7 +15,7 @@ const inputSchema = z.object({
 });
 
 export interface IListJobsController {
-    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Job>>>>;
+    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedJobItem>>>>;
 }
 
 export class ListJobsController implements IListJobsController {
@@ -28,7 +29,7 @@ export class ListJobsController implements IListJobsController {
         this.listJobsUseCase = listJobsUseCase;
     }
 
-    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Job>>>> {
+    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedJobItem>>>> {
         // parse input
         const result = inputSchema.safeParse(request);
         if (!result.success) {

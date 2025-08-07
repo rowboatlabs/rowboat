@@ -14,6 +14,15 @@ const createJobSchema = Job.pick({
     input: true,
 });
 
+export const ListedJobItem = Job.pick({
+    id: true,
+    projectId: true,
+    status: true,
+    reason: true,
+    createdAt: true,
+    updatedAt: true,
+});
+
 /**
  * Schema for updating an existing job.
  * Defines the fields that can be updated for a job.
@@ -100,5 +109,5 @@ export interface IJobsRepository {
      * @param limit - Maximum number of jobs to return (default: 50)
      * @returns Promise resolving to a paginated list of jobs
      */
-    list(projectId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Job>>>>;
+    list(projectId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedJobItem>>>>;
 }

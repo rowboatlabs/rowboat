@@ -2,7 +2,7 @@ import { BadRequestError, NotFoundError } from '@/src/entities/errors/common';
 import { z } from "zod";
 import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
-import { IConversationsRepository } from '../../repositories/conversations.repository.interface';
+import { IConversationsRepository, ListedConversationItem } from '../../repositories/conversations.repository.interface';
 import { Conversation } from '@/src/entities/models/conversation';
 import { PaginatedList } from '@/src/entities/common/paginated-list';
 
@@ -16,7 +16,7 @@ const inputSchema = z.object({
 });
 
 export interface IListConversationsUseCase {
-    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Conversation>>>>;
+    execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedConversationItem>>>>;
 }
 
 export class ListConversationsUseCase implements IListConversationsUseCase {
@@ -38,7 +38,7 @@ export class ListConversationsUseCase implements IListConversationsUseCase {
         this.projectActionAuthorizationPolicy = projectActionAuthorizationPolicy;
     }
 
-    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Conversation>>>> {
+    async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedConversationItem>>>> {
         // extract projectid from request
         const { projectId, limit } = request;
 

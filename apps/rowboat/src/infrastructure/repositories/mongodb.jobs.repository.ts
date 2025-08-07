@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ObjectId } from "mongodb";
 import { db } from "@/app/lib/mongodb";
-import { IJobsRepository } from "@/src/application/repositories/jobs.repository.interface";
+import { IJobsRepository, ListedJobItem } from "@/src/application/repositories/jobs.repository.interface";
 import { Job } from "@/src/entities/models/job";
 import { JobAcquisitionError } from "@/src/entities/errors/job-errors";
 import { NotFoundError } from "@/src/entities/errors/common";
@@ -217,7 +217,7 @@ export class MongoDBJobsRepository implements IJobsRepository {
     /**
      * Lists jobs for a specific project with pagination.
      */
-    async list(projectId: string, cursor?: string, limit: number = 50): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Job>>>> {
+    async list(projectId: string, cursor?: string, limit: number = 50): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedJobItem>>>> {
         const query: any = { projectId };
 
         if (cursor) {
@@ -228,6 +228,14 @@ export class MongoDBJobsRepository implements IJobsRepository {
             .find(query)
             .sort({ _id: 1 })
             .limit(limit + 1) // Fetch one extra to determine if there's a next page
+            .project<z.infer<typeof ListedJobItem> & { _id: ObjectId }>({
+                _id: 1,
+                projectId: 1,
+                status: 1,
+                reason: 1,
+                createdAt: 1,
+                updatedAt: 1,
+            })
             .toArray();
 
         const hasNextPage = results.length > limit;

@@ -15,6 +15,13 @@ export const AddTurnData = Turn.omit({
     updatedAt: true,
 });
 
+export const ListedConversationItem = Conversation.pick({
+    id: true,
+    projectId: true,
+    createdAt: true,
+    updatedAt: true,
+});
+
 export interface IConversationsRepository {
     // create a new conversation
     create(data: z.infer<typeof CreateConversationData>): Promise<z.infer<typeof Conversation>>;
@@ -23,7 +30,7 @@ export interface IConversationsRepository {
     fetch(id: string): Promise<z.infer<typeof Conversation> | null>;
 
     // list conversations for project
-    list(projectId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Conversation>>>>;
+    list(projectId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedConversationItem>>>>;
 
     // add turn data to conversation
     // returns the created turn
