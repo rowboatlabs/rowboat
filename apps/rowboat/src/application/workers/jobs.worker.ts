@@ -122,6 +122,8 @@ export class JobsWorker implements IJobsWorker {
                 return;
             }
 
+            logger.log(`Received job ${jobId} via subscription`);
+
             // Try to lock the specific job
             let job: z.infer<typeof Job> | null = null;
             try {
