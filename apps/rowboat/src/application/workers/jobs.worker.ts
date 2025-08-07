@@ -125,7 +125,7 @@ export class JobsWorker implements IJobsWorker {
             // Try to lock the specific job
             let job: z.infer<typeof Job> | null = null;
             try {
-                job = await this.jobsRepository.lockJob(jobId, this.workerId);
+                job = await this.jobsRepository.lock(jobId, this.workerId);
                 logger.log(`Successfully locked job`);
             } catch (error) {
                 // Job might already be locked by another worker or doesn't exist
@@ -147,7 +147,7 @@ export class JobsWorker implements IJobsWorker {
         const logger = this.logger.child(`poll-for-jobs`);
         try {
             // fetch next job
-            const job = await this.jobsRepository.pollNextJob(this.workerId);
+            const job = await this.jobsRepository.poll(this.workerId);
 
             // if no job found, return early
             if (!job) {

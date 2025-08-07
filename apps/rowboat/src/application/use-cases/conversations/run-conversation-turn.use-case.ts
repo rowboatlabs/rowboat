@@ -43,7 +43,7 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
 
     async *execute(data: z.infer<typeof inputSchema>): AsyncGenerator<z.infer<typeof TurnEvent>, void, unknown> {
         // fetch conversation
-        const conversation = await this.conversationsRepository.getConversation(data.conversationId);
+        const conversation = await this.conversationsRepository.fetch(data.conversationId);
         if (!conversation) {
             throw new NotFoundError('Conversation not found');
         }

@@ -47,7 +47,7 @@ export interface IJobsRepository {
      * @param workerId - The unique identifier of the worker requesting a job
      * @returns Promise resolving to the next available job or null if no jobs are available
      */
-    pollNextJob(workerId: string): Promise<z.infer<typeof Job> | null>;
+    poll(workerId: string): Promise<z.infer<typeof Job> | null>;
 
     /**
      * Locks a specific job for processing by a worker.
@@ -60,7 +60,7 @@ export interface IJobsRepository {
      * @returns Promise resolving to the locked job
      * @throws {JobAcquisitionError} if the job is already locked or doesn't exist
      */
-    lockJob(id: string, workerId: string): Promise<z.infer<typeof Job>>;
+    lock(id: string, workerId: string): Promise<z.infer<typeof Job>>;
 
     /**
      * Updates an existing job with new status and/or output data.

@@ -69,7 +69,7 @@ export class MongoDBJobsRepository implements IJobsRepository {
     /**
      * Polls for the next available job that can be processed by a worker.
      */
-    async pollNextJob(workerId: string): Promise<z.infer<typeof Job> | null> {
+    async poll(workerId: string): Promise<z.infer<typeof Job> | null> {
         const now = new Date().toISOString();
         
         // Find and update the next available job atomically
@@ -107,7 +107,7 @@ export class MongoDBJobsRepository implements IJobsRepository {
     /**
      * Locks a specific job for processing by a worker.
      */
-    async lockJob(id: string, workerId: string): Promise<z.infer<typeof Job>> {
+    async lock(id: string, workerId: string): Promise<z.infer<typeof Job>> {
         const now = new Date().toISOString();
 
         const result = await this.collection.findOneAndUpdate(

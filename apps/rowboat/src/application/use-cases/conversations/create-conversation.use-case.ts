@@ -73,7 +73,7 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
         }
 
         // create conversation
-        return await this.conversationsRepository.createConversation({
+        return await this.conversationsRepository.create({
             projectId,
             workflow,
             isLiveWorkflow,

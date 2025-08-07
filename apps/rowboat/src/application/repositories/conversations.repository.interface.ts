@@ -16,10 +16,10 @@ export const AddTurnData = Turn.omit({
 
 export interface IConversationsRepository {
     // create a new conversation
-    createConversation(data: z.infer<typeof CreateConversationData>): Promise<z.infer<typeof Conversation>>;
+    create(data: z.infer<typeof CreateConversationData>): Promise<z.infer<typeof Conversation>>;
 
     // get conversation
-    getConversation(id: string): Promise<z.infer<typeof Conversation> | null>;
+    fetch(id: string): Promise<z.infer<typeof Conversation> | null>;
 
     // add turn data to conversation
     // returns the created turn

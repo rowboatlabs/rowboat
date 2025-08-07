@@ -14,7 +14,7 @@ const DocSchema = Conversation
 export class MongoDBConversationsRepository implements IConversationsRepository {
     private readonly collection = db.collection<z.infer<typeof DocSchema>>("conversations");
 
-    async createConversation(data: z.infer<typeof CreateConversationData>): Promise<z.infer<typeof Conversation>> {
+    async create(data: z.infer<typeof CreateConversationData>): Promise<z.infer<typeof Conversation>> {
         const now = new Date();
         const _id = new ObjectId();
 
@@ -35,7 +35,7 @@ export class MongoDBConversationsRepository implements IConversationsRepository 
         };
     }
 
-    async getConversation(id: string): Promise<z.infer<typeof Conversation> | null> {
+    async fetch(id: string): Promise<z.infer<typeof Conversation> | null> {
         const result = await this.collection.findOne({
             _id: new ObjectId(id),
         });
