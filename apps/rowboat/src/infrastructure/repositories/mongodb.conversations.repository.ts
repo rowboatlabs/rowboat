@@ -79,7 +79,7 @@ export class MongoDBConversationsRepository implements IConversationsRepository 
         const query: any = { projectId };
 
         if (cursor) {
-            query._id = { $gt: new ObjectId(cursor) };
+            query._id = { $lt: new ObjectId(cursor) };
         }
 
         const results = await this.collection

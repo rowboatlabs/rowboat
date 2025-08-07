@@ -221,12 +221,12 @@ export class MongoDBJobsRepository implements IJobsRepository {
         const query: any = { projectId };
 
         if (cursor) {
-            query._id = { $gt: new ObjectId(cursor) };
+            query._id = { $lt: new ObjectId(cursor) };
         }
 
         const results = await this.collection
             .find(query)
-            .sort({ _id: 1 })
+            .sort({ _id: -1 })
             .limit(limit + 1) // Fetch one extra to determine if there's a next page
             .project<z.infer<typeof ListedJobItem> & { _id: ObjectId }>({
                 _id: 1,
