@@ -126,7 +126,7 @@ export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhook
                         triggerId: event.data.trigger_nano_id,
                         triggerDeploymentId: deployment.id,
                         triggerTypeSlug: deployment.triggerTypeSlug,
-                        payload: event.data,
+                        payload: event,
                     },
                     projectId: deployment.projectId,
                     input: {

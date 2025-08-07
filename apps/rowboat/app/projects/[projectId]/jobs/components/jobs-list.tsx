@@ -79,6 +79,13 @@ export function JobsList({ projectId }: { projectId: string }) {
         }
     };
 
+    const getReasonDisplay = (reason: any) => {
+        if (reason.type === 'composio_trigger') {
+            return `Composio: ${reason.triggerTypeSlug}`;
+        }
+        return 'Unknown';
+    };
+
     return (
         <Panel
             title={
@@ -117,7 +124,8 @@ export function JobsList({ projectId }: { projectId: string }) {
                                                     <tr>
                                                         <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Job</th>
                                                         <th className="w-[20%] px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Status</th>
-                                                        <th className="w-[30%] px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Created</th>
+                                                        <th className="w-[25%] px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Reason</th>
+                                                        <th className="w-[25%] px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Created</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -136,6 +144,11 @@ export function JobsList({ projectId }: { projectId: string }) {
                                                             <td className="px-6 py-4 text-left">
                                                                 <span className={`text-sm font-medium ${getStatusColor(job.status)}`}>
                                                                     {job.status}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-left">
+                                                                <span className="text-sm text-gray-600 dark:text-gray-300 font-mono">
+                                                                    {getReasonDisplay(job.reason)}
                                                                 </span>
                                                             </td>
                                                             <td className="px-6 py-4 text-left text-sm text-gray-600 dark:text-gray-300">

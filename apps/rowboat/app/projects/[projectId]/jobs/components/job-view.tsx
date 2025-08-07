@@ -45,9 +45,29 @@ export function JobView({ projectId, jobId }: { projectId: string; jobId: string
         }
     };
 
+    const getReasonDisplay = (reason: any) => {
+        if (reason.type === 'composio_trigger') {
+            return {
+                type: 'Composio Trigger',
+                details: {
+                    'Trigger Type': reason.triggerTypeSlug,
+                    'Trigger ID': reason.triggerId,
+                    'Deployment ID': reason.triggerDeploymentId,
+                },
+                payload: reason.payload
+            };
+        }
+        return {
+            type: 'Unknown',
+            details: {},
+            payload: null
+        };
+    };
+
     // Extract conversation and turn IDs from job output
     const conversationId = job?.output?.conversationId;
     const turnId = job?.output?.turnId;
+    const reasonInfo = job ? getReasonDisplay(job.reason) : null;
 
     return (
         <Panel
@@ -123,6 +143,41 @@ export function JobView({ projectId, jobId }: { projectId: string; jobId: string
                                     )}
                                 </div>
                             </div>
+
+                            {/* Job Reason */}
+                            {reasonInfo && (
+                                <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                                    <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 uppercase tracking-wide">
+                                        Job Reason
+                                    </div>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
+                                                {reasonInfo.type}
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-2 text-sm">
+                                                {Object.entries(reasonInfo.details).map(([key, value]) => (
+                                                    <div key={key} className="flex justify-between">
+                                                        <span className="font-semibold text-gray-700 dark:text-gray-300">{key}:</span>
+                                                        <span className="font-mono text-gray-600 dark:text-gray-400">{value}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        
+                                        {reasonInfo.payload && Object.keys(reasonInfo.payload).length > 0 && (
+                                            <div>
+                                                <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
+                                                    Trigger Payload
+                                                </div>
+                                                <pre className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs overflow-x-auto border border-gray-200 dark:border-gray-700 font-mono max-h-[300px]">
+                                                    {JSON.stringify(reasonInfo.payload, null, 2)}
+                                                </pre>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Job Input */}
                             <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
