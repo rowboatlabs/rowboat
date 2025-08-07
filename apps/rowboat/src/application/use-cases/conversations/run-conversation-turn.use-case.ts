@@ -10,11 +10,11 @@ import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
 
 const inputSchema = z.object({
-    caller: z.enum(["user", "api"]),
+    caller: z.enum(["user", "api", "job_worker"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
     conversationId: z.string(),
-    trigger: Turn.shape.trigger,
+    reason: Turn.shape.reason,
     input: Turn.shape.input,
 });
 
@@ -52,12 +52,14 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
         const { id: conversationId, projectId } = conversation;
 
         // authz check
-        await this.projectActionAuthorizationPolicy.authorize({
-            caller: data.caller,
-            userId: data.userId,
-            apiKey: data.apiKey,
-            projectId,
-        });
+        if (data.caller !== "job_worker") {
+            await this.projectActionAuthorizationPolicy.authorize({
+                caller: data.caller,
+                userId: data.userId,
+                apiKey: data.apiKey,
+                projectId,
+            });
+        }
 
         // assert and consume quota
         await this.usageQuotaPolicy.assertAndConsume(projectId);
@@ -129,7 +131,7 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
             } else {
                 // save turn data
                 const turn = await this.conversationsRepository.addTurn(data.conversationId, {
-                    trigger: data.trigger,
+                    reason: data.reason,
                     input: data.input,
                     output: outputMessages,
                 });

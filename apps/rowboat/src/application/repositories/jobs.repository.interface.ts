@@ -8,8 +8,7 @@ import { z } from "zod";
  * Defines the required fields when creating a job in the system.
  */
 const createJobSchema = Job.pick({
-    trigger: true,
-    triggerData: true,
+    reason: true,
     projectId: true,
     input: true,
 });

@@ -116,9 +116,12 @@ export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhook
 
                 // create job
                 const job = await this.jobsRepository.create({
-                    trigger: "composio_trigger",
-                    triggerData: {
-                        composioTriggerId: deployment.id,
+                    reason: {
+                        type: "composio_trigger",
+                        triggerId: event.data.trigger_nano_id,
+                        triggerDeploymentId: deployment.id,
+                        triggerTypeSlug: deployment.triggerTypeSlug,
+                        payload: event.data,
                     },
                     projectId: deployment.projectId,
                     input: {

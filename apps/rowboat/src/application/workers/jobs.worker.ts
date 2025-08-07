@@ -1,15 +1,10 @@
-import { USE_BILLING } from "@/app/lib/feature_flags";
-import { authorize, logUsage } from "@/app/lib/billing";
-import { getCustomerIdForProject } from "@/app/lib/billing";
 import { IJobsRepository } from "@/src/application/repositories/jobs.repository.interface";
-import { IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
-import { IProjectsRepository } from "@/src/application/repositories/projects.repository.interface";
 import { ICreateConversationUseCase } from "../use-cases/conversations/create-conversation.use-case";
 import { IRunConversationTurnUseCase } from "../use-cases/conversations/run-conversation-turn.use-case";
-import { getResponse } from "@/app/lib/agents";
+import { Job } from "@/src/entities/models/job";
+import { Turn } from "@/src/entities/models/turn";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { Job } from "@/src/entities/models/job";
 
 export interface IJobsWorker {
     run(): Promise<void>;
@@ -17,24 +12,20 @@ export interface IJobsWorker {
 
 export class JobsWorker implements IJobsWorker {
     private readonly jobsRepository: IJobsRepository;
-    private readonly projectsRepository: IProjectsRepository;
     private readonly createConversationUseCase: ICreateConversationUseCase;
     private readonly runConversationTurnUseCase: IRunConversationTurnUseCase;
     private workerId;
 
     constructor({
         jobsRepository,
-        projectsRepository,
         createConversationUseCase,
         runConversationTurnUseCase,
     }: {
         jobsRepository: IJobsRepository;
-        projectsRepository: IProjectsRepository;
         createConversationUseCase: ICreateConversationUseCase;
         runConversationTurnUseCase: IRunConversationTurnUseCase;
     }) {
         this.jobsRepository = jobsRepository;
-        this.projectsRepository = projectsRepository;
         this.createConversationUseCase = createConversationUseCase;
         this.runConversationTurnUseCase = runConversationTurnUseCase;
         this.workerId = nanoid();
@@ -54,14 +45,46 @@ export class JobsWorker implements IJobsWorker {
             });
 
             // run turn
-            const iter = this.runConversationTurnUseCase.execute({
+            const stream = this.runConversationTurnUseCase.execute({
                 caller: "job_worker",
                 conversationId: conversation.id,
-                trigger: "job",
+                reason: {
+                    type: "job",
+                    jobId: job.id,
+                },
                 input: {
                     messages: job.input.messages,
                 },
             });
+            let turn: z.infer<typeof Turn> | null = null;
+            for await (const event of stream) {
+                if (event.type === "done") {
+                    turn = event.turn;
+                }
+            }
+            if (!turn) {
+                throw new Error("Turn not created");
+            }
+
+            // update job
+            await this.jobsRepository.update(job.id, {
+                status: "completed",
+                output: {
+                    conversationId: conversation.id,
+                    turnId: turn.id,
+                },
+            });
+        } catch (error) {
+            // update job
+            await this.jobsRepository.update(job.id, {
+                status: "failed",
+                output: {
+                    error: error instanceof Error ? error.message : "Unknown error",
+                },
+            });
+        } finally {
+            // release job
+            await this.jobsRepository.release(job.id);
         }
     }
 

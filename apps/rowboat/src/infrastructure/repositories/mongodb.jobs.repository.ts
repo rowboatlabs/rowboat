@@ -18,8 +18,7 @@ const DocSchema = Job.omit({
  * Schema for creating a new job.
  */
 const createJobSchema = Job.pick({
-    trigger: true,
-    triggerData: true,
+    reason: true,
     projectId: true,
     input: true,
 });

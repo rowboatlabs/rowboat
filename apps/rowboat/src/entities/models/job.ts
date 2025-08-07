@@ -2,12 +2,19 @@ import { Message } from "@/app/lib/types/types";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { z } from "zod";
 
+const composioTriggerReason = z.object({
+    type: z.literal("composio_trigger"),
+    triggerId: z.string(),
+    triggerDeploymentId: z.string(),
+    triggerTypeSlug: z.string(),
+    payload: z.object({}).passthrough(),
+});
+
+const reason = composioTriggerReason;
+
 export const Job = z.object({
     id: z.string(),
-    trigger: z.enum(["composio_trigger"]),
-    triggerData: z.object({
-        composioTriggerId: z.string().optional(),
-    }),
+    reason,
     projectId: z.string(),
     input: z.object({
         workflow: Workflow,
