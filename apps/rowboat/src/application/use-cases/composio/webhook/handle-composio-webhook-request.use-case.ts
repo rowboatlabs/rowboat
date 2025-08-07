@@ -5,6 +5,7 @@ import { z } from "zod";
 import { BadRequestError } from "@/src/entities/errors/common";
 import { UserMessage } from "@/app/lib/types/types";
 import { PrefixLogger } from "@/app/lib/utils";
+import { IProjectsRepository } from "@/src/application/repositories/projects.repository.interface";
 
 const WEBHOOK_SECRET = process.env.COMPOSIO_TRIGGERS_WEBHOOK_SECRET || "test";
 
@@ -48,17 +49,21 @@ export interface IHandleCompsioWebhookRequestUseCase {
 export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhookRequestUseCase {
     private readonly composioTriggerDeploymentsRepository: IComposioTriggerDeploymentsRepository;
     private readonly jobsRepository: IJobsRepository;
+    private readonly projectsRepository: IProjectsRepository;
     private webhook;
 
     constructor({
         composioTriggerDeploymentsRepository,
         jobsRepository,
+        projectsRepository,
     }: {
         composioTriggerDeploymentsRepository: IComposioTriggerDeploymentsRepository;
         jobsRepository: IJobsRepository;
+        projectsRepository: IProjectsRepository;
     }) {
         this.composioTriggerDeploymentsRepository = composioTriggerDeploymentsRepository;
         this.jobsRepository = jobsRepository;
+        this.projectsRepository = projectsRepository;
         this.webhook = new Webhook(WEBHOOK_SECRET);
     }
 
@@ -96,6 +101,20 @@ export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhook
 
             // create a job for each deployment in the current page
             for (const deployment of triggerDeployments.items) {
+                // fetch project
+                const project = await this.projectsRepository.fetch(deployment.projectId);
+                if (!project) {
+                    logger.log(`Project ${deployment.projectId} not found`);
+                    continue;
+                }
+
+                // ensure workflow
+                if (!project.liveWorkflow) {
+                    logger.log(`Project ${deployment.projectId} has no live workflow`);
+                    continue;
+                }
+
+                // create job
                 const job = await this.jobsRepository.create({
                     trigger: "composio_trigger",
                     triggerData: {
@@ -103,6 +122,7 @@ export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhook
                     },
                     projectId: deployment.projectId,
                     input: {
+                        workflow: project.liveWorkflow,
                         messages: [msg],
                     },
                 });

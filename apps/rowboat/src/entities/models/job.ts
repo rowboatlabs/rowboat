@@ -1,4 +1,5 @@
 import { Message } from "@/app/lib/types/types";
+import { Workflow } from "@/app/lib/types/workflow_types";
 import { z } from "zod";
 
 export const Job = z.object({
@@ -9,6 +10,7 @@ export const Job = z.object({
     }),
     projectId: z.string(),
     input: z.object({
+        workflow: Workflow,
         messages: z.array(Message),
     }),
     output: z.object({
