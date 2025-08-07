@@ -71,14 +71,14 @@ export interface IComposioTriggerDeploymentsRepository {
     listByProjectId(projectId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ComposioTriggerDeployment>>>>;
     
     /**
-     * Retrieves all trigger deployments for a specific trigger type.
+     * Retrieves all trigger deployments for a specific trigger.
      * 
-     * @param triggerTypeSlug - The slug identifier of the trigger type
+     * @param triggerId - The identifier of the trigger
      * @param cursor - Optional cursor for pagination
      * @param limit - Optional limit for the number of items to return
-     * @returns Promise resolving to a paginated list of deployments for the specified trigger type
+     * @returns Promise resolving to a paginated list of deployments for the specified trigger
      */
-    listByTriggerTypeSlug(triggerTypeSlug: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ComposioTriggerDeployment>>>>;
+    listByTriggerId(triggerId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ComposioTriggerDeployment>>>>;
     
     /**
      * Deletes all trigger deployments associated with a specific connected account.

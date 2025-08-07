@@ -145,10 +145,10 @@ export class MongodbComposioTriggerDeploymentsRepository implements IComposioTri
     }
 
     /**
-     * Retrieves all trigger deployments for a specific trigger type with pagination.
+     * Retrieves all trigger deployments for a specific trigger with pagination.
      */
-    async listByTriggerTypeSlug(triggerTypeSlug: string, cursor?: string, limit: number = 50): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ComposioTriggerDeployment>>>> {
-        const query: any = { triggerTypeSlug };
+    async listByTriggerId(triggerId: string, cursor?: string, limit: number = 50): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ComposioTriggerDeployment>>>> {
+        const query: any = { triggerId };
 
         if (cursor) {
             query._id = { $gt: new ObjectId(cursor) };
