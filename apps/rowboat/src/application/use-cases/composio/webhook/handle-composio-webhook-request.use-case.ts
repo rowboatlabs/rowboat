@@ -6,6 +6,7 @@ import { BadRequestError } from "@/src/entities/errors/common";
 import { UserMessage } from "@/app/lib/types/types";
 import { PrefixLogger } from "@/app/lib/utils";
 import { IProjectsRepository } from "@/src/application/repositories/projects.repository.interface";
+import { IPubSubService } from "@/src/application/services/pub-sub.service.interface";
 
 const WEBHOOK_SECRET = process.env.COMPOSIO_TRIGGERS_WEBHOOK_SECRET || "test";
 
@@ -50,20 +51,24 @@ export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhook
     private readonly composioTriggerDeploymentsRepository: IComposioTriggerDeploymentsRepository;
     private readonly jobsRepository: IJobsRepository;
     private readonly projectsRepository: IProjectsRepository;
+    private readonly pubSubService: IPubSubService;
     private webhook;
 
     constructor({
         composioTriggerDeploymentsRepository,
         jobsRepository,
         projectsRepository,
+        pubSubService,
     }: {
         composioTriggerDeploymentsRepository: IComposioTriggerDeploymentsRepository;
         jobsRepository: IJobsRepository;
         projectsRepository: IProjectsRepository;
+        pubSubService: IPubSubService;
     }) {
         this.composioTriggerDeploymentsRepository = composioTriggerDeploymentsRepository;
         this.jobsRepository = jobsRepository;
         this.projectsRepository = projectsRepository;
+        this.pubSubService = pubSubService;
         this.webhook = new Webhook(WEBHOOK_SECRET);
     }
 
@@ -129,6 +134,10 @@ export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhook
                         messages: [msg],
                     },
                 });
+
+                // notify workers
+                await this.pubSubService.publish('new_jobs', job.id);
+
                 jobs++;
                 logger.log(`Created job ${job.id} for trigger deployment ${deployment.id}`);
             }

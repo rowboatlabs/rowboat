@@ -23,6 +23,7 @@ export class JobsWorker implements IJobsWorker {
     private isRunning: boolean = false;
     private pollInterval: number = 5000; // 5 seconds
     private logger: PrefixLogger;
+    private pollTimeoutId: NodeJS.Timeout | null = null;
 
     constructor({
         jobsRepository,
@@ -150,7 +151,6 @@ export class JobsWorker implements IJobsWorker {
 
             // if no job found, return early
             if (!job) {
-                logger.log("No job found");
                 return;
             }
 
@@ -167,27 +167,16 @@ export class JobsWorker implements IJobsWorker {
         const logger = this.logger.child(`start-polling`);
         logger.log("Starting polling mechanism");
         
-        // Use setInterval for non-blocking polling
-        const pollIntervalId = setInterval(async () => {
-            if (!this.isRunning) {
-                clearInterval(pollIntervalId);
-                return;
-            }
-            await this.pollForJobs();
-        }, this.pollInterval);
+        const scheduleNextPoll = () => {
+            this.pollTimeoutId = setTimeout(async () => {
+                await this.pollForJobs();
+                // Schedule the next poll after this one completes
+                scheduleNextPoll();
+            }, this.pollInterval);
+        };
 
-        // Keep this promise alive until the worker stops
-        return new Promise<void>((resolve) => {
-            // Check if we should stop every second
-            const checkIntervalId = setInterval(() => {
-                if (!this.isRunning) {
-                    clearInterval(checkIntervalId);
-                    clearInterval(pollIntervalId);
-                    logger.log("Polling mechanism stopped");
-                    resolve();
-                }
-            }, 1000);
-        });
+        // Start the first poll
+        scheduleNextPoll();
     }
 
     private async startSubscription(): Promise<void> {
@@ -237,6 +226,13 @@ export class JobsWorker implements IJobsWorker {
     async stop(): Promise<void> {
         this.logger.log(`Stopping worker ${this.workerId}`);
         this.isRunning = false;
+
+        // Clear any pending polls
+        if (this.pollTimeoutId) {
+            clearTimeout(this.pollTimeoutId);
+            this.pollTimeoutId = null;
+            this.logger.log("Cleared pending poll timeout");
+        }
 
         // Unsubscribe from the topic
         if (this.subscription) {

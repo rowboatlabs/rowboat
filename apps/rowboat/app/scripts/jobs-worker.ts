@@ -1,3 +1,4 @@
+import '../lib/loadenv';
 import { container } from "@/di/container";
 import { IJobsWorker } from "@/src/application/workers/jobs.worker";
 
