@@ -20,6 +20,14 @@ import { ListComposioTriggerDeploymentsUseCase } from "@/src/application/use-cas
 import { DeleteComposioTriggerDeploymentUseCase } from "@/src/application/use-cases/composio-trigger-deployments/delete-composio-trigger-deployment.use-case";
 import { ListComposioTriggerTypesUseCase } from "@/src/application/use-cases/composio-trigger-deployments/list-composio-trigger-types.use-case";
 import { DeleteComposioConnectedAccountUseCase } from "@/src/application/use-cases/composio/delete-composio-connected-account.use-case";
+import { HandleCompsioWebhookRequestUseCase } from "@/src/application/use-cases/composio/webhook/handle-composio-webhook-request.use-case";
+import { MongoDBJobsRepository } from "@/src/infrastructure/repositories/mongodb.jobs.repository";
+import { CreateComposioTriggerDeploymentController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/create-composio-trigger-deployment.controller";
+import { DeleteComposioTriggerDeploymentController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/delete-composio-trigger-deployment.controller";
+import { ListComposioTriggerDeploymentsController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/list-composio-trigger-deployments.controller";
+import { ListComposioTriggerTypesController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/list-composio-trigger-types.controller";
+import { DeleteComposioConnectedAccountController } from "@/src/interface-adapters/controllers/composio/delete-composio-connected-account.controller";
+import { HandleComposioWebhookRequestController } from "@/src/interface-adapters/controllers/composio/webhook/handle-composio-webhook-request.controller";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -48,9 +56,17 @@ container.register({
     // ---
     apiKeysRepository: asClass(MongoDBApiKeysRepository).singleton(),
 
+    // jobs
+    // ---
+    jobsRepository: asClass(MongoDBJobsRepository).singleton(),
+
     // composio
     // ---
     deleteComposioConnectedAccountUseCase: asClass(DeleteComposioConnectedAccountUseCase).singleton(),
+    handleCompsioWebhookRequestUseCase: asClass(HandleCompsioWebhookRequestUseCase).singleton(),
+
+    deleteComposioConnectedAccountController: asClass(DeleteComposioConnectedAccountController).singleton(),
+    handleComposioWebhookRequestController: asClass(HandleComposioWebhookRequestController).singleton(),
 
     // composio trigger deployments
     // ---
@@ -60,6 +76,11 @@ container.register({
     createComposioTriggerDeploymentUseCase: asClass(CreateComposioTriggerDeploymentUseCase).singleton(),
     listComposioTriggerDeploymentsUseCase: asClass(ListComposioTriggerDeploymentsUseCase).singleton(),
     deleteComposioTriggerDeploymentUseCase: asClass(DeleteComposioTriggerDeploymentUseCase).singleton(),
+
+    createComposioTriggerDeploymentController: asClass(CreateComposioTriggerDeploymentController).singleton(),
+    deleteComposioTriggerDeploymentController: asClass(DeleteComposioTriggerDeploymentController).singleton(),
+    listComposioTriggerDeploymentsController: asClass(ListComposioTriggerDeploymentsController).singleton(),
+    listComposioTriggerTypesController: asClass(ListComposioTriggerTypesController).singleton(),
 
     // conversations
     // ---
