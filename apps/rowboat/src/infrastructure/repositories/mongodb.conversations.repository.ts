@@ -84,7 +84,7 @@ export class MongoDBConversationsRepository implements IConversationsRepository 
 
         const results = await this.collection
             .find(query)
-            .sort({ _id: 1 })
+            .sort({ _id: -1 })
             .limit(limit + 1) // Fetch one extra to determine if there's a next page
             .project<z.infer<typeof ListedConversationItem> & { _id: ObjectId }>({
                 _id: 1,

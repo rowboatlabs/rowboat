@@ -13,7 +13,8 @@ import {
   ChevronRightIcon,
   Moon,
   Sun,
-  HelpCircle
+  HelpCircle,
+  MessageSquareIcon
 } from "lucide-react";
 import { getProjectConfig } from "@/app/actions/project_actions";
 import { useTheme } from "@/app/providers/theme-provider";
@@ -58,6 +59,12 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
       href: 'workflow',
       label: 'Build',
       icon: WorkflowIcon,
+      requiresProject: true
+    },
+    {
+      href: 'conversations',
+      label: 'Conversations',
+      icon: MessageSquareIcon,
       requiresProject: true
     },
     {
