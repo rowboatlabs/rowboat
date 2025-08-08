@@ -202,6 +202,16 @@ export function ConversationView({ projectId, conversationId }: { projectId: str
                                 </div>
                             </div>
 
+                            {/* Workflow */}
+                            <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                                <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 uppercase tracking-wide">
+                                    Workflow
+                                </div>
+                                <pre className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs overflow-x-auto border border-gray-200 dark:border-gray-700 font-mono max-h-[400px]">
+                                    {JSON.stringify(conversation.workflow, null, 2)}
+                                </pre>
+                            </div>
+
                             {/* Turns */}
                             {conversation.turns && conversation.turns.length > 0 ? (
                                 <div className="space-y-4">
@@ -224,5 +234,6 @@ export function ConversationView({ projectId, conversationId }: { projectId: str
         </Panel>
     );
 }
+
 
 
