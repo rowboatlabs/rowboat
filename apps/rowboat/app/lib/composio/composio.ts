@@ -1,8 +1,12 @@
 import { z } from "zod";
 import { PrefixLogger } from "../utils";
+import { Composio } from "@composio/core";
 
 const BASE_URL = 'https://backend.composio.dev/api/v3';
-const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || "";
+const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || "test";
+export const composio = new Composio({
+    apiKey: COMPOSIO_API_KEY,
+});
 
 export const ZAuthScheme = z.enum([
     'API_KEY',
@@ -27,14 +31,17 @@ export const ZConnectedAccountStatus = z.enum([
     'INACTIVE',
 ]);
 
+const ZToolkitMeta = z.object({
+    description: z.string(),
+    logo: z.string(),
+    tools_count: z.number(),
+    triggers_count: z.number(),
+});
+
 export const ZToolkit = z.object({
     slug: z.string(),
     name: z.string(),
-    meta: z.object({
-        description: z.string(),
-        logo: z.string(),
-        tools_count: z.number(),
-    }),
+    meta: ZToolkitMeta,
     no_auth: z.boolean(),
     auth_schemes: z.array(ZAuthScheme),
     composio_managed_auth_schemes: z.array(ZAuthScheme),
@@ -53,6 +60,7 @@ export const ZGetToolkitResponse = z.object({
     slug: z.string(),
     name: z.string(),
     composio_managed_auth_schemes: z.array(ZAuthScheme),
+    meta: ZToolkitMeta,
     auth_config_details: z.array(z.object({
         name: z.string(),
         mode: ZAuthScheme,
@@ -215,6 +223,23 @@ export const ZError = z.object({
 
 export const ZDeleteOperationResponse = z.object({
     success: z.boolean(),
+});
+
+export const ZTriggerType = z.object({
+    slug: z.string(),
+    name: z.string(),
+    description: z.string(),
+    toolkit: z.object({
+        slug: z.string(),
+        name: z.string(),
+        logo: z.string(),
+    }),
+    config: z.object({
+        type: z.literal('object'),
+        properties: z.record(z.string(), z.any()),
+        required: z.array(z.string()).optional(),
+        title: z.string().optional(),
+    }),
 });
 
 export const ZListResponse = <T extends z.ZodTypeAny>(schema: T) => z.object({
@@ -415,4 +440,17 @@ export async function deleteConnectedAccount(connectedAccountId: string): Promis
     return await composioApiCall(ZDeleteOperationResponse, url.toString(), {
         method: 'DELETE',
     });
+}
+
+export async function listTriggersTypes(toolkitSlug: string, cursor?: string): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTriggerType>>>> {
+    const url = new URL(`${BASE_URL}/triggers_types`);
+
+    // set params
+    url.searchParams.set("toolkit_slugs", toolkitSlug);
+    if (cursor) {
+        url.searchParams.set("cursor", cursor);
+    }
+
+    // fetch
+    return composioApiCall(ZListResponse(ZTriggerType), url.toString());
 }

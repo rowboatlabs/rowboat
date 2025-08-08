@@ -44,7 +44,7 @@ export class CreateCachedTurnUseCase implements ICreateCachedTurnUseCase {
 
     async execute(data: z.infer<typeof inputSchema>): Promise<{ key: string }> {
         // fetch conversation
-        const conversation = await this.conversationsRepository.getConversation(data.conversationId);
+        const conversation = await this.conversationsRepository.fetch(data.conversationId);
         if (!conversation) {
             throw new NotFoundError('Conversation not found');
         }

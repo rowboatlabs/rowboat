@@ -51,7 +51,7 @@ export class FetchCachedTurnUseCase implements IFetchCachedTurnUseCase {
         const cachedTurn = CachedTurnRequest.parse(JSON.parse(payload));
 
         // fetch conversation
-        const conversation = await this.conversationsRepository.getConversation(cachedTurn.conversationId);
+        const conversation = await this.conversationsRepository.fetch(cachedTurn.conversationId);
         if (!conversation) {
             throw new NotFoundError('Conversation not found');
         }

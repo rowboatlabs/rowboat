@@ -1,12 +1,28 @@
 import { Message } from "@/app/lib/types/types";
 import { z } from "zod";
 
+const chatReason = z.object({
+    type: z.literal("chat"),
+});
+
+const apiReason = z.object({
+    type: z.literal("api"),
+});
+
+const jobReason = z.object({
+    type: z.literal("job"),
+    jobId: z.string(),
+});
+
+const reason = z.discriminatedUnion("type", [
+    chatReason,
+    apiReason,
+    jobReason,
+]);
+
 export const Turn = z.object({
     id: z.string(),
-    trigger: z.enum([
-        "chat",
-        "api",
-    ]),
+    reason,
     input: z.object({
         messages: z.array(Message),
         mockTools: z.record(z.string(), z.string()).nullable().optional(),

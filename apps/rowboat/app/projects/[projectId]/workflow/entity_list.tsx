@@ -1,6 +1,6 @@
 import React, { forwardRef, useImperativeHandle } from "react";
 import { z } from "zod";
-import { WorkflowPrompt, WorkflowAgent, WorkflowTool, Workflow } from "../../../lib/types/workflow_types";
+import { WorkflowPrompt, WorkflowAgent, WorkflowTool, WorkflowPipeline, Workflow } from "../../../lib/types/workflow_types";
 import { Project } from "../../../lib/types/project_types";
 import { DataSource } from "../../../lib/types/datasource_types";
 import { WithStringId } from "../../../lib/types/types";
@@ -25,6 +25,7 @@ import { deleteDataSource } from '../../../actions/datasource_actions';
 import { ToolkitAuthModal } from '../tools/components/ToolkitAuthModal';
 import { deleteConnectedAccount } from '@/app/actions/composio_actions';
 import { ProjectWideChangeConfirmationModal } from '@/components/common/project-wide-change-confirmation-modal';
+import { SHOW_PROMPTS_SECTION } from '../../../lib/feature_flags';
 
 // Reduced gap size to match Cursor's UI
 const GAP_SIZE = 4; // 1 unit * 4px (tailwind's default spacing unit)
@@ -46,25 +47,30 @@ interface EntityListProps {
     agents: z.infer<typeof WorkflowAgent>[];
     tools: z.infer<typeof WorkflowTool>[];
     prompts: z.infer<typeof WorkflowPrompt>[];
+    pipelines: z.infer<typeof WorkflowPipeline>[];
     dataSources: WithStringId<z.infer<typeof DataSource>>[];
     workflow: z.infer<typeof Workflow>;
     selectedEntity: {
-        type: "agent" | "tool" | "prompt" | "datasource" | "visualise";
+        type: "agent" | "tool" | "prompt" | "datasource" | "pipeline" | "visualise";
         name: string;
     } | null;
     startAgentName: string | null;
     onSelectAgent: (name: string) => void;
     onSelectTool: (name: string) => void;
     onSelectPrompt: (name: string) => void;
+    onSelectPipeline: (name: string) => void;
     onSelectDataSource?: (id: string) => void;
     onAddAgent: (agent: Partial<z.infer<typeof WorkflowAgent>>) => void;
     onAddTool: (tool: Partial<z.infer<typeof WorkflowTool>>) => void;
     onAddPrompt: (prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
+    onAddPipeline: (pipeline: Partial<z.infer<typeof WorkflowPipeline>>) => void;
+    onAddAgentToPipeline: (pipelineName: string) => void;
     onToggleAgent: (name: string) => void;
     onSetMainAgent: (name: string) => void;
     onDeleteAgent: (name: string) => void;
     onDeleteTool: (name: string) => void;
     onDeletePrompt: (name: string) => void;
+    onDeletePipeline: (name: string) => void;
     onShowVisualise: (name: string) => void;
     onProjectToolsUpdated?: () => void;
     onDataSourcesUpdated?: () => void;
@@ -72,6 +78,7 @@ interface EntityListProps {
     useRagUploads: boolean;
     useRagS3Uploads: boolean;
     useRagScraping: boolean;
+    onReorderPipelines: (pipelines: z.infer<typeof WorkflowPipeline>[]) => void;
 }
 
 interface EmptyStateProps {
@@ -174,7 +181,7 @@ interface ServerCardProps {
     serverName: string;
     tools: z.infer<typeof WorkflowTool>[];
     selectedEntity: {
-        type: "agent" | "tool" | "prompt" | "datasource" | "visualise";
+        type: "agent" | "tool" | "prompt" | "datasource" | "pipeline" | "visualise";
         name: string;
     } | null;
     onSelectTool: (name: string) => void;
@@ -258,6 +265,163 @@ type ComposioToolkit = {
     tools: z.infer<typeof WorkflowTool>[];
 }
 
+interface PipelineCardProps {
+    pipeline: z.infer<typeof WorkflowPipeline>;
+    agents: z.infer<typeof WorkflowAgent>[];
+    selectedEntity: {
+        type: "agent" | "tool" | "prompt" | "datasource" | "pipeline" | "visualise";
+        name: string;
+    } | null;
+    onSelectPipeline: (name: string) => void;
+    onSelectAgent: (name: string) => void;
+    onDeletePipeline: (name: string) => void;
+    onDeleteAgent: (name: string) => void;
+    onAddAgentToPipeline: (pipelineName: string) => void;
+    selectedRef: React.RefObject<HTMLButtonElement | null>;
+    startAgentName: string | null;
+    dragHandle?: React.ReactNode;
+}
+
+const PipelineCard = ({
+    pipeline,
+    agents,
+    selectedEntity,
+    onSelectPipeline,
+    onSelectAgent,
+    onDeletePipeline,
+    onDeleteAgent,
+    onAddAgentToPipeline,
+    selectedRef,
+    startAgentName,
+    dragHandle,
+}: PipelineCardProps) => {
+    // Get agents that belong to this pipeline
+    const pipelineAgents = pipeline.agents
+        .map(agentName => agents.find(agent => agent.name === agentName))
+        .filter(Boolean) as z.infer<typeof WorkflowAgent>[];
+
+    // Check if any agent in this pipeline is currently selected
+    const hasSelectedAgent = selectedEntity?.type === "agent" && 
+        pipeline.agents.includes(selectedEntity.name);
+
+    // Track expansion state - allow manual override even when agent is selected
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [lastSelectedAgent, setLastSelectedAgent] = useState<string | null>(null);
+
+    // Auto-expand when a new agent in this pipeline is selected
+    useEffect(() => {
+        if (hasSelectedAgent && selectedEntity?.name !== lastSelectedAgent) {
+            setIsExpanded(true);
+            setLastSelectedAgent(selectedEntity?.name || null);
+        } else if (!hasSelectedAgent) {
+            setLastSelectedAgent(null);
+        }
+    }, [hasSelectedAgent, selectedEntity?.name, lastSelectedAgent]);
+
+    return (
+        <div className="mb-1 group">
+            <div className="flex items-center gap-2 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors">
+                {dragHandle}
+                {/* Chevron button for expand/collapse - only show when has agents and on hover */}
+                <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className={`w-4 h-4 flex items-center justify-center transition-opacity rounded ${
+                        pipelineAgents.length > 0 ? 'group-hover:opacity-100 opacity-60 hover:bg-gray-200 dark:hover:bg-gray-700' : 'opacity-0 pointer-events-none'
+                    }`}
+                >
+                    {pipelineAgents.length > 0 && (isExpanded ? (
+                        <ChevronDown className="w-3 h-3 text-gray-500" />
+                    ) : (
+                        <ChevronRight className="w-3 h-3 text-gray-500" />
+                    ))}
+                </button>
+                
+                {/* Pipeline name button for configuration */}
+                <button
+                    onClick={() => onSelectPipeline(pipeline.name)}
+                    className="flex-1 flex items-center gap-2 text-sm text-left min-h-[28px]"
+                >
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs">{pipeline.name}</span>
+                        <span className="text-xs text-gray-500">({pipelineAgents.length} steps)</span>
+                    </div>
+                </button>
+                
+                {/* Pipeline menu */}
+                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Dropdown>
+                        <DropdownTrigger>
+                            <button className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors">
+                                <MoreVertical className="w-4 h-4 text-gray-500" />
+                            </button>
+                        </DropdownTrigger>
+                        <DropdownMenu
+                            onAction={(key) => {
+                                if (key === 'delete') {
+                                    onDeletePipeline(pipeline.name);
+                                }
+                            }}
+                        >
+                            <DropdownItem key="delete" className="text-danger">Delete Pipeline</DropdownItem>
+                        </DropdownMenu>
+                    </Dropdown>
+                </div>
+            </div>
+            
+            {isExpanded && (
+                <div className="ml-6 mt-0.5 space-y-0.5 border-l border-gray-200 dark:border-gray-700 pl-3">
+                    {pipelineAgents.map((agent, index) => (
+                        <div key={`pipeline-agent-${index}`} className="group/agent">
+                            <div className={clsx(
+                                "flex items-center gap-2 px-3 py-2 rounded-md min-h-[24px] cursor-pointer",
+                                {
+                                    "bg-indigo-50 dark:bg-indigo-950/30": selectedEntity?.type === "agent" && selectedEntity.name === agent.name,
+                                    "hover:bg-zinc-50 dark:hover:bg-zinc-800": !(selectedEntity?.type === "agent" && selectedEntity.name === agent.name)
+                                }
+                            )}
+                            onClick={() => onSelectAgent(agent.name)}>
+                                <div className="shrink-0 flex items-center justify-center w-3 h-3">
+                                    <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                                        {index + 1}
+                                    </span>
+                                </div>
+                                <span className="text-xs flex-1">{agent.name}</span>
+                                {startAgentName === agent.name && (
+                                    <div className="text-xs text-indigo-500 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30 px-1.5 py-0.5 rounded">
+                                        Start
+                                    </div>
+                                )}
+                                <div className="opacity-0 group-hover/agent:opacity-100 transition-opacity">
+                                    <button
+                                        className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded-md transition-colors"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onDeleteAgent(agent.name);
+                                        }}
+                                    >
+                                        <Trash2 className="w-3 h-3 text-red-500" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    {/* Add Agent option */}
+                    <button
+                        className="flex items-center gap-2 px-3 py-2 mt-1 text-xs text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded transition-colors"
+                        onClick={() => {
+                            // Create a new pipeline agent and add it to this pipeline
+                            onAddAgentToPipeline(pipeline.name); // This will select the pipeline for editing later
+                        }}
+                    >
+                        <PlusIcon className="w-4 h-4" />
+                        <span>Add Agent to Pipeline</span>
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const EntityList = forwardRef<
     { openDataSourcesModal: () => void },
     EntityListProps & { 
@@ -268,6 +432,7 @@ export const EntityList = forwardRef<
     agents,
     tools,
     prompts,
+    pipelines,
     dataSources,
     workflow,
     selectedEntity,
@@ -275,27 +440,33 @@ export const EntityList = forwardRef<
     onSelectAgent,
     onSelectTool,
     onSelectPrompt,
+    onSelectPipeline,
     onSelectDataSource,
     onAddAgent,
     onAddTool,
     onAddPrompt,
+    onAddPipeline,
+    onAddAgentToPipeline,
     onToggleAgent,
     onSetMainAgent,
     onDeleteAgent,
     onDeleteTool,
     onDeletePrompt,
+    onDeletePipeline,
     onProjectToolsUpdated,
     onDataSourcesUpdated,
     projectId,
     projectConfig,
     onReorderAgents,
+    onReorderPipelines,
     onShowVisualise,
     useRagUploads,
     useRagS3Uploads,
     useRagScraping,
 }: EntityListProps & { 
     projectId: string,
-    onReorderAgents: (agents: z.infer<typeof WorkflowAgent>[]) => void 
+    onReorderAgents: (agents: z.infer<typeof WorkflowAgent>[]) => void,
+    onReorderPipelines: (pipelines: z.infer<typeof WorkflowPipeline>[]) => void 
 }, ref) {
     const [showAgentTypeModal, setShowAgentTypeModal] = useState(false);
     const [showToolsModal, setShowToolsModal] = useState(false);
@@ -346,6 +517,7 @@ export const EntityList = forwardRef<
 
     // Calculate panel sizes based on expanded state
     const getPanelSize = (panelName: 'agents' | 'tools' | 'data' | 'prompts') => {
+        // If this panel is collapsed, return minimum size
         if (!expandedPanels[panelName]) {
             return 8; // Collapsed height (53px equivalent)
         }
@@ -353,28 +525,35 @@ export const EntityList = forwardRef<
         // Base size when expanded
         let size = DEFAULT_SIZES[panelName];
 
-        // Redistribute space from collapsed panels to the panel above
-        if (panelName === 'agents') {
-            if (!expandedPanels.tools) {
-                size += DEFAULT_SIZES.tools;
+        // Calculate total space available from collapsed/hidden panels
+        let availableSpace = 0;
+        
+        // Add space from collapsed panels and hidden prompts
+        if (!expandedPanels.tools) {
+            availableSpace += DEFAULT_SIZES.tools;
+        }
+        if (!expandedPanels.data) {
+            availableSpace += DEFAULT_SIZES.data;
+        }
+        if (!expandedPanels.prompts || !SHOW_PROMPTS_SECTION) {
+            availableSpace += DEFAULT_SIZES.prompts;
+        }
+        if (!expandedPanels.agents) {
+            availableSpace += DEFAULT_SIZES.agents;
+        }
+
+        // Find the topmost expanded panel to give it the extra space
+        const panelOrder = ['agents', 'tools', 'data', 'prompts'] as const;
+        const expandedVisiblePanels = panelOrder.filter(panel => {
+            if (panel === 'prompts') {
+                return expandedPanels[panel] && SHOW_PROMPTS_SECTION;
             }
-            if (!expandedPanels.data) {
-                size += DEFAULT_SIZES.data;
-            }
-            if (!expandedPanels.prompts) {
-                size += DEFAULT_SIZES.prompts;
-            }
-        } else if (panelName === 'tools') {
-            if (!expandedPanels.data && expandedPanels.agents) {
-                size += DEFAULT_SIZES.data;
-            }
-            if (!expandedPanels.prompts && expandedPanels.agents) {
-                size += DEFAULT_SIZES.prompts;
-            }
-        } else if (panelName === 'data') {
-            if (!expandedPanels.prompts && (expandedPanels.agents || expandedPanels.tools)) {
-                size += DEFAULT_SIZES.prompts;
-            }
+            return expandedPanels[panel];
+        });
+
+        // If this is the topmost expanded panel, give it all the available space
+        if (expandedVisiblePanels.length > 0 && expandedVisiblePanels[0] === panelName) {
+            size += availableSpace;
         }
 
         return size;
@@ -417,20 +596,44 @@ export const EntityList = forwardRef<
         const { active, over } = event;
         
         if (over && active.id !== over.id) {
-            const oldIndex = agents.findIndex(agent => agent.name === active.id);
-            const newIndex = agents.findIndex(agent => agent.name === over.id);
+            // Determine if we're dragging a pipeline or an agent
+            const isPipelineDrag = pipelines.some(pipeline => pipeline.name === active.id);
+            const isPipelineTarget = pipelines.some(pipeline => pipeline.name === over.id);
             
-            const newAgents = [...agents];
-            const [movedAgent] = newAgents.splice(oldIndex, 1);
-            newAgents.splice(newIndex, 0, movedAgent);
-            
-            // Update order numbers
-            const updatedAgents = newAgents.map((agent, index) => ({
-                ...agent,
-                order: index * 100
-            }));
-            
-            onReorderAgents(updatedAgents);
+            if (isPipelineDrag && isPipelineTarget) {
+                // Reordering pipelines
+                const oldIndex = pipelines.findIndex(pipeline => pipeline.name === active.id);
+                const newIndex = pipelines.findIndex(pipeline => pipeline.name === over.id);
+                
+                const newPipelines = [...pipelines];
+                const [movedPipeline] = newPipelines.splice(oldIndex, 1);
+                newPipelines.splice(newIndex, 0, movedPipeline);
+                
+                // Update order numbers
+                const updatedPipelines = newPipelines.map((pipeline, index) => ({
+                    ...pipeline,
+                    order: index * 100
+                }));
+                
+                onReorderPipelines(updatedPipelines);
+            } else if (!isPipelineDrag && !isPipelineTarget) {
+                // Reordering individual agents (not in pipelines)
+                const oldIndex = agents.findIndex(agent => agent.name === active.id);
+                const newIndex = agents.findIndex(agent => agent.name === over.id);
+                
+                const newAgents = [...agents];
+                const [movedAgent] = newAgents.splice(oldIndex, 1);
+                newAgents.splice(newIndex, 0, movedAgent);
+                
+                // Update order numbers
+                const updatedAgents = newAgents.map((agent, index) => ({
+                    ...agent,
+                    order: index * 100
+                }));
+                
+                onReorderAgents(updatedAgents);
+            }
+            // Note: We don't allow dragging between pipelines and agents
         }
     };
 
@@ -443,6 +646,7 @@ export const EntityList = forwardRef<
     return (
         <div ref={containerRef} className="flex flex-col h-full min-h-0">
             <ResizablePanelGroup 
+                key={`${expandedPanels.agents}-${expandedPanels.tools}-${expandedPanels.data}-${expandedPanels.prompts}-${SHOW_PROMPTS_SECTION}`}
                 direction="vertical" 
                 className="flex-1 min-h-0 flex flex-col"
                 style={{ gap: `${GAP_SIZE}px` }}
@@ -509,36 +713,83 @@ export const EntityList = forwardRef<
                         {expandedPanels.agents && (
                             <div className="h-[calc(100%-53px)] overflow-y-auto">
                                 <div className="p-2">
-                                    {agents.length > 0 ? (
-                                        <DndContext
-                                            sensors={sensors}
-                                            collisionDetection={closestCenter}
-                                            onDragEnd={handleDragEnd}
-                                        >
-                                            <SortableContext
-                                                items={agents.map(a => a.name)}
-                                                strategy={verticalListSortingStrategy}
-                                            >
-                                                <div className="space-y-1">
-                                                    {agents.map((agent) => (
-                                                        <SortableAgentItem
-                                                            key={agent.name}
-                                                            agent={agent}
-                                                            isSelected={selectedEntity?.type === "agent" && selectedEntity.name === agent.name}
-                                                            onClick={() => onSelectAgent(agent.name)}
-                                                            selectedRef={selectedEntity?.type === "agent" && selectedEntity.name === agent.name ? selectedRef : undefined}
-                                                            statusLabel={startAgentName === agent.name ? <StartLabel /> : null}
-                                                            onToggle={onToggleAgent}
-                                                            onSetMainAgent={onSetMainAgent}
-                                                            onDelete={onDeleteAgent}
-                                                            isStartAgent={startAgentName === agent.name}
-                                                        />
-                                                    ))}
-                                                </div>
-                                            </SortableContext>
-                                        </DndContext>
+                                    {pipelines.length > 0 || agents.length > 0 ? (
+                                        <div className="space-y-1">
+                                            {/* Show pipelines first with drag-and-drop */}
+                                            {pipelines.length > 0 && (
+                                                <DndContext
+                                                    sensors={sensors}
+                                                    collisionDetection={closestCenter}
+                                                    onDragEnd={handleDragEnd}
+                                                >
+                                                    <SortableContext
+                                                        items={pipelines.map(p => p.name)}
+                                                        strategy={verticalListSortingStrategy}
+                                                    >
+                                                        {pipelines.map((pipeline) => (
+                                                            <SortablePipelineItem
+                                                                key={pipeline.name}
+                                                                pipeline={pipeline}
+                                                                agents={agents}
+                                                                selectedEntity={selectedEntity}
+                                                                onSelectPipeline={onSelectPipeline}
+                                                                onSelectAgent={onSelectAgent}
+                                                                onDeletePipeline={onDeletePipeline}
+                                                                onDeleteAgent={onDeleteAgent}
+                                                                onAddAgentToPipeline={onAddAgentToPipeline}
+                                                                selectedRef={selectedRef}
+                                                                startAgentName={startAgentName}
+                                                            />
+                                                        ))}
+                                                    </SortableContext>
+                                                </DndContext>
+                                            )}
+                                            
+                                            {/* Show individual agents that are NOT part of any pipeline */}
+                                            {(() => {
+                                                // Get all agent names that are part of pipelines
+                                                const pipelineAgentNames = new Set(
+                                                    pipelines.flatMap(pipeline => pipeline.agents)
+                                                );
+                                                
+                                                // Filter agents that are not in any pipeline and are not pipeline agents
+                                                const individualAgents = agents.filter(
+                                                    agent => !pipelineAgentNames.has(agent.name) && agent.type !== 'pipeline'
+                                                );
+                                                
+                                                if (individualAgents.length === 0) return null;
+                                                
+                                                return (
+                                                    <DndContext
+                                                        sensors={sensors}
+                                                        collisionDetection={closestCenter}
+                                                        onDragEnd={handleDragEnd}
+                                                    >
+                                                        <SortableContext
+                                                            items={individualAgents.map(a => a.name)}
+                                                            strategy={verticalListSortingStrategy}
+                                                        >
+                                                            {individualAgents.map((agent) => (
+                                                                <SortableAgentItem
+                                                                    key={agent.name}
+                                                                    agent={agent}
+                                                                    isSelected={selectedEntity?.type === "agent" && selectedEntity.name === agent.name}
+                                                                    onClick={() => onSelectAgent(agent.name)}
+                                                                    selectedRef={selectedEntity?.type === "agent" && selectedEntity.name === agent.name ? selectedRef : undefined}
+                                                                    statusLabel={startAgentName === agent.name ? <StartLabel /> : null}
+                                                                    onToggle={onToggleAgent}
+                                                                    onSetMainAgent={onSetMainAgent}
+                                                                    onDelete={onDeleteAgent}
+                                                                    isStartAgent={startAgentName === agent.name}
+                                                                />
+                                                            ))}
+                                                        </SortableContext>
+                                                    </DndContext>
+                                                );
+                                            })()}
+                                        </div>
                                     ) : (
-                                        <EmptyState entity="agents" hasFilteredItems={false} />
+                                        <EmptyState entity="agents and pipelines" hasFilteredItems={false} />
                                     )}
                                 </div>
                             </div>
@@ -843,88 +1094,94 @@ export const EntityList = forwardRef<
                     </Panel>
                 </ResizablePanel>
 
-                <ResizableHandle withHandle className="w-[3px] bg-transparent" />
+                {SHOW_PROMPTS_SECTION && <ResizableHandle withHandle className="w-[3px] bg-transparent" />}
 
                 {/* Prompts Panel */}
-                <ResizablePanel 
-                    defaultSize={getPanelSize('prompts')}
-                    minSize={expandedPanels.prompts ? 20 : 8}
-                    maxSize={100}
-                    className="flex flex-col min-h-0 h-full"
-                >
-                    <Panel 
-                        variant="entity-list"
-                        tourTarget="entity-prompts"
-                        className={clsx(
-                            "h-full",
-                            !expandedPanels.prompts && "h-[53px]!"
-                        )}
-                        title={
-                            <div className={`${headerClasses} rounded-md transition-colors h-full`}>
-                                <div className="flex items-center gap-2 h-full">
-                                    <button onClick={() => setExpandedPanels(prev => ({ ...prev, prompts: !prev.prompts }))}>
-                                        {expandedPanels.prompts ? (
-                                            <ChevronDown className="w-4 h-4" />
-                                        ) : (
-                                            <ChevronRight className="w-4 h-4" />
-                                        )}
-                                    </button>
-                                    <PenLine className="w-4 h-4" />
-                                    <span>Prompts</span>
-                                </div>
-                                <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setExpandedPanels(prev => ({ ...prev, prompts: true }));
-                                        onAddPrompt({});
-                                    }}
-                                    className={`group ${buttonClasses}`}
-                                    showHoverContent={true}
-                                    hoverContent="Add Prompt"
-                                >
-                                    <PlusIcon className="w-4 h-4" />
-                                </Button>
-                            </div>
-                        }
+                {SHOW_PROMPTS_SECTION && (
+                    <ResizablePanel 
+                        defaultSize={getPanelSize('prompts')}
+                        minSize={expandedPanels.prompts ? 20 : 8}
+                        maxSize={100}
+                        className="flex flex-col min-h-0 h-full"
                     >
-                        {expandedPanels.prompts && (
-                            <div className="h-[calc(100%-53px)] overflow-y-auto">
-                                <div className="p-2">
-                                    {prompts.length > 0 ? (
-                                        <div className="space-y-1">
-                                            {prompts.map((prompt, index) => (
-                                                <ListItemWithMenu
-                                                    key={`prompt-${index}`}
-                                                    name={prompt.name}
-                                                    isSelected={selectedEntity?.type === "prompt" && selectedEntity.name === prompt.name}
-                                                    onClick={() => onSelectPrompt(prompt.name)}
-                                                    selectedRef={selectedEntity?.type === "prompt" && selectedEntity.name === prompt.name ? selectedRef : undefined}
-                                                    icon={<ScrollText className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />}
-                                                    menuContent={
-                                                        <EntityDropdown 
-                                                            name={prompt.name} 
-                                                            onDelete={onDeletePrompt} 
-                                                        />
-                                                    }
-                                                />
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <EmptyState entity="prompts" hasFilteredItems={false} />
-                                    )}
+                        <Panel 
+                            variant="entity-list"
+                            tourTarget="entity-prompts"
+                            className={clsx(
+                                "h-full",
+                                !expandedPanels.prompts && "h-[53px]!"
+                            )}
+                            title={
+                                <div className={`${headerClasses} rounded-md transition-colors h-full`}>
+                                    <div className="flex items-center gap-2 h-full">
+                                        <button onClick={() => setExpandedPanels(prev => ({ ...prev, prompts: !prev.prompts }))}>
+                                            {expandedPanels.prompts ? (
+                                                <ChevronDown className="w-4 h-4" />
+                                            ) : (
+                                                <ChevronRight className="w-4 h-4" />
+                                            )}
+                                        </button>
+                                        <PenLine className="w-4 h-4" />
+                                        <span>Prompts</span>
+                                    </div>
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedPanels(prev => ({ ...prev, prompts: true }));
+                                            onAddPrompt({});
+                                        }}
+                                        className={`group ${buttonClasses}`}
+                                        showHoverContent={true}
+                                        hoverContent="Add Prompt"
+                                    >
+                                        <PlusIcon className="w-4 h-4" />
+                                    </Button>
                                 </div>
-                            </div>
-                        )}
-                    </Panel>
-                </ResizablePanel>
+                            }
+                        >
+                            {expandedPanels.prompts && (
+                                <div className="h-[calc(100%-53px)] overflow-y-auto">
+                                    <div className="p-2">
+                                        {prompts.length > 0 ? (
+                                            <div className="space-y-1">
+                                                {prompts.map((prompt, index) => (
+                                                    <ListItemWithMenu
+                                                        key={`prompt-${index}`}
+                                                        name={prompt.name}
+                                                        isSelected={selectedEntity?.type === "prompt" && selectedEntity.name === prompt.name}
+                                                        onClick={() => onSelectPrompt(prompt.name)}
+                                                        selectedRef={selectedEntity?.type === "prompt" && selectedEntity.name === prompt.name ? selectedRef : undefined}
+                                                        icon={<ScrollText className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />}
+                                                        menuContent={
+                                                            <EntityDropdown 
+                                                                name={prompt.name} 
+                                                                onDelete={onDeletePrompt} 
+                                                            />
+                                                        }
+                                                    />
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <EmptyState entity="prompts" hasFilteredItems={false} />
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </Panel>
+                    </ResizablePanel>
+                )}
             </ResizablePanelGroup>
             
             <AgentTypeModal
                 isOpen={showAgentTypeModal}
                 onClose={() => setShowAgentTypeModal(false)}
                 onConfirm={handleAddAgentWithType}
+                onCreatePipeline={() => {
+                    onAddPipeline({ name: `Pipeline ${pipelines.length + 1}` });
+                    setShowAgentTypeModal(false);
+                }}
             />
             <ToolsModal
                 isOpen={showToolsModal}
@@ -1027,7 +1284,7 @@ function EntityDropdown({
 interface ComposioCardProps {
     card: ComposioToolkit;
     selectedEntity: {
-        type: "agent" | "tool" | "prompt" | "datasource" | "visualise";
+        type: "agent" | "tool" | "prompt" | "datasource" | "pipeline" | "visualise";
         name: string;
     } | null;
     onSelectTool: (name: string) => void;
@@ -1210,7 +1467,7 @@ const ComposioCard = ({
                 <div className="flex items-center gap-2 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors">
                     <button
                         onClick={() => setIsExpanded(!isExpanded)}
-                        className="flex-1 flex items-center gap-2 text-sm text-left min-h-[28px] py-1"
+                        className="flex-1 flex items-center gap-2 text-left min-h-[28px]"
                     >
                         {/* Chevron - only show on hover or when has tools */}
                         <div className={`w-4 h-4 flex items-center justify-center transition-opacity ${
@@ -1391,62 +1648,132 @@ const SortableAgentItem = ({ agent, isSelected, onClick, selectedRef, statusLabe
     );
 }; 
 
+// Add SortableItem component for pipelines
+const SortablePipelineItem = ({ 
+    pipeline, 
+    agents, 
+    selectedEntity, 
+    onSelectPipeline, 
+    onSelectAgent, 
+    onDeletePipeline, 
+    onDeleteAgent, 
+    onAddAgentToPipeline, 
+    selectedRef, 
+    startAgentName 
+}: {
+    pipeline: z.infer<typeof WorkflowPipeline>;
+    agents: z.infer<typeof WorkflowAgent>[];
+    selectedEntity: {
+        type: "agent" | "tool" | "prompt" | "datasource" | "pipeline" | "visualise";
+        name: string;
+    } | null;
+    onSelectPipeline: (name: string) => void;
+    onSelectAgent: (name: string) => void;
+    onDeletePipeline: (name: string) => void;
+    onDeleteAgent: (name: string) => void;
+    onAddAgentToPipeline: (pipelineName: string) => void;
+    selectedRef: React.RefObject<HTMLButtonElement | null>;
+    startAgentName: string | null;
+}) => {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging
+    } = useSortable({ id: pipeline.name });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+        <div ref={setNodeRef} style={style} {...attributes}>
+            <PipelineCard
+                pipeline={pipeline}
+                agents={agents}
+                selectedEntity={selectedEntity}
+                onSelectPipeline={onSelectPipeline}
+                onSelectAgent={onSelectAgent}
+                onDeletePipeline={onDeletePipeline}
+                onDeleteAgent={onDeleteAgent}
+                onAddAgentToPipeline={onAddAgentToPipeline}
+                selectedRef={selectedRef}
+                startAgentName={startAgentName}
+                dragHandle={
+                    <button className="cursor-grab" {...listeners}>
+                        <GripVertical className="w-4 h-4 text-gray-400" />
+                    </button>
+                }
+            />
+        </div>
+    );
+};
+
 interface AgentTypeModalProps {
     isOpen: boolean;
     onClose: () => void;
     onConfirm: (agentType: 'internal' | 'user_facing') => void;
+    onCreatePipeline: () => void;
 }
 
-function AgentTypeModal({ isOpen, onClose, onConfirm }: AgentTypeModalProps) {
-    const [selectedType, setSelectedType] = useState<'internal' | 'user_facing'>('internal');
+function AgentTypeModal({ isOpen, onClose, onConfirm, onCreatePipeline }: AgentTypeModalProps) {
+    const [selectedType, setSelectedType] = useState<'internal' | 'user_facing' | 'pipeline'>('internal');
 
     const handleConfirm = () => {
-        onConfirm(selectedType);
+        if (selectedType === 'pipeline') {
+            onCreatePipeline();
+        } else {
+            onConfirm(selectedType);
+        }
         onClose();
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} size="lg" className="max-w-3xl w-full">
-            <ModalContent className="max-w-3xl w-full">
+        <Modal isOpen={isOpen} onClose={onClose} size="lg" className="max-w-5xl w-full">
+            <ModalContent className="max-w-5xl w-full">
                 <ModalHeader>
                     <div className="flex items-center gap-2">
                         <Brain className="w-5 h-5 text-indigo-600" />
-                        <span>Create New Agent</span>
+                        <span>Create New Agent or Pipeline</span>
                     </div>
                 </ModalHeader>
-                <ModalBody>
-                    <div className="space-y-6">
+                <ModalBody className="p-8">
+                    <div className="space-y-8">
                         <p className="text-sm text-gray-600 dark:text-gray-400">
-                            Choose the type of agent you want to create:
+                            Choose what you want to create:
                         </p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                             {/* Task Agent (Internal) */}
                             <button
                                 type="button"
                                 onClick={() => setSelectedType('internal')}
                                 className={clsx(
-                                    "relative group p-6 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
+                                    "relative group p-4 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
                                     selectedType === 'internal'
                                         ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 shadow-lg scale-[1.03]"
                                         : "border-gray-200 dark:border-gray-700 hover:border-indigo-400 hover:shadow-md bg-white dark:bg-gray-900"
                                 )}
                             >
-                                <div className="flex items-center gap-4 w-full mb-2">
+                                <div className="flex items-center gap-3 w-full mb-1">
                                     <div className={clsx(
-                                        "flex items-center justify-center w-12 h-12 rounded-lg transition-colors",
+                                        "flex items-center justify-center w-10 h-10 rounded-lg transition-colors",
                                         selectedType === 'internal'
                                             ? "bg-indigo-100 dark:bg-indigo-900/60"
                                             : "bg-gray-100 dark:bg-gray-800"
                                     )}>
                                         <Cog className={clsx(
-                                            "w-6 h-6 transition-colors",
+                                            "w-5 h-5 transition-colors",
                                             selectedType === 'internal'
                                                 ? "text-indigo-600 dark:text-indigo-400"
                                                 : "text-gray-600 dark:text-gray-400"
                                         )} />
                                     </div>
                                     <div className="flex-1">
-                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
                                             Task Agent
                                         </h3>
                                         <span className="inline-block align-middle">
@@ -1456,7 +1783,7 @@ function AgentTypeModal({ isOpen, onClose, onConfirm }: AgentTypeModalProps) {
                                         </span>
                                     </div>
                                 </div>
-                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mt-1 list-disc pl-5 space-y-1">
+                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-snug mt-0 list-disc pl-4 space-y-0.5">
                                   <li>Perform specific internal tasks, such as parts of workflows, pipelines, and data processing</li>
                                   <li>Cannot put out user-facing responses directly</li>
                                   <li>Can call other agents (both conversation and task agents)</li>
@@ -1468,28 +1795,28 @@ function AgentTypeModal({ isOpen, onClose, onConfirm }: AgentTypeModalProps) {
                                 type="button"
                                 onClick={() => setSelectedType('user_facing')}
                                 className={clsx(
-                                    "relative group p-6 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
+                                    "relative group p-4 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
                                     selectedType === 'user_facing'
                                         ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 shadow-lg scale-[1.03]"
                                         : "border-gray-200 dark:border-gray-700 hover:border-indigo-400 hover:shadow-md bg-white dark:bg-gray-900"
                                 )}
                             >
-                                <div className="flex items-center gap-4 w-full mb-2">
+                                <div className="flex items-center gap-3 w-full mb-1">
                                     <div className={clsx(
-                                        "flex items-center justify-center w-12 h-12 rounded-lg transition-colors",
+                                        "flex items-center justify-center w-10 h-10 rounded-lg transition-colors",
                                         selectedType === 'user_facing'
                                             ? "bg-indigo-100 dark:bg-indigo-900/60"
                                             : "bg-gray-100 dark:bg-gray-800"
                                     )}>
                                         <Users className={clsx(
-                                            "w-6 h-6 transition-colors",
+                                            "w-5 h-5 transition-colors",
                                             selectedType === 'user_facing'
                                                 ? "text-indigo-600 dark:text-indigo-400"
                                                 : "text-gray-600 dark:text-gray-400"
                                         )} />
                                     </div>
                                     <div className="flex-1">
-                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
                                             Conversation Agent
                                         </h3>
                                         <span className="inline-block align-middle">
@@ -1499,16 +1826,59 @@ function AgentTypeModal({ isOpen, onClose, onConfirm }: AgentTypeModalProps) {
                                         </span>
                                     </div>
                                 </div>
-                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mt-1 list-disc pl-5 space-y-1">
+                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-snug mt-0 list-disc pl-4 space-y-0.5">
                                   <li>Interact directly with users</li>
                                   <li>Ideal for specific roles in customer support, chat interfaces, and other end-user interactions</li>
                                   <li>Can call other agents (both conversation and task agents)</li>
                                 </ul>
                             </button>
+
+                            {/* Pipeline */}
+                            <button
+                                type="button"
+                                onClick={() => setSelectedType('pipeline')}
+                                className={clsx(
+                                    "relative group p-4 rounded-2xl border-2 flex flex-col items-start transition-all duration-200 text-left shadow-sm focus:outline-none",
+                                    selectedType === 'pipeline'
+                                        ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 shadow-lg scale-[1.03]"
+                                        : "border-gray-200 dark:border-gray-700 hover:border-indigo-400 hover:shadow-md bg-white dark:bg-gray-900"
+                                )}
+                            >
+                                <div className="flex items-center gap-3 w-full mb-1">
+                                    <div className={clsx(
+                                        "flex items-center justify-center w-10 h-10 rounded-lg transition-colors",
+                                        selectedType === 'pipeline'
+                                            ? "bg-indigo-100 dark:bg-indigo-900/60"
+                                            : "bg-gray-100 dark:bg-gray-800"
+                                    )}>
+                                        <Component className={clsx(
+                                            "w-5 h-5 transition-colors",
+                                            selectedType === 'pipeline'
+                                                ? "text-indigo-600 dark:text-indigo-400"
+                                                : "text-gray-600 dark:text-gray-400"
+                                        )} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
+                                            Pipeline
+                                        </h3>
+                                        <span className="inline-block align-middle">
+                                            <span className="text-xs font-medium text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/40 px-2 py-0.5 rounded">
+                                                Sequential
+                                            </span>
+                                        </span>
+                                    </div>
+                                </div>
+                                <ul className="text-sm text-gray-600 dark:text-gray-400 leading-snug mt-0 list-disc pl-4 space-y-0.5">
+                                  <li>Create a sequential workflow of agents</li>
+                                  <li>Agents execute one after another in order</li>
+                                  <li>Add individual agents to the pipeline after creation</li>
+                                </ul>
+                            </button>
                         </div>
                     </div>
                 </ModalBody>
-                <ModalFooter>
+                <ModalFooter className="px-8 pb-8">
                     <Button
                         variant="secondary"
                         onClick={onClose}
@@ -1519,7 +1889,7 @@ function AgentTypeModal({ isOpen, onClose, onConfirm }: AgentTypeModalProps) {
                         variant="primary"
                         onClick={handleConfirm}
                     >
-                        Create Agent
+                        {selectedType === 'pipeline' ? 'Create Pipeline' : 'Create Agent'}
                     </Button>
                 </ModalFooter>
             </ModalContent>

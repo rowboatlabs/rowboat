@@ -13,21 +13,23 @@ import { Project } from "../lib/types/project_types";
 import { USE_AUTH } from "../lib/feature_flags";
 import { authorizeUserAction } from "./billing_actions";
 import { Workflow } from "../lib/types/workflow_types";
+import { container } from "@/di/container";
+import { IProjectActionAuthorizationPolicy } from "@/src/application/policies/project-action-authorization.policy";
 
 const KLAVIS_API_KEY = process.env.KLAVIS_API_KEY || '';
+
+const projectActionAuthorizationPolicy = container.resolve<IProjectActionAuthorizationPolicy>('projectActionAuthorizationPolicy');
 
 export async function projectAuthCheck(projectId: string) {
     if (!USE_AUTH) {
         return;
     }
     const user = await authCheck();
-    const membership = await projectMembersCollection.findOne({
-        projectId,
+    await projectActionAuthorizationPolicy.authorize({
+        caller: 'user',
         userId: user._id,
+        projectId,
     });
-    if (!membership) {
-        throw new Error('User not a member of project');
-    }
 }
 
 async function createBaseProject(

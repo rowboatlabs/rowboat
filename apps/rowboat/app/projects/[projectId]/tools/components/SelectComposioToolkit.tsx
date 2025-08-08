@@ -10,34 +10,31 @@ import { getProjectConfig } from '@/app/actions/project_actions';
 import { z } from 'zod';
 import { ZToolkit, ZListResponse, ZTool } from '@/app/lib/composio/composio';
 import { Project } from '@/app/lib/types/project_types';
-import { ComposioToolsPanel } from './ComposioToolsPanel';
 import { ToolkitCard } from './ToolkitCard';
-import { Workflow, WorkflowTool } from '@/app/lib/types/workflow_types';
+import { Workflow } from '@/app/lib/types/workflow_types';
 
 type ToolkitType = z.infer<typeof ZToolkit>;
 type ToolkitListResponse = z.infer<ReturnType<typeof ZListResponse<typeof ZToolkit>>>;
 type ProjectType = z.infer<typeof Project>;
 
-interface ComposioProps {
+interface SelectComposioToolkitProps {
   projectId: string;
   tools: z.infer<typeof Workflow.shape.tools>;
-  onAddTool: (tool: z.infer<typeof WorkflowTool>) => void;
+  onSelectToolkit: (toolkit: ToolkitType) => void;
   initialToolkitSlug?: string | null;
 }
 
-export function Composio({
+export function SelectComposioToolkit({
   projectId,
   tools,
-  onAddTool,
+  onSelectToolkit,
   initialToolkitSlug
-}: ComposioProps) {
+}: SelectComposioToolkitProps) {
   const [toolkits, setToolkits] = useState<ToolkitType[]>([]);
   const [projectConfig, setProjectConfig] = useState<ProjectType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedToolkit, setSelectedToolkit] = useState<ToolkitType | null>(null);
-  const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
 
   const loadProjectConfig = useCallback(async () => {
     try {
@@ -84,14 +81,8 @@ export function Composio({
   }, [projectId]);
 
   const handleSelectToolkit = useCallback((toolkit: ToolkitType) => {
-    setSelectedToolkit(toolkit);
-    setIsToolsPanelOpen(true);
-  }, []);
-
-  const handleCloseToolsPanel = useCallback(() => {
-    setSelectedToolkit(null);
-    setIsToolsPanelOpen(false);
-  }, []);
+    onSelectToolkit(toolkit);
+  }, [onSelectToolkit]);
 
   useEffect(() => {
     loadProjectConfig();
@@ -106,11 +97,10 @@ export function Composio({
     if (initialToolkitSlug && toolkits.length > 0) {
       const toolkit = toolkits.find(t => t.slug === initialToolkitSlug);
       if (toolkit) {
-        setSelectedToolkit(toolkit);
-        setIsToolsPanelOpen(true);
+        onSelectToolkit(toolkit);
       }
     }
-  }, [initialToolkitSlug, toolkits]);
+  }, [initialToolkitSlug, toolkits, onSelectToolkit]);
 
   const filteredToolkits = toolkits.filter(toolkit => {
     const searchLower = searchQuery.toLowerCase();
@@ -226,15 +216,6 @@ export function Composio({
           </p>
         </div>
       )}
-
-      {/* Tools Panel */}
-      {selectedToolkit && <ComposioToolsPanel
-        toolkit={selectedToolkit}
-        isOpen={isToolsPanelOpen}
-        onClose={handleCloseToolsPanel}
-        tools={tools}
-        onAddTool={onAddTool}
-      />}
     </div>
   );
 } 

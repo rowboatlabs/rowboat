@@ -22,6 +22,19 @@ import {
 import { ComposioConnectedAccount } from "@/app/lib/types/project_types";
 import { getProjectConfig, projectAuthCheck } from "./project_actions";
 import { projectsCollection } from "../lib/mongodb";
+import { container } from "@/di/container";
+import { ICreateComposioTriggerDeploymentController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/create-composio-trigger-deployment.controller";
+import { IListComposioTriggerDeploymentsController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/list-composio-trigger-deployments.controller";
+import { IDeleteComposioTriggerDeploymentController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/delete-composio-trigger-deployment.controller";
+import { IListComposioTriggerTypesController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/list-composio-trigger-types.controller";
+import { IDeleteComposioConnectedAccountController } from "@/src/interface-adapters/controllers/composio/delete-composio-connected-account.controller";
+import { authCheck } from "./auth_actions";
+
+const createComposioTriggerDeploymentController = container.resolve<ICreateComposioTriggerDeploymentController>("createComposioTriggerDeploymentController");
+const listComposioTriggerDeploymentsController = container.resolve<IListComposioTriggerDeploymentsController>("listComposioTriggerDeploymentsController");
+const deleteComposioTriggerDeploymentController = container.resolve<IDeleteComposioTriggerDeploymentController>("deleteComposioTriggerDeploymentController");
+const listComposioTriggerTypesController = container.resolve<IListComposioTriggerTypesController>("listComposioTriggerTypesController");
+const deleteComposioConnectedAccountController = container.resolve<IDeleteComposioConnectedAccountController>("deleteComposioConnectedAccountController");
 
 const ZCreateCustomConnectedAccountRequest = z.object({
     toolkitSlug: z.string(),
@@ -191,29 +204,77 @@ export async function syncConnectedAccount(projectId: string, toolkitSlug: strin
 }
 
 export async function deleteConnectedAccount(projectId: string, toolkitSlug: string, connectedAccountId: string): Promise<boolean> {
-    await projectAuthCheck(projectId);
+    const user = await authCheck();
 
-    // ensure that the connected account belongs to this project
-    const project = await getProjectConfig(projectId);
-    const account = project.composioConnectedAccounts?.[toolkitSlug];
-    if (!account || account.id !== connectedAccountId) {
-        throw new Error(`Connected account ${connectedAccountId} not found in project ${projectId} for toolkit ${toolkitSlug}`);
-    }
-
-    // delete the connected account
-    await libDeleteConnectedAccount(connectedAccountId);
-
-    // get auth config data
-    const authConfig = await libGetAuthConfig(account.authConfigId);
-
-    // delete the auth config if it is NOT managed by composio
-    if (!authConfig.is_composio_managed) {
-        await libDeleteAuthConfig(account.authConfigId);
-    }
-
-    // update project with deleted connected account
-    const key = `composioConnectedAccounts.${toolkitSlug}`;
-    await projectsCollection.updateOne({ _id: projectId }, { $unset: { [key]: "" } });
+    await deleteComposioConnectedAccountController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId,
+        toolkitSlug,
+        connectedAccountId,
+    });
 
     return true;
+}
+
+export async function listComposioTriggerTypes(toolkitSlug: string, cursor?: string) {
+    await authCheck();
+
+    return await listComposioTriggerTypesController.execute({
+        toolkitSlug,
+        cursor,
+    });
+}
+
+export async function createComposioTriggerDeployment(request: {
+    projectId: string,
+    toolkitSlug: string,
+    triggerTypeSlug: string,
+    connectedAccountId: string,
+    triggerConfig?: Record<string, unknown>,
+}) {
+    const user = await authCheck();
+
+    // create trigger deployment
+    return await createComposioTriggerDeploymentController.execute({
+        caller: 'user',
+        userId: user._id,
+        data: {
+            projectId: request.projectId,
+            toolkitSlug: request.toolkitSlug,
+            triggerTypeSlug: request.triggerTypeSlug,
+            connectedAccountId: request.connectedAccountId,
+            triggerConfig: request.triggerConfig ?? {},
+        },
+    });
+}
+
+export async function listComposioTriggerDeployments(request: {
+    projectId: string,
+    cursor?: string,
+}) {
+    const user = await authCheck();
+
+    // list trigger deployments
+    return await listComposioTriggerDeploymentsController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId: request.projectId,
+        cursor: request.cursor,
+    });
+}
+
+export async function deleteComposioTriggerDeployment(request: {
+    projectId: string,
+    deploymentId: string,
+}) {
+    const user = await authCheck();
+
+    // delete trigger deployment
+    return await deleteComposioTriggerDeploymentController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId: request.projectId,
+        deploymentId: request.deploymentId,
+    });
 }

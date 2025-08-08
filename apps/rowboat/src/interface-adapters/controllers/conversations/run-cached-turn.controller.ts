@@ -48,7 +48,7 @@ export class RunCachedTurnController implements IRunCachedTurnController {
             caller: result.data.caller,
             userId: result.data.userId,
             conversationId: cachedTurn.conversationId,
-            trigger: result.data.caller === "user" ? "chat" : "api",
+            reason: result.data.caller === "user" ? { type: "chat" } : { type: "api" },
             input: cachedTurn.input,
         });
     }

@@ -89,20 +89,21 @@ function InternalAssistantMessage({ content, sender, latency, delta, showJsonMod
                     <span>{sender ?? 'Assistant'}</span>
                     {(Boolean(showDebugMessages && typeof onFix === 'function' && !isFirstAssistant)
                       || Boolean(showDebugMessages && typeof onExplain === 'function' && !isFirstAssistant)
-                      || Boolean(isJsonContent && hasResponseKey)) && (
+                      || Boolean(isJsonContent)) && (
                         <MessageActionsMenu
                             showFix={Boolean(showDebugMessages && typeof onFix === 'function' && !isFirstAssistant)}
                             showExplain={Boolean(showDebugMessages && typeof onExplain === 'function' && !isFirstAssistant)}
-                            showJson={Boolean(isJsonContent && hasResponseKey)}
+                            showJson={Boolean(isJsonContent)}
                             onFix={onFix ? () => onFix(content, index) : () => {}}
                             onExplain={onExplain ? () => onExplain('assistant', content, index) : () => {}}
-                            onJson={() => {}}
+                            onJson={() => setJsonMode(!jsonMode)}
+                            jsonLabel={jsonMode ? 'View formatted content' : 'View complete JSON'}
                         />
                     )}
                 </div>
                 <div className="bg-gray-50 dark:bg-zinc-800 px-4 py-2.5 rounded-2xl rounded-bl-lg text-sm leading-relaxed text-gray-700 dark:text-gray-200 border-none shadow-sm animate-slideUpAndFade flex flex-col items-stretch">
                     <div className="text-left mb-2">
-                        {isJsonContent && hasResponseKey && jsonMode && (
+                        {isJsonContent && jsonMode && (
                             <div className="mb-2 flex gap-4">
                                 <button 
                                     className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300 hover:underline self-start" 
@@ -113,7 +114,7 @@ function InternalAssistantMessage({ content, sender, latency, delta, showJsonMod
                                 </button>
                             </div>
                         )}
-                        {isJsonContent && hasResponseKey && jsonMode ? (
+                        {isJsonContent && jsonMode ? (
                             <pre
                                 className={`text-xs leading-snug bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 rounded-lg px-2 py-1 font-mono shadow-sm border border-zinc-100 dark:border-zinc-700 ${
                                     wrapText ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto whitespace-pre'
@@ -728,9 +729,14 @@ export function Messages({
                 );
             }
 
-            // Then check for internal messages
-            if (message.content && message.responseType === 'internal') {
-                // Skip internal messages if debug mode is off
+            // Then check for internal messages (including pipeline agents)
+            // Check both responseType === 'internal' and pipeline agents by type
+            const agentConfig = workflow.agents.find(a => a.name === message.agentName);
+            const isInternalOrPipeline = message.responseType === 'internal' || 
+                                       (agentConfig && (agentConfig.outputVisibility === 'internal' || agentConfig.type === 'pipeline'));
+            
+            if (message.content && isInternalOrPipeline) {
+                // Skip internal/pipeline messages if debug mode is off
                 if (!showDebugMessages) {
                     return null;
                 }

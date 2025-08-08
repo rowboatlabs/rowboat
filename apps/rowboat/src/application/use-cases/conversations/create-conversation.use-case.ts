@@ -8,7 +8,7 @@ import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
 
 const inputSchema = z.object({
-    caller: z.enum(["user", "api"]),
+    caller: z.enum(["user", "api", "job_worker"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
     projectId: z.string(),
@@ -45,16 +45,18 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
         let workflow = data.workflow;
 
         // authz check
-        await this.projectActionAuthorizationPolicy.authorize({
-            caller,
-            userId,
-            apiKey,
-            projectId,
-        });
+        if (caller !== "job_worker") {
+            await this.projectActionAuthorizationPolicy.authorize({
+                caller,
+                userId,
+                apiKey,
+                projectId,
+            });
+        }
 
         // assert and consume quota
         await this.usageQuotaPolicy.assertAndConsume(projectId);
- 
+
         // if workflow is not provided, fetch workflow
         if (!workflow) {
             const project = await projectsCollection.findOne({
@@ -71,7 +73,7 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
         }
 
         // create conversation
-        return await this.conversationsRepository.createConversation({
+        return await this.conversationsRepository.create({
             projectId,
             workflow,
             isLiveWorkflow,

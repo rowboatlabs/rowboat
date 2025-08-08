@@ -67,7 +67,7 @@ export class RunTurnController implements IRunTurnController {
             userId,
             apiKey,
             conversationId,
-            trigger: caller === "user" ? "chat" : "api",
+            reason: caller === "user" ? { type: "chat" } : { type: "api" },
             input,
         });
 
