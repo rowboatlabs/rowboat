@@ -175,7 +175,7 @@ export function Action({
                         'bg-gray-200 text-gray-600': stale || allApplied || action.error,
                     }
                 )}>
-                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : '💬'}
+                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : '💬'}
                 </span>
                 <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 truncate flex-1">
                     {action.action === 'create_new' ? 'Add' : 'Edit'} {action.config_type}: {action.name}
@@ -227,7 +227,7 @@ export function ActionHeader() {
     const { msgIndex, actionIndex, action, workflow, appliedFields, stale } = useContext(ActionContext);
     if (!action || !workflow) return null;
 
-    const targetType = action.config_type === 'tool' ? 'tool' : action.config_type === 'agent' ? 'agent' : 'prompt';
+    const targetType = action.config_type === 'tool' ? 'tool' : action.config_type === 'agent' ? 'agent' : action.config_type === 'pipeline' ? 'pipeline' : 'prompt';
     const change = action.action === 'create_new' ? 'Create' : 'Edit';
 
     return <div className="flex gap-2 items-center py-1 px-1">
@@ -272,6 +272,12 @@ export function ActionField({
             const prompt = workflow.prompts.find(p => p.name === action.name);
             if (prompt) {
                 oldValue = (prompt as any)[field];
+            }
+        } else if (action.config_type === 'pipeline') {
+            // Find the pipeline in the workflow
+            const pipeline = workflow.pipelines?.find(p => p.name === action.name);
+            if (pipeline) {
+                oldValue = (pipeline as any)[field];
             }
         }
     }
@@ -336,7 +342,7 @@ export function StreamingAction({
 }: {
     action: {
         action?: 'create_new' | 'edit';
-        config_type?: 'tool' | 'agent' | 'prompt';
+        config_type?: 'tool' | 'agent' | 'prompt' | 'pipeline';
         name?: string;
     };
     loading: boolean;
@@ -362,7 +368,7 @@ export function StreamingAction({
                         'bg-gray-200 text-gray-600': !action.action,
                     }
                 )}>
-                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : '💬'}
+                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : '💬'}
                 </span>
                 <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 truncate flex-1">
                     {action.action === 'create_new' ? 'Add' : 'Edit'} {action.config_type}: {action.name}

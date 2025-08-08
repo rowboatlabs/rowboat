@@ -14,7 +14,7 @@ export const CopilotAssistantMessageTextPart = z.object({
 export const CopilotAssistantMessageActionPart = z.object({
     type: z.literal("action"),
     content: z.object({
-        config_type: z.union([z.literal('tool'), z.literal('agent'), z.literal('prompt')]),
+        config_type: z.union([z.literal('tool'), z.literal('agent'), z.literal('prompt'), z.literal('pipeline')]),
         action: z.union([z.literal('create_new'), z.literal('edit')]),
         name: z.string(),
         change_description: z.string(),

@@ -13,6 +13,7 @@ You can perform the following tasks:
 4. Improve an existing agent's instructions
 5. Add, edit, or remove tools
 6. Adding RAG data sources to agents
+7. Create and manage pipelines (sequential agent workflows)
 
 Always aim to fully resolve the user's query before yielding. Only ask for clarification once, using up to 4 concise, bullet-point questions to understand the user’s objective and what they want the workflow to achieve.
 
@@ -175,6 +176,43 @@ Note: the rag_search tool searches across all data sources - it cannot call a sp
 3. If you are adding a tool, make sure to add it to all the agents that need it.
 
 </agent_tools>
+
+<about_pipelines>
+
+## Section 7: Creating and Managing Pipelines
+
+Pipelines are sequential workflows that execute agents in a specific order. They are useful for complex multi-step processes where each step depends on the output of the previous step.
+
+### Pipeline Structure:
+- **Pipeline Definition**: A pipeline contains a name, description, and an ordered list of agent names
+- **Pipeline Agents**: Agents with type: "pipeline" that are part of a pipeline workflow
+- **Pipeline Properties**: Pipeline agents have specific properties:
+  - outputVisibility: "internal" - They don't interact directly with users
+  - controlType: "relinquish_to_parent" - They return control to the calling agent
+  - maxCallsPerParentAgent: 3 - Maximum calls per parent agent
+
+### Creating Pipelines:
+1. **Plan the Pipeline**: Identify the sequential steps needed for the workflow
+2. **Create Pipeline Agents**: Create individual agents for each step with type: "pipeline"
+3. **Create Pipeline Definition**: Define the pipeline with the ordered list of agent names
+4. **Connect to Hub**: Reference the pipeline from the hub agent using pipeline syntax
+
+### Pipeline Agent Instructions:
+Pipeline agents should follow this structure:
+- Focus on their specific step in the process
+- Process input from the previous step
+- Return clear output for the next step
+- Use tools as needed for their specific task
+- Do NOT transfer to other agents (only use tools)
+
+### Example Pipeline Usage:
+When a hub agent needs to execute a pipeline, it should:
+1. Call the pipeline using pipeline syntax
+2. Pass the required input to the pipeline
+3. Wait for the pipeline to complete all steps
+4. Receive the final result from the pipeline
+
+</about_pipelines>
 
 <general_guidlines>
 

@@ -71,7 +71,7 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
                     type: 'action',
                     action: {
                         action: metadata.action as 'create_new' | 'edit',
-                        config_type: metadata.config_type as 'tool' | 'agent' | 'prompt',
+                        config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline',
                         name: metadata.name,
                         change_description: jsonData.change_description || '',
                         config_changes: {},
@@ -84,7 +84,7 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
                 type: 'action',
                 action: {
                     action: metadata.action as 'create_new' | 'edit',
-                    config_type: metadata.config_type as 'tool' | 'agent' | 'prompt',
+                                            config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline',
                     name: metadata.name,
                     change_description: jsonData.change_description || '',
                     config_changes: result.changes
@@ -100,7 +100,7 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
         type: 'streaming_action',
         action: {
             action: (metadata.action as 'create_new' | 'edit') || undefined,
-            config_type: (metadata.config_type as 'tool' | 'agent' | 'prompt') || undefined,
+            config_type: (metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline') || undefined,
             name: metadata.name
         }
     };
@@ -260,6 +260,15 @@ function AssistantMessage({
                         }
                     });
                     break;
+                case 'pipeline':
+                    dispatch({
+                        type: 'add_pipeline',
+                        pipeline: {
+                            name: action.name,
+                            ...action.config_changes
+                        }
+                    });
+                    break;
             }
         } else if (action.action === 'edit') {
             switch (action.config_type) {
@@ -282,6 +291,13 @@ function AssistantMessage({
                         type: 'update_prompt',
                         name: action.name,
                         prompt: action.config_changes
+                    });
+                    break;
+                case 'pipeline':
+                    dispatch({
+                        type: 'update_pipeline',
+                        name: action.name,
+                        pipeline: action.config_changes
                     });
                     break;
             }
