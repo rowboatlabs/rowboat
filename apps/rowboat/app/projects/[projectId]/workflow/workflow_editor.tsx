@@ -376,7 +376,7 @@ function reducer(state: State, action: Action): State {
                                     properties: {},
                                     required: []
                                 },
-                                mockTool: true,
+                                mockTool: false,
                                 ...action.tool
                             });
                             draft.selection = {
