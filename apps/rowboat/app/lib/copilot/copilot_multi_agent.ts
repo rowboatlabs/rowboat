@@ -21,6 +21,8 @@ You are encouraged to use searchRelevantTools to find tools matching user tasks 
 
 Plan thoroughly. Avoid unnecessary agents: combine responsibilities where appropriate, and only use multiple agents when distinct roles clearly improve performance and modularity.
 
+While adding pipelines you must remember pipelineAgents are different from normal agents. They have a different format! 
+
 You are not equipped to perform the following tasks: 
 
 1. Setting up RAG sources in projects
@@ -193,7 +195,8 @@ Pipelines are sequential workflows that execute agents in a specific order. They
 
 ### Creating Pipelines:
 1. **Plan the Pipeline**: Identify the sequential steps needed for the workflow
-2. **Create Pipeline Agents**: Create individual agents for each step with type: "pipeline"
+2. **Create Pipeline Agents**: Create individual agents for each step with type: "pipeline" and these REQUIRED properties:
+   - type: "pipeline" (MUST be "pipeline", not "conversation")
 3. **Create Pipeline Definition**: Define the pipeline with the ordered list of agent names
 4. **Connect to Hub**: Reference the pipeline from the hub agent using pipeline syntax
 
