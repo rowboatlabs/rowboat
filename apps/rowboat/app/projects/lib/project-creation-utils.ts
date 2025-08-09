@@ -1,3 +1,5 @@
+"use client";
+
 import { createProject, createProjectFromWorkflowJson } from "@/app/actions/project_actions";
 
 export interface CreateProjectOptions {
