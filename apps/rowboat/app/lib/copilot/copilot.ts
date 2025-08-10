@@ -16,8 +16,8 @@ import { composio, getTool } from "../composio/composio";
 
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
-const COPILOT_MODEL = process.env.PROVIDER_COPILOT_MODEL || 'gpt-4.1';
-const AGENT_MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4.1';
+const COPILOT_MODEL = process.env.PROVIDER_COPILOT_MODEL || 'gpt-5';
+const AGENT_MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
 
 const WORKFLOW_SCHEMA = JSON.stringify(zodToJsonSchema(Workflow));
 
@@ -138,7 +138,7 @@ async function searchRelevantTools(query: string): Promise<string> {
     }));
 
     // Format the response
-    const toolConfigs = workflowTools.map(tool => 
+    const toolConfigs = workflowTools.map(tool =>
         `**${tool.name}**:\n\`\`\`json\n${JSON.stringify(tool, null, 2)}\n\`\`\``
     ).join('\n\n');
 
