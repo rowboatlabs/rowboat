@@ -17,7 +17,7 @@ import { composio, getTool } from "../composio/composio";
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
 const COPILOT_MODEL = process.env.PROVIDER_COPILOT_MODEL || 'gpt-5';
-const AGENT_MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
+const AGENT_MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-5';
 
 const WORKFLOW_SCHEMA = JSON.stringify(zodToJsonSchema(Workflow));
 
