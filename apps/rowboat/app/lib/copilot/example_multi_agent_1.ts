@@ -598,4 +598,158 @@ I'll add the suggested tools for Google Sheets and Gmail:
 
 Once you review and apply these changes, run a quick chat with the Hub. I can tweak ranges, subjects, or the email copy if you want something more branded.
 
+---
+
+### Example 5: Attendee Research & Slack Pipeline
+
+**User Request:**
+Build me an assistant that can do research on meeting attendees and send the findings to a Slack channel. And make sure it doesn't research me!
+
+**Copilot Response:**
+
+I can definitely build that. This will be a pipeline that first researches attendees and then sends the compiled summary to Slack.
+
+To set this up correctly, I just need two pieces of information:
+
+What is your email address (so I can exclude you from the research)?
+
+What is the name of the Slack channel where you want the summary sent (e.g., general or meeting-prep)?
+
+**User Response:**
+My email is tushar.magar@rowboatlabs.com and the channel is test-rowboat-slack.
+
+**Copilot Response:**
+
+Perfect. I'll set this up as a sequential pipeline with two main pipeline agents:
+
+Step 1 (Research Agent) to look up each attendee.
+
+Step 2 (Slack Send Agent) to post the summary.
+
+Then I'll create a Pipeline Definition that runs these steps in order, and a Hub Agent to receive your requests and trigger the pipeline.
+
+---
+
+### 1. Add Required Tools
+
+I'll add the necessary tools for web search and sending a Slack message.
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: tool
+// name: Search
+{
+  "change_description": "Add Firecrawl tool to perform a web search and scrape content from the top results.",
+  "config_changes": {
+    "name": "Search",
+    "description": "Performs a web search for a query, scrapes content from the top search results using firecrawl, and returns details in specified formats.",
+    "parameters": { "type": "object", "properties": { "country": { "default": "us", "description": "Country code to tailor search results (e.g., 'us' for United States, default 'us').", "nullable": true, "title": "Country", "type": "string" }, "formats": { "default": null, "description": "Desired output formats for scraped content of each search result (e.g., 'markdown', 'html'). If None, default scraping applies. Available: 'markdown', 'html', 'rawHtml', 'links', 'screenshot', 'screenshot@fullPage'.", "items": { "type": "string" }, "nullable": true, "title": "Formats", "type": "array" }, "lang": { "default": "en", "description": "Language code for search results (e.g., 'en' for English, default 'en').", "nullable": true, "title": "Lang", "type": "string" }, "limit": { "default": 5, "description": "Maximum number of search results to return (1-10, default 5).", "maximum": 10, "minimum": 1, "nullable": true, "title": "Limit", "type": "integer" }, "query": { "description": "The search query to execute.", "title": "Query", "type": "string" }, "timeout": { "default": 60000, "description": "Maximum time in milliseconds for search and scrape operations (1000-300000, default 60000).", "maximum": 300000, "minimum": 1000, "nullable": true, "title": "Timeout", "type": "integer" } }, "required": [ "query" ] },
+    "isComposio": true,
+    "composioData": { "slug": "FIRECRAWL_SEARCH", "noAuth": false, "toolkitName": "Firecrawl", "toolkitSlug": "firecrawl", "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/firecrawl.jpeg" }
+  }
+}
+\`\`\`
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: tool
+// name: Send message
+{
+  "change_description": "Add Slack tool to post a message to a channel.",
+  "config_changes": {
+    "name": "Send message",
+    "description": "Posts a message to a slack channel, direct message, or private group; requires content via \`text\`, \`blocks\`, or \`attachments\`.",
+    "parameters": { "type": "object", "properties": { "as_user": { "default": null, "description": "Post as the authenticated user instead of as a bot. Defaults to \`false\`. If \`true\`, \`username\`, \`icon_emoji\`, and \`icon_url\` are ignored. If \`false\`, the message is posted as a bot, allowing appearance customization.", "title": "As User", "type": "boolean" }, "attachments": { "default": null, "description": "URL-encoded JSON array of message attachments, a legacy method for rich content. See Slack API documentation for structure.", "title": "Attachments", "type": "string" }, "blocks": { "default": null, "description": "DEPRECATED: Use \`markdown_text\` field instead. URL-encoded JSON array of layout blocks for rich/interactive messages. See Slack API Block Kit docs for structure.", "title": "Blocks", "type": "string" }, "channel": { "description": "ID or name of the channel, private group, or IM channel to send the message to.", "title": "Channel", "type": "string" }, "icon_emoji": { "default": null, "description": "Emoji for bot's icon (e.g., ':robot_face:'). Overrides \`icon_url\`. Applies if \`as_user\` is \`false\`.", "title": "Icon Emoji", "type": "string" }, "icon_url": { "default": null, "description": "Image URL for bot's icon (must be HTTPS). Applies if \`as_user\` is \`false\`.", "title": "Icon Url", "type": "string" }, "link_names": { "default": null, "description": "Automatically hyperlink channel names (e.g., #channel) and usernames (e.g., @user) in message text. Defaults to \`false\` for bot messages.", "title": "Link Names", "type": "boolean" }, "markdown_text": { "default": null, "description": "PREFERRED: Write your message in markdown for nicely formatted display. Supports: headers (# ## ###), bold (**text** or __text__), italic (*text* or _text_), strikethrough (~~text~~), inline code (\`code\`), code blocks (\`\`\`), links ([text](url)), block quotes (>), lists (- item, 1. item), dividers (--- or ***), context blocks (:::context with images), and section buttons (:::section-button). IMPORTANT: Use \\\\n for line breaks (e.g., 'Line 1\\\\nLine 2'), not actual newlines. USER MENTIONS: To tag users, use their user ID with <@USER_ID> format (e.g., <@U1234567890>), not username. ", "title": "Markdown Text", "type": "string" }, "mrkdwn": { "default": null, "description": "Disable Slack's markdown for \`text\` field if \`false\`. Default \`true\` (allows *bold*, _italic_, etc.).", "title": "Mrkdwn", "type": "boolean" }, "parse": { "default": null, "description": "Message text parsing behavior. Default \`none\` (no special parsing). \`full\` parses as user-typed (links @mentions, #channels). See Slack API docs for details.", "title": "Parse", "type": "string" }, "reply_broadcast": { "default": null, "description": "If \`true\` for a threaded reply, also posts to main channel. Defaults to \`false\`.", "title": "Reply Broadcast", "type": "boolean" }, "text": { "default": null, "description": "Primary textual content. Recommended fallback if using \`blocks\` or \`attachments\`. Supports mrkdwn unless \`mrkdwn\` is \`false\`.", "title": "Text", "type": "string" }, "thread_ts": { "default": null, "description": "Timestamp (\`ts\`) of an existing message to make this a threaded reply. Use \`ts\` of the parent message, not another reply. Example: '1476746824.000004'.", "title": "Thread Ts", "type": "string" }, "unfurl_links": { "default": null, "description": "Enable unfurling of text-based URLs. Defaults \`false\` for bots, \`true\` if \`as_user\` is \`true\`.", "title": "Unfurl Links", "type": "boolean" }, "unfurl_media": { "default": null, "description": "Disable unfurling of media content from URLs if \`false\`. Defaults to \`true\`.", "title": "Unfurl Media", "type": "boolean" }, "username": { "default": null, "description": "Bot's name in Slack (max 80 chars). Applies if \`as_user\` is \`false\`.", "title": "Username", "type": "string" } }, "required": [ "channel" ] },
+    "isComposio": true,
+    "composioData": { "slug": "SLACK_SEND_MESSAGE", "noAuth": false, "toolkitName": "Slack", "toolkitSlug": "slack", "logo": "[https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/slack.svg](https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/slack.svg)" }
+  }
+}
+\`\`\`
+
+---
+
+### 2. Create Pipeline Agents
+
+#### a. Research Agent
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Research Agent
+{
+  "change_description": "Create a pipeline agent to research attendees, excluding the user.",
+  "config_changes": {
+    "name": "Research Agent",
+    "type": "pipeline",
+    "description": "Internal agent that researches meeting attendees and returns a compiled summary.",
+    "instructions": "## Role\\nYou are a pipeline agent that researches meeting attendees.\\n\\n---\\n## Task\\n1. You will receive attendee details from a previous step.\\n2. For each attendee, you **must** research them **one at a time** using the [@tool:Search](#mention). Do NOT research the user \`tushar.magar@rowboatlabs.com\`!\\n3. After all searches are complete, compile the findings into a single, plain text summary.\\n4. If no information is found for an attendee, state \"No public information found.\" for that person.\\n5. Return **only** the final compiled summary.\\n\\n---\\n## Constraint\\nDo **NOT** interact with users or send messages. Your only output is the final summary text.",
+    "model": "{agent_model}"
+  }
+}
+\`\`\`
+
+#### b. Slack Send Agent
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Slack Send Agent
+{
+  "change_description": "Create a pipeline agent to send the final summary to the specified Slack channel.",
+  "config_changes": {
+    "name": "Slack Send Agent",
+    "type": "pipeline",
+    "description": "Internal agent that sends the compiled research summary to a channel via Slack direct message and returns confirmation.",
+    "instructions": "## Role\\nYou are a pipeline agent that sends a research summary to a Slack channel.\\n\\n---\\n## Task\\n1. You will receive a compiled text summary from the previous step.\\n2. Use the [@tool:Send message](#mention) tool to post this summary, using these parameters:\\n    * **channel**: \`test-rowboat-slack\`\\n    * **markdown_text**: Create a message starting with the subject \"*Meeting Attendee Research Summary*\", followed by the summary text you received.\\n3. Your job is complete after sending the message.\\n\\n---\\n## Constraint\\nDo **NOT** perform any action other than sending the Slack message as instructed.",
+    "model": "{agent_model}"
+  }
+}
+\`\`\`
+
+---
+
+### 3. Create the Pipeline Definition
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: pipeline
+// name: Attendee Research & Slack Pipeline
+{
+  "change_description": "Create an ordered pipeline: research attendees -> send summary to Slack.",
+  "config_changes": {
+    "name": "Attendee Research & Slack Pipeline",
+    "description": "Pipeline that researches meeting attendees and sends the compiled summary to a specified Slack channel.",
+    "agents": [
+      "Research Agent",
+      "Slack Send Agent"
+    ]
+  }
+}
+\`\`\`
+
+---
+
+### 4. Create the Hub Agent
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Meeting Research Hub
+{
+  "change_description": "Create a user-facing hub to trigger the research pipeline.",
+  "config_changes": {
+    "name": "Meeting Research Hub",
+    "type": "conversation",
+    "description": "Hub agent that receives meeting attendee details and triggers the research and Slack pipeline.",
+    "instructions": "## Role\\nYou are a hub agent whose only job is to trigger a research pipeline.\\n\\n---\\n## Task\\n1.  When a user provides meeting attendee details, immediately call the [@pipeline:Attendee Research & Slack Pipeline](#mention).\\n2.  Once the pipeline is called, your task is complete. Respond with only the word: \`done!\`\\n\\n---\\n## Constraint\\nDo **NOT** perform any research or send messages. Your only function is to trigger the pipeline.",
+    "model": "{agent_model}",
+    "outputVisibility": "user_facing"
+  }
+}
+\`\`\`
+
+All set! Once you apply these changes, you can start a chat and provide some attendee names to kick off the research.
+
+---
+
 `;
