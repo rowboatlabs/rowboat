@@ -1156,6 +1156,10 @@ export async function* streamResponse(
     const usageTracker = new UsageTracker();
     const turnMsgs: z.infer<typeof Message>[] = [...messages];
 
+    // Add deduplication tracking for tool calls
+    const processedToolCallIds = new Set<string>();
+    const processedToolResponseIds = new Set<string>();
+
     logger.log('🎬 STARTING AGENT TURN');
     
     // stack-based agent execution loop
@@ -1208,6 +1212,15 @@ export async function* streamResponse(
                             // handle tool call invocation
                             // except for transfer_to_* tool calls
                             if (output.type === 'function_call' && !output.name.startsWith('transfer_to')) {
+                                // Check if this tool call has already been processed
+                                if (processedToolCallIds.has(output.callId)) {
+                                    eventLogger.log(`⚠️ SKIPPING: tool call ${output.callId} (${output.name}) already processed`);
+                                    continue;
+                                }
+
+                                // Mark this tool call as processed
+                                processedToolCallIds.add(output.callId);
+
                                 const m: z.infer<typeof Message> = {
                                     role: 'assistant',
                                     content: null,
@@ -1309,6 +1322,16 @@ export async function* streamResponse(
                         event.item.rawItem.type === 'function_call_result' &&
                         event.item.rawItem.status === 'completed' &&
                         event.item.rawItem.output.type === 'text') {
+
+                        // Check if this tool response has already been processed
+                        if (processedToolResponseIds.has(event.item.rawItem.callId)) {
+                            eventLogger.log(`⚠️ SKIPPING: tool response ${event.item.rawItem.callId} (${event.item.rawItem.name}) already processed`);
+                            continue;
+                        }
+
+                        // Mark this tool response as processed
+                        processedToolResponseIds.add(event.item.rawItem.callId);
+
                         const m: z.infer<typeof Message> = {
                             role: 'tool',
                             content: event.item.rawItem.output.text,
