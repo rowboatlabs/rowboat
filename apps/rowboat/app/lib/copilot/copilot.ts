@@ -272,9 +272,9 @@ export async function* streamMultiAgentResponse(
         availableTools: ["search_relevant_tools"]
     });
     
-    const { fullStream } = await streamText({
+    const { fullStream } = streamText({
         model: openai(COPILOT_MODEL),
-        maxSteps: 5,
+        maxSteps: 10,
         tools: {
             "search_relevant_tools": tool({
                 description: "Use this tool whenever the user wants to add tools to their agents , search for tools or have questions about specific tools. ALWAYS search for real tools before suggesting mock tools. Use this when users mention: email sending, calendar management, file operations, database queries, web scraping, payment processing, social media integration, CRM operations, analytics, notifications, or any external service integration. This tool searches a comprehensive library of real, production-ready tools that can be integrated into workflows.",

@@ -145,7 +145,6 @@ I'll edit the Example Agent to become the hub agent:
   "change_description": "Created agent to fetch meetings from Google Calendar for a specified time period.",
   "config_changes": {
     "name": "Meeting Fetch Agent",
-    "type": "conversation",
     "description": "Fetches meetings from Google Calendar for a specified time period.",
     "instructions": "## 🧑‍💼 Role:\\nFetch meetings from the user's Google Calendar for the specified time period.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive the time period (start and end date/time) from the parent agent.\\n2. Use [@tool:Find event](#mention) to fetch all meetings in that period.\\n3. Return the list of meetings (with details: title, time, participants, description, etc.) to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Fetching meetings for a given time period.\\n\\n❌ Out of Scope:\\n- Researching participants.\\n- Summarizing meetings.\\n- Sending emails.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Return all relevant meeting details.\\n\\n🚫 Don'ts:\\n- Do not perform research or summaries.\\n- Do not interact with the user directly.",
     "examples": "- **Parent agent** : Fetch meetings from 2024-08-01 to 2024-08-07.\\n - **Agent actions**: Call [@tool:Find event](#mention)\\n - **Agent response**: [List of meetings with details]",
@@ -165,7 +164,6 @@ I'll edit the Example Agent to become the hub agent:
   "change_description": "Created agent to research meeting participants using web search.",
   "config_changes": {
     "name": "Participant Research Agent",
-    "type": "conversation",
     "description": "Researches each meeting participant using web search.",
     "instructions": "## 🧑‍💼 Role:\\nResearch each participant in the meeting using web search and return a brief profile for each.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive a list of participant names and emails from the parent agent.\\n2. For each participant, use [@tool:Tavily search](#mention) to find relevant information.\\n3. Summarize the findings for each participant (role, company, notable info).\\n4. Return the research summaries to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Researching participants using web search.\\n\\n❌ Out of Scope:\\n- Fetching meetings.\\n- Summarizing meetings.\\n- Sending emails.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Provide concise, relevant participant profiles.\\n\\n🚫 Don'ts:\\n- Do not fabricate information.\\n- Do not interact with the user directly.",
     "examples": "- **Parent agent** : Research participants: Alice Smith (alice@email.com), Bob Lee (bob@email.com)\\n - **Agent actions**: Call [@tool:Tavily search](#mention) for each participant\\n - **Agent response**: Alice Smith: [summary], Bob Lee: [summary]",
@@ -185,7 +183,6 @@ I'll edit the Example Agent to become the hub agent:
   "change_description": "Created agent to generate a summary of the meeting using meeting details and participant research.",
   "config_changes": {
     "name": "Meeting Summary Agent",
-    "type": "conversation",
     "description": "Generates a summary of the meeting using meeting details and participant research.",
     "instructions": "## 🧑‍💼 Role:\\nGenerate a concise summary of the meeting, incorporating meeting details and participant research.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive meeting details and participant research from the parent agent.\\n2. Write a summary including:\\n   - Meeting title, date, and time\\n   - Purpose/agenda (if available)\\n   - Key participants and their profiles\\n   - Any notable context\\n3. Return the summary to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Summarizing meetings using provided details and research.\\n\\n❌ Out of Scope:\\n- Fetching meetings.\\n- Researching participants.\\n- Sending emails.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Be clear and concise.\\n- Highlight important details.\\n\\n🚫 Don'ts:\\n- Do not add information not provided.\\n- Do not interact with the user directly.",
     "examples": "- **Parent agent** : Summarize meeting: 'Q3 Planning', 2024-08-02 10:00, participants: [Alice summary, Bob summary]\\n - **Agent response**: Meeting: Q3 Planning (2024-08-02 10:00)\\nParticipants: Alice Smith (CTO at Acme), Bob Lee (Product Manager at Beta)\\nSummary: The meeting will focus on Q3 product roadmap and resource allocation.",
@@ -205,7 +202,6 @@ I'll edit the Example Agent to become the hub agent:
   "change_description": "Created agent to send the meeting summary to the user's email.",
   "config_changes": {
     "name": "Email Agent",
-    "type": "conversation",
     "description": "Sends the meeting summary to the user's email address.",
     "instructions": "## 🧑‍💼 Role:\\nSend the provided meeting summary to the user's email address.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive the meeting summary and recipient email from the parent agent.\\n2. Use [@tool:Send Email](#mention) to send the summary.\\n3. Confirm delivery to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Sending meeting summaries via email.\\n\\n❌ Out of Scope:\\n- Fetching meetings.\\n- Researching participants.\\n- Summarizing meetings.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Ensure the summary is sent to the correct email.\\n\\n🚫 Don'ts:\\n- Do not interact with the user directly.",
     "examples": "- **Parent agent** : Send summary to user@email.com: [summary text]\\n - **Agent actions**: Call [@tool:Send Email](#mention)\\n - **Agent response**: Email sent confirmation.",

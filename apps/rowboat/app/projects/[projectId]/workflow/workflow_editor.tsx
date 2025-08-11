@@ -335,22 +335,46 @@ function reducer(state: State, action: Action): State {
                                 newAgentName = `New agent ${draft.workflow.agents.filter((agent) =>
                                     agent.name.startsWith("New agent")).length + 1}`;
                             }
-                            draft.workflow?.agents.push({
+                            
+                            // Start with a base agent configuration
+                            const baseAgent = {
                                 name: newAgentName,
-                                type: "conversation",
+                                type: "conversation" as const,
                                 description: "",
                                 disabled: false,
                                 instructions: "",
                                 model: "",
                                 locked: false,
                                 toggleAble: true,
-                                ragReturnType: "chunks",
+                                ragReturnType: "chunks" as const,
                                 ragK: 3,
-                                controlType: "retain",
-                                outputVisibility: "user_facing",
+                                controlType: "retain" as const,
+                                outputVisibility: "user_facing" as const,
                                 maxCallsPerParentAgent: 3,
-                                ...action.agent
-                            });
+                            };
+                            
+                            // Merge with action.agent to apply explicit values from the action (e.g., from copilot)
+                            const agentWithExplicitValues = { ...baseAgent, ...action.agent };
+                            
+                            // Now, refine controlType and outputVisibility based on the effective type and outputVisibility
+                            // This ensures Zod validation rules are met for inferred values.
+                            const effectiveType = agentWithExplicitValues.type;
+                            const effectiveOutputVisibility = agentWithExplicitValues.outputVisibility;
+                            
+                            if (effectiveType === 'pipeline') {
+                                agentWithExplicitValues.controlType = 'relinquish_to_parent';
+                                agentWithExplicitValues.outputVisibility = 'internal';
+                            } else { // For non-pipeline agents (e.g., 'conversation')
+                                if (effectiveOutputVisibility === 'internal') {
+                                    agentWithExplicitValues.controlType = 'relinquish_to_parent'; // Internal conversation agents should relinquish control
+                                } else {
+                                    // If outputVisibility is user_facing (or not explicitly internal), controlType should be retain
+                                    agentWithExplicitValues.controlType = 'retain';
+                                }
+                                // No change needed for outputVisibility here as effectiveOutputVisibility already holds the correct value
+                            }
+                            
+                            draft.workflow?.agents.push(agentWithExplicitValues);
                             draft.selection = {
                                 type: "agent",
                                 name: action.agent.name || newAgentName
@@ -935,6 +959,54 @@ export function WorkflowEditor({
         }
     }, [projectId]);
 
+    // Fix existing agents with incorrect configurations on component mount
+    useEffect(() => {
+        const workflow = state.present.workflow;
+        let hasChanges = false;
+        const updatedAgents = workflow.agents.map(agent => {
+            let updated = false;
+            let newAgent = { ...agent };
+
+            // Fix pipeline agents
+            if (agent.type === 'pipeline') {
+                if (agent.outputVisibility !== 'internal' || agent.controlType !== 'relinquish_to_parent') {
+                    newAgent.outputVisibility = 'internal';
+                    newAgent.controlType = 'relinquish_to_parent';
+                    updated = true;
+                }
+            } else {
+                // Fix non-pipeline agents
+                if (agent.outputVisibility === 'internal' && agent.controlType !== 'relinquish_to_parent') {
+                    newAgent.controlType = 'relinquish_to_parent';
+                    updated = true;
+                } else if (agent.outputVisibility === 'user_facing' && agent.controlType === 'relinquish_to_parent') {
+                    newAgent.controlType = 'retain';
+                    updated = true;
+                }
+            }
+
+            // Ensure controlType is always defined
+            if (newAgent.controlType === undefined) {
+                if (newAgent.outputVisibility === 'internal') {
+                    newAgent.controlType = 'relinquish_to_parent';
+                } else {
+                    newAgent.controlType = 'retain';
+                }
+                updated = true;
+            }
+
+            if (updated) {
+                hasChanges = true;
+            }
+            return newAgent;
+        });
+
+        if (hasChanges) {
+            console.log('Fixing existing agents with incorrect configurations');
+            dispatch({ type: "restore_state", state: { ...state.present, workflow: { ...workflow, agents: updatedAgents } } });
+        }
+    }, []); // Only run once on mount
+
     // Reset initial state when user interacts with copilot or opens other menus
     useEffect(() => {
         if (state.present.selection !== null) {
@@ -1022,6 +1094,7 @@ export function WorkflowEditor({
             name: newAgentName,
             type: 'pipeline' as const,
             outputVisibility: 'internal' as const,
+            controlType: 'relinquish_to_parent' as const,
             model: defaultModel || "gpt-4o"
         };
         
@@ -1112,6 +1185,7 @@ export function WorkflowEditor({
     }
 
     async function handlePublishWorkflow() {
+        // Publish the workflow directly - agents are created correctly from the start
         await publishWorkflow(projectId, state.present.workflow);
         onChangeMode('live');
     }
@@ -1151,6 +1225,7 @@ export function WorkflowEditor({
             if (isLive) {
                 return;
             } else {
+                // Save the workflow directly - agents are created correctly from the start
                 await saveWorkflow(projectId, workflowToSave);
             }
         } finally {

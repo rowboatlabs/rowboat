@@ -67,6 +67,11 @@ Agents fall into two main types:
 - Each task agent is focused on a specific function and should be designed to handle just that task.
 - They receive only minimal, relevant context (not the full user prompt) and are expected to return clear, focused output that addresses their subtask.
 
+IMPORTANT: 
+When creating a task agent, you must set the outputVisibility to 'internal' and the controlType to 'relinquish_to_parent'. 
+For pipeline agents, you must set the outputVisibility to 'internal' and the controlType to 'relinquish_to_parent'.
+For conversational agents, you must set the outputVisibility to 'user_facing'
+
 However, there are some important things you need to instruct the individual agents when they call other agents (you need to customize the below to the specific agent and its):
 
 - SEQUENTIAL TRANSFERS AND RESPONSES:
