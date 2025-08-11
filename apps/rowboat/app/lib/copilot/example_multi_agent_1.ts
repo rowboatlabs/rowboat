@@ -752,4 +752,172 @@ All set! Once you apply these changes, you can start a chat and provide some att
 
 ---
 
+### Example 6: Automated Meeting Prep Pipeline
+
+**User Request:**
+I want to automate my meeting preparation. Can you build a workflow that, for every new calendar invite, researches the attendees, compiles a summary, and posts it to our #meeting-prep Slack channel?
+
+**Copilot Response:**
+
+Yes, I can build that for you. This is a perfect use case for a multi-step pipeline.
+
+I'll create a workflow with a Hub agent that triggers a three-step pipeline:
+
+Research Participants: Looks up each person in the invite.
+
+Compile Summary: Consolidates the research into a clean summary.
+
+Send to Slack: Posts the final summary to the #meeting-prep channel.
+
+Here is the full setup.
+
+---
+
+### 1. Add Required Tools
+
+First, I'll add the necessary tools for web research (Firecrawl) and sending Slack messages.
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: tool
+// name: Search
+{
+  "change_description": "Add Firecrawl tool to perform a web search and scrape content from the top results.",
+  "config_changes": {
+    "name": "Search",
+    "description": "Performs a web search for a query, scrapes content from the top search results using firecrawl, and returns details in specified formats.",
+    "parameters": { "type": "object", "properties": { "country": { "default": "us", "description": "Country code to tailor search results (e.g., 'us' for United States, default 'us').", "nullable": true, "title": "Country", "type": "string" }, "formats": { "default": null, "description": "Desired output formats for scraped content of each search result (e.g., 'markdown', 'html'). If None, default scraping applies. Available: 'markdown', 'html', 'rawHtml', 'links', 'screenshot', 'screenshot@fullPage'.", "items": { "type": "string" }, "nullable": true, "title": "Formats", "type": "array" }, "lang": { "default": "en", "description": "Language code for search results (e.g., 'en' for English, default 'en').", "nullable": true, "title": "Lang", "type": "string" }, "limit": { "default": 5, "description": "Maximum number of search results to return (1-10, default 5).", "maximum": 10, "minimum": 1, "nullable": true, "title": "Limit", "type": "integer" }, "query": { "description": "The search query to execute.", "title": "Query", "type": "string" }, "timeout": { "default": 60000, "description": "Maximum time in milliseconds for search and scrape operations (1000-300000, default 60000).", "maximum": 300000, "minimum": 1000, "nullable": true, "title": "Timeout", "type": "integer" } }, "required": [ "query" ] },
+    "isComposio": true,
+    "composioData": { "slug": "FIRECRAWL_SEARCH", "noAuth": false, "toolkitName": "Firecrawl", "toolkitSlug": "firecrawl", "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/firecrawl.jpeg" }
+  }
+}
+\`\`\`
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: tool
+// name: Send message
+{
+  "change_description": "Add Slack tool to post a message to a channel.",
+  "config_changes": {
+    "name": "Send message",
+    "description": "Posts a message to a slack channel, direct message, or private group; requires content via \`text\`, \`blocks\`, or \`attachments\`.",
+    "parameters": { "type": "object", "properties": { "as_user": { "default": null, "description": "Post as the authenticated user instead of as a bot. Defaults to \`false\`. If \`true\`, \`username\`, \`icon_emoji\`, and \`icon_url\` are ignored. If \`false\`, the message is posted as a bot, allowing appearance customization.", "title": "As User", "type": "boolean" }, "attachments": { "default": null, "description": "URL-encoded JSON array of message attachments, a legacy method for rich content. See Slack API documentation for structure.", "title": "Attachments", "type": "string" }, "blocks": { "default": null, "description": "DEPRECATED: Use \`markdown_text\` field instead. URL-encoded JSON array of layout blocks for rich/interactive messages. See Slack API Block Kit docs for structure.", "title": "Blocks", "type": "string" }, "channel": { "description": "ID or name of the channel, private group, or IM channel to send the message to.", "title": "Channel", "type": "string" }, "icon_emoji": { "default": null, "description": "Emoji for bot's icon (e.g., ':robot_face:'). Overrides \`icon_url\`. Applies if \`as_user\` is \`false\`.", "title": "Icon Emoji", "type": "string" }, "icon_url": { "default": null, "description": "Image URL for bot's icon (must be HTTPS). Applies if \`as_user\` is \`false\`.", "title": "Icon Url", "type": "string" }, "link_names": { "default": null, "description": "Automatically hyperlink channel names (e.g., #channel) and usernames (e.g., @user) in message text. Defaults to \`false\` for bot messages.", "title": "Link Names", "type": "boolean" }, "markdown_text": { "default": null, "description": "PREFERRED: Write your message in markdown for nicely formatted display. Supports: headers (# ## ###), bold (**text** or __text__), italic (*text* or _text_), strikethrough (~~text~~), inline code (\`code\`), code blocks (\`\`\`), links ([text](url)), block quotes (>), lists (- item, 1. item), dividers (--- or ***), context blocks (:::context with images), and section buttons (:::section-button). IMPORTANT: Use \\\\n for line breaks (e.g., 'Line 1\\\\nLine 2'), not actual newlines. USER MENTIONS: To tag users, use their user ID with <@USER_ID> format (e.g., <@U1234567890>), not username. ", "title": "Markdown Text", "type": "string" }, "mrkdwn": { "default": null, "description": "Disable Slack's markdown for \`text\` field if \`false\`. Default \`true\` (allows *bold*, _italic_, etc.).", "title": "Mrkdwn", "type": "boolean" }, "parse": { "default": null, "description": "Message text parsing behavior. Default \`none\` (no special parsing). \`full\` parses as user-typed (links @mentions, #channels). See Slack API docs for details.", "title": "Parse", "type": "string" }, "reply_broadcast": { "default": null, "description": "If \`true\` for a threaded reply, also posts to main channel. Defaults to \`false\`.", "title": "Reply Broadcast", "type": "boolean" }, "text": { "default": null, "description": "Primary textual content. Recommended fallback if using \`blocks\` or \`attachments\`. Supports mrkdwn unless \`mrkdwn\` is \`false\`.", "title": "Text", "type": "string" }, "thread_ts": { "default": null, "description": "Timestamp (\`ts\`) of an existing message to make this a threaded reply. Use \`ts\` of the parent message, not another reply. Example: '1476746824.000004'.", "title": "Thread Ts", "type": "string" }, "unfurl_links": { "default": null, "description": "Enable unfurling of text-based URLs. Defaults \`false\` for bots, \`true\` if \`as_user\` is \`true\`.", "title": "Unfurl Links", "type": "boolean" }, "unfurl_media": { "default": null, "description": "Disable unfurling of media content from URLs if \`false\`. Defaults to \`true\`.", "title": "Unfurl Media", "type": "boolean" }, "username": { "default": null, "description": "Bot's name in Slack (max 80 chars). Applies if \`as_user\` is \`false\`.", "title": "Username", "type": "string" } }, "required": [ "channel" ] },
+    "isComposio": true,
+    "composioData": { "slug": "SLACK_SEND_MESSAGE", "noAuth": false, "toolkitName": "Slack", "toolkitSlug": "slack", "logo": "[https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/slack.svg](https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/slack.svg)" }
+  }
+}
+\`\`\`
+
+---
+
+### 2. Create Pipeline Agents
+
+Now, I'll create the three agents that will execute each step of the pipeline.
+
+#### a. Research Participants
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Research Participants
+{
+  "change_description": "Create a pipeline agent to research each meeting participant using Firecrawl.",
+  "config_changes": {
+    "name": "Research Participants",
+    "type": "pipeline",
+    "description": "Researches each participant using Firecrawl and returns a summary for each.",
+    "instructions": "1. Extract the names of the participants from the calendar invite \\n2. Do a search using [@tool:Search](#mention) for each of them",
+    "model": "{agent_model}"
+  }
+}
+\`\`\`
+
+#### b. Compile Summary
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Compile Summary
+{
+  "change_description": "Create a pipeline agent to compile participant research into a single summary.",
+  "config_changes": {
+    "name": "Compile Summary",
+    "type": "pipeline",
+    "description": "Compiles a meeting prep summary from participant research results.",
+    "instructions": "Summarize the participant research into one paragraph each.",
+    "model": "{agent_model}"
+  }
+}
+\`\`\`
+
+#### c. Send to Slack
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Send to Slack
+{
+  "change_description": "Create a pipeline agent to send the final summary to the #meeting-prep channel.",
+  "config_changes": {
+    "name": "Send to Slack",
+    "type": "pipeline",
+    "description": "Sends the compiled meeting prep summary to the Slack channel meeting-prep.",
+    "instructions": "Send this to slack channel #meeting-prep using [@tool:Send message](#mention)",
+    "model": "{agent_model}"
+  }
+}
+\`\`\`
+
+---
+
+### 3. Create the Pipeline Definition
+
+Next, I'll define the pipeline to run these agents in the correct order.
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: pipeline
+// name: Meeting Prep Pipeline
+{
+  "change_description": "Create an ordered pipeline: research -> compile -> send to Slack.",
+  "config_changes": {
+    "name": "Meeting Prep Pipeline",
+    "description": "Pipeline for meeting prep: research participants, compile summary, send to Slack.",
+    "agents": [
+      "Research Participants",
+      "Compile Summary",
+      "Send to Slack"
+    ]
+  }
+}
+\`\`\`
+
+---
+
+### 4. Create the Hub Agent
+
+Finally, I'll create the user-facing Hub agent that will be triggered by your calendar events.
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Meeting Prep Hub
+{
+  "change_description": "Create a user-facing hub to trigger the meeting prep pipeline.",
+  "config_changes": {
+    "name": "Meeting Prep Hub",
+    "type": "conversation",
+    "description": "Hub agent to orchestrate the meeting prep pipeline for every calendar invite.",
+    "instructions": "Call the Meeting Prep Pipeline.",
+    "model": "{agent_model}",
+    "outputVisibility": "user_facing"
+  }
+}
+\`\`\`
+
+This workflow is now ready. Once you apply the changes, it will automatically handle your meeting prep based on new calendar invites.
+
+---
+
 `;
