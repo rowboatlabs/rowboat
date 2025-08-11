@@ -8,6 +8,7 @@ import { listConversations } from "@/app/actions/conversation_actions";
 import { z } from "zod";
 import { ListedConversationItem } from "@/src/application/repositories/conversations.repository.interface";
 import { isToday, isThisWeek, isThisMonth } from "@/lib/utils/date";
+import { ReasonBadge } from "@/app/lib/components/reason-badge";
 
 type ListedItem = z.infer<typeof ListedConversationItem>;
 
@@ -101,26 +102,30 @@ export function ConversationsList({ projectId }: { projectId: string }) {
                                                 <thead className="bg-gray-50 dark:bg-gray-800/50">
                                                     <tr>
                                                         <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Conversation</th>
-                                                        <th className="w-[30%] px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Created</th>
+                                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Reason</th>
+                                                        <th className="w-[25%] px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Created</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                                     {group.map((c) => (
-                                                        <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
-                                                            <td className="px-6 py-4 text-left">
-                                                                <Link
-                                                                    href={`/projects/${projectId}/conversations/${c.id}`}
-                                                                    size="lg"
-                                                                    isBlock
-                                                                    className="text-sm text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 truncate block"
-                                                                >
-                                                                    {c.id}
-                                                                </Link>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-left text-sm text-gray-600 dark:text-gray-300">
-                                                                {new Date(c.createdAt).toLocaleString()}
-                                                            </td>
-                                                        </tr>
+                                                            <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                                                                <td className="px-6 py-4 text-left">
+                                                                    <Link
+                                                                        href={`/projects/${projectId}/conversations/${c.id}`}
+                                                                        size="lg"
+                                                                        isBlock
+                                                                        className="text-sm text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 truncate block"
+                                                                    >
+                                                                        {c.id}
+                                                                    </Link>
+                                                                </td>
+                                                                <td className="px-6 py-4 text-left">
+                                                                    <ReasonBadge reason={c.reason} projectId={projectId} />
+                                                                </td>
+                                                                <td className="px-6 py-4 text-left text-sm text-gray-600 dark:text-gray-300">
+                                                                    {new Date(c.createdAt).toLocaleString()}
+                                                                </td>
+                                                            </tr>
                                                     ))}
                                                 </tbody>
                                             </table>

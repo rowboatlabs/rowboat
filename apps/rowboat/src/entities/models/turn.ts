@@ -14,7 +14,7 @@ const jobReason = z.object({
     jobId: z.string(),
 });
 
-const reason = z.discriminatedUnion("type", [
+export const Reason = z.discriminatedUnion("type", [
     chatReason,
     apiReason,
     jobReason,
@@ -22,7 +22,7 @@ const reason = z.discriminatedUnion("type", [
 
 export const Turn = z.object({
     id: z.string(),
-    reason,
+    reason: Reason,
     input: z.object({
         messages: z.array(Message),
         mockTools: z.record(z.string(), z.string()).nullable().optional(),

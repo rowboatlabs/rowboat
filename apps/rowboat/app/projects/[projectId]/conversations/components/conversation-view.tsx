@@ -9,68 +9,7 @@ import { Turn } from "@/src/entities/models/turn";
 import { z } from "zod";
 import Link from "next/link";
 import { MessageDisplay } from "../../../../lib/components/message-display";
-
-function TurnReason({ reason }: { reason: z.infer<typeof Turn>['reason'] }) {
-    const getReasonDisplay = () => {
-        switch (reason.type) {
-            case 'chat':
-                return { label: 'CHAT', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' };
-            case 'api':
-                return { label: 'API', color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' };
-            case 'job':
-                return { label: `JOB: ${reason.jobId}`, color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300' };
-            default:
-                return { label: 'UNKNOWN', color: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300' };
-        }
-    };
-
-    const { label, color } = getReasonDisplay();
-
-    return (
-        <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-mono font-medium ${color}`}>
-            {label}
-        </span>
-    );
-}
-
-function TurnReasonWithLink({ reason, projectId }: { reason: z.infer<typeof Turn>['reason']; projectId: string }) {
-    const getReasonDisplay = () => {
-        switch (reason.type) {
-            case 'chat':
-                return { label: 'CHAT', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' };
-            case 'api':
-                return { label: 'API', color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' };
-            case 'job':
-                return { 
-                    label: `JOB: ${reason.jobId}`, 
-                    color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
-                    isJob: true,
-                    jobId: reason.jobId
-                };
-            default:
-                return { label: 'UNKNOWN', color: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300' };
-        }
-    };
-
-    const { label, color, isJob, jobId } = getReasonDisplay();
-
-    if (isJob && jobId) {
-        return (
-            <Link
-                href={`/projects/${projectId}/jobs/${jobId}`}
-                className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-mono font-medium ${color} hover:opacity-80 transition-opacity`}
-            >
-                {label}
-            </Link>
-        );
-    }
-
-    return (
-        <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-mono font-medium ${color}`}>
-            {label}
-        </span>
-    );
-}
+import { ReasonBadge } from "../../../../lib/components/reason-badge";
 
 function TurnContainer({ turn, index, projectId }: { turn: z.infer<typeof Turn>; index: number; projectId: string }) {
     return (
@@ -82,7 +21,7 @@ function TurnContainer({ turn, index, projectId }: { turn: z.infer<typeof Turn>;
                         <span className="text-sm font-mono font-semibold text-gray-700 dark:text-gray-300">
                             TURN #{index + 1}
                         </span>
-                        <TurnReasonWithLink reason={turn.reason} projectId={projectId} />
+                        <ReasonBadge reason={turn.reason} projectId={projectId} />
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-500">
                         {new Date(turn.createdAt).toLocaleTimeString()}
@@ -198,6 +137,12 @@ export function ConversationView({ projectId, conversationId }: { projectId: str
                                         <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">
                                             {conversation.isLiveWorkflow ? 'Yes' : 'No'}
                                         </span>
+                                    </div>
+                                    <div>
+                                        <span className="font-semibold text-gray-700 dark:text-gray-300">Reason:</span>
+                                                                           <span className="ml-2">
+                                       <ReasonBadge reason={conversation.reason} projectId={projectId} />
+                                   </span>
                                     </div>
                                 </div>
                             </div>

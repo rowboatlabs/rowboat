@@ -57,6 +57,10 @@ export class JobsWorker implements IJobsWorker {
             const conversation = await this.createConversationUseCase.execute({
                 caller: "job_worker",
                 projectId,
+                reason: {
+                    type: "job",
+                    jobId: job.id,
+                },
                 workflow: job.input.workflow,
                 isLiveWorkflow: true,
             });

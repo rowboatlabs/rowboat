@@ -1,4 +1,4 @@
-import { Turn, TurnEvent } from "@/src/entities/models/turn";
+import { Reason, Turn, TurnEvent } from "@/src/entities/models/turn";
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { authorize, getCustomerIdForProject, logUsage } from "@/app/lib/billing";
 import { NotFoundError } from '@/src/entities/errors/common';
@@ -14,7 +14,7 @@ const inputSchema = z.object({
     userId: z.string().optional(),
     apiKey: z.string().optional(),
     conversationId: z.string(),
-    reason: Turn.shape.reason,
+    reason: Reason,
     input: Turn.shape.input,
 });
 

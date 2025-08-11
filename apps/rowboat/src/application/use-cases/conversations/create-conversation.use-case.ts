@@ -6,12 +6,14 @@ import { Conversation } from "@/src/entities/models/conversation";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
+import { Reason } from '@/src/entities/models/turn';
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api", "job_worker"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
     projectId: z.string(),
+    reason: Reason,
     workflow: Workflow.optional(),
     isLiveWorkflow: z.boolean().optional(),
 });
@@ -40,7 +42,7 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
     }
 
     async execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Conversation>> {
-        const { caller, userId, apiKey, projectId } = data;
+        const { caller, userId, apiKey, projectId, reason } = data;
         let isLiveWorkflow = Boolean(data.isLiveWorkflow);
         let workflow = data.workflow;
 
@@ -75,6 +77,7 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
         // create conversation
         return await this.conversationsRepository.create({
             projectId,
+            reason,
             workflow,
             isLiveWorkflow,
         });

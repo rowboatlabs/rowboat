@@ -6,6 +6,7 @@ import { PaginatedList } from "@/src/entities/common/paginated-list";
 export const CreateConversationData = Conversation.pick({
     projectId: true,
     workflow: true,
+    reason: true,
     isLiveWorkflow: true,
 });
 
@@ -17,6 +18,7 @@ export const AddTurnData = Turn.omit({
 
 export const ListedConversationItem = Conversation.pick({
     id: true,
+    reason: true,
     projectId: true,
     createdAt: true,
     updatedAt: true,

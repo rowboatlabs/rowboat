@@ -1,6 +1,6 @@
 import { IJobsRepository } from "@/src/application/repositories/jobs.repository.interface";
 import { IComposioTriggerDeploymentsRepository } from "@/src/application/repositories/composio-trigger-deployments.repository.interface";
-import { Webhook } from "standardwebhooks";
+import { createHmac, timingSafeEqual } from "crypto";
 import { z } from "zod";
 import { BadRequestError } from "@/src/entities/errors/common";
 import { UserMessage } from "@/app/lib/types/types";
@@ -52,7 +52,7 @@ export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhook
     private readonly jobsRepository: IJobsRepository;
     private readonly projectsRepository: IProjectsRepository;
     private readonly pubSubService: IPubSubService;
-    private webhook;
+    // no external webhook verifier; using HMAC-SHA256 verification
 
     constructor({
         composioTriggerDeploymentsRepository,
@@ -69,18 +69,17 @@ export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhook
         this.jobsRepository = jobsRepository;
         this.projectsRepository = projectsRepository;
         this.pubSubService = pubSubService;
-        this.webhook = new Webhook(WEBHOOK_SECRET);
     }
 
     async execute(request: z.infer<typeof requestSchema>): Promise<void> {
         const { headers, payload } = request;
 
         // verify payload
-        // try {
-        //     this.webhook.verify(payload, headers);
-        // } catch (error) {
-        //     throw new BadRequestError("Payload verification failed");
-        // }
+        try {
+            this.verifySignature(headers, payload);
+        } catch (error) {
+            throw new BadRequestError("Payload verification failed");
+        }
 
         // parse event
         let event: z.infer<typeof payloadSchema>;
@@ -147,5 +146,36 @@ export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhook
         } while (cursor);
 
         logger.log(`Created ${jobs} jobs for trigger ${event.data.trigger_nano_id}`);
+    }
+
+    private verifySignature(headers: Record<string, string>, payload: string): void {
+        const normalizedHeaders = Object.fromEntries(
+            Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value])
+        ) as Record<string, string>;
+
+        const webhookId = normalizedHeaders["webhook-id"];
+        const webhookTimestamp = normalizedHeaders["webhook-timestamp"];
+        const webhookSignature = normalizedHeaders["webhook-signature"];
+
+        if (!webhookId || !webhookTimestamp || !webhookSignature) {
+            throw new BadRequestError("Missing required webhook headers");
+        }
+
+        const toSign = `${webhookId}.${webhookTimestamp}.${payload}`;
+        const expectedSignature = createHmac("sha256", WEBHOOK_SECRET)
+            .update(toSign)
+            .digest("base64");
+        const expectedFullSignature = `v1,${expectedSignature}`;
+
+        const encoder = new TextEncoder();
+        const expectedBytes = encoder.encode(expectedFullSignature);
+        const actualBytes = encoder.encode(webhookSignature);
+
+        const isValid =
+            expectedBytes.length === actualBytes.length && timingSafeEqual(expectedBytes, actualBytes);
+
+        if (!isValid) {
+            throw new BadRequestError("Invalid webhook signature");
+        }
     }
 }

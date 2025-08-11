@@ -60,6 +60,7 @@ services:
       - BILLING_API_KEY=${BILLING_API_KEY}
       - USE_COMPOSIO_TOOLS=${USE_COMPOSIO_TOOLS}
       - COMPOSIO_API_KEY=${COMPOSIO_API_KEY}
+      - COMPOSIO_TRIGGERS_WEBHOOK_SECRET=${COMPOSIO_TRIGGERS_WEBHOOK_SECRET}
     restart: unless-stopped
     volumes:
       - uploads:/app/uploads

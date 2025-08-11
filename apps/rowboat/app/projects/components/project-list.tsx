@@ -6,7 +6,7 @@ import clsx from 'clsx';
 import { tokens } from "@/app/styles/design-tokens";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import Link from "next/link";
-import { formatDistanceToNow } from "date-fns";
+import { RelativeTime } from "@primer/react";
 
 interface ProjectListProps {
     projects: z.infer<typeof Project>[];
@@ -75,7 +75,7 @@ export function ProjectList({ projects, isLoading, searchQuery }: ProjectListPro
                                     tokens.colors.light.text.muted,
                                     tokens.colors.dark.text.muted
                                 )}>
-                                    Created {formatDistanceToNow(new Date(project.createdAt))} ago
+                                    Created <RelativeTime date={new Date(project.createdAt)} />
                                 </p>
                             </div>
                             <ChevronRightIcon className={clsx(

@@ -91,6 +91,7 @@ export class MongoDBConversationsRepository implements IConversationsRepository 
                 projectId: 1,
                 createdAt: 1,
                 updatedAt: 1,
+                reason: 1,
             })
             .toArray();
 

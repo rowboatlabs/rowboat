@@ -38,6 +38,9 @@ export class CreatePlaygroundConversationController implements ICreatePlayground
         return await this.createConversationUseCase.execute({
             caller: "user",
             userId,
+            reason: {
+                type: "chat",
+            },
             projectId,
             workflow,
             isLiveWorkflow,

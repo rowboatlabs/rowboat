@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     const logger = new PrefixLogger(`composio-webhook-[${id}]`);
     const payload = await request.text();
     const headers = Object.fromEntries(request.headers.entries());
-    logger.log('received event', JSON.stringify(headers));
+    logger.log('received event', JSON.stringify(headers), payload);
 
     // handle webhook
     try {

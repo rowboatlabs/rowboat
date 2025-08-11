@@ -49,6 +49,7 @@ export class RunTurnController implements IRunTurnController {
         }
         const { caller, userId, apiKey, projectId, input } = result.data;
         let conversationId = result.data.conversationId;
+        const reason = caller === "user" ? { type: "chat" as const } : { type: "api" as const };
 
         // if conversationId is not provided, create conversation
         if (!conversationId) {
@@ -57,6 +58,7 @@ export class RunTurnController implements IRunTurnController {
                 userId,
                 apiKey,
                 projectId,
+                reason,
             });
             conversationId = conversation.id;
         }
@@ -67,7 +69,7 @@ export class RunTurnController implements IRunTurnController {
             userId,
             apiKey,
             conversationId,
-            reason: caller === "user" ? { type: "chat" } : { type: "api" },
+            reason,
             input,
         });
 
