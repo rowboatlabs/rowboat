@@ -1083,11 +1083,8 @@ async function* handleMessageOutput(
             return; // Exit without switching now
         }
 
-        // Check if this agent is part of a pipeline that needs to continue
-        const currentAgent = agents[current];
-        const isPartOfPipeline = currentAgent && (currentAgent as any).pipelineName !== undefined;
-        
-        if (currentPipelineConfig || currentAgentConfig?.type === 'pipeline' || isPartOfPipeline) {
+        // Check if this is a pipeline or pipeline agent that needs to continue the pipeline
+        if (currentPipelineConfig || currentAgentConfig?.type === 'pipeline') {
             const result = handlePipelineAgentExecution(
                 agents[current], // Use the correct agent from agents collection
                 current,
