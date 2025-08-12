@@ -293,6 +293,9 @@ export function ComposioToolsPanel({
                   {searchQuery && ` for "${searchQuery}"`}
                 </span>
               )}
+              <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                Powered by Composio
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <Button

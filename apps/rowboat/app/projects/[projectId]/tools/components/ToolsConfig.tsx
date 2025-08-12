@@ -65,7 +65,7 @@ export function ToolsConfig({
         fullWidth
       >
         {useComposioTools && (
-          <Tab key="composio" title="Composio">
+          <Tab key="composio" title="Library">
             <div className="mt-4 p-6">
               <SelectComposioToolkit
                 projectId={projectId}

@@ -20,6 +20,17 @@ const KLAVIS_API_KEY = process.env.KLAVIS_API_KEY || '';
 
 const projectActionAuthorizationPolicy = container.resolve<IProjectActionAuthorizationPolicy>('projectActionAuthorizationPolicy');
 
+export async function listTemplates() {
+    const templatesArray = Object.entries(templates)
+        .filter(([key]) => key !== 'default') // Exclude the default template
+        .map(([key, template]) => ({
+            id: key,
+            ...template
+        }));
+    
+    return templatesArray;
+}
+
 export async function projectAuthCheck(projectId: string) {
     if (!USE_AUTH) {
         return;
@@ -115,11 +126,12 @@ export async function createProjectFromWorkflowJson(formData: FormData): Promise
     const name = formData.get('name') as string | null;
 
     const workflowJson = formData.get('workflowJson') as string;
-    const { agents, prompts, tools, startAgent } = Workflow.parse(workflowJson);
+    const { agents, prompts, tools, pipelines, startAgent } = Workflow.parse(JSON.parse(workflowJson));
     const response = await createBaseProject(name || 'Imported project', user, {
         agents,
         prompts,
         tools,
+        pipelines,
         startAgent,
         lastUpdatedAt: (new Date()).toISOString(),
     });

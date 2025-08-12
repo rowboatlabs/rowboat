@@ -9,7 +9,7 @@ const copilotCodeMarker = "copilot_change\n";
 function parseMarkdown(markdown: string): Block[] {
   // Split on triple backticks but keep the delimiters
   // This gives us the raw content between and including delimiters
-  const parts = markdown.split("```");
+  const parts = markdown.split("\n```");
   const blocks: Block[] = [];
   
   for (const part of parts) {

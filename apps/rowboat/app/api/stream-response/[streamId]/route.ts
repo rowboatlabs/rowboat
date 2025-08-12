@@ -1,6 +1,8 @@
 import { container } from "@/di/container";
 import { IRunCachedTurnController } from "@/src/interface-adapters/controllers/conversations/run-cached-turn.controller";
 import { requireAuth } from "@/app/lib/auth";
+import { z } from "zod";
+import { TurnEvent } from "@/src/entities/models/turn";
 
 export async function GET(request: Request, props: { params: Promise<{ streamId: string }> }) {
     const params = await props.params;
@@ -23,10 +25,18 @@ export async function GET(request: Request, props: { params: Promise<{ streamId:
                 })) {
                     controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(event)}\n\n`));
                 }
-                controller.close();
             } catch (error) {
                 console.error('Error processing stream:', error);
-                controller.error(error);
+                const errMessage: z.infer<typeof TurnEvent> = {
+                    type: "error",
+                    error: `Error processing stream: ${error}`,
+                    isBillingError: false,
+                };
+                controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(errMessage)}\n\n`));
+            } finally {
+                console.log("closing stream");
+                controller.enqueue(encoder.encode("event: end\n\n"));
+                controller.close();
             }
         },
     });

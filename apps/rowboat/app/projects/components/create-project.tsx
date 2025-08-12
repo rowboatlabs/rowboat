@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from "react";
-import { createProject, createProjectFromWorkflowJson } from "@/app/actions/project_actions";
+import { createProjectWithOptions, createProjectFromJsonWithOptions } from "../lib/project-creation-utils";
 import { useRouter, useSearchParams } from 'next/navigation';
 import clsx from 'clsx';
 import { Textarea } from "@/components/ui/textarea";
@@ -128,9 +128,10 @@ interface CreateProjectProps {
     defaultName: string;
     onOpenProjectPane: () => void;
     isProjectPaneOpen: boolean;
+    hideHeader?: boolean;
 }
 
-export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpen }: CreateProjectProps) {
+export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpen, hideHeader = false }: CreateProjectProps) {
     const [selectedTab, setSelectedTab] = useState<TabState>(TabType.Describe);
     const [customPrompt, setCustomPrompt] = useState("");
     const [name, setName] = useState(defaultName);
@@ -168,26 +169,17 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
             if ((urlPrompt || urlTemplate) && !importLoading && !autoCreateLoading) {
                 setAutoCreateLoading(true);
                 try {
-                    const formData = new FormData();
-                    
-                    // If template is provided, use it
-                    if (urlTemplate) {
-                        formData.append('template', urlTemplate);
-                    }
-                    
-                    const response = await createProject(formData);
-                    
-                    if ('id' in response) {
-                        // Store prompt in localStorage if provided
-                        if (urlPrompt) {
-                            localStorage.setItem(`project_prompt_${response.id}`, urlPrompt);
+                    await createProjectWithOptions({
+                        name: 'New Assistant', // Default name for auto-creation
+                        template: urlTemplate || undefined,
+                        prompt: urlPrompt || undefined,
+                        router,
+                        onError: (error) => {
+                            // Auto-creation failed, show the form instead
+                            setBillingError(error instanceof Error ? error.message : String(error));
+                            setAutoCreateLoading(false);
                         }
-                        router.push(`/projects/${response.id}/workflow`);
-                    } else {
-                        // Auto-creation failed, show the form instead
-                        setBillingError(response.billingError);
-                        setAutoCreateLoading(false);
-                    }
+                    });
                 } catch (error) {
                     console.error('Error auto-creating project:', error);
                     setAutoCreateLoading(false);
@@ -288,41 +280,45 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
         try {
             if (importedJson) {
                 // Use imported JSON
-                const formData = new FormData();
-                formData.append('name', name);
-                formData.append('workflowJson', importedJson);
-                const response = await createProjectFromWorkflowJson(formData);
-                if ('id' in response) {
-                    router.push(`/projects/${response.id}/workflow`);
-                } else {
-                    setBillingError(response.billingError);
-                }
+                await createProjectFromJsonWithOptions({
+                    name,
+                    workflowJson: importedJson,
+                    router,
+                    onError: (error) => {
+                        setBillingError(error instanceof Error ? error.message : String(error));
+                    }
+                });
                 return;
             }
+            
             if (!customPrompt.trim()) {
                 setPromptError("Prompt cannot be empty");
                 return;
             }
-            const newFormData = new FormData();
-            newFormData.append('name', name);
             
-            // If template is provided via URL, use it
-            if (urlTemplate) {
-                newFormData.append('template', urlTemplate);
-            }
-            
-            const response = await createProject(newFormData);
-            if ('id' in response) {
-                if (customPrompt) {
-                    localStorage.setItem(`project_prompt_${response.id}`, customPrompt);
+            await createProjectWithOptions({
+                name,
+                template: urlTemplate || undefined,
+                prompt: customPrompt,
+                router,
+                onError: (error) => {
+                    setBillingError(error instanceof Error ? error.message : String(error));
                 }
-                router.push(`/projects/${response.id}/workflow`);
-            } else {
-                setBillingError(response.billingError);
-            }
+            });
         } catch (error) {
             console.error('Error creating project:', error);
         }
+    }
+
+    async function handleSubmitWithTemplate(template: string) {
+        await createProjectWithOptions({
+            name,
+            template,
+            router,
+            onError: (error) => {
+                setBillingError(error instanceof Error ? error.message : String(error));
+            }
+        });
     }
 
     return (
@@ -344,7 +340,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                     !USE_MULTIPLE_PROJECTS && "px-24",
                     USE_MULTIPLE_PROJECTS && "px-8"
                 )}>
-                    {USE_MULTIPLE_PROJECTS && (
+                    {USE_MULTIPLE_PROJECTS && !hideHeader && (
                         <>
                             <div className="px-4 pt-4 pb-6 flex justify-between items-center">
                                 <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
@@ -477,16 +473,39 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                                                         </p>
                                                     )}
                                                 </div>
-                                                {/* Import JSON button always below the main input, left-aligned, when no file is selected */}
-                                                <div className="mt-2">
+                                                
+                                                {/* Separation line with OR */}
+                                                <div className="relative my-6">
+                                                    <div className="absolute inset-0 flex items-center">
+                                                        <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
+                                                    </div>
+                                                    <div className="relative flex justify-center text-sm">
+                                                        <span className="bg-white dark:bg-gray-900 px-3 text-gray-500 dark:text-gray-400">OR</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Action buttons */}
+                                                <div className="flex gap-3 justify-start">
                                                     <Button
-                                                        variant="secondary"
+                                                        variant="primary"
                                                         size="sm"
                                                         onClick={handleImportJsonClick}
                                                         type="button"
-                                                        startContent={<Upload size={16} />}
+                                                        startContent={<Upload size={14} />}
+                                                        className="bg-white dark:bg-white text-gray-900 hover:bg-gray-50 border border-gray-300 dark:border-gray-300"
                                                     >
                                                         Import JSON
+                                                    </Button>
+                                                    <Button
+                                                        variant="primary"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            handleSubmitWithTemplate('default');
+                                                        }}
+                                                        type="button"
+                                                        className="bg-white dark:bg-white text-gray-900 hover:bg-gray-50 border border-gray-300 dark:border-gray-300"
+                                                    >
+                                                        I&apos;ll build it myself
                                                     </Button>
                                                 </div>
                                             </>
