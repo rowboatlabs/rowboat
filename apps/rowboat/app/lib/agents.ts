@@ -24,6 +24,11 @@ const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
 // Feature flags
 const USE_NATIVE_HANDOFFS = process.env.USE_NATIVE_HANDOFFS !== 'false'; // Default to true for testing
 
+// Agent state tracking for tool call completion
+interface AgentState {
+    pendingToolCalls: number;
+}
+
 const openai = createOpenAI({
     apiKey: PROVIDER_API_KEY,
     baseURL: PROVIDER_BASE_URL,
@@ -708,9 +713,22 @@ async function* handleRawModelStreamEvent(
     agentName: string,
     turnMsgs: z.infer<typeof Message>[],
     usageTracker: UsageTracker,
-    eventLogger: PrefixLogger
+    eventLogger: PrefixLogger,
+    getAgentState?: (agentName: string) => AgentState
 ): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>> {
     if (event.data.type === 'response_done') {
+        // Count tool calls (excluding transfer_to_* calls)
+        const toolCallCount = event.data.response.output.filter(
+            (output: any) => output.type === 'function_call' && !output.name.startsWith('transfer_to')
+        ).length;
+        
+        // If we have tool calls, increment pending counter
+        if (toolCallCount > 0 && getAgentState) {
+            const state = getAgentState(agentName);
+            state.pendingToolCalls += toolCallCount;
+            eventLogger.log(`🔧 Agent ${agentName} has ${toolCallCount} new tool calls (total: ${state.pendingToolCalls})`);
+        }
+        
         for (const output of event.data.response.output) {
             // handle tool call invocation
             // except for transfer_to_* tool calls
@@ -966,7 +984,8 @@ async function* handleMessageOutput(
     transferCounter: AgentTransferCounter,
     workflow: z.infer<typeof Workflow>,
     eventLogger: PrefixLogger,
-    loopLogger: PrefixLogger
+    loopLogger: PrefixLogger,
+    getAgentState: (agentName: string) => AgentState
 ): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage> | { newAgentName: string; shouldContinue: boolean }> {
     // check response visibility
     const agentConfigObj = agentConfig[agentName];
@@ -994,6 +1013,13 @@ async function* handleMessageOutput(
     if (isInternal) {
         const current = agentName;
         const currentAgentConfig = agentConfig[agentName];
+        const agentState = getAgentState(agentName);
+        
+        // Check if tool calls are still pending - if so, don't switch agents yet
+        if (agentState.pendingToolCalls > 0) {
+            loopLogger.log(`🔄 Deferring agent switch: ${current} has ${agentState.pendingToolCalls} pending tool calls`);
+            return; // Exit without switching now
+        }
 
         // Check if this is a pipeline agent that needs to continue the pipeline
         if (currentAgentConfig?.type === 'pipeline') {
@@ -1178,6 +1204,27 @@ export async function* streamResponse(
     const usageTracker = new UsageTracker();
     const turnMsgs: z.infer<typeof Message>[] = [...messages];
 
+    // Initialize agent state tracking for tool call completion
+    const agentStates = new Map<string, AgentState>();
+    
+    // Helper function to get or create agent state
+    const getAgentState = (agentName: string): AgentState => {
+        if (!agentStates.has(agentName)) {
+            agentStates.set(agentName, { pendingToolCalls: 0 });
+        }
+        return agentStates.get(agentName)!;
+    };
+    
+    // Helper function to check if agent can switch
+    const canSwitchAgent = (fromAgent: string, reason: string): boolean => {
+        const state = getAgentState(fromAgent);
+        if (state.pendingToolCalls > 0) {
+            console.log(`🚫 Blocking agent switch: ${fromAgent} has ${state.pendingToolCalls} pending tool calls (reason: ${reason})`);
+            return false;
+        }
+        return true;
+    };
+
     logger.log('🎬 STARTING AGENT TURN');
 
     // stack-based agent execution loop
@@ -1225,10 +1272,22 @@ export async function* streamResponse(
 
             switch (event.type) {
                 case 'raw_model_stream_event':
-                    yield* handleRawModelStreamEvent(event, agentName, turnMsgs, usageTracker, eventLogger);
+                    yield* handleRawModelStreamEvent(event, agentName, turnMsgs, usageTracker, eventLogger, getAgentState);
                     break;
 
                 case 'run_item_stream_event':
+                    // Track tool call completion - decrement counter when tool calls complete
+                    if (event.item.type === 'tool_call_output_item' &&
+                        event.item.rawItem.type === 'function_call_result' &&
+                        event.item.rawItem.status === 'completed') {
+                        
+                        const state = getAgentState(agentName);
+                        if (state.pendingToolCalls > 0) {
+                            state.pendingToolCalls--;
+                            eventLogger.log(`✅ Tool call completed: ${agentName} (${state.pendingToolCalls} remaining)`);
+                        }
+                    }
+
                     // handle handoff event with feature flag support
                     if (event.name === 'handoff_occurred' && event.item.type === 'handoff_output_item') {
                         if (USE_NATIVE_HANDOFFS) {
@@ -1304,7 +1363,8 @@ export async function* streamResponse(
                             transferCounter,
                             workflow,
                             eventLogger,
-                            loopLogger
+                            loopLogger,
+                            getAgentState
                         )) {
                             if ('newAgentName' in result && 'shouldContinue' in result) {
                                 agentName = result.newAgentName;
