@@ -68,6 +68,16 @@ export function JobView({ projectId, jobId }: { projectId: string; jobId: string
                 link: `/projects/${projectId}/scheduled-job-rules/${reason.ruleId}`
             };
         }
+        if (reason.type === 'recurring_job_rule') {
+            return {
+                type: 'Recurring Job Rule',
+                details: {
+                    'Rule ID': reason.ruleId,
+                },
+                payload: null,
+                link: `/projects/${projectId}/job-rules/recurring/${reason.ruleId}`
+            };
+        }
         return {
             type: 'Unknown',
             details: {},

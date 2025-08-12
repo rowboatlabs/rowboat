@@ -49,6 +49,18 @@ import { CreateScheduledJobRuleController } from "@/src/interface-adapters/contr
 import { FetchScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/fetch-scheduled-job-rule.controller";
 import { ListScheduledJobRulesController } from "@/src/interface-adapters/controllers/scheduled-job-rules/list-scheduled-job-rules.controller";
 
+// Recurring Job Rules
+import { MongoDBRecurringJobRulesRepository } from "@/src/infrastructure/repositories/mongodb.recurring-job-rules.repository";
+import { CreateRecurringJobRuleUseCase } from "@/src/application/use-cases/recurring-job-rules/create-recurring-job-rule.use-case";
+import { FetchRecurringJobRuleUseCase } from "@/src/application/use-cases/recurring-job-rules/fetch-recurring-job-rule.use-case";
+import { ListRecurringJobRulesUseCase } from "@/src/application/use-cases/recurring-job-rules/list-recurring-job-rules.use-case";
+import { UpdateRecurringJobRuleUseCase } from "@/src/application/use-cases/recurring-job-rules/update-recurring-job-rule.use-case";
+import { CreateRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/create-recurring-job-rule.controller";
+import { FetchRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/fetch-recurring-job-rule.controller";
+import { ListRecurringJobRulesController } from "@/src/interface-adapters/controllers/recurring-job-rules/list-recurring-job-rules.controller";
+import { UpdateRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/update-recurring-job-rule.controller";
+import { RecurringJobRulesWorker } from "@/src/application/workers/recurring-job-rules.worker";
+
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
     strict: true,
@@ -59,6 +71,7 @@ container.register({
     // ---
     jobsWorker: asClass(JobsWorker).singleton(),
     scheduledJobRulesWorker: asClass(ScheduledJobRulesWorker).singleton(),
+    recurringJobRulesWorker: asClass(RecurringJobRulesWorker).singleton(),
 
     // services
     // ---
@@ -99,6 +112,18 @@ container.register({
     createScheduledJobRuleController: asClass(CreateScheduledJobRuleController).singleton(),
     fetchScheduledJobRuleController: asClass(FetchScheduledJobRuleController).singleton(),
     listScheduledJobRulesController: asClass(ListScheduledJobRulesController).singleton(),
+
+    // recurring job rules
+    // ---
+    recurringJobRulesRepository: asClass(MongoDBRecurringJobRulesRepository).singleton(),
+    createRecurringJobRuleUseCase: asClass(CreateRecurringJobRuleUseCase).singleton(),
+    fetchRecurringJobRuleUseCase: asClass(FetchRecurringJobRuleUseCase).singleton(),
+    listRecurringJobRulesUseCase: asClass(ListRecurringJobRulesUseCase).singleton(),
+    updateRecurringJobRuleUseCase: asClass(UpdateRecurringJobRuleUseCase).singleton(),
+    createRecurringJobRuleController: asClass(CreateRecurringJobRuleController).singleton(),
+    fetchRecurringJobRuleController: asClass(FetchRecurringJobRuleController).singleton(),
+    listRecurringJobRulesController: asClass(ListRecurringJobRulesController).singleton(),
+    updateRecurringJobRuleController: asClass(UpdateRecurringJobRuleController).singleton(),
 
     // composio
     // ---

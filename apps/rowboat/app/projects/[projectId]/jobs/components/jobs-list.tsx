@@ -94,6 +94,13 @@ export function JobsList({ projectId }: { projectId: string }) {
                 link: `/projects/${projectId}/scheduled-job-rules/${reason.ruleId}`
             };
         }
+        if (reason.type === 'recurring_job_rule') {
+            return {
+                type: 'Recurring Job Rule',
+                display: `Recurring Rule`,
+                link: `/projects/${projectId}/job-rules/recurring/${reason.ruleId}`
+            };
+        }
         return {
             type: 'Unknown',
             display: 'Unknown',

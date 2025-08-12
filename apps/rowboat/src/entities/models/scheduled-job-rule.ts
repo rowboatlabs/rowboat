@@ -18,4 +18,4 @@ export const ScheduledJobRule = z.object({
     processedAt: z.string().datetime().optional(),
     createdAt: z.string(),
     updatedAt: z.string().optional(),
-})
+});

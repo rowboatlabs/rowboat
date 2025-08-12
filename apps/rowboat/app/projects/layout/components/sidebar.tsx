@@ -115,8 +115,8 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
       requiresProject: true
     },
     {
-      href: 'scheduled-job-rules',
-      label: 'Scheduled Job Rules',
+      href: 'job-rules',
+      label: 'Job Rules',
       icon: Clock,
       requiresProject: true
     },

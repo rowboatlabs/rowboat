@@ -15,9 +15,15 @@ const scheduledJobRuleReason = z.object({
     ruleId: z.string(),
 });
 
+const recurringJobRuleReason = z.object({
+    type: z.literal("recurring_job_rule"),
+    ruleId: z.string(),
+});
+
 const reason = z.discriminatedUnion("type", [
     composioTriggerReason,
     scheduledJobRuleReason,
+    recurringJobRuleReason,
 ]);
 
 export const Job = z.object({
