@@ -241,6 +241,16 @@ services:
       - COMPOSIO_API_KEY=${COMPOSIO_API_KEY}
     restart: unless-stopped
 
+  job-rules-worker:
+    build:
+      context: ./apps/rowboat
+      dockerfile: scripts.Dockerfile
+    command: ["npm", "run", "job-rules-worker"]
+    environment:
+      - MONGODB_CONNECTION_STRING=mongodb://mongo:27017/rowboat
+      - REDIS_URL=redis://redis:6379
+    restart: unless-stopped
+
   # chat_widget:
   #   build:
   #     context: ./apps/experimental/chat_widget

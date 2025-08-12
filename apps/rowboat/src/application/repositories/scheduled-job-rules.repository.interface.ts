@@ -87,4 +87,12 @@ export interface IScheduledJobRulesRepository {
      * @returns Promise resolving to a paginated list of scheduled job rules
      */
     list(projectId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedRuleItem>>>>;
+
+    /**
+     * Deletes a scheduled job rule by its unique identifier.
+     * 
+     * @param id - The unique identifier of the scheduled job rule to delete
+     * @returns Promise resolving to true if the rule was deleted, false if not found
+     */
+    delete(id: string): Promise<boolean>;
 }

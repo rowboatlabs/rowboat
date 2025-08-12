@@ -81,4 +81,12 @@ export interface IRecurringJobRulesRepository {
      * @returns Promise resolving to the updated recurring job rule
      */
     toggle(id: string, disabled: boolean): Promise<z.infer<typeof RecurringJobRule>>;
+
+    /**
+     * Deletes a recurring job rule by its unique identifier.
+     * 
+     * @param id - The unique identifier of the recurring job rule to delete
+     * @returns Promise resolving to true if the rule was deleted, false if not found
+     */
+    delete(id: string): Promise<boolean>;
 }

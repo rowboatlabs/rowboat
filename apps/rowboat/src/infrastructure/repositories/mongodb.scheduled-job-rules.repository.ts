@@ -207,4 +207,15 @@ export class MongoDBScheduledJobRulesRepository implements IScheduledJobRulesRep
             nextCursor: hasNextPage ? results[limit - 1]._id.toString() : null,
         };
     }
+
+    /**
+     * Deletes a scheduled job rule by its unique identifier.
+     */
+    async delete(id: string): Promise<boolean> {
+        const result = await this.collection.deleteOne({
+            _id: new ObjectId(id),
+        });
+
+        return result.deletedCount > 0;
+    }
 }

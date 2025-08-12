@@ -208,6 +208,17 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
         return await this.updateNextRunAt(id, result.cron);
     }
 
+    /**
+     * Deletes a recurring job rule by its unique identifier.
+     */
+    async delete(id: string): Promise<boolean> {
+        const result = await this.collection.deleteOne({
+            _id: new ObjectId(id),
+        });
+
+        return result.deletedCount > 0;
+    }
+
     async updateNextRunAt(id: string, cron: string): Promise<z.infer<typeof RecurringJobRule>> {
         // parse cron to get next run time
         const interval = CronExpressionParser.parse(cron, {
