@@ -94,26 +94,26 @@ export const WorkflowPipeline = z.object({
 
 // Context passing schemas for SDK handoffs (OpenAI API compatible)
 export const HandoffContext = z.object({
-    reason: z.enum(['direct_handoff', 'pipeline_execution', 'task_delegation']),
-    parentAgent: z.string(),
+    reason: z.enum(['direct_handoff', 'pipeline_execution', 'task_delegation']).default('direct_handoff'),
+    parentAgent: z.string().default('unknown'),
     transferCount: z.number().default(0),
     // Allow metadata to be object, string, or null to handle AI model variations
     metadata: z.union([z.record(z.any()), z.string(), z.null()]).default(null)
 });
 
 export const PipelineContext = HandoffContext.extend({
-    pipelineName: z.string(),
-    currentStep: z.number(),
-    totalSteps: z.number(),
-    isLastStep: z.boolean(),
+    pipelineName: z.string().default('unknown_pipeline'),
+    currentStep: z.number().default(0),
+    totalSteps: z.number().default(1),
+    isLastStep: z.boolean().default(false),
     // Allow flexible types for AI model compatibility  
     pipelineData: z.union([z.record(z.any()), z.string(), z.null()]).default(null),
     stepResults: z.union([z.array(z.record(z.any())), z.string(), z.null()]).default(null)
 });
 
 export const TaskContext = HandoffContext.extend({
-    taskType: z.string(),
-    priority: z.enum(['low', 'medium', 'high']),
+    taskType: z.string().default('general_task'),
+    priority: z.enum(['low', 'medium', 'high']).default('medium'),
     deadline: z.union([z.string().datetime(), z.string(), z.null()]).default(null),
     requirements: z.union([z.array(z.string()), z.string(), z.null()]).default(null),
     resources: z.union([z.record(z.any()), z.string(), z.null()]).default(null)

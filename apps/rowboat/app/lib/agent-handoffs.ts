@@ -119,18 +119,22 @@ export function createAgentHandoff(
         onHandoff: async (runContext, inputString) => {
             try {
                 const inputStr = typeof inputString === 'string' ? inputString : '{}';
-                const input = JSON.parse(inputStr || '{}');
+                let input = JSON.parse(inputStr || '{}');
                 
-                // Validate the parsed input
+                // Validate and enrich the parsed input with defaults
                 const schema = config.inputSchema || getDefaultSchemaForContext(contextType);
                 const validationResult = schema.safeParse(input);
                 
                 if (!validationResult.success) {
-                    logger?.log(`Handoff input validation failed for ${targetAgent.name}:`, validationResult.error);
-                    // Use the raw parsed input even if validation fails - let the system handle it
+                    logger?.log(`Handoff input validation failed for ${targetAgent.name}, enriching with defaults:`, validationResult.error.issues.map(i => i.path.join('.') + ': ' + i.message));
+                    // Parse with defaults to get a valid object
+                    input = schema.parse({});
+                    logger?.log(`Using default context for handoff to ${targetAgent.name}`);
                 } else {
                     logger?.log(`Handoff input validation succeeded for ${targetAgent.name}`);
+                    input = validationResult.data;
                 }
+                
                 logger?.log(`Handoff to ${targetAgent.name} with input:`, input);
                 
                 // Execute custom handoff logic
@@ -221,30 +225,19 @@ export function createTaskHandoff(
 
 // Get schema based on agent configuration
 export function getSchemaForAgent(agentConfig: z.infer<typeof WorkflowAgent>): z.ZodObject<any> {
-    if (agentConfig.type === 'pipeline') {
-        return PipelineContext;
-    }
-    
-    // Task agents get task context
-    if (agentConfig.outputVisibility === 'internal') {
-        return TaskContext;
-    }
-    
-    // Default to basic handoff context
+    // Always start with basic HandoffContext - more specific contexts are used
+    // only when explicitly creating pipeline or task handoffs
     return HandoffContext;
+    
+    // NOTE: PipelineContext and TaskContext are used only in specific creation functions
+    // like createPipelineHandoff() and createTaskHandoff(), not for general agent handoffs
 }
 
 // Create context filter based on agent configuration
 export function createContextFilterForAgent(agentConfig: z.infer<typeof WorkflowAgent>) {
     return (data: HandoffInputData): HandoffInputData => {
-        if (agentConfig.type === 'pipeline') {
-            return filterForPipeline(data);
-        }
-        
-        if (agentConfig.outputVisibility === 'internal') {
-            return filterForTask(data);
-        }
-        
+        // Use basic passthrough filtering for regular handoffs
+        // Specific filtering is handled by createPipelineHandoff and createTaskHandoff
         return data;
     };
 }
