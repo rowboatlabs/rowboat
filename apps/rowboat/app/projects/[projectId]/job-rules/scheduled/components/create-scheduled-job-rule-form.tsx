@@ -90,7 +90,7 @@ export function CreateScheduledJobRuleForm({ projectId }: { projectId: string })
                 input: { messages: convertedMessages },
                 scheduledTime: scheduledTimeString,
             });
-            router.push(`/projects/${projectId}/scheduled-job-rules`);
+            router.push(`/projects/${projectId}/job-rules`);
         } catch (error) {
             console.error("Failed to create scheduled job rule:", error);
             alert("Failed to create scheduled job rule");
@@ -105,7 +105,7 @@ export function CreateScheduledJobRuleForm({ projectId }: { projectId: string })
         <Panel
             title={
                 <div className="flex items-center gap-3">
-                    <Link href={`/projects/${projectId}/scheduled-job-rules`}>
+                    <Link href={`/projects/${projectId}/job-rules`}>
                         <Button variant="secondary" size="sm">
                             <ArrowLeftIcon className="w-4 h-4 mr-2" />
                             Back

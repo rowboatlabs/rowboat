@@ -55,7 +55,7 @@ export function ScheduledJobRuleView({ projectId, ruleId }: { projectId: string;
         <Panel
             title={
                 <div className="flex items-center gap-3">
-                    <Link href={`/projects/${projectId}/scheduled-job-rules`}>
+                    <Link href={`/projects/${projectId}/job-rules`}>
                         <Button variant="secondary" size="sm">
                             <ArrowLeftIcon className="w-4 h-4 mr-2" />
                             Back

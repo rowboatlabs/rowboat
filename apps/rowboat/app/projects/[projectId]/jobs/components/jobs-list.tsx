@@ -91,7 +91,7 @@ export function JobsList({ projectId }: { projectId: string }) {
             return {
                 type: 'Scheduled Job Rule',
                 display: `Scheduled Rule`,
-                link: `/projects/${projectId}/scheduled-job-rules/${reason.ruleId}`
+                link: `/projects/${projectId}/job-rules/scheduled/${reason.ruleId}`
             };
         }
         if (reason.type === 'recurring_job_rule') {

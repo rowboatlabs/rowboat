@@ -95,7 +95,7 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
             }
             rightActions={
                 <div className="flex items-center gap-3">
-                    <Link href={`/projects/${projectId}/scheduled-job-rules/new`}>
+                    <Link href={`/projects/${projectId}/job-rules/scheduled/new`}>
                         <Button size="sm" className="flex items-center gap-2">
                             <PlusIcon className="w-4 h-4" />
                             New Rule
@@ -125,7 +125,7 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
                                             {sectionItems.map((item) => (
                                                 <Link
                                                     key={item.id}
-                                                    href={`/projects/${projectId}/scheduled-job-rules/${item.id}`}
+                                                    href={`/projects/${projectId}/job-rules/scheduled/${item.id}`}
                                                     className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
                                                 >
                                                     <div className="flex items-center justify-between">
