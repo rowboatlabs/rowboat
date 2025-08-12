@@ -163,6 +163,7 @@ function getStartOfTurnAgentName(
     logger: PrefixLogger,
     messages: z.infer<typeof Message>[],
     agentConfig: Record<string, z.infer<typeof WorkflowAgent>>,
+    pipelineConfig: Record<string, z.infer<typeof WorkflowPipeline>>,
     workflow: z.infer<typeof Workflow>,
 ): string {
 
@@ -188,6 +189,14 @@ function getStartOfTurnAgentName(
     // if control type is retain, return last agent
     const lastAgentName = startAgentStack.pop() || workflow.startAgent;
     logger.log(`setting last agent name initially to: ${lastAgentName}`);
+    
+    // Check if this is a pipeline
+    const lastPipelineConfig = pipelineConfig[lastAgentName];
+    if (lastPipelineConfig) {
+        logger.log(`last agent ${lastAgentName} is a pipeline, returning pipeline: ${lastAgentName}`);
+        return lastAgentName;
+    }
+    
     const lastAgentConfig = agentConfig[lastAgentName];
     if (!lastAgentConfig) {
         logger.log(`last agent ${lastAgentName} not found in agent config, returning start agent: ${workflow.startAgent}`);
@@ -987,9 +996,10 @@ async function* handleMessageOutput(
     loopLogger: PrefixLogger,
     getAgentState: (agentName: string) => AgentState
 ): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage> | { newAgentName: string; shouldContinue: boolean }> {
-    // check response visibility
+    // check response visibility - could be an agent or pipeline
     const agentConfigObj = agentConfig[agentName];
-    const isInternal = agentConfigObj?.outputVisibility === 'internal' || agentConfigObj?.type === 'pipeline';
+    const pipelineConfigObj = pipelineConfig[agentName];
+    const isInternal = agentConfigObj?.outputVisibility === 'internal' || agentConfigObj?.type === 'pipeline' || !!pipelineConfigObj;
 
     for (const content of event.item.rawItem.content) {
         if (content.type === 'output_text') {
@@ -1013,6 +1023,7 @@ async function* handleMessageOutput(
     if (isInternal) {
         const current = agentName;
         const currentAgentConfig = agentConfig[agentName];
+        const currentPipelineConfig = pipelineConfig[agentName];
         const agentState = getAgentState(agentName);
         
         // Check if tool calls are still pending - if so, don't switch agents yet
@@ -1021,8 +1032,8 @@ async function* handleMessageOutput(
             return; // Exit without switching now
         }
 
-        // Check if this is a pipeline agent that needs to continue the pipeline
-        if (currentAgentConfig?.type === 'pipeline') {
+        // Check if this is a pipeline or pipeline agent that needs to continue the pipeline
+        if (currentPipelineConfig || currentAgentConfig?.type === 'pipeline') {
             const result = handlePipelineAgentExecution(
                 agents[current], // Use the correct agent from agents collection
                 current,
@@ -1049,10 +1060,24 @@ async function* handleMessageOutput(
 
         let nextAgentName = agentName;
 
-        // Check control type to determine next action for non-pipeline agents
-        if (currentAgentConfig?.controlType === 'relinquish_to_parent' || currentAgentConfig?.controlType === 'retain') {
-            nextAgentName = stack.pop()!;
-            loopLogger.log(`-- popped agent from stack: ${nextAgentName} || reason: ${current} is an internal agent, it put out a message and it has a control type of ${currentAgentConfig?.controlType}, hence the flow of control needs to return to the previous agent`);
+        // Check control type to determine next action
+        if (currentPipelineConfig) {
+            // For standalone pipelines, default behavior is to relinquish to parent
+            if (stack.length > 0) {
+                nextAgentName = stack.pop()!;
+                loopLogger.log(`-- popped agent from stack: ${nextAgentName} || reason: ${current} is a pipeline, returning to parent agent`);
+            } else {
+                nextAgentName = workflow.startAgent;
+                loopLogger.log(`-- using start agent: ${nextAgentName} || reason: ${current} is a pipeline, no parent agent`);
+            }
+        } else if (currentAgentConfig?.controlType === 'relinquish_to_parent' || currentAgentConfig?.controlType === 'retain') {
+            if (stack.length > 0) {
+                nextAgentName = stack.pop()!;
+                loopLogger.log(`-- popped agent from stack: ${nextAgentName} || reason: ${current} is an internal agent, it put out a message and it has a control type of ${currentAgentConfig?.controlType}, hence the flow of control needs to return to the previous agent`);
+            } else {
+                nextAgentName = workflow.startAgent;
+                loopLogger.log(`-- using start agent (stack empty): ${nextAgentName}`);
+            }
         } else if (currentAgentConfig?.controlType === 'relinquish_to_start') {
             nextAgentName = workflow.startAgent;
             loopLogger.log(`-- using start agent: ${nextAgentName} || reason: ${current} is an internal agent, it put out a message and it has a control type of ${currentAgentConfig?.controlType}, hence the flow of control needs to return to the start agent`);
@@ -1195,7 +1220,7 @@ export async function* streamResponse(
     const pipelineStateManager = USE_NATIVE_HANDOFFS ? new PipelineStateManager(logger) : null;
 
     // get the agent that should be starting this turn
-    const startOfTurnAgentName = getStartOfTurnAgentName(logger, messages, agentConfig, workflow);
+    const startOfTurnAgentName = getStartOfTurnAgentName(logger, messages, agentConfig, pipelineConfig, workflow);
     logger.log(`🎯 START AGENT DECISION: ${startOfTurnAgentName}`);
 
     let agentName = startOfTurnAgentName;
@@ -1229,7 +1254,7 @@ export async function* streamResponse(
 
     // stack-based agent execution loop
     let iter = 0;
-    const MAXTURNITERATIONS = 10;
+    const MAXTURNITERATIONS = 25;
 
     // loop indefinitely
     turnLoop: while (true) {
@@ -1242,6 +1267,12 @@ export async function* streamResponse(
 
         // increment loop counter
         iter++;
+        
+        // Check iteration limit to prevent infinite loops
+        if (iter >= MAXTURNITERATIONS) {
+            loopLogger.log(`⚠️ TURN LIMIT REACHED: ${iter}/${MAXTURNITERATIONS} - terminating to prevent infinite loop`);
+            break turnLoop;
+        }
 
         // set up logging
         // const loopLogger = logger.child(`iter-${iter}`);
@@ -1249,6 +1280,20 @@ export async function* streamResponse(
         // log agent info
         // loopLogger.log(`agent name: ${agentName}`);
         // loopLogger.log(`stack: ${JSON.stringify(stack)}`);
+        
+        // Check if current agent is actually a pipeline
+        const currentPipelineConfig = pipelineConfig[agentName];
+        if (currentPipelineConfig) {
+            // If agentName is a pipeline, switch to the first agent in the pipeline
+            if (currentPipelineConfig.agents.length === 0) {
+                throw new Error(`Pipeline '${agentName}' has no agents!`);
+            }
+            const firstAgentInPipeline = currentPipelineConfig.agents[0];
+            logger.log(`🔄 Pipeline '${agentName}' starting with first agent: ${firstAgentInPipeline}`);
+            agentName = firstAgentInPipeline;
+            // Continue with the first agent in the pipeline
+        }
+        
         if (!agents[agentName]) {
             throw new Error(`agent not found in agent config!`);
         }

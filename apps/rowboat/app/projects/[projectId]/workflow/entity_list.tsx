@@ -280,7 +280,8 @@ interface PipelineCardProps {
     onDeletePipeline: (name: string) => void;
     onDeleteAgent: (name: string) => void;
     onAddAgentToPipeline: (pipelineName: string) => void;
-    selectedRef: React.RefObject<HTMLDivElement | null>;
+    onSetMainAgent: (name: string) => void;
+    selectedRef: React.RefObject<HTMLButtonElement | null>;
     startAgentName: string | null;
     dragHandle?: React.ReactNode;
 }
@@ -294,6 +295,7 @@ const PipelineCard = ({
     onDeletePipeline,
     onDeleteAgent,
     onAddAgentToPipeline,
+    onSetMainAgent,
     selectedRef,
     startAgentName,
     dragHandle,
@@ -347,6 +349,11 @@ const PipelineCard = ({
                     <div className="flex items-center gap-2">
                         <span className="text-xs">{pipeline.name}</span>
                         <span className="text-xs text-gray-500">({pipelineAgents.length} steps)</span>
+                        {startAgentName === pipeline.name && (
+                            <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-0.5 rounded font-medium">
+                                START
+                            </span>
+                        )}
                     </div>
                 </button>
                 
@@ -362,10 +369,19 @@ const PipelineCard = ({
                             onAction={(key) => {
                                 if (key === 'delete') {
                                     onDeletePipeline(pipeline.name);
+                                } else if (key === 'set-main-agent') {
+                                    onSetMainAgent(pipeline.name);
                                 }
                             }}
                         >
-                            <DropdownItem key="delete" className="text-danger">Delete Pipeline</DropdownItem>
+                            {startAgentName !== pipeline.name ? (
+                                <>
+                                    <DropdownItem key="set-main-agent">Set as start agent</DropdownItem>
+                                    <DropdownItem key="delete" className="text-danger">Delete Pipeline</DropdownItem>
+                                </>
+                            ) : (
+                                <DropdownItem key="delete" className="text-danger">Delete Pipeline</DropdownItem>
+                            )}
                         </DropdownMenu>
                     </Dropdown>
                 </div>
@@ -740,6 +756,7 @@ export const EntityList = forwardRef<
                                                                 onDeletePipeline={onDeletePipeline}
                                                                 onDeleteAgent={onDeleteAgent}
                                                                 onAddAgentToPipeline={onAddAgentToPipeline}
+                                                                onSetMainAgent={onSetMainAgent}
                                                                 selectedRef={selectedRef}
                                                                 startAgentName={startAgentName}
                                                             />
@@ -1663,6 +1680,7 @@ const SortablePipelineItem = ({
     onDeletePipeline, 
     onDeleteAgent, 
     onAddAgentToPipeline, 
+    onSetMainAgent,
     selectedRef, 
     startAgentName 
 }: {
@@ -1677,7 +1695,8 @@ const SortablePipelineItem = ({
     onDeletePipeline: (name: string) => void;
     onDeleteAgent: (name: string) => void;
     onAddAgentToPipeline: (pipelineName: string) => void;
-    selectedRef: React.RefObject<HTMLDivElement | null>;
+    onSetMainAgent: (name: string) => void;
+    selectedRef: React.RefObject<HTMLButtonElement | null>;
     startAgentName: string | null;
 }) => {
     const {
@@ -1706,6 +1725,7 @@ const SortablePipelineItem = ({
                 onDeletePipeline={onDeletePipeline}
                 onDeleteAgent={onDeleteAgent}
                 onAddAgentToPipeline={onAddAgentToPipeline}
+                onSetMainAgent={onSetMainAgent}
                 selectedRef={selectedRef}
                 startAgentName={startAgentName}
                 dragHandle={
