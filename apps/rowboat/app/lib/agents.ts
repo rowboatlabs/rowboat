@@ -1,27 +1,19 @@
 // External dependencies
-import { Agent, AgentInputItem, run, tool, Tool } from "@openai/agents";
+import { Agent, AgentInputItem, run, Tool } from "@openai/agents";
 import { RECOMMENDED_PROMPT_PREFIX } from "@openai/agents-core/extensions";
 import { aisdk } from "@openai/agents-extensions";
 import { createOpenAI } from "@ai-sdk/openai";
-import { CoreMessage, embed, generateText } from "ai";
-import { ObjectId } from "mongodb";
 import { z } from "zod";
-import { composio } from "./composio/composio";
-import { SignJWT } from "jose";
 import crypto from "crypto";
 
 // Internal dependencies
-import { embeddingModel } from '../lib/embedding';
-import { getMcpClient } from "./mcp";
-import { dataSourceDocsCollection, dataSourcesCollection, projectsCollection } from "./mongodb";
-import { qdrantClient } from '../lib/qdrant';
-import { EmbeddingRecord } from "./types/datasource_types";
+import { createTools, createRagTool } from "./agent-tools";
 import { ConnectedEntity, sanitizeTextWithMentions, Workflow, WorkflowAgent, WorkflowPipeline, WorkflowPrompt, WorkflowTool } from "./types/workflow_types";
 import { CHILD_TRANSFER_RELATED_INSTRUCTIONS, CONVERSATION_TYPE_INSTRUCTIONS, PIPELINE_TYPE_INSTRUCTIONS, RAG_INSTRUCTIONS, TASK_TYPE_INSTRUCTIONS } from "./agent_instructions";
 import { PrefixLogger } from "./utils";
 import { Message, AssistantMessage, AssistantMessageWithToolCalls, ToolMessage } from "./types/types";
 
-// Make everything available as a promise
+// Provider configuration
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
 const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
@@ -45,456 +37,6 @@ const ZOutMessage = z.union([
     ToolMessage,
 ]);
 
-// Helper to handle mock tool responses
-async function invokeMockTool(
-    logger: PrefixLogger,
-    toolName: string,
-    args: string,
-    description: string,
-    mockInstructions: string
-): Promise<string> {
-    logger = logger.child(`invokeMockTool`);
-    logger.log(`toolName: ${toolName}`);
-    logger.log(`args: ${args}`);
-    logger.log(`description: ${description}`);
-    logger.log(`mockInstructions: ${mockInstructions}`);
-
-    const messages: CoreMessage[] = [{
-        role: "system" as const,
-        content: `You are simulating the execution of a tool called '${toolName}'. Here is the description of the tool: ${description}. Here are the instructions for the mock tool: ${mockInstructions}. Generate a realistic response as if the tool was actually executed with the given parameters.`
-    }, {
-        role: "user" as const,
-        content: `Generate a realistic response for the tool '${toolName}' with these parameters: ${args}. The response should be concise and focused on what the tool would actually return.`
-    }];
-
-    const { text } = await generateText({
-        model: openai(MODEL),
-        messages,
-    });
-    logger.log(`generated text: ${text}`);
-
-    return text;
-}
-
-// Helper to handle RAG tool calls
-async function invokeRagTool(
-    logger: PrefixLogger,
-    projectId: string,
-    query: string,
-    sourceIds: string[],
-    returnType: 'chunks' | 'content',
-    k: number
-): Promise<{
-    title: string;
-    name: string;
-    content: string;
-    docId: string;
-    sourceId: string;
-}[]> {
-    logger = logger.child(`invokeRagTool`);
-    logger.log(`projectId: ${projectId}`);
-    logger.log(`query: ${query}`);
-    logger.log(`sourceIds: ${sourceIds.join(', ')}`);
-    logger.log(`returnType: ${returnType}`);
-    logger.log(`k: ${k}`);
-
-    // Create embedding for question
-    const { embedding } = await embed({
-        model: embeddingModel,
-        value: query,
-    });
-
-    // Fetch all data sources for this project
-    const sources = await dataSourcesCollection.find({
-        projectId: projectId,
-        active: true,
-    }).toArray();
-    const validSourceIds = sources
-        .filter(s => sourceIds.includes(s._id.toString())) // id should be in sourceIds
-        .filter(s => s.active) // should be active
-        .map(s => s._id.toString());
-    logger.log(`valid source ids: ${validSourceIds.join(', ')}`);
-
-    // if no sources found, return empty response
-    if (validSourceIds.length === 0) {
-        logger.log(`no valid source ids found, returning empty response`);
-        return [];
-    }
-
-    // Perform vector search
-    const qdrantResults = await qdrantClient.query("embeddings", {
-        query: embedding,
-        filter: {
-            must: [
-                { key: "projectId", match: { value: projectId } },
-                { key: "sourceId", match: { any: validSourceIds } },
-            ],
-        },
-        limit: k,
-        with_payload: true,
-    });
-    logger.log(`found ${qdrantResults.points.length} results`);
-
-    // if return type is chunks, return the chunks
-    let results = qdrantResults.points.map((point) => {
-        const { title, name, content, docId, sourceId } = point.payload as z.infer<typeof EmbeddingRecord>['payload'];
-        return {
-            title,
-            name,
-            content,
-            docId,
-            sourceId,
-        };
-    });
-
-    if (returnType === 'chunks') {
-        logger.log(`returning chunks`);
-        return results;
-    }
-
-    // otherwise, fetch the doc contents from mongodb
-    const docs = await dataSourceDocsCollection.find({
-        _id: { $in: results.map(r => new ObjectId(r.docId)) },
-    }).toArray();
-    logger.log(`fetched docs: ${docs.length}`);
-
-    // map the results to the docs
-    results = results.map(r => {
-        const doc = docs.find(d => d._id.toString() === r.docId);
-        return {
-            ...r,
-            content: doc?.content || '',
-        };
-    });
-
-    return results;
-}
-
-async function invokeWebhookTool(
-    logger: PrefixLogger,
-    projectId: string,
-    name: string,
-    input: any,
-): Promise<unknown> {
-    logger = logger.child(`invokeWebhookTool`);
-    logger.log(`projectId: ${projectId}`);
-    logger.log(`name: ${name}`);
-    logger.log(`input: ${JSON.stringify(input)}`);
-
-    const project = await projectsCollection.findOne({
-        "_id": projectId,
-    });
-    if (!project) {
-        throw new Error('Project not found');
-    }
-
-    if (!project.webhookUrl) {
-        throw new Error('Webhook URL not found');
-    }
-
-    // prepare request body
-    const toolCall: z.infer<typeof AssistantMessageWithToolCalls.shape.toolCalls>[number] = {
-        id: crypto.randomUUID(),
-        type: "function",
-        function: {
-            name,
-            arguments: JSON.stringify(input),
-        },
-    }
-    const content = JSON.stringify({
-        toolCall,
-    });
-    const requestId = crypto.randomUUID();
-    const bodyHash = crypto
-        .createHash('sha256')
-        .update(content, 'utf8')
-        .digest('hex');
-
-    // sign request
-    const jwt = await new SignJWT({
-        requestId,
-        projectId,
-        bodyHash,
-    })
-        .setProtectedHeader({
-            alg: 'HS256',
-            typ: 'JWT',
-        })
-        .setIssuer('rowboat')
-        .setAudience(project.webhookUrl)
-        .setSubject(`tool-call-${toolCall.id}`)
-        .setJti(requestId)
-        .setIssuedAt()
-        .setExpirationTime("5 minutes")
-        .sign(new TextEncoder().encode(project.secret));
-
-    // make request
-    const request = {
-        requestId,
-        content,
-    };
-    const response = await fetch(project.webhookUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-signature-jwt': jwt,
-        },
-        body: JSON.stringify(request),
-    });
-    if (!response.ok) {
-        throw new Error(`Failed to call webhook: ${response.status}: ${response.statusText}`);
-    }
-    const responseBody = await response.json();
-    return responseBody;
-}
-
-// Helper to handle MCP tool calls
-async function invokeMcpTool(
-    logger: PrefixLogger,
-    projectId: string,
-    name: string,
-    input: any,
-    mcpServerName: string
-) {
-    logger = logger.child(`invokeMcpTool`);
-    logger.log(`projectId: ${projectId}`);
-    logger.log(`name: ${name}`);
-    logger.log(`input: ${JSON.stringify(input)}`);
-    logger.log(`mcpServerName: ${mcpServerName}`);
-
-    // Get project configuration
-    const project = await projectsCollection.findOne({ _id: projectId });
-    if (!project) {
-        throw new Error(`project ${projectId} not found`);
-    }
-
-    // get server url from project data
-    const mcpServerURL = project.customMcpServers?.[mcpServerName]?.serverUrl;
-    if (!mcpServerURL) {
-        throw new Error(`mcp server url not found for project ${projectId} and server ${mcpServerName}`);
-    }
-
-    const client = await getMcpClient(mcpServerURL, mcpServerName);
-    const result = await client.callTool({
-        name,
-        arguments: input,
-    });
-    logger.log(`mcp tool result: ${JSON.stringify(result)}`);
-    await client.close();
-    return result;
-}
-
-// Helper to handle composio tool calls
-async function invokeComposioTool(
-    logger: PrefixLogger,
-    projectId: string,
-    name: string,
-    composioData: z.infer<typeof WorkflowTool>['composioData'] & {},
-    input: any,
-) {
-    logger = logger.child(`invokeComposioTool`);
-    logger.log(`projectId: ${projectId}`);
-    logger.log(`name: ${name}`);
-    logger.log(`input: ${JSON.stringify(input)}`);
-
-    const { slug, toolkitSlug, noAuth } = composioData;
-
-    let connectedAccountId: string | undefined = undefined;
-    if (!noAuth) {
-        const project = await projectsCollection.findOne({ _id: projectId });
-        if (!project) {
-            throw new Error(`project ${projectId} not found`);
-        }
-        connectedAccountId = project.composioConnectedAccounts?.[toolkitSlug]?.id;
-        if (!connectedAccountId) {
-            throw new Error(`connected account id not found for project ${projectId} and toolkit ${toolkitSlug}`);
-        }
-    }
-
-    const result = await composio.tools.execute(slug, {
-        userId: projectId,
-        arguments: input,
-        connectedAccountId: connectedAccountId,
-    });
-    logger.log(`composio tool result: ${JSON.stringify(result)}`);
-    return result.data;
-}
-
-// Helper to create RAG tool
-function createRagTool(
-    logger: PrefixLogger,
-    config: z.infer<typeof WorkflowAgent>,
-    projectId: string
-): Tool {
-    if (!config.ragDataSources?.length) {
-        throw new Error(`data sources not found for agent ${config.name}`);
-    }
-
-    return tool({
-        name: "rag_search",
-        description: config.description,
-        parameters: z.object({
-            query: z.string().describe("The query to search for")
-        }),
-        async execute(input: { query: string }) {
-            const results = await invokeRagTool(
-                logger,
-                projectId,
-                input.query,
-                config.ragDataSources || [],
-                config.ragReturnType || 'chunks',
-                config.ragK || 3
-            );
-            return JSON.stringify({
-                results,
-            });
-        }
-    });
-}
-
-// Helper to create a mock tool
-function createMockTool(
-    logger: PrefixLogger,
-    config: z.infer<typeof WorkflowTool>,
-): Tool {
-    return tool({
-        name: config.name,
-        description: config.description,
-        strict: false,
-        parameters: {
-            type: 'object',
-            properties: config.parameters.properties,
-            required: config.parameters.required || [],
-            additionalProperties: true,
-        },
-        async execute(input: any) {
-            try {
-                const result = await invokeMockTool(
-                    logger,
-                    config.name,
-                    JSON.stringify(input),
-                    config.description,
-                    config.mockInstructions || ''
-                );
-                return JSON.stringify({
-                    result,
-                });
-            } catch (error) {
-                logger.log(`Error executing mock tool ${config.name}:`, error);
-                return JSON.stringify({
-                    error: `Mock tool execution failed: ${error}`,
-                });
-            }
-        }
-    });
-}
-
-// Helper to create a webhook tool
-function createWebhookTool(
-    logger: PrefixLogger,
-    config: z.infer<typeof WorkflowTool>,
-    projectId: string,
-): Tool {
-    const { name, description, parameters } = config;
-
-    return tool({
-        name,
-        description,
-        strict: false,
-        parameters: {
-            type: 'object',
-            properties: parameters.properties,
-            required: parameters.required || [],
-            additionalProperties: true,
-        },
-        async execute(input: any) {
-            try {
-                const result = await invokeWebhookTool(logger, projectId, name, input);
-                return JSON.stringify({
-                    result,
-                });
-            } catch (error) {
-                logger.log(`Error executing webhook tool ${config.name}:`, error);
-                return JSON.stringify({
-                    error: `Tool execution failed: ${error}`,
-                });
-            }
-        }
-    });
-}
-
-// Helper to create an mcp tool
-function createMcpTool(
-    logger: PrefixLogger,
-    config: z.infer<typeof WorkflowTool>,
-    projectId: string
-): Tool {
-    const { name, description, parameters, mcpServerName } = config;
-
-    return tool({
-        name,
-        description,
-        strict: false,
-        parameters: {
-            type: 'object',
-            properties: parameters.properties,
-            required: parameters.required || [],
-            additionalProperties: true,
-        },
-        async execute(input: any) {
-            try {
-                const result = await invokeMcpTool(logger, projectId, name, input, mcpServerName || '');
-                return JSON.stringify({
-                    result,
-                });
-            } catch (error) {
-                logger.log(`Error executing mcp tool ${name}:`, error);
-                return JSON.stringify({
-                    error: `Tool execution failed: ${error}`,
-                });
-            }
-        }
-    });
-}
-
-// Helper to create a composio tool
-function createComposioTool(
-    logger: PrefixLogger,
-    config: z.infer<typeof WorkflowTool>,
-    projectId: string
-): Tool {
-    const { name, description, parameters, composioData } = config;
-
-    if (!composioData) {
-        throw new Error(`composio data not found for tool ${name}`);
-    }
-
-    return tool({
-        name,
-        description,
-        strict: false,
-        parameters: {
-            type: 'object',
-            properties: parameters.properties,
-            required: parameters.required || [],
-            additionalProperties: true,
-        },
-        async execute(input: any) {
-            try {
-                const result = await invokeComposioTool(logger, projectId, name, composioData, input);
-                return JSON.stringify({
-                    result,
-                });
-            } catch (error) {
-                logger.log(`Error executing composio tool ${name}:`, error);
-                return JSON.stringify({
-                    error: `Tool execution failed: ${error}`,
-                });
-            }
-        }
-    });
-}
-
 // Helper to create an agent
 function createAgent(
     logger: PrefixLogger,
@@ -517,10 +59,10 @@ ${config.description}
 
 ## About You
 
-${config.outputVisibility === 'user_facing' 
-    ? CONVERSATION_TYPE_INSTRUCTIONS() 
-    : config.type === 'pipeline' 
-        ? PIPELINE_TYPE_INSTRUCTIONS() 
+${config.outputVisibility === 'user_facing'
+    ? CONVERSATION_TYPE_INSTRUCTIONS()
+    : config.type === 'pipeline'
+        ? PIPELINE_TYPE_INSTRUCTIONS()
         : TASK_TYPE_INSTRUCTIONS()}
 
 ## Instructions
@@ -535,12 +77,12 @@ ${CHILD_TRANSFER_RELATED_INSTRUCTIONS}
 `;
 
     let { sanitized, entities } = sanitizeTextWithMentions(instructions, workflow, config);
-    
+
     // Remove agent transfer instructions for pipeline agents
     if (config.type === 'pipeline') {
         sanitized = sanitized.replace(CHILD_TRANSFER_RELATED_INSTRUCTIONS, '');
     }
-    
+
     agentLogger.log(`instructions: ${JSON.stringify(sanitized)}`);
     agentLogger.log(`mentions: ${JSON.stringify(entities)}`);
 
@@ -626,7 +168,7 @@ function getStartOfTurnAgentName(
             }
         }
         return stack;
-    }    
+    }
 
     logger = logger.child(`getStartOfTurnAgentName`);
     const startAgentStack = createAgentCallStack(messages);
@@ -640,7 +182,7 @@ function getStartOfTurnAgentName(
         logger.log(`last agent ${lastAgentName} not found in agent config, returning start agent: ${workflow.startAgent}`);
         return workflow.startAgent;
     }
-    
+
     // For other agents, check control type
     switch (lastAgentConfig.controlType) {
         case 'retain':
@@ -757,7 +299,7 @@ function ensureSystemMessage(logger: PrefixLogger, messages: z.infer<typeof Mess
 
 Basic context:
     - The date-time right now is ${new Date().toISOString()}`;
-        
+
         messages[0].content = defaultContext;
         logger.log(`updated system message with default context: ${messages[0].content}`);
     }
@@ -781,12 +323,12 @@ function mapConfig(workflow: z.infer<typeof Workflow>): {
         ...acc,
         [prompt.name]: prompt
     }), {});
-    
+
     const pipelineConfig: Record<string, z.infer<typeof WorkflowPipeline>> = (workflow.pipelines || []).reduce((acc, pipeline) => ({
         ...acc,
         [pipeline.name]: pipeline
     }), {});
-    
+
     return { agentConfig, toolConfig, promptConfig, pipelineConfig };
 }
 
@@ -807,38 +349,6 @@ async function* emitGreetingTurn(logger: PrefixLogger, workflow: z.infer<typeof 
     yield* emitEvent(logger, new UsageTracker().asEvent());
 }
 
-function createTools(
-    logger: PrefixLogger,
-    projectId: string,
-    workflow: z.infer<typeof Workflow>,
-    toolConfig: Record<string, z.infer<typeof WorkflowTool>>,
-): Record<string, Tool> {
-    const tools: Record<string, Tool> = {};
-    const toolLogger = logger.child('createTools');
-    
-    toolLogger.log(`=== CREATING ${Object.keys(toolConfig).length} TOOLS ===`);
-
-    for (const [toolName, config] of Object.entries(toolConfig)) {
-        toolLogger.log(`creating tool: ${toolName} (type: ${config.mockTool ? 'mock' : config.isMcp ? 'mcp' : config.isComposio ? 'composio' : 'webhook'})`);
-        
-        if (config.mockTool) {
-            tools[toolName] = createMockTool(logger, config);
-            toolLogger.log(`✓ created mock tool: ${toolName}`);
-        } else if (config.isMcp) {
-            tools[toolName] = createMcpTool(logger, config, projectId);
-            toolLogger.log(`✓ created mcp tool: ${toolName} (server: ${config.mcpServerName || 'unknown'})`);
-        } else if (config.isComposio) {
-            tools[toolName] = createComposioTool(logger, config, projectId);
-            toolLogger.log(`✓ created composio tool: ${toolName}`);
-        } else {
-            tools[toolName] = createWebhookTool(logger, config, projectId);
-            toolLogger.log(`✓ created webhook tool: ${toolName} (fallback)`);
-        }
-    }
-    
-    toolLogger.log(`=== TOOL CREATION COMPLETE ===`);
-    return tools;
-}
 
 function createAgents(
     logger: PrefixLogger,
@@ -869,12 +379,12 @@ function createAgents(
     // create agents
     for (const [agentName, config] of Object.entries(agentConfig)) {
         agentsLogger.log(`creating agent: ${agentName} (type: ${config.outputVisibility}, control: ${config.controlType})`);
-        
+
         // Pipeline agents get special handling:
         // - Different instruction template (PIPELINE_TYPE_INSTRUCTIONS)
         // - Filtered mentions (tools only, no agents)
         // - No agent transfer instructions
-        
+
         const { agent, entities } = createAgent(
             logger,
             projectId,
@@ -884,7 +394,7 @@ function createAgents(
             promptConfig,
         );
         agents[agentName] = agent;
-        
+
         // Add pipeline entities to the agent's available mentions (unless it's a pipeline agent itself)
         // Pipeline agents cannot reference other agents or pipelines, only tools
         let agentEntities = entities;
@@ -894,7 +404,7 @@ function createAgents(
         } else {
             agentsLogger.log(`${agentName} (pipeline agent) can reference: ${entities.length} entities only`);
         }
-        
+
         mentions[agentName] = agentEntities;
         originalInstructions[agentName] = agent.instructions as string;
         // handoffs will be set after all agents are created
@@ -906,17 +416,17 @@ function createAgents(
     for (const [agentName, agent] of Object.entries(agents)) {
         const connectedAgentNames = (mentions[agentName] || []).filter(e => e.type === 'agent').map(e => e.name);
         const connectedPipelineNames = (mentions[agentName] || []).filter(e => e.type === 'pipeline').map(e => e.name);
-        
+
         // Pipeline agents have no agent handoffs (filtered out in validatePipelineAgentMentions)
         // They only have tool connections, no agent transfers allowed
-        
+
         // Filter out pipeline agents from being handoff targets
         // Only allow handoffs to non-pipeline agents
         const validAgentNames = connectedAgentNames.filter(name => {
             const targetConfig = agentConfig[name];
             return targetConfig && targetConfig.type !== 'pipeline';
         });
-        
+
         // Convert pipeline mentions to handoffs to the first agent in each pipeline
         const pipelineFirstAgents: string[] = [];
         for (const pipelineName of connectedPipelineNames) {
@@ -929,10 +439,10 @@ function createAgents(
                 }
             }
         }
-        
+
         // Combine regular agent handoffs with pipeline first agents
         const allHandoffTargets = [...validAgentNames, ...pipelineFirstAgents];
-        
+
         // Only store Agent objects in handoffs (filter out Handoff if present)
         const agentHandoffs = allHandoffTargets.map(e => agents[e]).filter(Boolean) as Agent[];
         agent.handoffs = agentHandoffs;
@@ -944,30 +454,30 @@ function createAgents(
     agentsLogger.log(`=== SETTING UP PIPELINE CHAINS ===`);
     for (const [pipelineName, pipeline] of Object.entries(pipelineConfig)) {
         agentsLogger.log(`setting up pipeline chain: ${pipelineName} -> [${pipeline.agents.join(' -> ')}]`);
-        
+
         for (let i = 0; i < pipeline.agents.length; i++) {
             const currentAgentName = pipeline.agents[i];
             const currentAgent = agents[currentAgentName];
-            
+
             if (!currentAgent) {
                 agentsLogger.log(`warning: pipeline agent ${currentAgentName} not found in agent config`);
                 continue;
             }
-            
+
             // Pipeline agents have NO handoffs - they just execute once
             currentAgent.handoffs = [];
-            
+
             // Add pipeline metadata to the agent for easy lookup
             (currentAgent as any).pipelineName = pipelineName;
             (currentAgent as any).pipelineIndex = i;
             (currentAgent as any).isLastInPipeline = i === pipeline.agents.length - 1;
-            
+
             // Update originalHandoffs to reflect the final pipeline state
             originalHandoffs[currentAgentName] = [];
-            
+
             agentsLogger.log(`pipeline agent ${currentAgentName} has no handoffs (will be controlled by pipeline controller)`);
             agentsLogger.log(`pipeline agent ${currentAgentName} metadata: pipeline=${pipelineName}, index=${i}, isLast=${i === pipeline.agents.length - 1}`);
-            
+
             // Configure pipeline agents to relinquish control after completing their task
             const agentConfigObj = agentConfig[currentAgentName];
             if (agentConfigObj && agentConfigObj.type === 'pipeline') {
@@ -1023,13 +533,13 @@ function maybeInjectGiveUpControlInstructions(
     injectLogger.log(`isInternal: ${isInternal}`);
     injectLogger.log(`isPipeline: ${isPipeline}`);
     injectLogger.log(`isRetain: ${isRetain}`);
-    
+
     // For pipeline agents, they should continue pipeline execution, so no need to inject give up control
     if (isPipeline) {
         injectLogger.log(`Pipeline agent ${childAgentName} continues pipeline execution, no give up control needed`);
         return;
     }
-    
+
     if (!isInternal && isRetain) {
         // inject give up control instructions
         agents[childAgentName].instructions = getGiveUpControlInstructions(agents[childAgentName], parentAgentName, injectLogger);
@@ -1056,20 +566,20 @@ function handlePipelineAgentExecution(
     const pipelineName = (currentAgent as any).pipelineName;
     const pipelineIndex = (currentAgent as any).pipelineIndex;
     const isLastInPipeline = (currentAgent as any).isLastInPipeline;
-    
+
     if (!pipelineName || pipelineIndex === undefined) {
         logger.log(`warning: pipeline agent ${currentAgentName} missing pipeline metadata`);
         return { nextAgentName: null, shouldContinue: false };
     }
-    
+
     const pipeline = pipelineConfig[pipelineName];
     if (!pipeline) {
         logger.log(`warning: pipeline ${pipelineName} not found in config`);
         return { nextAgentName: null, shouldContinue: false };
     }
-    
+
     let nextAgentName: string | null = null;
-    
+
     if (!isLastInPipeline) {
         // Not the last agent - continue to next agent in pipeline
         nextAgentName = pipeline.agents[pipelineIndex + 1];
@@ -1079,24 +589,24 @@ function handlePipelineAgentExecution(
         nextAgentName = stack.pop()!;
         logger.log(`-- pipeline controller: ${currentAgentName} -> ${nextAgentName} (pipeline ${pipelineName} complete, returning to caller)`);
     }
-    
+
     if (nextAgentName) {
         // Create transfer events for pipeline continuation
         const transferEvents = createTransferEvents(currentAgentName, nextAgentName);
         const [transferStart, transferComplete] = transferEvents;
-        
+
         // Add messages to turn
         turnMsgs.push(transferStart);
         turnMsgs.push(transferComplete);
-        
+
         // Update transfer counter
         transferCounter.increment(currentAgentName, nextAgentName);
-        
+
         logger.log(`switched to agent: ${nextAgentName} || reason: pipeline controller transfer`);
-        
+
         return { nextAgentName, shouldContinue: true, transferEvents };
     }
-    
+
     return { nextAgentName: null, shouldContinue: false };
 }
 
@@ -1133,7 +643,7 @@ export async function* streamResponse(
     logger.log(`pipelines: ${Object.keys(pipelineConfig).length} (${Object.keys(pipelineConfig).join(', ')})`);
     logger.log(`start agent: ${workflow.startAgent}`);
     logger.log(`=== END CONFIGURATION ===`);
-    
+
     const stack: string[] = [];
     logger.log(`initialized stack: ${JSON.stringify(stack)}`);
 
@@ -1149,7 +659,7 @@ export async function* streamResponse(
     // get the agent that should be starting this turn
     const startOfTurnAgentName = getStartOfTurnAgentName(logger, messages, agentConfig, workflow);
     logger.log(`🎯 START AGENT DECISION: ${startOfTurnAgentName}`);
-    
+
     let agentName = startOfTurnAgentName;
 
     // start the turn loop
@@ -1157,7 +667,7 @@ export async function* streamResponse(
     const turnMsgs: z.infer<typeof Message>[] = [...messages];
 
     logger.log('🎬 STARTING AGENT TURN');
-    
+
     // stack-based agent execution loop
     let iter = 0;
     const MAXTURNITERATIONS = 10;
@@ -1243,7 +753,7 @@ export async function* streamResponse(
                     // handle handoff event
                     if (event.name === 'handoff_occurred' && event.item.type === 'handoff_output_item') {
                         eventLogger.log(`🔄 HANDOFF EVENT: ${agentName} -> ${event.item.targetAgent.name}`);
-                        
+
                         // skip if its the same agent
                         if (agentName === event.item.targetAgent.name) {
                             eventLogger.log(`⚠️ SKIPPING: handoff to same agent: ${agentName}`);
@@ -1298,10 +808,10 @@ export async function* streamResponse(
                             loopLogger.log(`📚 STACK PUSH: ${agentName} (new agent ${newAgentName} is internal/pipeline)`);
                             loopLogger.log(`📚 STACK NOW: [${stack.join(' -> ')}]`);
                         }
-                        
+
                         // set this as the new agent name
                         agentName = newAgentName;
-                        
+
                     }
 
                     // handle tool call result
@@ -1365,14 +875,14 @@ export async function* streamResponse(
                                     transferCounter,
                                     createTransferEvents
                                 );
-                                
+
                                 // Emit transfer events if they exist
                                 if (result.transferEvents) {
                                     const [transferStart, transferComplete] = result.transferEvents;
                                     yield* emitEvent(eventLogger, transferStart);
                                     yield* emitEvent(eventLogger, transferComplete);
                                 }
-                                
+
                                 if (result.shouldContinue) {
                                     agentName = result.nextAgentName!;
                                     // Run the turn from the next agent
@@ -1388,7 +898,7 @@ export async function* streamResponse(
                                 agentName = workflow.startAgent;
                                 loopLogger.log(`-- using start agent: ${agentName} || reason: ${current} is an internal agent, it put out a message and it has a control type of ${currentAgentConfig?.controlType}, hence the flow of control needs to return to the start agent`);
                             }
-                            
+
                             // Only emit transfer events if we're actually changing agents
                             if (agentName !== current) {
                                 loopLogger.log(`-- stack is now: ${JSON.stringify(stack)}`);
