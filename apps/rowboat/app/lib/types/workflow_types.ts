@@ -92,6 +92,46 @@ export const WorkflowPipeline = z.object({
     order: z.number().int().optional(),
 });
 
+// Context passing schemas for SDK handoffs (OpenAI API compatible)
+export const HandoffContext = z.object({
+    reason: z.enum(['direct_handoff', 'pipeline_execution', 'task_delegation']),
+    parentAgent: z.string(),
+    transferCount: z.number().default(0),
+    // Allow metadata to be object, string, or null to handle AI model variations
+    metadata: z.union([z.record(z.any()), z.string(), z.null()]).default(null)
+});
+
+export const PipelineContext = HandoffContext.extend({
+    pipelineName: z.string(),
+    currentStep: z.number(),
+    totalSteps: z.number(),
+    isLastStep: z.boolean(),
+    // Allow flexible types for AI model compatibility  
+    pipelineData: z.union([z.record(z.any()), z.string(), z.null()]).default(null),
+    stepResults: z.union([z.array(z.record(z.any())), z.string(), z.null()]).default(null)
+});
+
+export const TaskContext = HandoffContext.extend({
+    taskType: z.string(),
+    priority: z.enum(['low', 'medium', 'high']),
+    deadline: z.union([z.string().datetime(), z.string(), z.null()]).default(null),
+    requirements: z.union([z.array(z.string()), z.string(), z.null()]).default(null),
+    resources: z.union([z.record(z.any()), z.string(), z.null()]).default(null)
+});
+
+// Pipeline execution state for state manager
+export const PipelineExecutionState = z.object({
+    pipelineName: z.string(),
+    currentStep: z.number(),
+    totalSteps: z.number(),
+    callingAgent: z.string(),
+    pipelineData: z.union([z.record(z.any()), z.string(), z.null()]).default(null),
+    stepResults: z.union([z.array(z.record(z.any())), z.string(), z.null()]).default(null),
+    currentStepResult: z.union([z.record(z.any()), z.string(), z.null()]).default(null),
+    startTime: z.string().datetime(),
+    metadata: z.union([z.record(z.any()), z.string(), z.null()]).default(null)
+});
+
 export const Workflow = z.object({
     agents: z.array(WorkflowAgent),
     prompts: z.array(WorkflowPrompt),

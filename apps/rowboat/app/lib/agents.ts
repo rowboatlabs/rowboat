@@ -12,11 +12,17 @@ import { ConnectedEntity, sanitizeTextWithMentions, Workflow, WorkflowAgent, Wor
 import { CHILD_TRANSFER_RELATED_INSTRUCTIONS, CONVERSATION_TYPE_INSTRUCTIONS, PIPELINE_TYPE_INSTRUCTIONS, RAG_INSTRUCTIONS, TASK_TYPE_INSTRUCTIONS } from "./agent_instructions";
 import { PrefixLogger } from "./utils";
 import { Message, AssistantMessage, AssistantMessageWithToolCalls, ToolMessage } from "./types/types";
+// Native handoff support
+import { createAgentHandoff, getSchemaForAgent, createContextFilterForAgent } from "./agent-handoffs";
+import { PipelineStateManager } from "./pipeline-state-manager";
 
 // Provider configuration
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
 const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
+
+// Feature flags
+const USE_NATIVE_HANDOFFS = process.env.USE_NATIVE_HANDOFFS !== 'false'; // Default to true for testing
 
 const openai = createOpenAI({
     apiKey: PROVIDER_API_KEY,
@@ -350,7 +356,151 @@ async function* emitGreetingTurn(logger: PrefixLogger, workflow: z.infer<typeof 
 }
 
 
-function createAgents(
+// Enhanced agent creation with native handoff support
+function createAgentsWithNativeHandoffs(
+    logger: PrefixLogger,
+    projectId: string,
+    workflow: z.infer<typeof Workflow>,
+    agentConfig: Record<string, z.infer<typeof WorkflowAgent>>,
+    tools: Record<string, Tool>,
+    promptConfig: Record<string, z.infer<typeof WorkflowPrompt>>,
+    pipelineConfig: Record<string, z.infer<typeof WorkflowPipeline>>,
+): { agents: Record<string, Agent>, mentions: Record<string, z.infer<typeof ConnectedEntity>[]>, originalInstructions: Record<string, string>, originalHandoffs: Record<string, any[]> } {
+    const agentsLogger = logger.child('createAgentsWithNativeHandoffs');
+    const agents: Record<string, Agent> = {};
+    const mentions: Record<string, z.infer<typeof ConnectedEntity>[]> = {};
+    const originalInstructions: Record<string, string> = {};
+    const originalHandoffs: Record<string, any[]> = {};
+
+    agentsLogger.log(`=== CREATING ${Object.keys(agentConfig).length} AGENTS WITH NATIVE HANDOFFS ===`);
+
+    // Create pipeline entities that will be available for @ referencing
+    const pipelineEntities: z.infer<typeof ConnectedEntity>[] = Object.keys(pipelineConfig).map(pipelineName => ({
+        type: 'pipeline' as const,
+        name: pipelineName,
+    }));
+    if (pipelineEntities.length > 0) {
+        agentsLogger.log(`available pipeline entities for @ referencing: ${pipelineEntities.map(p => p.name).join(', ')}`);
+    }
+
+    // Create agents first
+    for (const [agentName, config] of Object.entries(agentConfig)) {
+        agentsLogger.log(`creating agent: ${agentName} (type: ${config.outputVisibility}, control: ${config.controlType})`);
+        
+        const { agent, entities } = createAgent(
+            logger,
+            projectId,
+            config,
+            tools,
+            workflow,
+            promptConfig,
+        );
+        agents[agentName] = agent;
+        
+        // Add pipeline entities to the agent's available mentions (unless it's a pipeline agent itself)
+        let agentEntities = entities;
+        if (config.type !== 'pipeline') {
+            agentEntities = [...entities, ...pipelineEntities];
+            agentsLogger.log(`${agentName} can reference: ${entities.length} entities + ${pipelineEntities.length} pipelines`);
+        } else {
+            agentsLogger.log(`${agentName} (pipeline agent) can reference: ${entities.length} entities only`);
+        }
+        
+        mentions[agentName] = agentEntities;
+        originalInstructions[agentName] = agent.instructions as string;
+    }
+
+    agentsLogger.log(`=== SETTING UP NATIVE HANDOFFS ===`);
+
+    // Set up SDK native handoffs
+    for (const [agentName, agent] of Object.entries(agents)) {
+        const connectedAgentNames = (mentions[agentName] || []).filter(e => e.type === 'agent').map(e => e.name);
+        const connectedPipelineNames = (mentions[agentName] || []).filter(e => e.type === 'pipeline').map(e => e.name);
+        
+        // Pipeline agents have no direct handoffs - they're controlled by the pipeline manager
+        const agentConfigObj = agentConfig[agentName];
+        if (agentConfigObj?.type === 'pipeline') {
+            agent.handoffs = [];
+            originalHandoffs[agentName] = [];
+            agentsLogger.log(`${agentName} is a pipeline agent - no direct handoffs`);
+            continue;
+        }
+        
+        // Create SDK handoffs for connected agents
+        const agentHandoffs: any[] = [];
+        
+        // Regular agent handoffs
+        for (const targetAgentName of connectedAgentNames) {
+            const targetAgent = agents[targetAgentName];
+            const targetConfig = agentConfig[targetAgentName];
+            
+            if (!targetAgent || !targetConfig) continue;
+            
+            // Skip pipeline agents as direct handoff targets
+            if (targetConfig.type === 'pipeline') continue;
+            
+            const handoffType = targetConfig.outputVisibility === 'internal' ? 'task' : 'direct';
+            
+            const handoff = createAgentHandoff(targetAgent, handoffType, {
+                inputSchema: getSchemaForAgent(targetConfig),
+                onHandoff: (context, input) => {
+                    agentsLogger.log(`🔄 SDK Handoff: ${agentName} -> ${targetAgentName} (${handoffType})`);
+                },
+                inputFilter: createContextFilterForAgent(targetConfig),
+                logger: agentsLogger
+            });
+            
+            agentHandoffs.push(handoff);
+        }
+        
+        // Pipeline handoffs - create handoff to first agent of each pipeline
+        for (const pipelineName of connectedPipelineNames) {
+            const pipeline = pipelineConfig[pipelineName];
+            if (pipeline && pipeline.agents.length > 0) {
+                const firstAgentName = pipeline.agents[0];
+                const firstAgent = agents[firstAgentName];
+                
+                if (firstAgent && !agentHandoffs.some(h => h.agent.name === firstAgentName)) {
+                    const pipelineHandoff = createAgentHandoff(firstAgent, 'pipeline', {
+                        onHandoff: (context, input) => {
+                            agentsLogger.log(`🔄 Pipeline Handoff: ${agentName} -> ${pipelineName} (starting with ${firstAgentName})`);
+                            // TODO: Initialize pipeline state here
+                        },
+                        logger: agentsLogger
+                    });
+                    
+                    agentHandoffs.push(pipelineHandoff);
+                    agentsLogger.log(`${agentName} pipeline mention ${pipelineName} -> SDK handoff to first agent: ${firstAgentName}`);
+                }
+            }
+        }
+        
+        agent.handoffs = agentHandoffs;
+        originalHandoffs[agentName] = agentHandoffs;
+        agentsLogger.log(`set ${agentHandoffs.length} SDK handoffs for ${agentName}`);
+    }
+
+    // Pipeline agents still get their metadata for compatibility
+    agentsLogger.log(`=== SETTING UP PIPELINE METADATA ===`);
+    for (const [pipelineName, pipeline] of Object.entries(pipelineConfig)) {
+        for (let i = 0; i < pipeline.agents.length; i++) {
+            const currentAgentName = pipeline.agents[i];
+            const currentAgent = agents[currentAgentName];
+            
+            if (currentAgent) {
+                (currentAgent as any).pipelineName = pipelineName;
+                (currentAgent as any).pipelineIndex = i;
+                (currentAgent as any).isLastInPipeline = i === pipeline.agents.length - 1;
+                agentsLogger.log(`pipeline agent ${currentAgentName} metadata: pipeline=${pipelineName}, index=${i}`);
+            }
+        }
+    }
+
+    return { agents, mentions, originalInstructions, originalHandoffs };
+}
+
+// Legacy agent creation (existing implementation)
+function createAgentsLegacy(
     logger: PrefixLogger,
     projectId: string,
     workflow: z.infer<typeof Workflow>,
@@ -597,7 +747,119 @@ async function* handleRawModelStreamEvent(
     }
 }
 
-// Handle handoff events
+// Handle native SDK handoff events
+async function* handleNativeHandoffEvent(
+    event: any,
+    agentName: string,
+    agentConfig: Record<string, z.infer<typeof WorkflowAgent>>,
+    agents: Record<string, Agent>,
+    pipelineConfig: Record<string, z.infer<typeof WorkflowPipeline>>,
+    stack: string[],
+    turnMsgs: z.infer<typeof Message>[],
+    transferCounter: AgentTransferCounter,
+    pipelineStateManager: PipelineStateManager,
+    originalInstructions: Record<string, string>,
+    originalHandoffs: Record<string, any[]>,
+    eventLogger: PrefixLogger,
+    loopLogger: PrefixLogger
+): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage> | { newAgentName: string; shouldContinue?: boolean }> {
+    eventLogger.log(`🔄 NATIVE HANDOFF EVENT: ${agentName} -> ${event.item.targetAgent.name}`);
+
+    // skip if its the same agent
+    if (agentName === event.item.targetAgent.name) {
+        eventLogger.log(`⚠️ SKIPPING: handoff to same agent: ${agentName}`);
+        return;
+    }
+
+    const targetAgentName = event.item.targetAgent.name;
+    const targetAgentConfig = agentConfig[targetAgentName];
+
+    // Check if this is a pipeline-related handoff
+    const isTargetPipelineAgent = targetAgentConfig?.type === 'pipeline';
+    const isSourceStartingPipeline = pipelineStateManager && !pipelineStateManager.isAgentInPipeline(agentName);
+
+    if (isTargetPipelineAgent && isSourceStartingPipeline) {
+        // Starting a new pipeline execution
+        eventLogger.log(`🚀 Starting pipeline execution: ${agentName} -> ${targetAgentName}`);
+        
+        // Find which pipeline this agent belongs to
+        let targetPipelineName = '';
+        let targetPipeline: z.infer<typeof WorkflowPipeline> | null = null;
+        
+        for (const [pipelineName, pipeline] of Object.entries(pipelineConfig)) {
+            if (pipeline.agents.includes(targetAgentName)) {
+                targetPipelineName = pipelineName;
+                targetPipeline = pipeline;
+                break;
+            }
+        }
+        
+        if (targetPipeline) {
+            // Initialize pipeline state
+            const pipelineState = pipelineStateManager!.initializePipelineExecution(
+                targetPipelineName,
+                agentName,
+                targetPipeline,
+                {} // TODO: Extract initial data from handoff input
+            );
+            
+            eventLogger.log(`📋 Initialized pipeline "${targetPipelineName}" with ${targetPipeline.agents.length} steps`);
+        }
+    }
+
+    // Handle pipeline step completion and continuation
+    if (pipelineStateManager?.isAgentInPipeline(agentName)) {
+        eventLogger.log(`🔄 Pipeline step handoff from ${agentName} to ${targetAgentName}`);
+        
+        // This is handled by the pipeline state manager
+        // The handoff event will trigger the next pipeline step
+        const result = await pipelineStateManager.handlePipelineExecution(
+            agentName,
+            pipelineConfig,
+            agents,
+            {} // TODO: Extract step result from event data
+        );
+        
+        if (result.action === 'complete') {
+            eventLogger.log(`✅ Pipeline completed, returning to ${result.returnToAgent}`);
+            yield { newAgentName: result.returnToAgent || agentName };
+            return;
+        } else if (result.action === 'handoff' && result.nextAgent) {
+            eventLogger.log(`➡️ Pipeline continuing to ${result.nextAgent}`);
+            yield { newAgentName: result.nextAgent };
+            return;
+        }
+    }
+
+    // Regular handoff handling (non-pipeline)
+    const maxCalls = targetAgentConfig?.maxCallsPerParentAgent || 3;
+    const currentCalls = transferCounter.get(agentName, targetAgentName);
+    
+    if (targetAgentConfig?.outputVisibility === 'internal' && currentCalls >= maxCalls) {
+        eventLogger.log(`⚠️ SKIPPING: handoff to ${targetAgentName} - max calls ${maxCalls} exceeded from ${agentName}`);
+        return;
+    }
+
+    eventLogger.log(`📊 TRANSFER COUNT: ${agentName} -> ${targetAgentName} = ${currentCalls}/${maxCalls}`);
+
+    // Update transfer counter
+    transferCounter.increment(agentName, targetAgentName);
+
+    loopLogger.log(`🔄 AGENT SWITCH: ${agentName} -> ${targetAgentName} (reason: native SDK handoff)`);
+
+    // Add current agent to stack only if new agent is internal or pipeline
+    const newAgentConfig = agentConfig[targetAgentName];
+    if (newAgentConfig?.outputVisibility === 'internal' || newAgentConfig?.type === 'pipeline') {
+        stack.push(agentName);
+        loopLogger.log(`📚 STACK PUSH: ${agentName} (new agent ${targetAgentName} is internal/pipeline)`);
+        loopLogger.log(`📚 STACK NOW: [${stack.join(' -> ')}]`);
+    }
+
+    // Return the new agent name for the caller to handle
+    yield { newAgentName: targetAgentName };
+}
+
+// Handle handoff events (legacy)
 async function* handleHandoffEvent(
     event: any,
     agentName: string,
@@ -894,11 +1156,17 @@ export async function* streamResponse(
     // create tools
     const tools = createTools(logger, projectId, workflow, toolConfig);
 
-    // create agents
-    const { agents, originalInstructions, originalHandoffs } = createAgents(logger, projectId, workflow, agentConfig, tools, promptConfig, pipelineConfig);
+    // create agents with feature flag support
+    const createAgentsFunction = USE_NATIVE_HANDOFFS ? createAgentsWithNativeHandoffs : createAgentsLegacy;
+    const { agents, originalInstructions, originalHandoffs } = createAgentsFunction(logger, projectId, workflow, agentConfig, tools, promptConfig, pipelineConfig);
+    
+    logger.log(`Using ${USE_NATIVE_HANDOFFS ? 'NATIVE SDK' : 'LEGACY'} handoffs`);
 
     // track agent to agent calls
     const transferCounter = new AgentTransferCounter();
+    
+    // initialize pipeline state manager for native handoffs
+    const pipelineStateManager = USE_NATIVE_HANDOFFS ? new PipelineStateManager(logger) : null;
 
     // get the agent that should be starting this turn
     const startOfTurnAgentName = getStartOfTurnAgentName(logger, messages, agentConfig, workflow);
@@ -961,25 +1229,54 @@ export async function* streamResponse(
                     break;
 
                 case 'run_item_stream_event':
-                    // handle handoff event
+                    // handle handoff event with feature flag support
                     if (event.name === 'handoff_occurred' && event.item.type === 'handoff_output_item') {
-                        for await (const result of handleHandoffEvent(
-                            event,
-                            agentName,
-                            agentConfig,
-                            agents,
-                            stack,
-                            turnMsgs,
-                            transferCounter,
-                            originalInstructions,
-                            originalHandoffs,
-                            eventLogger,
-                            loopLogger
-                        )) {
-                            if ('newAgentName' in result) {
-                                agentName = result.newAgentName;
-                            } else {
-                                yield result;
+                        if (USE_NATIVE_HANDOFFS) {
+                            // Use native SDK handoff handling
+                            for await (const result of handleNativeHandoffEvent(
+                                event,
+                                agentName,
+                                agentConfig,
+                                agents,
+                                pipelineConfig,
+                                stack,
+                                turnMsgs,
+                                transferCounter,
+                                pipelineStateManager!,
+                                originalInstructions,
+                                originalHandoffs,
+                                eventLogger,
+                                loopLogger
+                            )) {
+                                if ('newAgentName' in result) {
+                                    agentName = result.newAgentName;
+                                    if (result.shouldContinue) {
+                                        continue turnLoop;
+                                    }
+                                } else {
+                                    yield result;
+                                }
+                            }
+                        } else {
+                            // Use legacy handoff handling
+                            for await (const result of handleHandoffEvent(
+                                event,
+                                agentName,
+                                agentConfig,
+                                agents,
+                                stack,
+                                turnMsgs,
+                                transferCounter,
+                                originalInstructions,
+                                originalHandoffs,
+                                eventLogger,
+                                loopLogger
+                            )) {
+                                if ('newAgentName' in result) {
+                                    agentName = result.newAgentName;
+                                } else {
+                                    yield result;
+                                }
                             }
                         }
                     }
