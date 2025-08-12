@@ -123,7 +123,7 @@ export function RecurringJobRuleView({ projectId, ruleId }: { projectId: string;
                     <Button
                         onClick={handleToggleStatus}
                         disabled={updating}
-                        variant={rule.disabled ? "default" : "secondary"}
+                        variant={rule.disabled ? "secondary" : "primary"}
                         size="sm"
                         className="flex items-center gap-2"
                     >

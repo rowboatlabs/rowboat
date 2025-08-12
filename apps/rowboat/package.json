@@ -14,8 +14,7 @@
     "ragFilesWorker": "tsx app/scripts/rag_files_worker.ts",
     "ragTextWorker": "tsx app/scripts/rag_text_worker.ts",
     "jobs-worker": "tsx app/scripts/jobs-worker.ts",
-    "scheduled-job-rules-worker": "tsx app/scripts/scheduled-job-rules.worker.ts",
-    "recurring-job-rules-worker": "tsx app/scripts/recurring-job-rules.worker.ts"
+    "job-rules-worker": "tsx app/scripts/job-rules.worker.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.3.21",

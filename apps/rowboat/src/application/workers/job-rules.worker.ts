@@ -1,4 +1,5 @@
 import { IScheduledJobRulesRepository } from "@/src/application/repositories/scheduled-job-rules.repository.interface";
+import { IRecurringJobRulesRepository } from "@/src/application/repositories/recurring-job-rules.repository.interface";
 import { IJobsRepository } from "@/src/application/repositories/jobs.repository.interface";
 import { IProjectsRepository } from "@/src/application/repositories/projects.repository.interface";
 import { IPubSubService } from "@/src/application/services/pub-sub.service.interface";
@@ -6,14 +7,17 @@ import { ScheduledJobRule } from "@/src/entities/models/scheduled-job-rule";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { PrefixLogger } from "@/app/lib/utils";
+import { RecurringJobRule } from "@/src/entities/models/recurring-job-rule";
+import { CronExpressionParser } from 'cron-parser';
 
-export interface IScheduledJobRulesWorker {
+export interface IJobRulesWorker {
     run(): Promise<void>;
     stop(): Promise<void>;
 }
 
-export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
+export class JobRulesWorker implements IJobRulesWorker {
     private readonly scheduledJobRulesRepository: IScheduledJobRulesRepository;
+    private readonly recurringJobRulesRepository: IRecurringJobRulesRepository;
     private readonly jobsRepository: IJobsRepository;
     private readonly projectsRepository: IProjectsRepository;
     private readonly pubSubService: IPubSubService;
@@ -26,16 +30,19 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
 
     constructor({
         scheduledJobRulesRepository,
+        recurringJobRulesRepository,
         jobsRepository,
         projectsRepository,
         pubSubService,
     }: {
         scheduledJobRulesRepository: IScheduledJobRulesRepository;
+        recurringJobRulesRepository: IRecurringJobRulesRepository;
         jobsRepository: IJobsRepository;
         projectsRepository: IProjectsRepository;
         pubSubService: IPubSubService;
     }) {
         this.scheduledJobRulesRepository = scheduledJobRulesRepository;
+        this.recurringJobRulesRepository = recurringJobRulesRepository;
         this.jobsRepository = jobsRepository;
         this.projectsRepository = projectsRepository;
         this.pubSubService = pubSubService;
@@ -43,7 +50,7 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
         this.logger = new PrefixLogger(`scheduled-job-rules-worker-[${this.workerId}]`);
     }
 
-    private async processRule(rule: z.infer<typeof ScheduledJobRule>): Promise<void> {
+    private async processScheduledRule(rule: z.infer<typeof ScheduledJobRule>): Promise<void> {
         const logger = this.logger.child(`rule-${rule.id}`);
         logger.log("Processing scheduled job rule");
 
@@ -62,7 +69,7 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
 
             // notify job workers
             await this.pubSubService.publish("new_jobs", job.id);
- 
+
             logger.log(`Created job ${job.id} from rule ${rule.id}`);
 
             // update data
@@ -76,12 +83,61 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
             // release
             await this.scheduledJobRulesRepository.release(rule.id);
 
-           logger.log(`Published job ${job.id} to new_jobs`);
+            logger.log(`Published job ${job.id} to new_jobs`);
         } catch (error) {
             logger.log(`Failed to process rule: ${error instanceof Error ? error.message : "Unknown error"}`);
             // Always release the rule to avoid deadlocks but do not attach a jobId
             try {
                 await this.scheduledJobRulesRepository.release(rule.id);
+            } catch (releaseError) {
+                logger.log(`Failed to release rule: ${releaseError instanceof Error ? releaseError.message : "Unknown error"}`);
+            }
+        }
+    }
+
+    private async processRecurringRule(rule: z.infer<typeof RecurringJobRule>): Promise<void> {
+        const logger = this.logger.child(`rule-${rule.id}`);
+        logger.log("Processing recurring job rule");
+
+        try {
+            // create job
+            const job = await this.jobsRepository.create({
+                reason: {
+                    type: "recurring_job_rule",
+                    ruleId: rule.id,
+                },
+                projectId: rule.projectId,
+                input: {
+                    messages: rule.input.messages,
+                },
+            });
+
+            // notify job workers
+            await this.pubSubService.publish("new_jobs", job.id);
+
+            logger.log(`Created job ${job.id} from rule ${rule.id}`);
+
+            // calculate next run time
+            // parse cron to get next run time
+            const interval = CronExpressionParser.parse(rule.cron, {
+                tz: "UTC",
+            });
+            const nextRunAt = interval.next().toDate().toISOString();
+
+            // update nextrun time
+            await this.recurringJobRulesRepository.update(rule.id, {
+                nextRunAt,
+            });
+
+            // release
+            await this.recurringJobRulesRepository.release(rule.id);
+
+            logger.log(`Published job ${job.id} to new_jobs`);
+        } catch (error) {
+            logger.log(`Failed to process rule: ${error instanceof Error ? error.message : "Unknown error"}`);
+            // Always release the rule to avoid deadlocks
+            try {
+                await this.recurringJobRulesRepository.release(rule.id);
             } catch (releaseError) {
                 logger.log(`Failed to release rule: ${releaseError instanceof Error ? releaseError.message : "Unknown error"}`);
             }
@@ -96,20 +152,39 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
         return delayMs > 0 ? delayMs : this.minuteAlignmentOffsetMs;
     }
 
-    private async pollAndProcess(): Promise<void> {
-        this.logger.log("Polling...");
+    private async pollScheduled(): Promise<void> {
+        const logger = this.logger.child(`poll-scheduled`);
+        logger.log("Polling...");
         let rule: z.infer<typeof ScheduledJobRule> | null = null;
         try {
             do {
                 rule = await this.scheduledJobRulesRepository.poll(this.workerId);
                 if (!rule) {
-                    this.logger.log("No rules to process");
+                    logger.log("No rules to process");
                     return;
                 }
-                await this.processRule(rule);
+                await this.processScheduledRule(rule);
             } while (rule);
         } catch (error) {
-            this.logger.log(`Error while polling rules: ${error instanceof Error ? error.message : "Unknown error"}`);
+            logger.log(`Error while polling rules: ${error instanceof Error ? error.message : "Unknown error"}`);
+        }
+    }
+
+    private async pollRecurring(): Promise<void> {
+        const logger = this.logger.child(`poll-recurring`);
+        logger.log("Polling...");
+        let rule: z.infer<typeof RecurringJobRule> | null = null;
+        try {
+            do {
+                rule = await this.recurringJobRulesRepository.poll(this.workerId);
+                if (!rule) {
+                    logger.log("No rules to process");
+                    return;
+                }
+                await this.processRecurringRule(rule);
+            } while (rule);
+        } catch (error) {
+            logger.log(`Error while polling rules: ${error instanceof Error ? error.message : "Unknown error"}`);
         }
     }
 
@@ -118,7 +193,10 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
         this.logger.log(`Scheduling next poll in ${delayMs} ms`);
         this.pollTimeoutId = setTimeout(async () => {
             if (!this.isRunning) return;
-            await this.pollAndProcess();
+            await Promise.all([
+                this.pollScheduled(),
+                this.pollRecurring(),
+            ]);
             this.scheduleNextPoll();
         }, delayMs);
     }

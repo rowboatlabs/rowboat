@@ -30,7 +30,7 @@ import { DeleteComposioConnectedAccountController } from "@/src/interface-adapte
 import { HandleComposioWebhookRequestController } from "@/src/interface-adapters/controllers/composio/webhook/handle-composio-webhook-request.controller";
 import { RedisPubSubService } from "@/src/infrastructure/services/redis.pub-sub.service";
 import { JobsWorker } from "@/src/application/workers/jobs.worker";
-import { ScheduledJobRulesWorker } from "@/src/application/workers/scheduled-job-rules.worker";
+import { JobRulesWorker } from "@/src/application/workers/job-rules.worker";
 import { ListJobsUseCase } from "@/src/application/use-cases/jobs/list-jobs.use-case";
 import { ListJobsController } from "@/src/interface-adapters/controllers/jobs/list-jobs.controller";
 import { ListConversationsUseCase } from "@/src/application/use-cases/conversations/list-conversations.use-case";
@@ -59,7 +59,6 @@ import { CreateRecurringJobRuleController } from "@/src/interface-adapters/contr
 import { FetchRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/fetch-recurring-job-rule.controller";
 import { ListRecurringJobRulesController } from "@/src/interface-adapters/controllers/recurring-job-rules/list-recurring-job-rules.controller";
 import { ToggleRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/toggle-recurring-job-rule.controller";
-import { RecurringJobRulesWorker } from "@/src/application/workers/recurring-job-rules.worker";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -70,8 +69,7 @@ container.register({
     // workers
     // ---
     jobsWorker: asClass(JobsWorker).singleton(),
-    scheduledJobRulesWorker: asClass(ScheduledJobRulesWorker).singleton(),
-    recurringJobRulesWorker: asClass(RecurringJobRulesWorker).singleton(),
+    jobRulesWorker: asClass(JobRulesWorker).singleton(),
 
     // services
     // ---
