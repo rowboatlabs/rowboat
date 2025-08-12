@@ -16,7 +16,8 @@ import {
   Sun,
   HelpCircle,
   MessageSquareIcon,
-  LogsIcon
+  LogsIcon,
+  Clock
 } from "lucide-react";
 import { getProjectConfig } from "@/app/actions/project_actions";
 import { createProjectWithOptions } from "../../lib/project-creation-utils";
@@ -111,6 +112,12 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
       href: 'jobs',
       label: 'Jobs',
       icon: LogsIcon,
+      requiresProject: true
+    },
+    {
+      href: 'scheduled-job-rules',
+      label: 'Scheduled Job Rules',
+      icon: Clock,
       requiresProject: true
     },
     {

@@ -81,9 +81,24 @@ export function JobsList({ projectId }: { projectId: string }) {
 
     const getReasonDisplay = (reason: any) => {
         if (reason.type === 'composio_trigger') {
-            return `Composio: ${reason.triggerTypeSlug}`;
+            return {
+                type: 'Composio Trigger',
+                display: `Composio: ${reason.triggerTypeSlug}`,
+                link: null
+            };
         }
-        return 'Unknown';
+        if (reason.type === 'scheduled_job_rule') {
+            return {
+                type: 'Scheduled Job Rule',
+                display: `Scheduled Rule`,
+                link: `/projects/${projectId}/scheduled-job-rules/${reason.ruleId}`
+            };
+        }
+        return {
+            type: 'Unknown',
+            display: 'Unknown',
+            link: null
+        };
     };
 
     return (
@@ -129,33 +144,46 @@ export function JobsList({ projectId }: { projectId: string }) {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                                    {group.map((job) => (
-                                                        <tr key={job.id} className="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
-                                                            <td className="px-6 py-4 text-left">
-                                                                <Link
-                                                                    href={`/projects/${projectId}/jobs/${job.id}`}
-                                                                    size="lg"
-                                                                    isBlock
-                                                                    className="text-sm text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 truncate block"
-                                                                >
-                                                                    {job.id}
-                                                                </Link>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-left">
-                                                                <span className={`text-sm font-medium ${getStatusColor(job.status)}`}>
-                                                                    {job.status}
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-left">
-                                                                <span className="text-sm text-gray-600 dark:text-gray-300 font-mono">
-                                                                    {getReasonDisplay(job.reason)}
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-left text-sm text-gray-600 dark:text-gray-300">
-                                                                {new Date(job.createdAt).toLocaleString()}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
+                                                    {group.map((job) => {
+                                                        const reasonInfo = getReasonDisplay(job.reason);
+                                                        return (
+                                                            <tr key={job.id} className="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+                                                                <td className="px-6 py-4 text-left">
+                                                                    <Link
+                                                                        href={`/projects/${projectId}/jobs/${job.id}`}
+                                                                        size="lg"
+                                                                        isBlock
+                                                                        className="text-sm text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 truncate block"
+                                                                    >
+                                                                        {job.id}
+                                                                    </Link>
+                                                                </td>
+                                                                <td className="px-6 py-4 text-left">
+                                                                    <span className={`text-sm font-medium ${getStatusColor(job.status)}`}>
+                                                                        {job.status}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-6 py-4 text-left">
+                                                                    {reasonInfo.link ? (
+                                                                        <Link
+                                                                            href={reasonInfo.link}
+                                                                            size="sm"
+                                                                            className="text-sm text-blue-600 dark:text-blue-400 hover:underline font-mono"
+                                                                        >
+                                                                            {reasonInfo.display}
+                                                                        </Link>
+                                                                    ) : (
+                                                                        <span className="text-sm text-gray-600 dark:text-gray-300 font-mono">
+                                                                            {reasonInfo.display}
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="px-6 py-4 text-left text-sm text-gray-600 dark:text-gray-300">
+                                                                    {new Date(job.createdAt).toLocaleString()}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
                                                 </tbody>
                                             </table>
                                         </div>

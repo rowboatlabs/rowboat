@@ -8,7 +8,7 @@ import { PaginatedList } from "@/src/entities/common/paginated-list";
  * Schema for creating a new job.
  * Defines the required fields when creating a job in the system.
  */
-const createJobSchema = Job.pick({
+export const CreateJobSchema = Job.pick({
     reason: true,
     projectId: true,
     input: true,
@@ -27,7 +27,7 @@ export const ListedJobItem = Job.pick({
  * Schema for updating an existing job.
  * Defines the fields that can be updated for a job.
  */
-const updateJobSchema = Job.pick({
+export const UpdateJobSchema = Job.pick({
     status: true,
     output: true,
 });
@@ -46,7 +46,7 @@ export interface IJobsRepository {
      * @param data - The job data containing trigger information, project ID, and input
      * @returns Promise resolving to the created job with all fields populated
      */
-    create(data: z.infer<typeof createJobSchema>): Promise<z.infer<typeof Job>>;
+    create(data: z.infer<typeof CreateJobSchema>): Promise<z.infer<typeof Job>>;
 
     /**
      * Fetches a job by its unique identifier.
@@ -88,7 +88,7 @@ export interface IJobsRepository {
      * @returns Promise resolving to the updated job
      * @throws {NotFoundError} if the job doesn't exist
      */
-    update(id: string, data: z.infer<typeof updateJobSchema>): Promise<z.infer<typeof Job>>;
+    update(id: string, data: z.infer<typeof UpdateJobSchema>): Promise<z.infer<typeof Job>>;
 
     /**
      * Releases a job lock, making it available for other workers.

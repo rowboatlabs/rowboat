@@ -54,13 +54,25 @@ export function JobView({ projectId, jobId }: { projectId: string; jobId: string
                     'Trigger ID': reason.triggerId,
                     'Deployment ID': reason.triggerDeploymentId,
                 },
-                payload: reason.payload
+                payload: reason.payload,
+                link: null
+            };
+        }
+        if (reason.type === 'scheduled_job_rule') {
+            return {
+                type: 'Scheduled Job Rule',
+                details: {
+                    'Rule ID': reason.ruleId,
+                },
+                payload: null,
+                link: `/projects/${projectId}/scheduled-job-rules/${reason.ruleId}`
             };
         }
         return {
             type: 'Unknown',
             details: {},
-            payload: null
+            payload: null,
+            link: null
         };
     };
 
@@ -164,7 +176,7 @@ export function JobView({ projectId, jobId }: { projectId: string; jobId: string
                                                 ))}
                                             </div>
                                         </div>
-                                        
+
                                         {reasonInfo.payload && Object.keys(reasonInfo.payload).length > 0 && (
                                             <div>
                                                 <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
@@ -173,6 +185,19 @@ export function JobView({ projectId, jobId }: { projectId: string; jobId: string
                                                 <pre className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs overflow-x-auto border border-gray-200 dark:border-gray-700 font-mono max-h-[300px]">
                                                     {JSON.stringify(reasonInfo.payload, null, 2)}
                                                 </pre>
+                                            </div>
+                                        )}
+                                        {reasonInfo.link && (
+                                            <div>
+                                                <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
+                                                    Related Link
+                                                </div>
+                                                <Link
+                                                    href={reasonInfo.link}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                                                >
+                                                    {reasonInfo.type === 'Scheduled Job Rule' ? 'View Scheduled Job Rule' : 'View Details'}
+                                                </Link>
                                             </div>
                                         )}
                                     </div>
@@ -197,15 +222,7 @@ export function JobView({ projectId, jobId }: { projectId: string; jobId: string
                                         </div>
                                     </div>
 
-                                    {/* Workflow */}
-                                    {job.output?.workflow && <div>
-                                        <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
-                                            Workflow
-                                        </div>
-                                        <pre className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs overflow-x-auto border border-gray-200 dark:border-gray-700 font-mono max-h-[400px]">
-                                            {JSON.stringify(job.output.workflow, null, 2)}
-                                        </pre>
-                                    </div>}
+
                                 </div>
                             </div>
 

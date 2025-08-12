@@ -28,7 +28,6 @@ export const Job = z.object({
         messages: z.array(Message),
     }),
     output: z.object({
-        workflow: Workflow.optional(),
         conversationId: z.string().optional(),
         turnId: z.string().optional(),
         error: z.string().optional(),

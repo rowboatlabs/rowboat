@@ -10,5 +10,3 @@ import { IScheduledJobRulesWorker } from "@/src/application/workers/scheduled-jo
         console.error(`Unable to run scheduled job rules worker: ${error}`);
     }
 })();
-
-

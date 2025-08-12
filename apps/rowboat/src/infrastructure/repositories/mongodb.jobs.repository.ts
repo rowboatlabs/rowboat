@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ObjectId } from "mongodb";
 import { db } from "@/app/lib/mongodb";
-import { IJobsRepository, ListedJobItem } from "@/src/application/repositories/jobs.repository.interface";
+import { CreateJobSchema, IJobsRepository, ListedJobItem, UpdateJobSchema } from "@/src/application/repositories/jobs.repository.interface";
 import { Job } from "@/src/entities/models/job";
 import { JobAcquisitionError } from "@/src/entities/errors/job-errors";
 import { NotFoundError } from "@/src/entities/errors/common";
@@ -16,23 +16,6 @@ const DocSchema = Job.omit({
 });
 
 /**
- * Schema for creating a new job.
- */
-const createJobSchema = Job.pick({
-    reason: true,
-    projectId: true,
-    input: true,
-});
-
-/**
- * Schema for updating an existing job.
- */
-const updateJobSchema = Job.pick({
-    status: true,
-    output: true,
-});
-
-/**
  * MongoDB implementation of the JobsRepository.
  * 
  * This repository manages jobs in MongoDB, providing operations for
@@ -44,7 +27,7 @@ export class MongoDBJobsRepository implements IJobsRepository {
     /**
      * Creates a new job in the system.
      */
-    async create(data: z.infer<typeof createJobSchema>): Promise<z.infer<typeof Job>> {
+    async create(data: z.infer<typeof CreateJobSchema>): Promise<z.infer<typeof Job>> {
         const now = new Date().toISOString();
         const _id = new ObjectId();
 
@@ -163,7 +146,7 @@ export class MongoDBJobsRepository implements IJobsRepository {
     /**
      * Updates an existing job with new status and/or output data.
      */
-    async update(id: string, data: z.infer<typeof updateJobSchema>): Promise<z.infer<typeof Job>> {
+    async update(id: string, data: z.infer<typeof UpdateJobSchema>): Promise<z.infer<typeof Job>> {
         const now = new Date().toISOString();
 
         const result = await this.collection.findOneAndUpdate(

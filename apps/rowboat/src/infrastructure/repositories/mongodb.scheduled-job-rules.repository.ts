@@ -119,12 +119,10 @@ export class MongoDBScheduledJobRulesRepository implements IScheduledJobRulesRep
                     $lte: Math.floor(now.getTime() / 1000),
                     $gte: Math.floor(notBefore.getTime() / 1000),
                 },
-                processedAt: {
-                    $or: [
-                        { $eq: null },
-                        { $lt: "$nextRunAt" },
-                    ]
-                },
+                $or: [
+                    { processedAt: null },
+                    { processedAt: { $lt: Math.floor(now.getTime() / 1000) } },
+                ],
                 disabled: false,
                 workerId: null,
             },

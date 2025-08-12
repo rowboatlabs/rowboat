@@ -72,7 +72,6 @@ export class JobsWorker implements IJobsWorker {
                     type: "job",
                     jobId: job.id,
                 },
-                workflow: project.liveWorkflow,
                 isLiveWorkflow: true,
             });
             logger.log(`Created conversation ${conversation.id}`);
@@ -106,7 +105,6 @@ export class JobsWorker implements IJobsWorker {
             await this.jobsRepository.update(job.id, {
                 status: "completed",
                 output: {
-                    workflow: conversation.workflow,
                     conversationId: conversation.id,
                     turnId: turn.id,
                 },
