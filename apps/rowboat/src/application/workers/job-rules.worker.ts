@@ -8,7 +8,6 @@ import { z } from "zod";
 import { nanoid } from "nanoid";
 import { PrefixLogger } from "@/app/lib/utils";
 import { RecurringJobRule } from "@/src/entities/models/recurring-job-rule";
-import { CronExpressionParser } from 'cron-parser';
 
 export interface IJobRulesWorker {
     run(): Promise<void>;
@@ -116,18 +115,6 @@ export class JobRulesWorker implements IJobRulesWorker {
             await this.pubSubService.publish("new_jobs", job.id);
 
             logger.log(`Created job ${job.id} from rule ${rule.id}`);
-
-            // calculate next run time
-            // parse cron to get next run time
-            const interval = CronExpressionParser.parse(rule.cron, {
-                tz: "UTC",
-            });
-            const nextRunAt = interval.next().toDate().toISOString();
-
-            // update nextrun time
-            await this.recurringJobRulesRepository.update(rule.id, {
-                nextRunAt,
-            });
 
             // release
             await this.recurringJobRulesRepository.release(rule.id);

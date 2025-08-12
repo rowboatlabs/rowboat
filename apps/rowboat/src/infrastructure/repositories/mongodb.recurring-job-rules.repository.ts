@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { ObjectId } from "mongodb";
 import { db } from "@/app/lib/mongodb";
-import { CreateRecurringRuleSchema, IRecurringJobRulesRepository, ListedRecurringRuleItem, UpdateRecurringRuleSchema } from "@/src/application/repositories/recurring-job-rules.repository.interface";
+import { CreateRecurringRuleSchema, IRecurringJobRulesRepository, ListedRecurringRuleItem } from "@/src/application/repositories/recurring-job-rules.repository.interface";
 import { RecurringJobRule } from "@/src/entities/models/recurring-job-rule";
 import { NotFoundError } from "@/src/entities/errors/common";
 import { PaginatedList } from "@/src/entities/common/paginated-list";
+import { CronExpressionParser } from 'cron-parser';
 
 /**
  * MongoDB document schema for RecurringJobRule.
@@ -57,16 +58,9 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
         const now = new Date().toISOString();
         const _id = new ObjectId();
 
-        // convert date string to seconds since epoch
-        // and round down to the last minute
-        const nextRunAtDate = new Date(data.nextRunAt);
-        const nextRunAtSeconds = Math.floor(nextRunAtDate.getTime() / 1000);
-        const nextRunAtMinutes = Math.floor(nextRunAtSeconds / 60) * 60;
-        const nextRunAt = nextRunAtMinutes;
-
         const doc: z.infer<typeof CreateDocSchema> = {
             ...data,
-            nextRunAt,
+            nextRunAt: 0,
             disabled: false,
             workerId: null,
             lastWorkerId: null,
@@ -78,12 +72,8 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
             _id,
         });
 
-        return {
-            ...doc,
-            id: _id.toString(),
-            nextRunAt: new Date(nextRunAt * 1000).toISOString(),
-            lastProcessedAt: undefined,
-        };
+        // update next run and return
+        return await this.updateNextRunAt(_id.toString(), data.cron);
     }
 
     /**
@@ -148,37 +138,6 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
     }
 
     /**
-     * Updates a recurring job rule with new data.
-     */
-    async update(id: string, data: z.infer<typeof UpdateRecurringRuleSchema>): Promise<z.infer<typeof RecurringJobRule>> {
-        const now = new Date();
-
-        // convert date string to seconds since epoch
-        // and round down to the last minute
-        const nextRunAtDate = new Date(data.nextRunAt);
-        const nextRunAtSeconds = Math.floor(nextRunAtDate.getTime() / 1000);
-        const nextRunAtMinutes = Math.floor(nextRunAtSeconds / 60) * 60;
-        const nextRunAt = nextRunAtMinutes;
-
-        const result = await this.collection.findOneAndUpdate(
-            { _id: new ObjectId(id) },
-            {
-                $set: {
-                    ...data,
-                    updatedAt: now.toISOString(),
-                    nextRunAt,
-                }
-            },
-        );
-
-        if (!result) {
-            throw new NotFoundError(`Recurring job rule ${id} not found`);
-        }
-
-        return this.convertDocToModel(result);
-    }
-
-    /**
      * Releases a recurring job rule after it has been executed
      */
     async release(id: string): Promise<z.infer<typeof RecurringJobRule>> {
@@ -203,7 +162,8 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
             throw new NotFoundError(`Recurring job rule ${id} not found`);
         }
 
-        return this.convertDocToModel(result);
+        // update next run at
+        return await this.updateNextRunAt(id, result.cron);
     }
 
     /**
@@ -238,6 +198,27 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
         const result = await this.collection.findOneAndUpdate(
             { _id: new ObjectId(id) },
             { $set: { disabled, updatedAt: new Date().toISOString() } },
+        );
+
+        if (!result) {
+            throw new NotFoundError(`Recurring job rule ${id} not found`);
+        }
+
+        // update next run and return
+        return await this.updateNextRunAt(id, result.cron);
+    }
+
+    async updateNextRunAt(id: string, cron: string): Promise<z.infer<typeof RecurringJobRule>> {
+        // parse cron to get next run time
+        const interval = CronExpressionParser.parse(cron, {
+            tz: "UTC",
+        });
+        const nextRunAt = Math.floor(interval.next().toDate().getTime() / 1000);
+
+        const result = await this.collection.findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            { $set: { nextRunAt, updatedAt: new Date().toISOString() } },
+            { returnDocument: "after" },
         );
 
         if (!result) {

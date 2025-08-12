@@ -11,16 +11,10 @@ export const CreateRecurringRuleSchema = RecurringJobRule
         projectId: true,
         input: true,
         cron: true,
-        nextRunAt: true,
     });
 
 export const ListedRecurringRuleItem = RecurringJobRule.omit({
     input: true,
-});
-
-export const UpdateRecurringRuleSchema = RecurringJobRule.pick({
-    lastError: true,
-    nextRunAt: true,
 });
 
 /**
@@ -57,16 +51,6 @@ export interface IRecurringJobRulesRepository {
      * @returns Promise resolving to the next available recurring job rule or null if no rules are available
      */
     poll(workerId: string): Promise<z.infer<typeof RecurringJobRule> | null>;
-
-    /**
-     * Updates a recurring job rule with new data.
-     * 
-     * @param id - The unique identifier of the recurring job rule to update
-     * @param data - The update data
-     * @returns Promise resolving to the updated recurring job rule
-     * @throws {NotFoundError} if the recurring job rule doesn't exist
-     */
-    update(id: string, data: z.infer<typeof UpdateRecurringRuleSchema>): Promise<z.infer<typeof RecurringJobRule>>;
 
     /**
      * Releases a recurring job rule after it has been executed
