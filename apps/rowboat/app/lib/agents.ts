@@ -1314,8 +1314,7 @@ export async function* streamResponse(
         }
         
         // At this point, agentName is guaranteed to be non-null
-        const currentAgentName: string = agentName;
-        const agent: Agent = agents[currentAgentName]!;
+        const agent: Agent = agents[agentName]!;
 
         // convert messages to agents sdk compatible input
         const inputs = convertMsgsInput(turnMsgs);
@@ -1335,7 +1334,7 @@ export async function* streamResponse(
 
             switch (event.type) {
                 case 'raw_model_stream_event':
-                    yield* handleRawModelStreamEvent(event, currentAgentName, turnMsgs, usageTracker, eventLogger, getAgentState);
+                    yield* handleRawModelStreamEvent(event, agentName!, turnMsgs, usageTracker, eventLogger, getAgentState);
                     break;
 
                 case 'run_item_stream_event':
@@ -1344,10 +1343,10 @@ export async function* streamResponse(
                         event.item.rawItem.type === 'function_call_result' &&
                         event.item.rawItem.status === 'completed') {
                         
-                        const state = getAgentState(currentAgentName);
+                        const state = getAgentState(agentName!);
                         if (state.pendingToolCalls > 0) {
                             state.pendingToolCalls--;
-                            eventLogger.log(`✅ Tool call completed: ${currentAgentName} (${state.pendingToolCalls} remaining)`);
+                            eventLogger.log(`✅ Tool call completed: ${agentName!} (${state.pendingToolCalls} remaining)`);
                         }
                     }
 
@@ -1355,9 +1354,9 @@ export async function* streamResponse(
                     if (event.name === 'handoff_occurred' && event.item.type === 'handoff_output_item') {
                         if (USE_NATIVE_HANDOFFS) {
                             // Use native SDK handoff handling
-                            for await (const result of handleNativeHandoffEvent(
+                            const nativeHandoffResults = handleNativeHandoffEvent(
                                 event,
-                                currentAgentName,
+                                agentName!,
                                 agentConfig,
                                 agents,
                                 pipelineConfig,
@@ -1369,21 +1368,22 @@ export async function* streamResponse(
                                 originalHandoffs,
                                 eventLogger,
                                 loopLogger
-                            )) {
-                                if ('newAgentName' in result) {
-                                    agentName = result.newAgentName;
-                                    if (result.shouldContinue) {
+                            );
+                            for await (const handoffResult of nativeHandoffResults) {
+                                if ('newAgentName' in handoffResult) {
+                                    agentName = handoffResult.newAgentName;
+                                    if (handoffResult.shouldContinue) {
                                         continue turnLoop;
                                     }
                                 } else {
-                                    yield result;
+                                    yield handoffResult;
                                 }
                             }
                         } else {
                             // Use legacy handoff handling
-                            for await (const result of handleHandoffEvent(
+                            const legacyHandoffResults = handleHandoffEvent(
                                 event,
-                                currentAgentName,
+                                agentName!,
                                 agentConfig,
                                 agents,
                                 stack,
@@ -1393,11 +1393,12 @@ export async function* streamResponse(
                                 originalHandoffs,
                                 eventLogger,
                                 loopLogger
-                            )) {
-                                if ('newAgentName' in result) {
-                                    agentName = result.newAgentName;
+                            );
+                            for await (const legacyResult of legacyHandoffResults) {
+                                if ('newAgentName' in legacyResult) {
+                                    agentName = legacyResult.newAgentName;
                                 } else {
-                                    yield result;
+                                    yield legacyResult;
                                 }
                             }
                         }
@@ -1415,9 +1416,9 @@ export async function* streamResponse(
                     if (event.item.type === 'message_output_item' &&
                         event.item.rawItem.type === 'message' &&
                         event.item.rawItem.status === 'completed') {
-                        for await (const result of handleMessageOutput(
+                        const messageResults = handleMessageOutput(
                             event,
-                            currentAgentName,
+                            agentName!,
                             agentConfig,
                             agents,
                             pipelineConfig,
@@ -1428,14 +1429,15 @@ export async function* streamResponse(
                             eventLogger,
                             loopLogger,
                             getAgentState
-                        )) {
-                            if ('newAgentName' in result && 'shouldContinue' in result) {
-                                agentName = result.newAgentName;
-                                if (result.shouldContinue) {
+                        );
+                        for await (const messageResult of messageResults) {
+                            if ('newAgentName' in messageResult && 'shouldContinue' in messageResult) {
+                                agentName = messageResult.newAgentName;
+                                if (messageResult.shouldContinue) {
                                     continue turnLoop;
                                 }
                             } else {
-                                yield result;
+                                yield messageResult;
                             }
                         }
                     }
