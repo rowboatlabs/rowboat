@@ -4,7 +4,7 @@ import { container } from "@/di/container";
 import { ICreateRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/create-recurring-job-rule.controller";
 import { IListRecurringJobRulesController } from "@/src/interface-adapters/controllers/recurring-job-rules/list-recurring-job-rules.controller";
 import { IFetchRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/fetch-recurring-job-rule.controller";
-import { IUpdateRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/update-recurring-job-rule.controller";
+import { IToggleRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/toggle-recurring-job-rule.controller";
 import { authCheck } from "./auth_actions";
 import { z } from "zod";
 import { Message } from "@/app/lib/types/types";
@@ -12,7 +12,7 @@ import { Message } from "@/app/lib/types/types";
 const createRecurringJobRuleController = container.resolve<ICreateRecurringJobRuleController>('createRecurringJobRuleController');
 const listRecurringJobRulesController = container.resolve<IListRecurringJobRulesController>('listRecurringJobRulesController');
 const fetchRecurringJobRuleController = container.resolve<IFetchRecurringJobRuleController>('fetchRecurringJobRuleController');
-const updateRecurringJobRuleController = container.resolve<IUpdateRecurringJobRuleController>('updateRecurringJobRuleController');
+const toggleRecurringJobRuleController = container.resolve<IToggleRecurringJobRuleController>('toggleRecurringJobRuleController');
 
 export async function createRecurringJobRule(request: {
     projectId: string,
@@ -60,19 +60,16 @@ export async function fetchRecurringJobRule(request: {
     });
 }
 
-export async function updateRecurringJobRule(request: {
+export async function toggleRecurringJobRule(request: {
     ruleId: string,
-    data: {
-        disabled?: boolean,
-        lastError?: string,
-    },
+    disabled: boolean,
 }) {
     const user = await authCheck();
 
-    return await updateRecurringJobRuleController.execute({
+    return await toggleRecurringJobRuleController.execute({
         caller: 'user',
         userId: user._id,
         ruleId: request.ruleId,
-        data: request.data,
+        disabled: request.disabled,
     });
 }

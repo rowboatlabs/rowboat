@@ -11,6 +11,7 @@ export const CreateRecurringRuleSchema = RecurringJobRule
         projectId: true,
         input: true,
         cron: true,
+        nextRunAt: true,
     });
 
 export const ListedRecurringRuleItem = RecurringJobRule.omit({
@@ -18,8 +19,8 @@ export const ListedRecurringRuleItem = RecurringJobRule.omit({
 });
 
 export const UpdateRecurringRuleSchema = RecurringJobRule.pick({
-    disabled: true,
     lastError: true,
+    nextRunAt: true,
 });
 
 /**
@@ -68,14 +69,13 @@ export interface IRecurringJobRulesRepository {
     update(id: string, data: z.infer<typeof UpdateRecurringRuleSchema>): Promise<z.infer<typeof RecurringJobRule>>;
 
     /**
-     * Releases a recurring job rule after it has been executed and sets the next run time.
+     * Releases a recurring job rule after it has been executed
      * 
      * @param id - The unique identifier of the recurring job rule to release
-     * @param nextRunAt - The next time this rule should run
      * @returns Promise resolving to the updated recurring job rule
      * @throws {NotFoundError} if the recurring job rule doesn't exist
      */
-    release(id: string, nextRunAt: string): Promise<z.infer<typeof RecurringJobRule>>;
+    release(id: string): Promise<z.infer<typeof RecurringJobRule>>;
 
     /**
      * Lists recurring job rules for a specific project with pagination.
@@ -86,4 +86,15 @@ export interface IRecurringJobRulesRepository {
      * @returns Promise resolving to a paginated list of recurring job rules
      */
     list(projectId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedRecurringRuleItem>>>>;
+
+    /**
+     * Toggles a recurring job rule's disabled state
+     *
+     * This method should update the disabled field of the recurring job rule.
+     * 
+     * @param id - The unique identifier of the recurring job rule to toggle
+     * @param disabled - The new disabled state
+     * @returns Promise resolving to the updated recurring job rule
+     */
+    toggle(id: string, disabled: boolean): Promise<z.infer<typeof RecurringJobRule>>;
 }

@@ -4,15 +4,16 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/common/panel-common";
-import { fetchRecurringJobRule, updateRecurringJobRule } from "@/app/actions/recurring-job-rules.actions";
+import { fetchRecurringJobRule, toggleRecurringJobRule } from "@/app/actions/recurring-job-rules.actions";
 import { ArrowLeftIcon, PlayIcon, PauseIcon, ClockIcon, AlertCircleIcon } from "lucide-react";
 import Link from "next/link";
 import { RecurringJobRule } from "@/src/entities/models/recurring-job-rule";
 import { Spinner } from "@heroui/react";
+import { z } from "zod";
 
 export function RecurringJobRuleView({ projectId, ruleId }: { projectId: string; ruleId: string }) {
     const router = useRouter();
-    const [rule, setRule] = useState<RecurringJobRule | null>(null);
+    const [rule, setRule] = useState<z.infer<typeof RecurringJobRule> | null>(null);
     const [loading, setLoading] = useState(true);
     const [updating, setUpdating] = useState(false);
 
@@ -36,9 +37,9 @@ export function RecurringJobRuleView({ projectId, ruleId }: { projectId: string;
         
         setUpdating(true);
         try {
-            const updatedRule = await updateRecurringJobRule({
+            const updatedRule = await toggleRecurringJobRule({
                 ruleId: rule.id,
-                data: { disabled: !rule.disabled }
+                disabled: !rule.disabled,
             });
             setRule(updatedRule);
         } catch (error) {

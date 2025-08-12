@@ -4,21 +4,20 @@ import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
 import { IRecurringJobRulesRepository } from '../../repositories/recurring-job-rules.repository.interface';
 import { RecurringJobRule } from '@/src/entities/models/recurring-job-rule';
-import { UpdateRecurringRuleSchema } from '../../repositories/recurring-job-rules.repository.interface';
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
     ruleId: z.string(),
-    data: UpdateRecurringRuleSchema,
+    disabled: z.boolean(),
 });
 
-export interface IUpdateRecurringJobRuleUseCase {
+export interface IToggleRecurringJobRuleUseCase {
     execute(request: z.infer<typeof inputSchema>): Promise<z.infer<typeof RecurringJobRule>>;
 }
 
-export class UpdateRecurringJobRuleUseCase implements IUpdateRecurringJobRuleUseCase {
+export class ToggleRecurringJobRuleUseCase implements IToggleRecurringJobRuleUseCase {
     private readonly recurringJobRulesRepository: IRecurringJobRulesRepository;   
     private readonly usageQuotaPolicy: IUsageQuotaPolicy;
     private readonly projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy;
@@ -59,6 +58,6 @@ export class UpdateRecurringJobRuleUseCase implements IUpdateRecurringJobRuleUse
         await this.usageQuotaPolicy.assertAndConsume(projectId);
 
         // update the rule
-        return await this.recurringJobRulesRepository.update(request.ruleId, request.data);
+        return await this.recurringJobRulesRepository.toggle(request.ruleId, request.disabled);
     }
 }

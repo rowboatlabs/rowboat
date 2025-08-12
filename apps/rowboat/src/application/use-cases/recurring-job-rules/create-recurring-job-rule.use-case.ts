@@ -5,6 +5,7 @@ import { IProjectActionAuthorizationPolicy } from '../../policies/project-action
 import { IRecurringJobRulesRepository } from '../../repositories/recurring-job-rules.repository.interface';
 import { RecurringJobRule } from '@/src/entities/models/recurring-job-rule';
 import { Message } from '@/app/lib/types/types';
+import { CronExpressionParser } from 'cron-parser';
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
@@ -57,11 +58,18 @@ export class CreateRecurringJobRuleUseCase implements ICreateRecurringJobRuleUse
         // assert and consume quota
         await this.usageQuotaPolicy.assertAndConsume(request.projectId);
 
+        // parse cron to get next run time
+        const interval = CronExpressionParser.parse(request.cron, {
+            tz: "UTC",
+        });
+        const nextRunAt = interval.next().toDate().toISOString();
+
         // create the recurring job rule
         const rule = await this.recurringJobRulesRepository.create({
             projectId: request.projectId,
             input: request.input,
             cron: request.cron,
+            nextRunAt,
         });
 
         return rule;

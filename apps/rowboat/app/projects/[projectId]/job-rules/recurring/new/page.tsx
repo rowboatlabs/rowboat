@@ -1,6 +1,6 @@
 import { Metadata } from "next";
 import { requireActiveBillingSubscription } from '@/app/lib/billing';
-import { CreateRecurringJobRuleForm } from "../components/create-recurring-job-rule-form";
+import { CreateRecurringJobRuleForm } from "../../components/create-recurring-job-rule-form";
 
 export const metadata: Metadata = {
     title: "Create Recurring Job Rule",

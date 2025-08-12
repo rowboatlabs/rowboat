@@ -6,33 +6,6 @@ import { RecurringJobRule } from "@/src/entities/models/recurring-job-rule";
 import { NotFoundError } from "@/src/entities/errors/common";
 import { PaginatedList } from "@/src/entities/common/paginated-list";
 
-// Simple cron parser for minute-level resolution
-function parseCronExpression(cron: string): Date {
-    const parts = cron.split(' ');
-    if (parts.length !== 5) {
-        throw new Error('Invalid cron expression. Expected 5 parts: minute hour day month dayOfWeek');
-    }
-    
-    const [minute, hour, day, month, dayOfWeek] = parts;
-    
-    // For now, we'll use a simple approach that calculates the next run time
-    // In a production environment, you'd want to use a proper cron library
-    const now = new Date();
-    const nextRun = new Date(now);
-    
-    // Set to next minute if current minute doesn't match
-    if (minute !== '*' && minute !== now.getMinutes().toString()) {
-        nextRun.setMinutes(now.getMinutes() + 1);
-        nextRun.setSeconds(0);
-        nextRun.setMilliseconds(0);
-    } else {
-        nextRun.setSeconds(0);
-        nextRun.setMilliseconds(0);
-    }
-    
-    return nextRun;
-}
-
 /**
  * MongoDB document schema for RecurringJobRule.
  * Excludes the 'id' field as it's represented by MongoDB's '_id'.
@@ -84,13 +57,16 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
         const now = new Date().toISOString();
         const _id = new ObjectId();
 
-        // Calculate the first nextRunAt based on cron expression
-        const firstNextRunAt = parseCronExpression(data.cron);
-        const nextRunAtSeconds = Math.floor(firstNextRunAt.getTime() / 1000);
+        // convert date string to seconds since epoch
+        // and round down to the last minute
+        const nextRunAtDate = new Date(data.nextRunAt);
+        const nextRunAtSeconds = Math.floor(nextRunAtDate.getTime() / 1000);
+        const nextRunAtMinutes = Math.floor(nextRunAtSeconds / 60) * 60;
+        const nextRunAt = nextRunAtMinutes;
 
         const doc: z.infer<typeof CreateDocSchema> = {
             ...data,
-            nextRunAt: nextRunAtSeconds,
+            nextRunAt,
             disabled: false,
             workerId: null,
             lastWorkerId: null,
@@ -104,8 +80,9 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
 
         return {
             ...doc,
-            nextRunAt: new Date(nextRunAtSeconds * 1000).toISOString(),
             id: _id.toString(),
+            nextRunAt: new Date(nextRunAt * 1000).toISOString(),
+            lastProcessedAt: undefined,
         };
     }
 
@@ -137,6 +114,14 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
                     $lte: Math.floor(now.getTime() / 1000),
                     $gte: Math.floor(notBefore.getTime() / 1000),
                 },
+                $or: [
+                    {
+                        lastProcessedAt: {
+                            $lt: Math.floor(now.getTime() / 1000),
+                        },
+                    },
+                    { lastProcessedAt: { $exists: false } },
+                ],
                 disabled: false,
                 workerId: null,
             },
@@ -145,6 +130,7 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
                     workerId,
                     lastWorkerId: workerId,
                     lastProcessedAt: Math.floor(now.getTime() / 1000),
+                    lastError: undefined,
                     updatedAt: now.toISOString(),
                 },
             },
@@ -166,9 +152,23 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
      */
     async update(id: string, data: z.infer<typeof UpdateRecurringRuleSchema>): Promise<z.infer<typeof RecurringJobRule>> {
         const now = new Date();
+
+        // convert date string to seconds since epoch
+        // and round down to the last minute
+        const nextRunAtDate = new Date(data.nextRunAt);
+        const nextRunAtSeconds = Math.floor(nextRunAtDate.getTime() / 1000);
+        const nextRunAtMinutes = Math.floor(nextRunAtSeconds / 60) * 60;
+        const nextRunAt = nextRunAtMinutes;
+
         const result = await this.collection.findOneAndUpdate(
             { _id: new ObjectId(id) },
-            { $set: { ...data, updatedAt: now.toISOString() } },
+            {
+                $set: {
+                    ...data,
+                    updatedAt: now.toISOString(),
+                    nextRunAt,
+                }
+            },
         );
 
         if (!result) {
@@ -179,11 +179,10 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
     }
 
     /**
-     * Releases a recurring job rule after it has been executed and sets the next run time.
+     * Releases a recurring job rule after it has been executed
      */
-    async release(id: string, nextRunAt: string): Promise<z.infer<typeof RecurringJobRule>> {
+    async release(id: string): Promise<z.infer<typeof RecurringJobRule>> {
         const now = new Date();
-        const nextRunAtSeconds = Math.floor(new Date(nextRunAt).getTime() / 1000);
 
         const result = await this.collection.findOneAndUpdate(
             {
@@ -192,7 +191,6 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
             {
                 $set: {
                     workerId: null, // Release the lock
-                    nextRunAt: nextRunAtSeconds,
                     updatedAt: now.toISOString(),
                 },
             },
@@ -231,5 +229,21 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
             items,
             nextCursor: hasNextPage ? results[limit - 1]._id.toString() : null,
         };
+    }
+
+    /**
+     * Toggles a recurring job rule's disabled state
+     */
+    async toggle(id: string, disabled: boolean): Promise<z.infer<typeof RecurringJobRule>> {
+        const result = await this.collection.findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            { $set: { disabled, updatedAt: new Date().toISOString() } },
+        );
+
+        if (!result) {
+            throw new NotFoundError(`Recurring job rule ${id} not found`);
+        }
+
+        return this.convertDocToModel(result);
     }
 }

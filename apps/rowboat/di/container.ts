@@ -54,11 +54,11 @@ import { MongoDBRecurringJobRulesRepository } from "@/src/infrastructure/reposit
 import { CreateRecurringJobRuleUseCase } from "@/src/application/use-cases/recurring-job-rules/create-recurring-job-rule.use-case";
 import { FetchRecurringJobRuleUseCase } from "@/src/application/use-cases/recurring-job-rules/fetch-recurring-job-rule.use-case";
 import { ListRecurringJobRulesUseCase } from "@/src/application/use-cases/recurring-job-rules/list-recurring-job-rules.use-case";
-import { UpdateRecurringJobRuleUseCase } from "@/src/application/use-cases/recurring-job-rules/update-recurring-job-rule.use-case";
+import { ToggleRecurringJobRuleUseCase } from "@/src/application/use-cases/recurring-job-rules/toggle-recurring-job-rule.use-case";
 import { CreateRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/create-recurring-job-rule.controller";
 import { FetchRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/fetch-recurring-job-rule.controller";
 import { ListRecurringJobRulesController } from "@/src/interface-adapters/controllers/recurring-job-rules/list-recurring-job-rules.controller";
-import { UpdateRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/update-recurring-job-rule.controller";
+import { ToggleRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/toggle-recurring-job-rule.controller";
 import { RecurringJobRulesWorker } from "@/src/application/workers/recurring-job-rules.worker";
 
 export const container = createContainer({
@@ -119,11 +119,11 @@ container.register({
     createRecurringJobRuleUseCase: asClass(CreateRecurringJobRuleUseCase).singleton(),
     fetchRecurringJobRuleUseCase: asClass(FetchRecurringJobRuleUseCase).singleton(),
     listRecurringJobRulesUseCase: asClass(ListRecurringJobRulesUseCase).singleton(),
-    updateRecurringJobRuleUseCase: asClass(UpdateRecurringJobRuleUseCase).singleton(),
+    toggleRecurringJobRuleUseCase: asClass(ToggleRecurringJobRuleUseCase).singleton(),
     createRecurringJobRuleController: asClass(CreateRecurringJobRuleController).singleton(),
     fetchRecurringJobRuleController: asClass(FetchRecurringJobRuleController).singleton(),
     listRecurringJobRulesController: asClass(ListRecurringJobRulesController).singleton(),
-    updateRecurringJobRuleController: asClass(UpdateRecurringJobRuleController).singleton(),
+    toggleRecurringJobRuleController: asClass(ToggleRecurringJobRuleController).singleton(),
 
     // composio
     // ---
