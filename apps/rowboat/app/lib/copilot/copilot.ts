@@ -322,9 +322,9 @@ export async function* streamMultiAgentResponse(
                 toolName: event.toolName,
                 toolCallId: event.toolCallId,
                 args: event.args,
-                query: event.args.query || event.args.query || undefined,
+                query: event.args.query || undefined,
             };
-        } else if (event.type === "tool-result") {
+        } else if (event.type === "tool-result") { 
             yield {
                 type: 'tool-result',
                 toolCallId: event.toolCallId,
