@@ -3,18 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { Spinner } from "@heroui/react";
 import { Panel } from "@/components/common/panel-common";
-import { fetchScheduledJobRule, enableScheduledJobRule, disableScheduledJobRule } from "@/app/actions/scheduled-job-rules.actions";
+import { fetchScheduledJobRule } from "@/app/actions/scheduled-job-rules.actions";
 import { ScheduledJobRule } from "@/src/entities/models/scheduled-job-rule";
 import { z } from "zod";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { ArrowLeftIcon, PlayIcon, PauseIcon } from "lucide-react";
+import { ArrowLeftIcon } from "lucide-react";
 import { MessageDisplay } from "@/app/lib/components/message-display";
 
 export function ScheduledJobRuleView({ projectId, ruleId }: { projectId: string; ruleId: string; }) {
     const [rule, setRule] = useState<z.infer<typeof ScheduledJobRule> | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
-    const [actionLoading, setActionLoading] = useState<boolean>(false);
 
     useEffect(() => {
         let ignore = false;
@@ -33,41 +32,23 @@ export function ScheduledJobRuleView({ projectId, ruleId }: { projectId: string;
         return `Scheduled Job Rule ${rule.id}`;
     }, [rule]);
 
-    const getStatusColor = (disabled: boolean, processedAt: string | null) => {
-        if (disabled) return 'text-gray-600 dark:text-gray-400';
+    const getStatusColor = (status: string, processedAt: string | null) => {
         if (processedAt) return 'text-green-600 dark:text-green-400';
-        return 'text-blue-600 dark:text-blue-400';
+        if (status === 'processing') return 'text-yellow-600 dark:text-yellow-400';
+        if (status === 'triggered') return 'text-blue-600 dark:text-blue-400';
+        return 'text-gray-600 dark:text-gray-400'; // pending
     };
 
-    const getStatusText = (disabled: boolean, processedAt: string | null) => {
-        if (disabled) return 'Disabled';
+    const getStatusText = (status: string, processedAt: string | null) => {
         if (processedAt) return 'Completed';
-        return 'Active';
+        if (status === 'processing') return 'Processing';
+        if (status === 'triggered') return 'Triggered';
+        return 'Pending';
     };
 
     const formatDateTime = (dateString: string) => {
         const date = new Date(dateString);
         return date.toLocaleString();
-    };
-
-    const handleToggleStatus = async () => {
-        if (!rule) return;
-        
-        setActionLoading(true);
-        try {
-            if (rule.disabled) {
-                const updatedRule = await enableScheduledJobRule({ ruleId: rule.id });
-                setRule(updatedRule);
-            } else {
-                const updatedRule = await disableScheduledJobRule({ ruleId: rule.id });
-                setRule(updatedRule);
-            }
-        } catch (error) {
-            console.error("Failed to toggle rule status:", error);
-            alert("Failed to update rule status");
-        } finally {
-            setActionLoading(false);
-        }
     };
 
     return (
@@ -83,33 +64,6 @@ export function ScheduledJobRuleView({ projectId, ruleId }: { projectId: string;
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
                         {title}
                     </div>
-                </div>
-            }
-            rightActions={
-                <div className="flex items-center gap-3">
-                    {rule && (
-                        <Button
-                            onClick={handleToggleStatus}
-                            disabled={actionLoading}
-                            variant={rule.disabled ? "primary" : "secondary"}
-                            size="sm"
-                            className="flex items-center gap-2"
-                        >
-                            {actionLoading ? (
-                                <Spinner size="sm" />
-                            ) : rule.disabled ? (
-                                <>
-                                    <PlayIcon className="w-4 h-4" />
-                                    Enable
-                                </>
-                            ) : (
-                                <>
-                                    <PauseIcon className="w-4 h-4" />
-                                    Disable
-                                </>
-                            )}
-                        </Button>
-                    )}
                 </div>
             }
         >
@@ -132,8 +86,8 @@ export function ScheduledJobRuleView({ projectId, ruleId }: { projectId: string;
                                     </div>
                                     <div>
                                         <span className="font-semibold text-gray-700 dark:text-gray-300">Status:</span>
-                                        <span className={`ml-2 font-mono ${getStatusColor(rule.disabled, rule.processedAt)}`}>
-                                            {getStatusText(rule.disabled, rule.processedAt)}
+                                        <span className={`ml-2 font-mono ${getStatusColor(rule.status, rule.processedAt || null)}`}>
+                                            {getStatusText(rule.status, rule.processedAt || null)}
                                         </span>
                                     </div>
                                     <div>
@@ -156,15 +110,15 @@ export function ScheduledJobRuleView({ projectId, ruleId }: { projectId: string;
                                             </span>
                                         </div>
                                     )}
-                                    {rule.jobId && (
+                                    {rule.output?.jobId && (
                                         <div>
                                             <span className="font-semibold text-gray-700 dark:text-gray-300">Job ID:</span>
                                             <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">
                                                 <Link 
-                                                    href={`/projects/${projectId}/jobs/${rule.jobId}`}
+                                                    href={`/projects/${projectId}/jobs/${rule.output.jobId}`}
                                                     className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
                                                 >
-                                                    {rule.jobId}
+                                                    {rule.output.jobId}
                                                 </Link>
                                             </span>
                                         </div>

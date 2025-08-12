@@ -10,9 +10,12 @@ export const ScheduledJobRule = z.object({
     nextRunAt: z.string().datetime(),
     workerId: z.string().nullable(),
     lastWorkerId: z.string().nullable(),
-    processedAt: z.string().datetime().nullable(),
-    jobId: z.string().optional(),
+    status: z.enum(["pending", "processing", "triggered"]),
+    output: z.object({
+        error: z.string().optional(),
+        jobId: z.string().optional(),
+    }).optional(),
+    processedAt: z.string().datetime().optional(),
     createdAt: z.string(),
-    updatedAt: z.string(),
-    disabled: z.boolean(),
+    updatedAt: z.string().optional(),
 })

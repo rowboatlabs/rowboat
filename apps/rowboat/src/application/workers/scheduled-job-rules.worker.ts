@@ -59,19 +59,28 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
                 },
             });
 
-            logger.log(`Created job ${job.id} from rule ${rule.id}`);
-
-            // mark rule processed and release lock
-            await this.scheduledJobRulesRepository.processAndRelease(rule.id, job.id);
-
             // notify job workers
             await this.pubSubService.publish("new_jobs", job.id);
-            logger.log(`Published job ${job.id} to new_jobs`);
+ 
+            logger.log(`Created job ${job.id} from rule ${rule.id}`);
+
+            // update data
+            await this.scheduledJobRulesRepository.update(rule.id, {
+                output: {
+                    jobId: job.id,
+                },
+                status: "triggered",
+            });
+
+            // release
+            await this.scheduledJobRulesRepository.release(rule.id);
+
+           logger.log(`Published job ${job.id} to new_jobs`);
         } catch (error) {
             logger.log(`Failed to process rule: ${error instanceof Error ? error.message : "Unknown error"}`);
             // Always release the rule to avoid deadlocks but do not attach a jobId
             try {
-                await this.scheduledJobRulesRepository.processAndRelease(rule.id, "");
+                await this.scheduledJobRulesRepository.release(rule.id);
             } catch (releaseError) {
                 logger.log(`Failed to release rule: ${releaseError instanceof Error ? releaseError.message : "Unknown error"}`);
             }

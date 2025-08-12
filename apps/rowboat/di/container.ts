@@ -45,13 +45,9 @@ import { MongoDBScheduledJobRulesRepository } from "@/src/infrastructure/reposit
 import { CreateScheduledJobRuleUseCase } from "@/src/application/use-cases/scheduled-job-rules/create-scheduled-job-rule.use-case";
 import { FetchScheduledJobRuleUseCase } from "@/src/application/use-cases/scheduled-job-rules/fetch-scheduled-job-rule.use-case";
 import { ListScheduledJobRulesUseCase } from "@/src/application/use-cases/scheduled-job-rules/list-scheduled-job-rules.use-case";
-import { EnableScheduledJobRuleUseCase } from "@/src/application/use-cases/scheduled-job-rules/enable-scheduled-job-rule.use-case";
-import { DisableScheduledJobRuleUseCase } from "@/src/application/use-cases/scheduled-job-rules/disable-scheduled-job-rule.use-case";
 import { CreateScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/create-scheduled-job-rule.controller";
 import { FetchScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/fetch-scheduled-job-rule.controller";
 import { ListScheduledJobRulesController } from "@/src/interface-adapters/controllers/scheduled-job-rules/list-scheduled-job-rules.controller";
-import { EnableScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/enable-scheduled-job-rule.controller";
-import { DisableScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/disable-scheduled-job-rule.controller";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -100,13 +96,9 @@ container.register({
     createScheduledJobRuleUseCase: asClass(CreateScheduledJobRuleUseCase).singleton(),
     fetchScheduledJobRuleUseCase: asClass(FetchScheduledJobRuleUseCase).singleton(),
     listScheduledJobRulesUseCase: asClass(ListScheduledJobRulesUseCase).singleton(),
-    enableScheduledJobRuleUseCase: asClass(EnableScheduledJobRuleUseCase).singleton(),
-    disableScheduledJobRuleUseCase: asClass(DisableScheduledJobRuleUseCase).singleton(),
     createScheduledJobRuleController: asClass(CreateScheduledJobRuleController).singleton(),
     fetchScheduledJobRuleController: asClass(FetchScheduledJobRuleController).singleton(),
     listScheduledJobRulesController: asClass(ListScheduledJobRulesController).singleton(),
-    enableScheduledJobRuleController: asClass(EnableScheduledJobRuleController).singleton(),
-    disableScheduledJobRuleController: asClass(DisableScheduledJobRuleController).singleton(),
 
     // composio
     // ---

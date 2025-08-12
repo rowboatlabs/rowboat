@@ -19,6 +19,11 @@ export const ListedRuleItem = ScheduledJobRule.omit({
     input: true,
 });
 
+export const UpdateJobSchema = ScheduledJobRule.pick({
+    status: true,
+    output: true,
+});
+
 /**
  * Repository interface for managing scheduled job rules in the system.
  * 
@@ -54,16 +59,24 @@ export interface IScheduledJobRulesRepository {
      * @returns Promise resolving to the next available scheduled job rule or null if no rules are available
      */
     poll(workerId: string): Promise<z.infer<typeof ScheduledJobRule> | null>;
-
     /**
-     * Processes and releases a scheduled job rule after it has been executed.
+     * Updates a scheduled job rule with new status and output data.
      * 
-     * @param id - The unique identifier of the scheduled job rule to process
-     * @param jobId - The unique identifier of the job that was created from this rule
+     * @param id - The unique identifier of the scheduled job rule to update
+     * @param data - The update data containing status and output fields
      * @returns Promise resolving to the updated scheduled job rule
      * @throws {NotFoundError} if the scheduled job rule doesn't exist
      */
-    processAndRelease(id: string, jobId: string): Promise<z.infer<typeof ScheduledJobRule>>;
+    update(id: string, data: z.infer<typeof UpdateJobSchema>): Promise<z.infer<typeof ScheduledJobRule>>;
+
+    /**
+     * Releases a scheduled job rule after it has been executed.
+     * 
+     * @param id - The unique identifier of the scheduled job rule to release
+     * @returns Promise resolving to the updated scheduled job rule
+     * @throws {NotFoundError} if the scheduled job rule doesn't exist
+     */
+    release(id: string): Promise<z.infer<typeof ScheduledJobRule>>;
 
     /**
      * Lists scheduled job rules for a specific project with pagination.
@@ -74,20 +87,4 @@ export interface IScheduledJobRulesRepository {
      * @returns Promise resolving to a paginated list of scheduled job rules
      */
     list(projectId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof ListedRuleItem>>>>;
-
-    /**
-     * Disables a scheduled job rule by its unique identifier.
-     * 
-     * @param id - The unique identifier of the scheduled job rule to disable
-     * @returns Promise resolving to the updated scheduled job rule
-     */
-    disable(id: string): Promise<z.infer<typeof ScheduledJobRule>>;
-
-    /**
-     * Enables a scheduled job rule by its unique identifier.
-     * 
-     * @param id - The unique identifier of the scheduled job rule to enable
-     * @returns Promise resolving to the updated scheduled job rule
-     */
-    enable(id: string): Promise<z.infer<typeof ScheduledJobRule>>;
 }

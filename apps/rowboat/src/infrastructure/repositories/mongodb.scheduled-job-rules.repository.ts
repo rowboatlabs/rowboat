@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ObjectId } from "mongodb";
 import { db } from "@/app/lib/mongodb";
-import { CreateRuleSchema, IScheduledJobRulesRepository, ListedRuleItem } from "@/src/application/repositories/scheduled-job-rules.repository.interface";
+import { CreateRuleSchema, IScheduledJobRulesRepository, ListedRuleItem, UpdateJobSchema } from "@/src/application/repositories/scheduled-job-rules.repository.interface";
 import { ScheduledJobRule } from "@/src/entities/models/scheduled-job-rule";
 import { NotFoundError } from "@/src/entities/errors/common";
 import { PaginatedList } from "@/src/entities/common/paginated-list";
@@ -19,7 +19,6 @@ const DocSchema = ScheduledJobRule
     .extend({
         _id: z.instanceof(ObjectId),
         nextRunAt: z.number(),
-        processedAt: z.number().nullable(),
     });
 
 /**
@@ -41,12 +40,11 @@ export class MongoDBScheduledJobRulesRepository implements IScheduledJobRulesRep
      * Handles the conversion of nextRunAt and processedAt from Unix timestamps to ISO strings.
      */
     private convertDocToModel(doc: z.infer<typeof DocSchema>): z.infer<typeof ScheduledJobRule> {
-        const { _id, nextRunAt, processedAt, ...rest } = doc;
+        const { _id, nextRunAt, ...rest } = doc;
         return {
             ...rest,
             id: _id.toString(),
             nextRunAt: new Date(nextRunAt * 1000).toISOString(),
-            processedAt: processedAt ? new Date(processedAt * 1000).toISOString() : null,
         };
     }
 
@@ -69,13 +67,10 @@ export class MongoDBScheduledJobRulesRepository implements IScheduledJobRulesRep
         const doc: z.infer<typeof CreateDocSchema> = {
             ...rest,
             nextRunAt: nextRunAt,
+            status: "pending",
             workerId: null,
             lastWorkerId: null,
-            processedAt: null,
-            jobId: undefined,
             createdAt: now,
-            updatedAt: now,
-            disabled: false,
         };
 
         await this.collection.insertOne({
@@ -86,7 +81,6 @@ export class MongoDBScheduledJobRulesRepository implements IScheduledJobRulesRep
         return {
             ...doc,
             nextRunAt: new Date(nextRunAt * 1000).toISOString(),
-            processedAt: null,
             id: _id.toString(),
         };
     }
@@ -119,17 +113,15 @@ export class MongoDBScheduledJobRulesRepository implements IScheduledJobRulesRep
                     $lte: Math.floor(now.getTime() / 1000),
                     $gte: Math.floor(notBefore.getTime() / 1000),
                 },
-                $or: [
-                    { processedAt: null },
-                    { processedAt: { $lt: Math.floor(now.getTime() / 1000) } },
-                ],
-                disabled: false,
+                status: "pending",
                 workerId: null,
             },
             {
                 $set: {
                     workerId,
+                    status: "processing",
                     lastWorkerId: workerId,
+                    processedAt: now.toISOString(),
                     updatedAt: now.toISOString(),
                 },
             },
@@ -147,9 +139,26 @@ export class MongoDBScheduledJobRulesRepository implements IScheduledJobRulesRep
     }
 
     /**
+     * Updates a scheduled job rule with new status and output data.
+     */
+    async update(id: string, data: z.infer<typeof UpdateJobSchema>): Promise<z.infer<typeof ScheduledJobRule>> {
+        const now = new Date();
+        const result = await this.collection.findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            { $set: { ...data, updatedAt: now.toISOString() } },
+        );
+
+        if (!result) {
+            throw new NotFoundError(`Scheduled job rule ${id} not found`);
+        }
+
+        return this.convertDocToModel(result);
+    }
+
+    /**
      * Processes and releases a scheduled job rule after it has been executed.
      */
-    async processAndRelease(id: string, jobId: string): Promise<z.infer<typeof ScheduledJobRule>> {
+    async release(id: string): Promise<z.infer<typeof ScheduledJobRule>> {
         const now = new Date();
 
         const result = await this.collection.findOneAndUpdate(
@@ -158,8 +167,6 @@ export class MongoDBScheduledJobRulesRepository implements IScheduledJobRulesRep
             },
             {
                 $set: {
-                    processedAt: Math.floor(now.getTime() / 1000),
-                    jobId,
                     workerId: null, // Release the lock
                     updatedAt: now.toISOString(),
                 },
@@ -199,51 +206,5 @@ export class MongoDBScheduledJobRulesRepository implements IScheduledJobRulesRep
             items,
             nextCursor: hasNextPage ? results[limit - 1]._id.toString() : null,
         };
-    }
-
-    /**
-     * Disables a scheduled job rule by its unique identifier.
-     */
-    async disable(id: string): Promise<z.infer<typeof ScheduledJobRule>> {
-        const result = await this.collection.findOneAndUpdate({
-            _id: new ObjectId(id),
-            disabled: false,
-        }, {
-            $set: {
-                disabled: true,
-                updatedAt: new Date().toISOString(),
-            },
-        }, {
-            returnDocument: "after",
-        });
-
-        if (!result) {
-            throw new NotFoundError(`Scheduled job rule ${id} not found`);
-        }
-
-        return this.convertDocToModel(result);
-    }
-
-    /**
-     * Enables a scheduled job rule by its unique identifier.
-     */
-    async enable(id: string): Promise<z.infer<typeof ScheduledJobRule>> {
-        const result = await this.collection.findOneAndUpdate({
-            _id: new ObjectId(id),
-            disabled: true,
-        }, {
-            $set: {
-                disabled: false,
-                updatedAt: new Date().toISOString(),
-            },
-        }, {
-            returnDocument: "after",
-        });
-
-        if (!result) {
-            throw new NotFoundError(`Scheduled job rule ${id} not found`);
-        }
-
-        return this.convertDocToModel(result);
     }
 }

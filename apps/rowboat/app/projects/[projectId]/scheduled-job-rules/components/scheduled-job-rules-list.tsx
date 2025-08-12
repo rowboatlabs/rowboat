@@ -65,16 +65,18 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
         return groups;
     }, [items]);
 
-    const getStatusColor = (disabled: boolean, processedAt: string | null) => {
-        if (disabled) return 'text-gray-600 dark:text-gray-400';
+    const getStatusColor = (status: string, processedAt: string | null) => {
         if (processedAt) return 'text-green-600 dark:text-green-400';
-        return 'text-blue-600 dark:text-blue-400';
+        if (status === 'processing') return 'text-yellow-600 dark:text-yellow-400';
+        if (status === 'triggered') return 'text-blue-600 dark:text-blue-400';
+        return 'text-gray-600 dark:text-gray-400'; // pending
     };
 
-    const getStatusText = (disabled: boolean, processedAt: string | null) => {
-        if (disabled) return 'Disabled';
+    const getStatusText = (status: string, processedAt: string | null) => {
         if (processedAt) return 'Completed';
-        return 'Active';
+        if (status === 'processing') return 'Processing';
+        if (status === 'triggered') return 'Triggered';
+        return 'Pending';
     };
 
     const formatNextRunAt = (dateString: string) => {
@@ -129,8 +131,8 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
                                                     <div className="flex items-center justify-between">
                                                         <div className="flex-1">
                                                             <div className="flex items-center gap-3 mb-2">
-                                                                <span className={`text-sm font-medium ${getStatusColor(item.disabled, item.processedAt)}`}>
-                                                                    {getStatusText(item.disabled, item.processedAt)}
+                                                                <span className={`text-sm font-medium ${getStatusColor(item.status, item.processedAt || null)}`}>
+                                                                    {getStatusText(item.status, item.processedAt || null)}
                                                                 </span>
                                                                 <span className="text-sm text-gray-500 dark:text-gray-400">
                                                                     Next run: {formatNextRunAt(item.nextRunAt)}
