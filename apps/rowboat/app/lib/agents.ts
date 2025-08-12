@@ -552,6 +552,250 @@ function maybeInjectGiveUpControlInstructions(
     }
 }
 
+// Handle raw model stream events
+async function* handleRawModelStreamEvent(
+    event: any,
+    agentName: string,
+    turnMsgs: z.infer<typeof Message>[],
+    usageTracker: UsageTracker,
+    eventLogger: PrefixLogger
+): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>> {
+    if (event.data.type === 'response_done') {
+        for (const output of event.data.response.output) {
+            // handle tool call invocation
+            // except for transfer_to_* tool calls
+            if (output.type === 'function_call' && !output.name.startsWith('transfer_to')) {
+                const m: z.infer<typeof Message> = {
+                    role: 'assistant',
+                    content: null,
+                    toolCalls: [{
+                        id: output.callId,
+                        type: 'function',
+                        function: {
+                            name: output.name,
+                            arguments: output.arguments,
+                        },
+                    }],
+                    agentName: agentName,
+                };
+
+                // add message to turn
+                turnMsgs.push(m);
+
+                // emit event
+                yield* emitEvent(eventLogger, m);
+            }
+        }
+
+        // update usage information
+        usageTracker.increment(
+            event.data.response.usage.totalTokens,
+            event.data.response.usage.inputTokens,
+            event.data.response.usage.outputTokens
+        );
+        eventLogger.log(`updated usage information: ${JSON.stringify(usageTracker.get())}`);
+    }
+}
+
+// Handle handoff events
+async function* handleHandoffEvent(
+    event: any,
+    agentName: string,
+    agentConfig: Record<string, z.infer<typeof WorkflowAgent>>,
+    agents: Record<string, Agent>,
+    stack: string[],
+    turnMsgs: z.infer<typeof Message>[],
+    transferCounter: AgentTransferCounter,
+    originalInstructions: Record<string, string>,
+    originalHandoffs: Record<string, Agent[]>,
+    eventLogger: PrefixLogger,
+    loopLogger: PrefixLogger
+): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage> | { newAgentName: string }> {
+    eventLogger.log(`🔄 HANDOFF EVENT: ${agentName} -> ${event.item.targetAgent.name}`);
+
+    // skip if its the same agent
+    if (agentName === event.item.targetAgent.name) {
+        eventLogger.log(`⚠️ SKIPPING: handoff to same agent: ${agentName}`);
+        return;
+    }
+
+    // Only apply max calls limit to internal agents (task agents)
+    const targetAgentConfig = agentConfig[event.item.targetAgent.name];
+    if (targetAgentConfig?.outputVisibility === 'internal') {
+        const maxCalls = targetAgentConfig?.maxCallsPerParentAgent || 3;
+        const currentCalls = transferCounter.get(agentName, event.item.targetAgent.name);
+        if (currentCalls >= maxCalls) {
+            eventLogger.log(`⚠️ SKIPPING: handoff to ${event.item.targetAgent.name} - max calls ${maxCalls} exceeded from ${agentName}`);
+            return;
+        }
+        eventLogger.log(`📊 TRANSFER COUNT: ${agentName} -> ${event.item.targetAgent.name} = ${currentCalls}/${maxCalls}`);
+    }
+
+    // inject give up control instructions if needed (parent handing off to child)
+    maybeInjectGiveUpControlInstructions(
+        agents,
+        agentConfig,
+        event.item.targetAgent.name, // child
+        agentName, // parent
+        eventLogger,
+        originalInstructions,
+        originalHandoffs
+    );
+
+    // emit transfer tool call invocation
+    const [transferStart, transferComplete] = createTransferEvents(agentName, event.item.targetAgent.name);
+
+    // add messages to turn
+    turnMsgs.push(transferStart);
+    turnMsgs.push(transferComplete);
+
+    // emit events
+    yield* emitEvent(eventLogger, transferStart);
+    yield* emitEvent(eventLogger, transferComplete);
+
+    // update transfer counter
+    transferCounter.increment(agentName, event.item.targetAgent.name);
+
+    const newAgentName = event.item.targetAgent.name;
+
+    loopLogger.log(`🔄 AGENT SWITCH: ${agentName} -> ${newAgentName} (reason: handoff)`);
+
+    // add current agent to stack only if new agent is internal
+    const newAgentConfig = agentConfig[newAgentName];
+    if (newAgentConfig?.outputVisibility === 'internal' || newAgentConfig?.type === 'pipeline') {
+        stack.push(agentName);
+        loopLogger.log(`📚 STACK PUSH: ${agentName} (new agent ${newAgentName} is internal/pipeline)`);
+        loopLogger.log(`📚 STACK NOW: [${stack.join(' -> ')}]`);
+    }
+
+    // Return the new agent name for the caller to handle
+    yield { newAgentName };
+}
+
+// Handle tool call result events
+async function* handleToolCallResult(
+    event: any,
+    turnMsgs: z.infer<typeof Message>[],
+    eventLogger: PrefixLogger
+): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>> {
+    const m: z.infer<typeof Message> = {
+        role: 'tool',
+        content: event.item.rawItem.output.text,
+        toolCallId: event.item.rawItem.callId,
+        toolName: event.item.rawItem.name,
+    };
+
+    // add message to turn
+    turnMsgs.push(m);
+
+    // emit event
+    yield* emitEvent(eventLogger, m);
+}
+
+// Handle message output events and internal agent switching
+async function* handleMessageOutput(
+    event: any,
+    agentName: string,
+    agentConfig: Record<string, z.infer<typeof WorkflowAgent>>,
+    agents: Record<string, Agent>,
+    pipelineConfig: Record<string, z.infer<typeof WorkflowPipeline>>,
+    stack: string[],
+    turnMsgs: z.infer<typeof Message>[],
+    transferCounter: AgentTransferCounter,
+    workflow: z.infer<typeof Workflow>,
+    eventLogger: PrefixLogger,
+    loopLogger: PrefixLogger
+): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage> | { newAgentName: string; shouldContinue: boolean }> {
+    // check response visibility
+    const agentConfigObj = agentConfig[agentName];
+    const isInternal = agentConfigObj?.outputVisibility === 'internal' || agentConfigObj?.type === 'pipeline';
+
+    for (const content of event.item.rawItem.content) {
+        if (content.type === 'output_text') {
+            // create message
+            const msg: z.infer<typeof Message> = {
+                role: 'assistant',
+                content: content.text,
+                agentName: agentName,
+                responseType: isInternal ? 'internal' : 'external',
+            };
+
+            // add message to turn
+            turnMsgs.push(msg);
+
+            // emit event
+            yield* emitEvent(eventLogger, msg);
+        }
+    }
+
+    // if this is an internal agent or pipeline agent, switch to previous agent
+    if (isInternal) {
+        const current = agentName;
+        const currentAgentConfig = agentConfig[agentName];
+
+        // Check if this is a pipeline agent that needs to continue the pipeline
+        if (currentAgentConfig?.type === 'pipeline') {
+            const result = handlePipelineAgentExecution(
+                agents[current], // Use the correct agent from agents collection
+                current,
+                pipelineConfig,
+                stack,
+                loopLogger,
+                turnMsgs,
+                transferCounter,
+                createTransferEvents
+            );
+
+            // Emit transfer events if they exist
+            if (result.transferEvents) {
+                const [transferStart, transferComplete] = result.transferEvents;
+                yield* emitEvent(eventLogger, transferStart);
+                yield* emitEvent(eventLogger, transferComplete);
+            }
+
+            if (result.shouldContinue) {
+                yield { newAgentName: result.nextAgentName!, shouldContinue: true };
+                return;
+            }
+        }
+
+        let nextAgentName = agentName;
+
+        // Check control type to determine next action for non-pipeline agents
+        if (currentAgentConfig?.controlType === 'relinquish_to_parent' || currentAgentConfig?.controlType === 'retain') {
+            nextAgentName = stack.pop()!;
+            loopLogger.log(`-- popped agent from stack: ${nextAgentName} || reason: ${current} is an internal agent, it put out a message and it has a control type of ${currentAgentConfig?.controlType}, hence the flow of control needs to return to the previous agent`);
+        } else if (currentAgentConfig?.controlType === 'relinquish_to_start') {
+            nextAgentName = workflow.startAgent;
+            loopLogger.log(`-- using start agent: ${nextAgentName} || reason: ${current} is an internal agent, it put out a message and it has a control type of ${currentAgentConfig?.controlType}, hence the flow of control needs to return to the start agent`);
+        }
+
+        // Only emit transfer events if we're actually changing agents
+        if (nextAgentName !== current) {
+            loopLogger.log(`-- stack is now: ${JSON.stringify(stack)}`);
+
+            // emit transfer tool call invocation
+            const [transferStart, transferComplete] = createTransferEvents(current, nextAgentName);
+
+            // add messages to turn
+            turnMsgs.push(transferStart);
+            turnMsgs.push(transferComplete);
+
+            // emit events
+            yield* emitEvent(eventLogger, transferStart);
+            yield* emitEvent(eventLogger, transferComplete);
+
+            // update transfer counter
+            transferCounter.increment(current, nextAgentName);
+
+            // set this as the new agent name
+            loopLogger.log(`switched to agent: ${nextAgentName} || reason: internal agent (${current}) put out a message`);
+
+            yield { newAgentName: nextAgentName, shouldContinue: true };
+        }
+    }
+}
+
 // Pipeline controller function to handle pipeline agent execution and transfers
 function handlePipelineAgentExecution(
     currentAgent: Agent,
@@ -713,105 +957,31 @@ export async function* streamResponse(
 
             switch (event.type) {
                 case 'raw_model_stream_event':
-                    if (event.data.type === 'response_done') {
-                        for (const output of event.data.response.output) {
-                            // handle tool call invocation
-                            // except for transfer_to_* tool calls
-                            if (output.type === 'function_call' && !output.name.startsWith('transfer_to')) {
-                                const m: z.infer<typeof Message> = {
-                                    role: 'assistant',
-                                    content: null,
-                                    toolCalls: [{
-                                        id: output.callId,
-                                        type: 'function',
-                                        function: {
-                                            name: output.name,
-                                            arguments: output.arguments,
-                                        },
-                                    }],
-                                    agentName: agentName,
-                                };
-
-                                // add message to turn
-                                turnMsgs.push(m);
-
-                                // emit event
-                                yield* emitEvent(eventLogger, m);
-                            }
-                        }
-
-                        // update usage information
-                        usageTracker.increment(
-                            event.data.response.usage.totalTokens,
-                            event.data.response.usage.inputTokens,
-                            event.data.response.usage.outputTokens
-                        );
-                        eventLogger.log(`updated usage information: ${JSON.stringify(usageTracker.get())}`);
-                    }
+                    yield* handleRawModelStreamEvent(event, agentName, turnMsgs, usageTracker, eventLogger);
                     break;
+
                 case 'run_item_stream_event':
                     // handle handoff event
                     if (event.name === 'handoff_occurred' && event.item.type === 'handoff_output_item') {
-                        eventLogger.log(`🔄 HANDOFF EVENT: ${agentName} -> ${event.item.targetAgent.name}`);
-
-                        // skip if its the same agent
-                        if (agentName === event.item.targetAgent.name) {
-                            eventLogger.log(`⚠️ SKIPPING: handoff to same agent: ${agentName}`);
-                            break;
-                        }
-
-                        // Only apply max calls limit to internal agents (task agents)
-                        const targetAgentConfig = agentConfig[event.item.targetAgent.name];
-                        if (targetAgentConfig?.outputVisibility === 'internal') {
-                            const maxCalls = targetAgentConfig?.maxCallsPerParentAgent || 3;
-                            const currentCalls = transferCounter.get(agentName, event.item.targetAgent.name);
-                            if (currentCalls >= maxCalls) {
-                                eventLogger.log(`⚠️ SKIPPING: handoff to ${event.item.targetAgent.name} - max calls ${maxCalls} exceeded from ${agentName}`);
-                                continue;
-                            }
-                            eventLogger.log(`📊 TRANSFER COUNT: ${agentName} -> ${event.item.targetAgent.name} = ${currentCalls}/${maxCalls}`);
-                        }
-
-                        // inject give up control instructions if needed (parent handing off to child)
-                        maybeInjectGiveUpControlInstructions(
-                            agents,
+                        for await (const result of handleHandoffEvent(
+                            event,
+                            agentName,
                             agentConfig,
-                            event.item.targetAgent.name, // child
-                            agentName, // parent
-                            eventLogger,
+                            agents,
+                            stack,
+                            turnMsgs,
+                            transferCounter,
                             originalInstructions,
-                            originalHandoffs
-                        );
-
-                        // emit transfer tool call invocation
-                        const [transferStart, transferComplete] = createTransferEvents(agentName, event.item.targetAgent.name);
-
-                        // add messages to turn
-                        turnMsgs.push(transferStart);
-                        turnMsgs.push(transferComplete);
-
-                        // emit events
-                        yield* emitEvent(eventLogger, transferStart);
-                        yield* emitEvent(eventLogger, transferComplete);
-
-                        // update transfer counter
-                        transferCounter.increment(agentName, event.item.targetAgent.name);
-
-                        const newAgentName = event.item.targetAgent.name;
-
-                        loopLogger.log(`🔄 AGENT SWITCH: ${agentName} -> ${newAgentName} (reason: handoff)`);
-
-                        // add current agent to stack only if new agent is internal
-                        const newAgentConfig = agentConfig[newAgentName];
-                        if (newAgentConfig?.outputVisibility === 'internal' || newAgentConfig?.type === 'pipeline') {
-                            stack.push(agentName);
-                            loopLogger.log(`📚 STACK PUSH: ${agentName} (new agent ${newAgentName} is internal/pipeline)`);
-                            loopLogger.log(`📚 STACK NOW: [${stack.join(' -> ')}]`);
+                            originalHandoffs,
+                            eventLogger,
+                            loopLogger
+                        )) {
+                            if ('newAgentName' in result) {
+                                agentName = result.newAgentName;
+                            } else {
+                                yield result;
+                            }
                         }
-
-                        // set this as the new agent name
-                        agentName = newAgentName;
-
                     }
 
                     // handle tool call result
@@ -819,114 +989,38 @@ export async function* streamResponse(
                         event.item.rawItem.type === 'function_call_result' &&
                         event.item.rawItem.status === 'completed' &&
                         event.item.rawItem.output.type === 'text') {
-                        const m: z.infer<typeof Message> = {
-                            role: 'tool',
-                            content: event.item.rawItem.output.text,
-                            toolCallId: event.item.rawItem.callId,
-                            toolName: event.item.rawItem.name,
-                        };
-
-                        // add message to turn
-                        turnMsgs.push(m);
-
-                        // emit event
-                        yield* emitEvent(eventLogger, m);
+                        yield* handleToolCallResult(event, turnMsgs, eventLogger);
                     }
 
                     // handle model response message output
                     if (event.item.type === 'message_output_item' &&
                         event.item.rawItem.type === 'message' &&
                         event.item.rawItem.status === 'completed') {
-                        // check response visibility
-                        const agentConfigObj = agentConfig[agentName];
-                        const isInternal = agentConfigObj?.outputVisibility === 'internal' || agentConfigObj?.type === 'pipeline';
-                        for (const content of event.item.rawItem.content) {
-                            if (content.type === 'output_text') {
-                                // create message
-                                const msg: z.infer<typeof Message> = {
-                                    role: 'assistant',
-                                    content: content.text,
-                                    agentName: agentName,
-                                    responseType: isInternal ? 'internal' : 'external',
-                                };
-
-                                // add message to turn
-                                turnMsgs.push(msg);
-
-                                // emit event
-                                yield* emitEvent(eventLogger, msg);
-                            }
-                        }
-
-                        // if this is an internal agent or pipeline agent, switch to previous agent
-                        if (isInternal) {
-                            const current = agentName;
-                            const currentAgentConfig = agentConfig[agentName];
-
-                            // Check if this is a pipeline agent that needs to continue the pipeline
-                            if (currentAgentConfig?.type === 'pipeline') {
-                                const result = handlePipelineAgentExecution(
-                                    agents[current], // Use the correct agent from agents collection
-                                    current,
-                                    pipelineConfig,
-                                    stack,
-                                    loopLogger,
-                                    turnMsgs,
-                                    transferCounter,
-                                    createTransferEvents
-                                );
-
-                                // Emit transfer events if they exist
-                                if (result.transferEvents) {
-                                    const [transferStart, transferComplete] = result.transferEvents;
-                                    yield* emitEvent(eventLogger, transferStart);
-                                    yield* emitEvent(eventLogger, transferComplete);
-                                }
-
+                        for await (const result of handleMessageOutput(
+                            event,
+                            agentName,
+                            agentConfig,
+                            agents,
+                            pipelineConfig,
+                            stack,
+                            turnMsgs,
+                            transferCounter,
+                            workflow,
+                            eventLogger,
+                            loopLogger
+                        )) {
+                            if ('newAgentName' in result && 'shouldContinue' in result) {
+                                agentName = result.newAgentName;
                                 if (result.shouldContinue) {
-                                    agentName = result.nextAgentName!;
-                                    // Run the turn from the next agent
                                     continue turnLoop;
                                 }
-                            }
-
-                            // Check control type to determine next action for non-pipeline agents
-                            if (currentAgentConfig?.controlType === 'relinquish_to_parent' || currentAgentConfig?.controlType === 'retain') {
-                                agentName = stack.pop()!;
-                                loopLogger.log(`-- popped agent from stack: ${agentName} || reason: ${current} is an internal agent, it put out a message and it has a control type of ${currentAgentConfig?.controlType}, hence the flow of control needs to return to the previous agent`);
-                            } else if (currentAgentConfig?.controlType === 'relinquish_to_start') {
-                                agentName = workflow.startAgent;
-                                loopLogger.log(`-- using start agent: ${agentName} || reason: ${current} is an internal agent, it put out a message and it has a control type of ${currentAgentConfig?.controlType}, hence the flow of control needs to return to the start agent`);
-                            }
-
-                            // Only emit transfer events if we're actually changing agents
-                            if (agentName !== current) {
-                                loopLogger.log(`-- stack is now: ${JSON.stringify(stack)}`);
-
-                                // emit transfer tool call invocation
-                                const [transferStart, transferComplete] = createTransferEvents(current, agentName);
-
-                                // add messages to turn
-                                turnMsgs.push(transferStart);
-                                turnMsgs.push(transferComplete);
-
-                                // emit events
-                                yield* emitEvent(eventLogger, transferStart);
-                                yield* emitEvent(eventLogger, transferComplete);
-
-                                // update transfer counter
-                                transferCounter.increment(current, agentName);
-
-                                // set this as the new agent name
-                                loopLogger.log(`switched to agent: ${agentName} || reason: internal agent (${current}) put out a message`);
-
-                                // run the turn from the previous agent
-                                continue turnLoop;
+                            } else {
+                                yield result;
                             }
                         }
-                        break;
                     }
                     break;
+
                 default:
                     break;
             }
