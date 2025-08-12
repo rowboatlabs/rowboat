@@ -17,7 +17,8 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
     private readonly jobsRepository: IJobsRepository;
     private readonly projectsRepository: IProjectsRepository;
     private readonly pubSubService: IPubSubService;
-    private readonly pollIntervalMs: number = 60_000; // 1 minute
+    // Run polls aligned to minute marks at this offset (e.g., 2000 ms => :02 each minute)
+    private readonly minuteAlignmentOffsetMs: number = 2_000;
     private workerId: string;
     private logger: PrefixLogger;
     private isRunning: boolean = false;
@@ -87,12 +88,22 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
         }
     }
 
-    private async pollRules(): Promise<void> {
+    // Calculates delay so the next run happens at next minute + minuteAlignmentOffsetMs
+    private calculateDelayToNextAlignedMinute(): number {
+        const now = new Date();
+        const millisecondsUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+        const delayMs = millisecondsUntilNextMinute + this.minuteAlignmentOffsetMs;
+        return delayMs > 0 ? delayMs : this.minuteAlignmentOffsetMs;
+    }
+
+    private async pollAndProcess(): Promise<void> {
+        this.logger.log("Polling...");
         let rule: z.infer<typeof ScheduledJobRule> | null = null;
         try {
             do {
                 rule = await this.scheduledJobRulesRepository.poll(this.workerId);
                 if (!rule) {
+                    this.logger.log("No rules to process");
                     return;
                 }
                 await this.processRule(rule);
@@ -103,11 +114,13 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
     }
 
     private scheduleNextPoll(): void {
+        const delayMs = this.calculateDelayToNextAlignedMinute();
+        this.logger.log(`Scheduling next poll in ${delayMs} ms`);
         this.pollTimeoutId = setTimeout(async () => {
             if (!this.isRunning) return;
-            await this.pollRules();
+            await this.pollAndProcess();
             this.scheduleNextPoll();
-        }, this.pollIntervalMs);
+        }, delayMs);
     }
 
     async run(): Promise<void> {
@@ -117,6 +130,7 @@ export class ScheduledJobRulesWorker implements IScheduledJobRulesWorker {
         }
         this.isRunning = true;
         this.logger.log(`Starting worker ${this.workerId}`);
+        // No immediate polling; align to 2s past the next minute
         this.scheduleNextPoll();
     }
 
