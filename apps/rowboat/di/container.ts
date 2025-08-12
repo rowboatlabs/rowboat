@@ -39,6 +39,19 @@ import { FetchJobController } from "@/src/interface-adapters/controllers/jobs/fe
 import { FetchConversationUseCase } from "@/src/application/use-cases/conversations/fetch-conversation.use-case";
 import { FetchConversationController } from "@/src/interface-adapters/controllers/conversations/fetch-conversation.controller";
 
+// Scheduled Job Rules
+import { MongoDBScheduledJobRulesRepository } from "@/src/infrastructure/repositories/mongodb.scheduled-job-rules.repository";
+import { CreateScheduledJobRuleUseCase } from "@/src/application/use-cases/scheduled-job-rules/create-scheduled-job-rule.use-case";
+import { FetchScheduledJobRuleUseCase } from "@/src/application/use-cases/scheduled-job-rules/fetch-scheduled-job-rule.use-case";
+import { ListScheduledJobRulesUseCase } from "@/src/application/use-cases/scheduled-job-rules/list-scheduled-job-rules.use-case";
+import { EnableScheduledJobRuleUseCase } from "@/src/application/use-cases/scheduled-job-rules/enable-scheduled-job-rule.use-case";
+import { DisableScheduledJobRuleUseCase } from "@/src/application/use-cases/scheduled-job-rules/disable-scheduled-job-rule.use-case";
+import { CreateScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/create-scheduled-job-rule.controller";
+import { FetchScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/fetch-scheduled-job-rule.controller";
+import { ListScheduledJobRulesController } from "@/src/interface-adapters/controllers/scheduled-job-rules/list-scheduled-job-rules.controller";
+import { EnableScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/enable-scheduled-job-rule.controller";
+import { DisableScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/disable-scheduled-job-rule.controller";
+
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
     strict: true,
@@ -78,6 +91,20 @@ container.register({
     listJobsController: asClass(ListJobsController).singleton(),
     fetchJobUseCase: asClass(FetchJobUseCase).singleton(),
     fetchJobController: asClass(FetchJobController).singleton(),
+
+    // scheduled job rules
+    // ---
+    scheduledJobRulesRepository: asClass(MongoDBScheduledJobRulesRepository).singleton(),
+    createScheduledJobRuleUseCase: asClass(CreateScheduledJobRuleUseCase).singleton(),
+    fetchScheduledJobRuleUseCase: asClass(FetchScheduledJobRuleUseCase).singleton(),
+    listScheduledJobRulesUseCase: asClass(ListScheduledJobRulesUseCase).singleton(),
+    enableScheduledJobRuleUseCase: asClass(EnableScheduledJobRuleUseCase).singleton(),
+    disableScheduledJobRuleUseCase: asClass(DisableScheduledJobRuleUseCase).singleton(),
+    createScheduledJobRuleController: asClass(CreateScheduledJobRuleController).singleton(),
+    fetchScheduledJobRuleController: asClass(FetchScheduledJobRuleController).singleton(),
+    listScheduledJobRulesController: asClass(ListScheduledJobRulesController).singleton(),
+    enableScheduledJobRuleController: asClass(EnableScheduledJobRuleController).singleton(),
+    disableScheduledJobRuleController: asClass(DisableScheduledJobRuleController).singleton(),
 
     // composio
     // ---

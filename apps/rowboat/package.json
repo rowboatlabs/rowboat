@@ -30,6 +30,7 @@
     "@heroui/react": "^2.8.0-beta.10",
     "@heroui/system": "^2.4.18-beta.2",
     "@heroui/theme": "^2.4.18-beta.2",
+    "@internationalized/date": "^3.8.2",
     "@langchain/core": "^0.3.7",
     "@langchain/textsplitters": "^0.1.0",
     "@mendable/firecrawl-js": "^1.0.3",
