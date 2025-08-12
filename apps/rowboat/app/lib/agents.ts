@@ -995,7 +995,7 @@ async function* handleMessageOutput(
     eventLogger: PrefixLogger,
     loopLogger: PrefixLogger,
     getAgentState: (agentName: string) => AgentState
-): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage> | { newAgentName: string; shouldContinue: boolean }> {
+): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage> | { newAgentName: string | null; shouldContinue: boolean }> {
     // check response visibility - could be an agent or pipeline
     const agentConfigObj = agentConfig[agentName];
     const pipelineConfigObj = pipelineConfig[agentName];
@@ -1032,8 +1032,11 @@ async function* handleMessageOutput(
             return; // Exit without switching now
         }
 
-        // Check if this is a pipeline or pipeline agent that needs to continue the pipeline
-        if (currentPipelineConfig || currentAgentConfig?.type === 'pipeline') {
+        // Check if this agent is part of a pipeline that needs to continue
+        const currentAgent = agents[current];
+        const isPartOfPipeline = currentAgent && (currentAgent as any).pipelineName !== undefined;
+        
+        if (currentPipelineConfig || currentAgentConfig?.type === 'pipeline' || isPartOfPipeline) {
             const result = handlePipelineAgentExecution(
                 agents[current], // Use the correct agent from agents collection
                 current,
@@ -1054,6 +1057,11 @@ async function* handleMessageOutput(
 
             if (result.shouldContinue) {
                 yield { newAgentName: result.nextAgentName!, shouldContinue: true };
+                return;
+            } else {
+                // Pipeline completed - set agentName to null to terminate turn
+                loopLogger.log(`Pipeline execution complete - terminating turn`);
+                yield { newAgentName: null, shouldContinue: false };
                 return;
             }
         }
@@ -1142,9 +1150,16 @@ function handlePipelineAgentExecution(
         nextAgentName = pipeline.agents[pipelineIndex + 1];
         logger.log(`-- pipeline controller: ${currentAgentName} -> ${nextAgentName} (continuing pipeline ${pipelineName})`);
     } else {
-        // Last agent - return to calling agent
-        nextAgentName = stack.pop()!;
-        logger.log(`-- pipeline controller: ${currentAgentName} -> ${nextAgentName} (pipeline ${pipelineName} complete, returning to caller)`);
+        // Last agent in pipeline - check if there's a calling agent to return to
+        if (stack.length > 0) {
+            // Normal case: return to calling agent
+            nextAgentName = stack.pop()!;
+            logger.log(`-- pipeline controller: ${currentAgentName} -> ${nextAgentName} (pipeline ${pipelineName} complete, returning to caller)`);
+        } else {
+            // Pipeline was start agent: no caller to return to, terminate execution
+            logger.log(`-- pipeline controller: pipeline ${pipelineName} complete, no caller to return to - ending turn`);
+            return { nextAgentName: null, shouldContinue: false };
+        }
     }
 
     if (nextAgentName) {
@@ -1223,7 +1238,7 @@ export async function* streamResponse(
     const startOfTurnAgentName = getStartOfTurnAgentName(logger, messages, agentConfig, pipelineConfig, workflow);
     logger.log(`🎯 START AGENT DECISION: ${startOfTurnAgentName}`);
 
-    let agentName = startOfTurnAgentName;
+    let agentName: string | null = startOfTurnAgentName;
 
     // start the turn loop
     const usageTracker = new UsageTracker();
@@ -1282,22 +1297,25 @@ export async function* streamResponse(
         // loopLogger.log(`stack: ${JSON.stringify(stack)}`);
         
         // Check if current agent is actually a pipeline
-        const currentPipelineConfig = pipelineConfig[agentName];
+        const currentPipelineConfig: z.infer<typeof WorkflowPipeline> | null = agentName ? pipelineConfig[agentName] : null;
         if (currentPipelineConfig) {
             // If agentName is a pipeline, switch to the first agent in the pipeline
             if (currentPipelineConfig.agents.length === 0) {
                 throw new Error(`Pipeline '${agentName}' has no agents!`);
             }
-            const firstAgentInPipeline = currentPipelineConfig.agents[0];
+            const firstAgentInPipeline: string = currentPipelineConfig.agents[0];
             logger.log(`🔄 Pipeline '${agentName}' starting with first agent: ${firstAgentInPipeline}`);
             agentName = firstAgentInPipeline;
             // Continue with the first agent in the pipeline
         }
         
-        if (!agents[agentName]) {
+        if (!agentName || !agents[agentName]) {
             throw new Error(`agent not found in agent config!`);
         }
-        const agent: Agent = agents[agentName]!;
+        
+        // At this point, agentName is guaranteed to be non-null
+        const currentAgentName: string = agentName;
+        const agent: Agent = agents[currentAgentName]!;
 
         // convert messages to agents sdk compatible input
         const inputs = convertMsgsInput(turnMsgs);
@@ -1317,7 +1335,7 @@ export async function* streamResponse(
 
             switch (event.type) {
                 case 'raw_model_stream_event':
-                    yield* handleRawModelStreamEvent(event, agentName, turnMsgs, usageTracker, eventLogger, getAgentState);
+                    yield* handleRawModelStreamEvent(event, currentAgentName, turnMsgs, usageTracker, eventLogger, getAgentState);
                     break;
 
                 case 'run_item_stream_event':
@@ -1326,10 +1344,10 @@ export async function* streamResponse(
                         event.item.rawItem.type === 'function_call_result' &&
                         event.item.rawItem.status === 'completed') {
                         
-                        const state = getAgentState(agentName);
+                        const state = getAgentState(currentAgentName);
                         if (state.pendingToolCalls > 0) {
                             state.pendingToolCalls--;
-                            eventLogger.log(`✅ Tool call completed: ${agentName} (${state.pendingToolCalls} remaining)`);
+                            eventLogger.log(`✅ Tool call completed: ${currentAgentName} (${state.pendingToolCalls} remaining)`);
                         }
                     }
 
@@ -1339,7 +1357,7 @@ export async function* streamResponse(
                             // Use native SDK handoff handling
                             for await (const result of handleNativeHandoffEvent(
                                 event,
-                                agentName,
+                                currentAgentName,
                                 agentConfig,
                                 agents,
                                 pipelineConfig,
@@ -1365,7 +1383,7 @@ export async function* streamResponse(
                             // Use legacy handoff handling
                             for await (const result of handleHandoffEvent(
                                 event,
-                                agentName,
+                                currentAgentName,
                                 agentConfig,
                                 agents,
                                 stack,
@@ -1399,7 +1417,7 @@ export async function* streamResponse(
                         event.item.rawItem.status === 'completed') {
                         for await (const result of handleMessageOutput(
                             event,
-                            agentName,
+                            currentAgentName,
                             agentConfig,
                             agents,
                             pipelineConfig,
@@ -1428,6 +1446,12 @@ export async function* streamResponse(
             }
         }
 
+        // Check if we have no next agent (pipeline or other termination)
+        if (!agentName) {
+            loopLogger.log(`no next agent available, breaking out of turn loop`);
+            break turnLoop;
+        }
+
         // if the last message was a text response by a user-facing agent, complete the turn
         // loopLogger.log(`iter end, turnMsgs: ${JSON.stringify(turnMsgs)}, agentName: ${agentName}`);
         const lastMessage = turnMsgs[turnMsgs.length - 1];
@@ -1439,6 +1463,7 @@ export async function* streamResponse(
             loopLogger.log(`last message was by a user_facing agent, breaking out of parent loop`);
             break turnLoop;
         }
+
     }
 
     // emit usage information
