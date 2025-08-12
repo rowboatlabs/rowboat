@@ -198,14 +198,14 @@ export function JobView({ projectId, jobId }: { projectId: string; jobId: string
                                     </div>
 
                                     {/* Workflow */}
-                                    <div>
+                                    {job.output?.workflow && <div>
                                         <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
                                             Workflow
                                         </div>
                                         <pre className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs overflow-x-auto border border-gray-200 dark:border-gray-700 font-mono max-h-[400px]">
-                                            {JSON.stringify(job.input.workflow, null, 2)}
+                                            {JSON.stringify(job.output.workflow, null, 2)}
                                         </pre>
-                                    </div>
+                                    </div>}
                                 </div>
                             </div>
 

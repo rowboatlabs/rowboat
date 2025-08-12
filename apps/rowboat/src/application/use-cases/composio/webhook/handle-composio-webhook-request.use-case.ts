@@ -129,7 +129,6 @@ export class HandleCompsioWebhookRequestUseCase implements IHandleCompsioWebhook
                     },
                     projectId: deployment.projectId,
                     input: {
-                        workflow: project.liveWorkflow,
                         messages: [msg],
                     },
                 });

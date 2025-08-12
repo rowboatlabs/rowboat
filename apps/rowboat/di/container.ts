@@ -30,6 +30,7 @@ import { DeleteComposioConnectedAccountController } from "@/src/interface-adapte
 import { HandleComposioWebhookRequestController } from "@/src/interface-adapters/controllers/composio/webhook/handle-composio-webhook-request.controller";
 import { RedisPubSubService } from "@/src/infrastructure/services/redis.pub-sub.service";
 import { JobsWorker } from "@/src/application/workers/jobs.worker";
+import { ScheduledJobRulesWorker } from "@/src/application/workers/scheduled-job-rules.worker";
 import { ListJobsUseCase } from "@/src/application/use-cases/jobs/list-jobs.use-case";
 import { ListJobsController } from "@/src/interface-adapters/controllers/jobs/list-jobs.controller";
 import { ListConversationsUseCase } from "@/src/application/use-cases/conversations/list-conversations.use-case";
@@ -61,6 +62,7 @@ container.register({
     // workers
     // ---
     jobsWorker: asClass(JobsWorker).singleton(),
+    scheduledJobRulesWorker: asClass(ScheduledJobRulesWorker).singleton(),
 
     // services
     // ---

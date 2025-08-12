@@ -65,13 +65,13 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
         return groups;
     }, [items]);
 
-    const getStatusColor = (disabled: boolean, processedAt?: string) => {
+    const getStatusColor = (disabled: boolean, processedAt: string | null) => {
         if (disabled) return 'text-gray-600 dark:text-gray-400';
         if (processedAt) return 'text-green-600 dark:text-green-400';
         return 'text-blue-600 dark:text-blue-400';
     };
 
-    const getStatusText = (disabled: boolean, processedAt?: string) => {
+    const getStatusText = (disabled: boolean, processedAt: string | null) => {
         if (disabled) return 'Disabled';
         if (processedAt) return 'Completed';
         return 'Active';

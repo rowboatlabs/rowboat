@@ -1,4 +1,5 @@
 import { IJobsRepository } from "@/src/application/repositories/jobs.repository.interface";
+import { IProjectsRepository } from "@/src/application/repositories/projects.repository.interface";
 import { ICreateConversationUseCase } from "../use-cases/conversations/create-conversation.use-case";
 import { IRunConversationTurnUseCase } from "../use-cases/conversations/run-conversation-turn.use-case";
 import { Job } from "@/src/entities/models/job";
@@ -15,6 +16,7 @@ export interface IJobsWorker {
 
 export class JobsWorker implements IJobsWorker {
     private readonly jobsRepository: IJobsRepository;
+    private readonly projectsRepository: IProjectsRepository;
     private readonly createConversationUseCase: ICreateConversationUseCase;
     private readonly runConversationTurnUseCase: IRunConversationTurnUseCase;
     private readonly pubSubService: IPubSubService;
@@ -27,16 +29,19 @@ export class JobsWorker implements IJobsWorker {
 
     constructor({
         jobsRepository,
+        projectsRepository,
         createConversationUseCase,
         runConversationTurnUseCase,
         pubSubService,
     }: {
         jobsRepository: IJobsRepository;
+        projectsRepository: IProjectsRepository;
         createConversationUseCase: ICreateConversationUseCase;
         runConversationTurnUseCase: IRunConversationTurnUseCase;
         pubSubService: IPubSubService;
     }) {
         this.jobsRepository = jobsRepository;
+        this.projectsRepository = projectsRepository;
         this.createConversationUseCase = createConversationUseCase;
         this.runConversationTurnUseCase = runConversationTurnUseCase;
         this.pubSubService = pubSubService;
@@ -52,6 +57,12 @@ export class JobsWorker implements IJobsWorker {
             // extract project id from job
             const { projectId } = job;
 
+            // fetch project
+            const project = await this.projectsRepository.fetch(projectId);
+            if (!project) {
+                throw new Error("Project not found");
+            }
+
             // create conversation
             logger.log('Creating conversation');
             const conversation = await this.createConversationUseCase.execute({
@@ -61,7 +72,7 @@ export class JobsWorker implements IJobsWorker {
                     type: "job",
                     jobId: job.id,
                 },
-                workflow: job.input.workflow,
+                workflow: project.liveWorkflow,
                 isLiveWorkflow: true,
             });
             logger.log(`Created conversation ${conversation.id}`);
@@ -95,6 +106,7 @@ export class JobsWorker implements IJobsWorker {
             await this.jobsRepository.update(job.id, {
                 status: "completed",
                 output: {
+                    workflow: conversation.workflow,
                     conversationId: conversation.id,
                     turnId: turn.id,
                 },
