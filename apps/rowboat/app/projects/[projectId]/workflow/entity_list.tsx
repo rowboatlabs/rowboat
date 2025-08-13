@@ -281,7 +281,7 @@ interface PipelineCardProps {
     onDeleteAgent: (name: string) => void;
     onAddAgentToPipeline: (pipelineName: string) => void;
     onSetMainAgent: (name: string) => void;
-    selectedRef: React.RefObject<HTMLButtonElement | null>;
+    selectedRef: React.RefObject<HTMLDivElement | null>;
     startAgentName: string | null;
     dragHandle?: React.ReactNode;
 }
@@ -1696,7 +1696,7 @@ const SortablePipelineItem = ({
     onDeleteAgent: (name: string) => void;
     onAddAgentToPipeline: (pipelineName: string) => void;
     onSetMainAgent: (name: string) => void;
-    selectedRef: React.RefObject<HTMLButtonElement | null>;
+    selectedRef: React.RefObject<HTMLDivElement | null>;
     startAgentName: string | null;
 }) => {
     const {
