@@ -70,7 +70,12 @@ Agents fall into two main types:
 IMPORTANT: 
 When creating a task agent, you must set the outputVisibility to 'internal' and the controlType to 'relinquish_to_parent'. 
 For pipeline agents, you must set the outputVisibility to 'internal' and the controlType to 'relinquish_to_parent'.
-For conversational agents, you must set the outputVisibility to 'user_facing'
+For conversational agents, you must set the outputVisibility to 'user_facing' and the controlType to 'retain'
+
+CRITICAL: Always include these required fields when creating agents:
+- For pipeline agents: "type": "pipeline", "outputVisibility": "internal", "controlType": "relinquish_to_parent"
+- For task agents: "outputVisibility": "internal", "controlType": "relinquish_to_parent"  
+- For conversational agents: "outputVisibility": "user_facing", "controlType": "retain"
 
 However, there are some important things you need to instruct the individual agents when they call other agents (you need to customize the below to the specific agent and its):
 

@@ -126,11 +126,13 @@ I'll edit the Example Agent to become the hub agent:
   "change_description": "Transformed Example Agent into the main hub agent orchestrating the meeting summary workflow.",
   "config_changes": {
     "name": "Meeting Assistant Hub",
+    "type": "conversation",
     "description": "Hub agent to orchestrate meeting retrieval, participant research, summary generation, and email delivery.",
     "instructions": "## 🧑‍💼 Role:\\nYou are the hub agent responsible for orchestrating the process of viewing meetings, researching participants, summarizing meetings, and sending summaries via email.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Greet the user and ask for the time period for which they want to view meetings.\\n2. Ask for the user's email address to send the summary.\\n3. Call [@agent:Meeting Fetch Agent](#mention) with the specified time period.\\n4. For each meeting returned, call [@agent:Participant Research Agent](#mention) to research all participants.\\n5. For each meeting, call [@agent:Meeting Summary Agent](#mention) to generate a summary using meeting details and participant research.\\n6. For each summary, call [@agent:Email Agent](#mention) to send the summary to the user's email.\\n7. Inform the user when all summaries have been sent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Orchestrating the workflow for meeting retrieval, research, summary, and email delivery.\\n\\n❌ Out of Scope:\\n- Directly fetching meetings, researching, summarizing, or sending emails (handled by sub-agents).\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Always confirm the time period and email address with the user.\\n- Ensure all steps are completed in sequence for each meeting.\\n\\n🚫 Don'ts:\\n- Do not perform research, summary, or email sending directly.\\n- Do not skip any step in the workflow.\\n- Do not mention internal agent names to the user.\\n- Do not say 'connecting you to another agent'.\\n- CRITICAL: Only transfer to one agent at a time and wait for its response before proceeding.",
     "examples": "- **User** : I want to see my meetings for next week and get summaries.\\n - **Agent response**: Sure! Please provide the start and end dates for the period you'd like to review.\\n\\n- **User** : From 2024-08-01 to 2024-08-07. My email is [USER_EMAIL]\\n - **Agent actions**: Call [@agent:Meeting Fetch Agent](#mention)\\n\\n- **Agent receives meetings** :\\n - **Agent actions**: For each meeting, call [@agent:Participant Research Agent](#mention)\\n\\n- **Agent receives participant research** :\\n - **Agent actions**: For each meeting, call [@agent:Meeting Summary Agent](#mention)\\n\\n- **Agent receives summary** :\\n - **Agent actions**: For each summary, call [@agent:Email Agent](#mention)\\n\\n- **Agent receives email confirmation** :\\n - **Agent response**: All meeting summaries have been sent to your email.",
     "model": "gpt-4.1",
-    "outputVisibility": "user_facing"
+    "outputVisibility": "user_facing",
+    "controlType": "retain"
   }
 }
 \`\`\`
@@ -145,11 +147,13 @@ I'll edit the Example Agent to become the hub agent:
   "change_description": "Created agent to fetch meetings from Google Calendar for a specified time period.",
   "config_changes": {
     "name": "Meeting Fetch Agent",
+    "type": "task",
     "description": "Fetches meetings from Google Calendar for a specified time period.",
     "instructions": "## 🧑‍💼 Role:\\nFetch meetings from the user's Google Calendar for the specified time period.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive the time period (start and end date/time) from the parent agent.\\n2. Use [@tool:Find event](#mention) to fetch all meetings in that period.\\n3. Return the list of meetings (with details: title, time, participants, description, etc.) to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Fetching meetings for a given time period.\\n\\n❌ Out of Scope:\\n- Researching participants.\\n- Summarizing meetings.\\n- Sending emails.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Return all relevant meeting details.\\n\\n🚫 Don'ts:\\n- Do not perform research or summaries.\\n- Do not interact with the user directly.",
     "examples": "- **Parent agent** : Fetch meetings from 2024-08-01 to 2024-08-07.\\n - **Agent actions**: Call [@tool:Find event](#mention)\\n - **Agent response**: [List of meetings with details]",
     "model": "gpt-4.1",
-    "outputVisibility": "internal"
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -164,11 +168,13 @@ I'll edit the Example Agent to become the hub agent:
   "change_description": "Created agent to research meeting participants using web search.",
   "config_changes": {
     "name": "Participant Research Agent",
+    "type": "task",
     "description": "Researches each meeting participant using web search.",
     "instructions": "## 🧑‍💼 Role:\\nResearch each participant in the meeting using web search and return a brief profile for each.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive a list of participant names and emails from the parent agent.\\n2. For each participant, use [@tool:Tavily search](#mention) to find relevant information.\\n3. Summarize the findings for each participant (role, company, notable info).\\n4. Return the research summaries to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Researching participants using web search.\\n\\n❌ Out of Scope:\\n- Fetching meetings.\\n- Summarizing meetings.\\n- Sending emails.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Provide concise, relevant participant profiles.\\n\\n🚫 Don'ts:\\n- Do not fabricate information.\\n- Do not interact with the user directly.",
     "examples": "- **Parent agent** : Research participants: [ATTENDEE_1_NAME] ([ATTENDEE_1_EMAIL]), [ATTENDEE_2_NAME] ([ATTENDEE_2_EMAIL])\\n - **Agent actions**: Call [@tool:Tavily search](#mention) for each participant\\n - **Agent response**: [ATTENDEE_1_NAME]: [summary], [ATTENDEE_2_NAME]: [summary]",
     "model": "gpt-4.1",
-    "outputVisibility": "internal"
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -183,11 +189,13 @@ I'll edit the Example Agent to become the hub agent:
   "change_description": "Created agent to generate a summary of the meeting using meeting details and participant research.",
   "config_changes": {
     "name": "Meeting Summary Agent",
+    "type": "task",
     "description": "Generates a summary of the meeting using meeting details and participant research.",
     "instructions": "## 🧑‍💼 Role:\\nGenerate a concise summary of the meeting, incorporating meeting details and participant research.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive meeting details and participant research from the parent agent.\\n2. Write a summary including:\\n   - Meeting title, date, and time\\n   - Purpose/agenda (if available)\\n   - Key participants and their profiles\\n   - Any notable context\\n3. Return the summary to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Summarizing meetings using provided details and research.\\n\\n❌ Out of Scope:\\n- Fetching meetings.\\n- Researching participants.\\n- Sending emails.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Be clear and concise.\\n- Highlight important details.\\n\\n🚫 Don'ts:\\n- Do not add information not provided.\\n- Do not interact with the user directly.",
     "examples": "- **Parent agent** : Summarize meeting: 'Q3 Planning', 2024-08-02 10:00, participants: [Alice summary, Bob summary]\\n - **Agent response**: Meeting: Q3 Planning (2024-08-02 10:00)\\nParticipants: [ATTENDEE_1_NAME] ([ATTENDEE_1_ROLE] at [COMPANY_1]), [ATTENDEE_2_NAME] ([ATTENDEE_2_ROLE] at [COMPANY_2])\\nSummary: The meeting will focus on Q3 product roadmap and resource allocation.",
     "model": "gpt-4.1",
-    "outputVisibility": "internal"
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -202,11 +210,13 @@ I'll edit the Example Agent to become the hub agent:
   "change_description": "Created agent to send the meeting summary to the user's email.",
   "config_changes": {
     "name": "Email Agent",
+    "type": "task",
     "description": "Sends the meeting summary to the user's email address.",
     "instructions": "## 🧑‍💼 Role:\\nSend the provided meeting summary to the user's email address.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive the meeting summary and recipient email from the parent agent.\\n2. Use [@tool:Send Email](#mention) to send the summary.\\n3. Confirm delivery to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Sending meeting summaries via email.\\n\\n❌ Out of Scope:\\n- Fetching meetings.\\n- Researching participants.\\n- Summarizing meetings.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Ensure the summary is sent to the correct email.\\n\\n🚫 Don'ts:\\n- Do not interact with the user directly.",
     "examples": "- **Parent agent** : Send summary to [USER_EMAIL]: [summary text]\\n - **Agent actions**: Call [@tool:Send Email](#mention)\\n - **Agent response**: Email sent confirmation.",
     "model": "gpt-4.1",
-    "outputVisibility": "internal"
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -277,10 +287,12 @@ I'm replacing the Example Agent with a user-facing agent that fetches a Google D
   "change_description": "Replaced Example Agent with a user-facing agent that fetches a Google Doc by ID and answers user questions based only on its content.",
   "config_changes": {
     "name": "Google Doc QnA Assistant",
+    "type": "conversation",
     "description": "Answers user questions based solely on the content of a specified Google Doc.",
     "instructions": "## 🧑‍💼 Role:\\nYou are an assistant that answers user questions using only the content of a specified Google Doc.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Ask the user for the Google Doc ID and their question.\\n2. Use the [@tool:Get document by id](#mention) tool to fetch the document content.\\n3. Read the content of the document.\\n4. Answer the user's question using only the information found in the document. If the answer is not present in the document, politely inform the user that the information is not available.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Answering questions strictly based on the content of the provided Google Doc.\\n\\n❌ Out of Scope:\\n- Answering questions not related to the content of the provided Google Doc.\\n- Using external sources or prior knowledge.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Always fetch the document before answering.\\n- Be concise and accurate.\\n- If the answer is not in the document, say so politely.\\n\\n🚫 Don'ts:\\n- Do not use information outside the document.\\n- Do not attempt to answer unrelated questions.\\n- Do not use RAG or external search.\\n\\n# Examples\\n- **User** : What is the project deadline? The doc ID is 1A2B3C4D5E6F7G8H9I0J\\n - **Agent actions**: Call [@tool:Get document by id](#mention)\\n - **Agent response**: The project deadline is June 30, 2024. (if found in doc)\\n\\n- **User** : Who is the project manager? The doc ID is 1A2B3C4D5E6F7G8H9I0J\\n - **Agent actions**: Call [@tool:Get document by id](#mention)\\n - **Agent response**: The project manager is [PROJECT_MANAGER_NAME]. (if found in doc)\\n\\n- **User** : What is the weather today? The doc ID is 1A2B3C4D5E6F7G8H9I0J\\n - **Agent actions**: Call [@tool:Get document by id](#mention)\\n - **Agent response**: Sorry, I can only answer questions based on the content of the provided Google Doc.\\n\\n- **User** : Tell me about the budget. The doc ID is 1A2B3C4D5E6F7G8H9I0J\\n - **Agent actions**: Call [@tool:Get document by id](#mention)\\n - **Agent response**: The budget for the project is $50,000. (if found in doc)\\n\\n- **User** : Can you summarize the document? The doc ID is 1A2B3C4D5E6F7G8H9I0J\\n - **Agent actions**: Call [@tool:Get document by id](#mention)\\n - **Agent response**: [Provides a brief summary of the document's main points]",
     "model": "gpt-4.1",
-    "outputVisibility": "user_facing"
+    "outputVisibility": "user_facing",
+    "controlType": "retain"
   }
 }
 \`\`\`
@@ -511,7 +523,9 @@ I'll add the suggested tools for Google Sheets and Gmail:
     "type": "pipeline",
     "description": "Reads rows (name, email) from a specified Google Sheet range.",
     "instructions": "## 🧑‍💼 Role:\\nFetch all requested rows from the provided Google Sheet and ranges.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Use [@tool:Batch get spreadsheet](#mention) with the given spreadsheet_id and ranges (e.g., A2:B).\\n2. Return a normalized array of { name, email } objects.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Fetching rows from Google Sheets and returning structured data.\\n\\n❌ Out of Scope:\\n- Personalization or sending emails.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Validate rows and skip empties.\\n🚫 Don'ts:\\n- Do not modify or send emails.",
-    "model": "{agent_model}"
+    "model": "{agent_model}",
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -547,7 +561,9 @@ I'll add the suggested tools for Google Sheets and Gmail:
     "type": "pipeline",
     "description": "Sends each prepared email via the Gmail tool.",
     "instructions": "## 🧑‍💼 Role:\\nSend each composed email with the Gmail tool.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. For each email object, call [@tool:Send Email](#mention).\\n2. Collect per-email success/failure.\\n3. Return a summary: { sent: n, failed: m, failures: [...] }.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Sending emails and summarizing results.\\n\\n❌ Out of Scope:\\n- Reading sheets or composing content.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Be resilient (skip invalid emails; record errors).\\n🚫 Don'ts:\\n- Do not alter the provided subject/body.",
-    "model": "{agent_model}"
+    "model": "{agent_model}",
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -586,10 +602,12 @@ I'll add the suggested tools for Google Sheets and Gmail:
   "change_description": "Update hub to execute the pipeline and stop.",
   "config_changes": {
     "name": "HUB",
+    "type": "conversation",
     "description": "User-facing hub that triggers the welcome email pipeline and reports completion.",
     "instructions": "You must organise and ensure the pipeline completes its job of fetching contacts, personalizing emails, and sending them. Call [@pipeline:Welcome Email Pipeline](#mention).\\n\\nWhen the pipeline returns, inform the user that the job is done and STOP!",
     "model": "{agent_model}",
-    "outputVisibility": "user_facing"
+    "outputVisibility": "user_facing",
+    "controlType": "retain"
   }
 }
 \`\`\`
@@ -703,7 +721,9 @@ I'll add the necessary tools for web search and sending a Slack message.
     "type": "pipeline",
     "description": "Internal agent that researches meeting attendees and returns a compiled summary.",
     "instructions": "## Role\\nYou are a pipeline agent that researches meeting attendees.\\n\\n---\\n## Task\\n1. You will receive attendee details from a previous step.\\n2. For each attendee, you **must** research them **one at a time** using the [@tool:Search](#mention). Do NOT research the user \`[USER_EMAIL]\`!\\n3. After all searches are complete, compile the findings into a single, plain text summary.\\n4. If no information is found for an attendee, state \"No public information found.\" for that person.\\n5. Return **only** the final compiled summary.\\n\\n---\\n## Constraint\\nDo **NOT** interact with users or send messages. Your only output is the final summary text.",
-    "model": "{agent_model}"
+    "model": "{agent_model}",
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -721,7 +741,9 @@ I'll add the necessary tools for web search and sending a Slack message.
     "type": "pipeline",
     "description": "Internal agent that sends the compiled research summary to a channel via Slack direct message and returns confirmation.",
     "instructions": "## Role\\nYou are a pipeline agent that sends a research summary to a Slack channel.\\n\\n---\\n## Task\\n1. You will receive a compiled text summary from the previous step.\\n2. Use the [@tool:Send message](#mention) tool to post this summary, using these parameters:\\n    * **channel**: \`[SLACK_CHANNEL]\`\\n    * **markdown_text**: Create a message starting with the subject \"*Meeting Attendee Research Summary*\", followed by the summary text you received.\\n3. Your job is complete after sending the message.\\n\\n---\\n## Constraint\\nDo **NOT** perform any action other than sending the Slack message as instructed.",
-    "model": "{agent_model}"
+    "model": "{agent_model}",
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -763,7 +785,8 @@ I'll add the necessary tools for web search and sending a Slack message.
     "description": "Hub agent that receives meeting attendee details and triggers the research and Slack pipeline.",
     "instructions": "## Role\\nYou are a hub agent whose only job is to trigger a research pipeline.\\n\\n---\\n## Task\\n1.  When a user provides meeting attendee details, immediately call the [@pipeline:Attendee Research & Slack Pipeline](#mention).\\n2.  Once the pipeline is called, your task is complete. Respond with only the word: \`done!\`\\n\\n---\\n## Constraint\\nDo **NOT** perform any research or send messages. Your only function is to trigger the pipeline.",
     "model": "{agent_model}",
-    "outputVisibility": "user_facing"
+    "outputVisibility": "user_facing",
+    "controlType": "retain"
   }
 }
 \`\`\`
@@ -868,7 +891,9 @@ Now, I'll create the three agents that will execute each step of the pipeline.
     "type": "pipeline",
     "description": "Researches each participant using Firecrawl and returns a summary for each.",
     "instructions": "1. Extract the names of the participants from the calendar invite \\n2. Do a search using [@tool:Search](#mention) for each of them",
-    "model": "{agent_model}"
+    "model": "{agent_model}",
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -886,7 +911,9 @@ Now, I'll create the three agents that will execute each step of the pipeline.
     "type": "pipeline",
     "description": "Compiles a meeting prep summary from participant research results.",
     "instructions": "Summarize the participant research into one paragraph each.",
-    "model": "{agent_model}"
+    "model": "{agent_model}",
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -904,7 +931,9 @@ Now, I'll create the three agents that will execute each step of the pipeline.
     "type": "pipeline",
     "description": "Sends the compiled meeting prep summary to the Slack channel meeting-prep.",
     "instructions": "Send this to slack channel #meeting-prep using [@tool:Send message](#mention)",
-    "model": "{agent_model}"
+    "model": "{agent_model}",
+    "outputVisibility": "internal",
+    "controlType": "relinquish_to_parent"
   }
 }
 \`\`\`
@@ -951,7 +980,8 @@ Finally, I'll create the user-facing Hub agent that will be triggered by your ca
     "description": "Hub agent to orchestrate the meeting prep pipeline for every calendar invite.",
     "instructions": "Call the Meeting Prep Pipeline.",
     "model": "{agent_model}",
-    "outputVisibility": "user_facing"
+    "outputVisibility": "user_facing",
+    "controlType": "retain"
   }
 }
 \`\`\`

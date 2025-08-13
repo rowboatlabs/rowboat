@@ -20,15 +20,10 @@ export function validateConfigChanges(configType: string, configChanges: Record<
             break;
         }
         case 'agent': {
-            // Check if this is a pipeline agent or task agent (internal) and use appropriate defaults
-            const isPipelineAgent = configChanges.type === 'pipeline';
-            const isTaskAgent = configChanges.outputVisibility === 'internal';
-            const isInternalAgent = isPipelineAgent || isTaskAgent;
-            
             testObject = {
                 name: 'test',
                 description: 'test',
-                type: isPipelineAgent ? 'pipeline' : 'conversation',
+                type: 'conversation',
                 instructions: 'test',
                 prompts: [],
                 tools: [],
@@ -36,8 +31,8 @@ export function validateConfigChanges(configType: string, configChanges: Record<
                 ragReturnType: 'chunks',
                 ragK: 10,
                 connectedAgents: [],
-                controlType: isInternalAgent ? 'relinquish_to_parent' : 'retain',
-                outputVisibility: isInternalAgent ? 'internal' : 'user_facing',
+                controlType: 'retain',
+                outputVisibility: 'user_facing',
                 maxCallsPerParentAgent: 3,
             } as z.infer<typeof WorkflowAgent>;
             schema = WorkflowAgent;
