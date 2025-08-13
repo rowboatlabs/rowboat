@@ -24,6 +24,9 @@ const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
 // Feature flags
 const USE_NATIVE_HANDOFFS = process.env.USE_NATIVE_HANDOFFS === 'true';
 
+// Agent execution limits
+const MAX_AGENT_TURNS = 25; // Configurable limit for agent SDK turns (default was 10)
+
 // Internal types for agent handoffs and pipeline management
 // Context passing schemas for SDK handoffs (OpenAI API compatible)
 export const HandoffContext = z.object({
@@ -1131,8 +1134,15 @@ async function* handleMessageOutput(
                 nextAgentName = stack.pop()!;
                 loopLogger.log(`-- popped agent from stack: ${nextAgentName} || reason: ${current} is an internal agent, it put out a message and it has a control type of ${currentAgentConfig?.controlType}, hence the flow of control needs to return to the previous agent`);
             } else {
-                nextAgentName = workflow.startAgent;
-                loopLogger.log(`-- using start agent (stack empty): ${nextAgentName}`);
+                // Check if current agent IS the start agent - if so, terminate to avoid loop
+                if (current === workflow.startAgent) {
+                    loopLogger.log(`Task agent ${current} is start agent with no parent - terminating turn`);
+                    yield { newAgentName: null, shouldContinue: false };
+                    return;
+                } else {
+                    nextAgentName = workflow.startAgent;
+                    loopLogger.log(`-- using start agent (stack empty): ${nextAgentName}`);
+                }
             }
         } else if (currentAgentConfig?.controlType === 'relinquish_to_start') {
             nextAgentName = workflow.startAgent;
@@ -1373,6 +1383,7 @@ export async function* streamResponse(
             inputs,
             {
                 stream: true,
+                maxTurns: MAX_AGENT_TURNS,
             }
         );
 
