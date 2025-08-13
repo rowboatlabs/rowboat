@@ -84,7 +84,7 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
                 type: 'action',
                 action: {
                     action: metadata.action as 'create_new' | 'edit',
-                                            config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline',
+                    config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline',
                     name: metadata.name,
                     change_description: jsonData.change_description || '',
                     config_changes: result.changes

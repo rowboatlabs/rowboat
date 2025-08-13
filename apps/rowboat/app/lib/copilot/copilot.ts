@@ -222,10 +222,7 @@ export async function getEditAgentInstructionsResponse(
                 role: 'system',
                 content: SYSTEM_PROMPT,
             },
-            ...messages.map(msg => ({
-                role: msg.role,
-                content: msg.content,
-            })),
+            ...messages,
         ],
         schema: z.object({
             agent_instructions: z.string(),
@@ -297,10 +294,7 @@ export async function* streamMultiAgentResponse(
                 role: 'system',
                 content: SYSTEM_PROMPT,
             },
-            ...messages.map(msg => ({
-                role: msg.role,
-                content: msg.content,
-            })),
+            ...messages,
         ],
     });
 

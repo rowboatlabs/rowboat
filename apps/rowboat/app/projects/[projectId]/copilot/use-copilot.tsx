@@ -75,11 +75,9 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
 
             eventSource.onmessage = (event) => {
                 try {
-                    const data = JSON.parse(event.data);
-                    if ('content' in data) {
-                        responseRef.current += data.content;
-                        setStreamingResponse(prev => prev + data.content);
-                    }
+                    const { content } = JSON.parse(event.data);
+                    responseRef.current += content;
+                    setStreamingResponse(prev => prev + content);
                 } catch (e) {
                     setError('Failed to parse stream message');
                 }
