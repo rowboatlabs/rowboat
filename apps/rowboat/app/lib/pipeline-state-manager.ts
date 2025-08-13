@@ -1,7 +1,8 @@
 // Pipeline State Manager for handling complex pipeline execution flow
 import { Agent } from "@openai/agents";
 import { z } from "zod";
-import { PipelineExecutionState, WorkflowPipeline, WorkflowAgent } from "./types/workflow_types";
+import { WorkflowPipeline, WorkflowAgent } from "./types/workflow_types";
+import { PipelineExecutionState } from "./agents";
 import { PrefixLogger } from "./utils";
 import { createPipelineHandoff } from "./agent-handoffs";
 

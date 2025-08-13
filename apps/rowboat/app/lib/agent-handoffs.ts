@@ -3,12 +3,14 @@ import { Agent, handoff, Handoff } from "@openai/agents";
 import { z } from "zod";
 import { PrefixLogger } from "./utils";
 import { 
+    WorkflowAgent
+} from "./types/workflow_types";
+import {
     HandoffContext, 
     PipelineContext, 
     TaskContext, 
-    WorkflowAgent,
     PipelineExecutionState 
-} from "./types/workflow_types";
+} from "./agents";
 
 // Types for handoff input data (from SDK)
 export interface HandoffInputData {
