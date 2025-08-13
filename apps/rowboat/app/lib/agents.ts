@@ -22,7 +22,7 @@ const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
 const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
 
 // Feature flags
-const USE_NATIVE_HANDOFFS = process.env.USE_NATIVE_HANDOFFS !== 'false'; // Default to true for testing
+const USE_NATIVE_HANDOFFS = process.env.USE_NATIVE_HANDOFFS === 'true';
 
 // Internal types for agent handoffs and pipeline management
 // Context passing schemas for SDK handoffs (OpenAI API compatible)
@@ -1044,6 +1044,13 @@ async function* handleMessageOutput(
 
     for (const content of event.item.rawItem.content) {
         if (content.type === 'output_text') {
+            // todo: look into what is causing empty messages
+            // Skip empty or whitespace-only messages
+            if (!content.text || content.text.trim() === '') {
+                eventLogger.log(`Skipping empty message from ${agentName}`);
+                continue;
+            }
+            
             // create message
             const msg: z.infer<typeof Message> = {
                 role: 'assistant',
