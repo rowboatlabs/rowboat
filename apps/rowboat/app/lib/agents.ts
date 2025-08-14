@@ -78,14 +78,6 @@ const openai = createOpenAI({
     baseURL: PROVIDER_BASE_URL,
 });
 
-const ZUsage = z.object({
-    tokens: z.object({
-        total: z.number(),
-        prompt: z.number(),
-        completion: z.number(),
-    }),
-});
-
 const ZOutMessage = z.union([
     AssistantMessage,
     AssistantMessageWithToolCalls,
@@ -95,6 +87,7 @@ const ZOutMessage = z.union([
 // Helper to create an agent
 function createAgent(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     projectId: string,
     config: z.infer<typeof WorkflowAgent>,
     tools: Record<string, Tool>,
@@ -145,7 +138,7 @@ ${CHILD_TRANSFER_RELATED_INSTRUCTIONS}
 
     // Add RAG tool if needed
     if (config.ragDataSources?.length) {
-        const ragTool = createRagTool(logger, config, projectId);
+        const ragTool = createRagTool(logger, usageTracker, config, projectId);
         agentTools.push(ragTool);
 
         // update instructions to include RAG instructions
@@ -269,8 +262,8 @@ function getStartOfTurnAgentName(
 // Logs an event and then yields it
 async function* emitEvent(
     logger: PrefixLogger,
-    event: z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>,
-): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>> {
+    event: z.infer<typeof ZOutMessage>,
+): AsyncIterable<z.infer<typeof ZOutMessage>> {
     logger.log(`-> emitting event: ${JSON.stringify(event)}`);
     yield event;
     return;
@@ -318,30 +311,6 @@ class AgentTransferCounter {
     get(fromAgent: string, toAgent: string): number {
         const key = `${fromAgent}:${toAgent}`;
         return this.calls[key] || 0;
-    }
-}
-
-class UsageTracker {
-    private usage: {
-        total: number;
-        prompt: number;
-        completion: number;
-    } = { total: 0, prompt: 0, completion: 0 };
-
-    increment(total: number, prompt: number, completion: number): void {
-        this.usage.total += total;
-        this.usage.prompt += prompt;
-        this.usage.completion += completion;
-    }
-
-    get(): { total: number, prompt: number, completion: number } {
-        return this.usage;
-    }
-
-    asEvent(): z.infer<typeof ZUsage> {
-        return {
-            tokens: this.usage,
-        };
     }
 }
 
@@ -396,7 +365,7 @@ function mapConfig(workflow: z.infer<typeof Workflow>): {
     return { agentConfig, toolConfig, promptConfig, pipelineConfig };
 }
 
-async function* emitGreetingTurn(logger: PrefixLogger, workflow: z.infer<typeof Workflow>): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>> {
+async function* emitGreetingTurn(logger: PrefixLogger, workflow: z.infer<typeof Workflow>): AsyncIterable<z.infer<typeof ZOutMessage>> {
     // find the greeting prompt
     const prompt = workflow.prompts.find(p => p.type === 'greeting')?.prompt || 'How can I help you today?';
     logger.log(`greeting turn: ${prompt}`);
@@ -408,15 +377,13 @@ async function* emitGreetingTurn(logger: PrefixLogger, workflow: z.infer<typeof 
         agentName: workflow.startAgent,
         responseType: 'external',
     });
-
-    // emit final usage information
-    yield* emitEvent(logger, new UsageTracker().asEvent());
 }
 
 
 // Enhanced agent creation with native handoff support
 function createAgentsWithNativeHandoffs(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     projectId: string,
     workflow: z.infer<typeof Workflow>,
     agentConfig: Record<string, z.infer<typeof WorkflowAgent>>,
@@ -560,6 +527,7 @@ function createAgentsWithNativeHandoffs(
 // Legacy agent creation (existing implementation)
 function createAgentsLegacy(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     projectId: string,
     workflow: z.infer<typeof Workflow>,
     agentConfig: Record<string, z.infer<typeof WorkflowAgent>>,
@@ -595,6 +563,7 @@ function createAgentsLegacy(
 
         const { agent, entities } = createAgent(
             logger,
+            usageTracker,
             projectId,
             config,
             tools,
@@ -1243,7 +1212,8 @@ export async function* streamResponse(
     projectId: string,
     workflow: z.infer<typeof Workflow>,
     messages: z.infer<typeof Message>[],
-): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>> {
+    usageTracker: UsageTracker,
+): AsyncIterable<z.infer<typeof ZOutMessage>> {
     // Divider log for tracking agent loop start
     console.log('-------------------- AGENT LOOP START --------------------');
     // set up logging
@@ -1275,7 +1245,7 @@ export async function* streamResponse(
     logger.log(`initialized stack: ${JSON.stringify(stack)}`);
 
     // create tools
-    const tools = createTools(logger, projectId, workflow, toolConfig);
+    const tools = createTools(logger, usageTracker, projectId, workflow, toolConfig);
 
     // create agents with feature flag support
     const createAgentsFunction = USE_NATIVE_HANDOFFS ? createAgentsWithNativeHandoffs : createAgentsLegacy;
@@ -1296,7 +1266,6 @@ export async function* streamResponse(
     let agentName: string | null = startOfTurnAgentName;
 
     // start the turn loop
-    const usageTracker = new UsageTracker();
     const turnMsgs: z.infer<typeof Message>[] = [...messages];
 
     // Initialize agent state tracking for tool call completion
@@ -1523,9 +1492,6 @@ export async function* streamResponse(
         }
 
     }
-
-    // emit usage information
-    yield* emitEvent(logger, usageTracker.asEvent());
 }
 
 // this is a sync version of streamResponse
@@ -1535,8 +1501,10 @@ export async function getResponse(
     messages: z.infer<typeof Message>[],
 ): Promise<{
     messages: z.infer<typeof ZOutMessage>[],
-    usage: z.infer<typeof ZUsage>,
+    usage: any,
 }> {
+    throw new Error("Not implemented!");
+    /*
     const out: z.infer<typeof ZOutMessage>[] = [];
     let usage: z.infer<typeof ZUsage> = {
         tokens: {
@@ -1554,4 +1522,5 @@ export async function getResponse(
         }
     }
     return { messages: out, usage };
+    */
 }

@@ -220,10 +220,10 @@ export async function POST(
         // log billing usage
         if (USE_BILLING && billingCustomerId) {
             const agentMessageCount = convertedResponseMessages.filter(m => m.role === 'assistant').length;
-            await logUsage(billingCustomerId, {
-                type: 'agent_messages',
-                amount: agentMessageCount,
-            });
+            // await logUsage(billingCustomerId, {
+            //     type: 'agent_messages',
+            //     amount: agentMessageCount,
+            // });
         }
 
         logger.log(`Turn processing completed successfully`);

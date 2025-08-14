@@ -15,6 +15,7 @@ import { WithStringId } from "../lib/types/types";
 import { getEditAgentInstructionsResponse } from "../lib/copilot/copilot";
 import { container } from "@/di/container";
 import { IUsageQuotaPolicy } from "@/src/application/policies/usage-quota.policy.interface";
+import { UsageTracker } from "../lib/billing";
 
 const usageQuotaPolicy = container.resolve<IUsageQuotaPolicy>('usageQuotaPolicy');
 
@@ -32,8 +33,7 @@ export async function getCopilotResponseStream(
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
-        type: 'copilot_request',
-        data: {},
+        type: 'use_credits',
     });
     if (!authResponse.success) {
         return { billingError: authResponse.error || 'Billing error' };
@@ -75,8 +75,7 @@ export async function getCopilotAgentInstructions(
 
     // Check billing authorization
     const authResponse = await authorizeUserAction({
-        type: 'copilot_request',
-        data: {},
+        type: 'use_credits',
     });
     if (!authResponse.success) {
         return { billingError: authResponse.error || 'Billing error' };
@@ -93,8 +92,11 @@ export async function getCopilotAgentInstructions(
         }
     };
 
+    const usageTracker = new UsageTracker();
+
     // call copilot api
     const agent_instructions = await getEditAgentInstructionsResponse(
+        usageTracker,
         projectId,
         request.context,
         request.messages,
@@ -104,8 +106,7 @@ export async function getCopilotAgentInstructions(
     // log the billing usage
     if (USE_BILLING) {
         await logUsage({
-            type: 'copilot_requests',
-            amount: 1,
+            items: usageTracker.flush(),
         });
     }
 

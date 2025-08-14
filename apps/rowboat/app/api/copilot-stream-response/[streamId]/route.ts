@@ -1,4 +1,4 @@
-import { getCustomerIdForProject, logUsage } from "@/app/lib/billing";
+import { getCustomerIdForProject, logUsage, UsageTracker } from "@/app/lib/billing";
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { redisClient } from "@/app/lib/redis";
 import { CopilotAPIRequest } from "@/app/lib/types/copilot_types";
@@ -21,6 +21,7 @@ export async function GET(request: Request, props: { params: Promise<{ streamId:
     billingCustomerId = await getCustomerIdForProject(projectId);
   }
 
+  const usageTracker = new UsageTracker();
   const encoder = new TextEncoder();
   let messageCount = 0;
 
@@ -29,6 +30,7 @@ export async function GET(request: Request, props: { params: Promise<{ streamId:
       try {
         // Iterate over the copilot stream generator
         for await (const event of streamMultiAgentResponse(
+          usageTracker,
           projectId,
           context,
           messages,
@@ -49,21 +51,20 @@ export async function GET(request: Request, props: { params: Promise<{ streamId:
         }
 
         controller.close();
-
-        // increment copilot request count in billing
+      } catch (error) {
+        console.error('Error processing copilot stream:', error);
+        controller.error(error);
+      } finally {
+        // log copilot usage
         if (USE_BILLING && billingCustomerId) {
           try {
             await logUsage(billingCustomerId, {
-              type: "copilot_requests",
-              amount: 1,
+              items: usageTracker.flush(),
             });
           } catch (error) {
             console.error("Error logging usage", error);
           }
         }
-      } catch (error) {
-        console.error('Error processing copilot stream:', error);
-        controller.error(error);
       }
     },
   });

@@ -1,6 +1,6 @@
 import { Reason, Turn, TurnEvent } from "@/src/entities/models/turn";
 import { USE_BILLING } from "@/app/lib/feature_flags";
-import { authorize, getCustomerIdForProject, logUsage } from "@/app/lib/billing";
+import { authorize, getCustomerIdForProject, logUsage, UsageTracker } from "@/app/lib/billing";
 import { NotFoundError } from '@/src/entities/errors/common';
 import { IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
 import { streamResponse } from "@/app/lib/agents";
@@ -69,6 +69,21 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
         if (USE_BILLING) {
             // get billing customer id for project
             billingCustomerId = await getCustomerIdForProject(projectId);
+
+            // validate enough credits
+            const result = await authorize(billingCustomerId, {
+                type: "use_credits"
+            });
+            if (!result.success) {
+                yield {
+                    type: "error",
+                    error: result.error || 'Billing error',
+                    isBillingError: true,
+                };
+                return;
+            }
+
+            // validate model usage
             const agentModels = conversation.workflow.agents.reduce((acc, agent) => {
                 acc.push(agent.model);
                 return acc;
@@ -111,46 +126,50 @@ export class RunConversationTurnUseCase implements IRunConversationTurnUseCase {
             conversation.workflow.mockTools = data.input.mockTools;
         }
 
+        // init usage tracker
+        const usageTracker = new UsageTracker();
+
         // call agents runtime and handle generated messages
-        const outputMessages: z.infer<typeof Message>[] = [];
-        for await (const event of streamResponse(projectId, conversation.workflow, inputMessages)) {
-            // handle msg events
-            if ("role" in event) {
-                // collect generated message
-                const msg = {
-                    ...event,
-                    timestamp: new Date().toISOString(),
-                };
-                outputMessages.push(msg);
+        try {
+            const outputMessages: z.infer<typeof Message>[] = [];
+            for await (const event of streamResponse(projectId, conversation.workflow, inputMessages, usageTracker)) {
+                // handle msg events
+                if ("role" in event) {
+                    // collect generated message
+                    const msg = {
+                        ...event,
+                        timestamp: new Date().toISOString(),
+                    };
+                    outputMessages.push(msg);
 
-                // yield event
-                yield {
-                    type: "message",
-                    data: msg,
-                };
-            } else {
-                // save turn data
-                const turn = await this.conversationsRepository.addTurn(data.conversationId, {
-                    reason: data.reason,
-                    input: data.input,
-                    output: outputMessages,
-                });
-
-                // yield event
-                yield {
-                    type: "done",
-                    turn,
-                    conversationId,
+                    // yield event
+                    yield {
+                        type: "message",
+                        data: msg,
+                    };
                 }
             }
-        }
 
-        // Log billing usage
-        if (USE_BILLING && billingCustomerId) {
-            await logUsage(billingCustomerId, {
-                type: "agent_messages",
-                amount: outputMessages.length,
+            // save turn data
+            const turn = await this.conversationsRepository.addTurn(data.conversationId, {
+                reason: data.reason,
+                input: data.input,
+                output: outputMessages,
             });
+
+            // yield event
+            yield {
+                type: "done",
+                turn,
+                conversationId,
+            }
+        } finally {
+            // Log billing usage
+            if (USE_BILLING && billingCustomerId) {
+                await logUsage(billingCustomerId, {
+                    items: usageTracker.flush(),
+                });
+            }
         }
     }
 }

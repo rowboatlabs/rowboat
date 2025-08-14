@@ -2,11 +2,51 @@ import { z } from "zod";
 
 export const SubscriptionPlan = z.enum(["free", "starter", "pro"]);
 
-export const UsageType = z.enum([
-    "copilot_requests",
-    "agent_messages",
-    "rag_tokens",
+export const UsageTypeKey = z.enum([
+    "LLM_USAGE",
+    "EMBEDDING_MODEL_USAGE",
+    "COMPOSIO_TOOL_USAGE",
+    "FIRECRAWL_SCRAPE_USAGE",
 ]);
+
+export const LLMUsage = z.object({
+    type: z.literal(UsageTypeKey.Enum.LLM_USAGE),
+    modelName: z.string(),
+    inputTokens: z.number().positive(),
+    outputTokens: z.number().positive(),
+    context: z.string(),
+});
+
+export const EmbeddingModelUsage = z.object({
+    type: z.literal(UsageTypeKey.Enum.EMBEDDING_MODEL_USAGE),
+    modelName: z.string(),
+    tokens: z.number().positive(),
+    context: z.string(),
+});
+
+export const ComposioToolUsage = z.object({
+    type: z.literal(UsageTypeKey.Enum.COMPOSIO_TOOL_USAGE),
+    toolSlug: z.string(),
+    context: z.string(),
+});
+
+export const FirecrawlScrapeUsage = z.object({
+    type: z.literal(UsageTypeKey.Enum.FIRECRAWL_SCRAPE_USAGE),
+    context: z.string(),
+});
+
+export const UsageItem = z.discriminatedUnion("type", [
+    LLMUsage,
+    EmbeddingModelUsage,
+    ComposioToolUsage,
+    FirecrawlScrapeUsage,
+]);
+
+export const LogUsageRequest = z.object({
+    items: z.array(UsageItem),
+});
+
+export const CustomerUsageData = z.record(z.string(), z.number());
 
 export const Customer = z.object({
     _id: z.string(),
@@ -19,35 +59,22 @@ export const Customer = z.object({
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
     subscriptionPlanUpdatedAt: z.string().datetime().optional(),
-    usage: z.record(UsageType, z.number()).optional(),
+    usage: CustomerUsageData.optional(),
     usageUpdatedAt: z.string().datetime().optional(),
-});
-
-export const LogUsageRequest = z.object({
-    type: UsageType,
-    amount: z.number().int().positive(),
-});
+    creditsOverride: z.number().optional(),
+    maxProjectsOverride: z.number().optional(),
+    agentModelsOverride: z.array(z.string()).optional(),
+ });
 
 export const AuthorizeRequest = z.discriminatedUnion("type", [
+    z.object({
+        "type": z.literal("use_credits"),
+    }),
     z.object({
         "type": z.literal("create_project"),
         "data": z.object({
             "existingProjectCount": z.number(),
         }),
-    }),
-    z.object({
-        "type": z.literal("enable_hosted_tool_server"),
-        "data": z.object({
-            "existingServerCount": z.number(),
-        }),
-    }),
-    z.object({
-        "type": z.literal("process_rag"),
-        "data": z.object({}),
-    }),
-    z.object({
-        "type": z.literal("copilot_request"),
-        "data": z.object({}),
     }),
     z.object({
         "type": z.literal("agent_response"),
@@ -63,10 +90,9 @@ export const AuthorizeResponse = z.object({
 });
 
 export const UsageResponse = z.object({
-    usage: z.record(UsageType, z.object({
-        usage: z.number(),
-        total: z.number(),
-    })),
+    sanctionedCredits: z.number(),
+    availableCredits: z.number(),
+    usage: CustomerUsageData,
 });
 
 export const CustomerPortalSessionRequest = z.object({

@@ -16,7 +16,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { createOpenAI } from '@ai-sdk/openai';
 import { USE_BILLING, USE_GEMINI_FILE_PARSING } from '../lib/feature_flags';
-import { authorize, getCustomerIdForProject, logUsage } from '../lib/billing';
+import { authorize, getCustomerIdForProject, logUsage, UsageTracker } from '../lib/billing';
 import { BillingError } from '@/src/entities/errors/common';
 
 const FILE_PARSING_PROVIDER_API_KEY = process.env.FILE_PARSING_PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
@@ -75,7 +75,7 @@ async function retryable<T>(fn: () => Promise<T>, maxAttempts: number = 3): Prom
     }
 }
 
-async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>> & { data: { type: "file_local" | "file_s3" } }): Promise<number> {
+async function runProcessPipeline(_logger: PrefixLogger, usageTracker: UsageTracker, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>> & { data: { type: "file_local" | "file_s3" } }) {
     const logger = _logger
         .child(doc._id.toString())
         .child(doc.name);
@@ -95,7 +95,7 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
     if (!USE_GEMINI_FILE_PARSING) {
         // Use OpenAI to extract text content
         logger.log("Extracting content using OpenAI");
-        const { text } = await generateText({
+        const { text, usage } = await generateText({
             model: openai(FILE_PARSING_MODEL),
             system: extractPrompt,
             messages: [
@@ -112,6 +112,13 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
             ],
         });
         markdown = text;
+        usageTracker.track({
+            type: "LLM_USAGE",
+            modelName: FILE_PARSING_MODEL,
+            inputTokens: usage.promptTokens,
+            outputTokens: usage.completionTokens,
+            context: "rag.files.llm_usage",
+        });
     } else {
         // Use Gemini to extract text content
         logger.log("Extracting content using Gemini");
@@ -127,6 +134,13 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
             extractPrompt,
         ]);
         markdown = result.response.text();
+        usageTracker.track({
+            type: "LLM_USAGE",
+            modelName: FILE_PARSING_MODEL,
+            inputTokens: result.response.usageMetadata?.promptTokenCount || 0,
+            outputTokens: result.response.usageMetadata?.candidatesTokenCount || 0,
+            context: "rag.files.llm_usage",
+        });
     }
 
     // split into chunks
@@ -138,6 +152,12 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
     const { embeddings, usage } = await embedMany({
         model: embeddingModel,
         values: splits.map((split) => split.pageContent)
+    });
+    usageTracker.track({
+        type: "EMBEDDING_MODEL_USAGE",
+        modelName: embeddingModel.modelId,
+        tokens: usage.tokens,
+        context: "rag.files.embedding_usage",
     });
 
     // store embeddings in qdrant
@@ -170,8 +190,6 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
             lastUpdatedAt: new Date().toISOString(),
         }
     });
-
-    return usage.tokens;
 }
 
 async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>>): Promise<void> {
@@ -339,8 +357,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                 // authorize with billing
                 if (USE_BILLING && billingCustomerId) {
                     const authResponse = await authorize(billingCustomerId, {
-                        type: "process_rag",
-                        data: {},
+                        type: "use_credits",
                     });
 
                     if ('error' in authResponse) {
@@ -349,16 +366,9 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                 }
 
                 const ldoc = doc as WithId<z.infer<typeof DataSourceDoc>> & { data: { type: "file_local" | "file_s3" } };
+                const usageTracker = new UsageTracker();
                 try {
-                    const usedTokens = await runProcessPipeline(logger, job, ldoc);
-
-                    // log usage in billing
-                    if (USE_BILLING && billingCustomerId) {
-                        await logUsage(billingCustomerId, {
-                            type: "rag_tokens",
-                            amount: usedTokens,
-                        });
-                    }
+                    await runProcessPipeline(logger, usageTracker, job, ldoc);
                 } catch (e: any) {
                     errors = true;
                     logger.log("Error processing doc:", e);
@@ -371,6 +381,13 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                             error: e.message,
                         }
                     });
+                } finally {
+                    // log usage in billing
+                    if (USE_BILLING && billingCustomerId) {
+                        await logUsage(billingCustomerId, {
+                            items: usageTracker.flush(),
+                        });
+                    }
                 }
             }
 

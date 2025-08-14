@@ -1,6 +1,6 @@
 import { WithStringId } from './types/types';
 import { z } from 'zod';
-import { Customer, AuthorizeRequest, AuthorizeResponse, LogUsageRequest, UsageResponse, CustomerPortalSessionResponse, PricesResponse, UpdateSubscriptionPlanRequest, UpdateSubscriptionPlanResponse, ModelsResponse } from './types/billing_types';
+import { Customer, AuthorizeRequest, AuthorizeResponse, LogUsageRequest, UsageResponse, CustomerPortalSessionResponse, PricesResponse, UpdateSubscriptionPlanRequest, UpdateSubscriptionPlanResponse, ModelsResponse, UsageItem } from './types/billing_types';
 import { ObjectId } from 'mongodb';
 import { projectsCollection, usersCollection } from './mongodb';
 import { redirect } from 'next/navigation';
@@ -22,6 +22,20 @@ const GUEST_BILLING_CUSTOMER = {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
 };
+
+export class UsageTracker{
+    private items: z.infer<typeof UsageItem>[] = [];
+
+    track(item: z.infer<typeof UsageItem>) {
+        this.items.push(item);
+    }
+
+    flush(): z.infer<typeof UsageItem>[] {
+        const items = this.items;
+        this.items = [];
+        return items;
+    }
+}
 
 export async function getCustomerIdForProject(projectId: string): Promise<string> {
     const project = await projectsCollection.findOne({ _id: projectId });
@@ -111,6 +125,7 @@ export async function authorize(customerId: string, request: z.infer<typeof Auth
 }
 
 export async function logUsage(customerId: string, request: z.infer<typeof LogUsageRequest>) {
+    console.log(`logging billing usage for customer ${customerId}`, JSON.stringify(request));
     const response = await fetch(`${BILLING_API_URL}/api/customers/${customerId}/log-usage`, {
         method: 'POST',
         headers: {

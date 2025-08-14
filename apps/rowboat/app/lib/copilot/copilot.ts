@@ -13,6 +13,7 @@ import { COPILOT_MULTI_AGENT_EXAMPLE_1 } from "./example_multi_agent_1";
 import { CURRENT_WORKFLOW_PROMPT } from "./current_workflow";
 import { USE_COMPOSIO_TOOLS } from "../feature_flags";
 import { composio, getTool } from "../composio/composio";
+import { UsageTracker } from "../billing";
 
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
@@ -119,7 +120,7 @@ ${JSON.stringify(simplifiedDataSources)}
     return prompt;
 }
 
-async function searchRelevantTools(query: string): Promise<string> {
+async function searchRelevantTools(usageTracker: UsageTracker, query: string): Promise<string> {
     const logger = new PrefixLogger("copilot-search-tools");
     console.log("🔧 TOOL CALL: searchRelevantTools", { query });
     
@@ -141,6 +142,13 @@ async function searchRelevantTools(query: string): Promise<string> {
         logger.log(`tool search failed: ${searchResult.error}`)
         return 'No tools found!';
     }
+
+    // track composio search tool usage
+    usageTracker.track({
+        type: "COMPOSIO_TOOL_USAGE",
+        toolSlug: "COMPOSIO_SEARCH_TOOLS",
+        context: "copilot.search_relevant_tools",
+    });
 
     // parse results
     const result = composioToolSearchResponseSchema.safeParse(searchResult.data);
@@ -208,6 +216,7 @@ function updateLastUserMessage(
 }
 
 export async function getEditAgentInstructionsResponse(
+    usageTracker: UsageTracker,
     projectId: string,
     context: z.infer<typeof CopilotChatContext> | null,
     messages: z.infer<typeof CopilotMessage>[],
@@ -232,7 +241,7 @@ export async function getEditAgentInstructionsResponse(
         system: COPILOT_INSTRUCTIONS_EDIT_AGENT,
         messages: messages,
     }));
-    const { object } = await generateObject({
+    const { object, usage } = await generateObject({
         model: openai(COPILOT_MODEL),
         messages: [
             {
@@ -246,10 +255,20 @@ export async function getEditAgentInstructionsResponse(
         }),
     });
 
+    // log usage
+    usageTracker.track({
+        type: "LLM_USAGE",
+        modelName: COPILOT_MODEL,
+        inputTokens: usage.promptTokens,
+        outputTokens: usage.completionTokens,
+        context: "copilot.llm_usage",
+    });
+
     return object.agent_instructions;
 }
 
 export async function* streamMultiAgentResponse(
+    usageTracker: UsageTracker,
     projectId: string,
     context: z.infer<typeof CopilotChatContext> | null,
     messages: z.infer<typeof CopilotMessage>[],
@@ -297,7 +316,7 @@ export async function* streamMultiAgentResponse(
                 }),
                 execute: async ({ query }: { query: string }) => {
                     console.log("🎯 AI TOOL CALL: search_relevant_tools", { query });
-                    const result = await searchRelevantTools(query);
+                    const result = await searchRelevantTools(usageTracker, query);
                     console.log("✅ AI TOOL CALL COMPLETED: search_relevant_tools", { 
                         query, 
                         resultLength: result.length 
@@ -341,6 +360,15 @@ export async function* streamMultiAgentResponse(
                 toolCallId: event.toolCallId,
                 result: event.result,
             };
+        } else if (event.type === "step-finish") {
+            // log usage
+            usageTracker.track({
+                type: "LLM_USAGE",
+                modelName: COPILOT_MODEL,
+                inputTokens: event.usage.promptTokens,
+                outputTokens: event.usage.completionTokens,
+                context: "copilot.llm_usage",
+            });
         }
     }
 

@@ -10,7 +10,7 @@ import { qdrantClient } from '../lib/qdrant';
 import { PrefixLogger } from "../lib/utils";
 import crypto from 'crypto';
 import { USE_BILLING } from '../lib/feature_flags';
-import { authorize, getCustomerIdForProject, logUsage } from '../lib/billing';
+import { authorize, getCustomerIdForProject, logUsage, UsageTracker } from '../lib/billing';
 import { BillingError } from '@/src/entities/errors/common';
 
 const splitter = new RecursiveCharacterTextSplitter({
@@ -23,7 +23,7 @@ const second = 1000;
 const minute = 60 * second;
 const hour = 60 * minute;
 
-async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>>): Promise<number> {
+async function runProcessPipeline(_logger: PrefixLogger, usageTracker: UsageTracker, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>>) {
     const logger = _logger
         .child(doc._id.toString())
         .child(doc.name);
@@ -41,6 +41,12 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
     const { embeddings, usage } = await embedMany({
         model: embeddingModel,
         values: splits.map((split) => split.pageContent)
+    });
+    usageTracker.track({
+        type: "EMBEDDING_MODEL_USAGE",
+        modelName: embeddingModel.modelId,
+        tokens: usage.tokens,
+        context: "rag.text.embedding_usage",
     });
 
     // store embeddings in qdrant
@@ -73,8 +79,6 @@ async function runProcessPipeline(_logger: PrefixLogger, job: WithId<z.infer<typ
             lastUpdatedAt: new Date().toISOString(),
         }
     });
-
-    return usage.tokens;
 }
 
 async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>>): Promise<void> {
@@ -241,8 +245,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                 // authorize with billing
                 if (USE_BILLING && billingCustomerId) {
                     const authResponse = await authorize(billingCustomerId, {
-                        type: "process_rag",
-                        data: {}
+                        type: "use_credits",
                     });
 
                     if ('error' in authResponse) {
@@ -250,16 +253,9 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                     }
                 }
 
+                const usageTracker = new UsageTracker();
                 try {
-                    const usedTokens = await runProcessPipeline(logger, job, doc);
-
-                    // log usage in billing
-                    if (USE_BILLING && billingCustomerId) {
-                        await logUsage(billingCustomerId, {
-                            type: "rag_tokens",
-                            amount: usedTokens,
-                        });
-                    }
+                    await runProcessPipeline(logger, usageTracker, job, doc);
                 } catch (e: any) {
                     errors = true;
                     logger.log("Error processing doc:", e);
@@ -272,6 +268,13 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                             error: e.message,
                         }
                     });
+                } finally {
+                    // log usage in billing
+                    if (USE_BILLING && billingCustomerId) {
+                        await logUsage(billingCustomerId, {
+                            items: usageTracker.flush(),
+                        });
+                    }
                 }
             }
 
