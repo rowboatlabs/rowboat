@@ -16,6 +16,7 @@ import { qdrantClient } from '../lib/qdrant';
 import { EmbeddingRecord } from "./types/datasource_types";
 import { WorkflowAgent, WorkflowTool } from "./types/workflow_types";
 import { PrefixLogger } from "./utils";
+import { UsageTracker } from "./billing";
 
 // Provider configuration
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
@@ -30,6 +31,7 @@ const openai = createOpenAI({
 // Helper to handle mock tool responses
 export async function invokeMockTool(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     toolName: string,
     args: string,
     description: string,
@@ -49,11 +51,20 @@ export async function invokeMockTool(
         content: `Generate a realistic response for the tool '${toolName}' with these parameters: ${args}. The response should be concise and focused on what the tool would actually return.`
     }];
 
-    const { text } = await generateText({
+    const { text, usage } = await generateText({
         model: openai(MODEL),
         messages,
     });
     logger.log(`generated text: ${text}`);
+
+    // track usage
+    usageTracker.track({
+        type: "LLM_USAGE",
+        modelName: MODEL,
+        inputTokens: usage.promptTokens,
+        outputTokens: usage.completionTokens,
+        context: "agents_runtime.mock_tool",
+    });
 
     return text;
 }
@@ -61,6 +72,7 @@ export async function invokeMockTool(
 // Helper to handle RAG tool calls
 export async function invokeRagTool(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     projectId: string,
     query: string,
     sourceIds: string[],
@@ -81,9 +93,19 @@ export async function invokeRagTool(
     logger.log(`k: ${k}`);
 
     // Create embedding for question
-    const { embedding } = await embed({
+    const { embedding, usage } = await embed({
         model: embeddingModel,
         value: query,
+    });
+
+    // track usage
+
+    // track usage
+    usageTracker.track({
+        type: "EMBEDDING_MODEL_USAGE",
+        modelName: embeddingModel.modelId,
+        tokens: usage.tokens,
+        context: "agents_runtime.rag_tool.embedding_usage",
     });
 
     // Fetch all data sources for this project
@@ -154,6 +176,7 @@ export async function invokeRagTool(
 
 export async function invokeWebhookTool(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     projectId: string,
     name: string,
     input: any,
@@ -233,6 +256,7 @@ export async function invokeWebhookTool(
 // Helper to handle MCP tool calls
 export async function invokeMcpTool(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     projectId: string,
     name: string,
     input: any,
@@ -269,6 +293,7 @@ export async function invokeMcpTool(
 // Helper to handle composio tool calls
 export async function invokeComposioTool(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     projectId: string,
     name: string,
     composioData: z.infer<typeof WorkflowTool>['composioData'] & {},
@@ -299,12 +324,21 @@ export async function invokeComposioTool(
         connectedAccountId: connectedAccountId,
     });
     logger.log(`composio tool result: ${JSON.stringify(result)}`);
+
+    // track usage
+    usageTracker.track({
+        type: "COMPOSIO_TOOL_USAGE",
+        toolSlug: slug,
+        context: "agents_runtime.composio_tool",
+    });
+
     return result.data;
 }
 
 // Helper to create RAG tool
 export function createRagTool(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     config: z.infer<typeof WorkflowAgent>,
     projectId: string
 ): Tool {
@@ -321,6 +355,7 @@ export function createRagTool(
         async execute(input: { query: string }) {
             const results = await invokeRagTool(
                 logger,
+                usageTracker,
                 projectId,
                 input.query,
                 config.ragDataSources || [],
@@ -337,6 +372,7 @@ export function createRagTool(
 // Helper to create a mock tool
 export function createMockTool(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     config: z.infer<typeof WorkflowTool>,
 ): Tool {
     return tool({
@@ -353,6 +389,7 @@ export function createMockTool(
             try {
                 const result = await invokeMockTool(
                     logger,
+                    usageTracker,
                     config.name,
                     JSON.stringify(input),
                     config.description,
@@ -374,6 +411,7 @@ export function createMockTool(
 // Helper to create a webhook tool
 export function createWebhookTool(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     config: z.infer<typeof WorkflowTool>,
     projectId: string,
 ): Tool {
@@ -391,7 +429,7 @@ export function createWebhookTool(
         },
         async execute(input: any) {
             try {
-                const result = await invokeWebhookTool(logger, projectId, name, input);
+                const result = await invokeWebhookTool(logger, usageTracker, projectId, name, input);
                 return JSON.stringify({
                     result,
                 });
@@ -408,6 +446,7 @@ export function createWebhookTool(
 // Helper to create an mcp tool
 export function createMcpTool(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     config: z.infer<typeof WorkflowTool>,
     projectId: string
 ): Tool {
@@ -425,7 +464,7 @@ export function createMcpTool(
         },
         async execute(input: any) {
             try {
-                const result = await invokeMcpTool(logger, projectId, name, input, mcpServerName || '');
+                const result = await invokeMcpTool(logger, usageTracker, projectId, name, input, mcpServerName || '');
                 return JSON.stringify({
                     result,
                 });
@@ -442,6 +481,7 @@ export function createMcpTool(
 // Helper to create a composio tool
 export function createComposioTool(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     config: z.infer<typeof WorkflowTool>,
     projectId: string
 ): Tool {
@@ -463,7 +503,7 @@ export function createComposioTool(
         },
         async execute(input: any) {
             try {
-                const result = await invokeComposioTool(logger, projectId, name, composioData, input);
+                const result = await invokeComposioTool(logger, usageTracker, projectId, name, composioData, input);
                 return JSON.stringify({
                     result,
                 });
@@ -479,6 +519,7 @@ export function createComposioTool(
 
 export function createTools(
     logger: PrefixLogger,
+    usageTracker: UsageTracker,
     projectId: string,
     workflow: { tools: z.infer<typeof WorkflowTool>[] },
     toolConfig: Record<string, z.infer<typeof WorkflowTool>>,
@@ -492,16 +533,16 @@ export function createTools(
         toolLogger.log(`creating tool: ${toolName} (type: ${config.mockTool ? 'mock' : config.isMcp ? 'mcp' : config.isComposio ? 'composio' : 'webhook'})`);
         
         if (config.mockTool) {
-            tools[toolName] = createMockTool(logger, config);
+            tools[toolName] = createMockTool(logger, usageTracker, config);
             toolLogger.log(`✓ created mock tool: ${toolName}`);
         } else if (config.isMcp) {
-            tools[toolName] = createMcpTool(logger, config, projectId);
+            tools[toolName] = createMcpTool(logger, usageTracker, config, projectId);
             toolLogger.log(`✓ created mcp tool: ${toolName} (server: ${config.mcpServerName || 'unknown'})`);
         } else if (config.isComposio) {
-            tools[toolName] = createComposioTool(logger, config, projectId);
+            tools[toolName] = createComposioTool(logger, usageTracker, config, projectId);
             toolLogger.log(`✓ created composio tool: ${toolName}`);
         } else {
-            tools[toolName] = createWebhookTool(logger, config, projectId);
+            tools[toolName] = createWebhookTool(logger, usageTracker, config, projectId);
             toolLogger.log(`✓ created webhook tool: ${toolName} (fallback)`);
         }
     }

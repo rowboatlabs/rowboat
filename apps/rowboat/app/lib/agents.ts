@@ -12,6 +12,8 @@ import { ConnectedEntity, sanitizeTextWithMentions, Workflow, WorkflowAgent, Wor
 import { CHILD_TRANSFER_RELATED_INSTRUCTIONS, CONVERSATION_TYPE_INSTRUCTIONS, PIPELINE_TYPE_INSTRUCTIONS, RAG_INSTRUCTIONS, TASK_TYPE_INSTRUCTIONS } from "./agent_instructions";
 import { PrefixLogger } from "./utils";
 import { Message, AssistantMessage, AssistantMessageWithToolCalls, ToolMessage } from "./types/types";
+import { UsageTracker } from "./billing";
+
 // Native handoff support
 import { createAgentHandoff, getSchemaForAgent, createContextFilterForAgent } from "./agent-handoffs";
 import { PipelineStateManager } from "./pipeline-state-manager";
@@ -414,6 +416,7 @@ function createAgentsWithNativeHandoffs(
         
         const { agent, entities } = createAgent(
             logger,
+            usageTracker,
             projectId,
             config,
             tools,
@@ -732,12 +735,13 @@ function maybeInjectGiveUpControlInstructions(
 // Handle raw model stream events
 async function* handleRawModelStreamEvent(
     event: any,
+    agentConfig: Record<string, z.infer<typeof WorkflowAgent>>,
     agentName: string,
     turnMsgs: z.infer<typeof Message>[],
     usageTracker: UsageTracker,
     eventLogger: PrefixLogger,
     getAgentState?: (agentName: string) => AgentState
-): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>> {
+): AsyncIterable<z.infer<typeof ZOutMessage>> {
     if (event.data.type === 'response_done') {
         // Count tool calls (excluding transfer_to_* calls)
         const toolCallCount = event.data.response.output.filter(
@@ -778,12 +782,13 @@ async function* handleRawModelStreamEvent(
         }
 
         // update usage information
-        usageTracker.increment(
-            event.data.response.usage.totalTokens,
-            event.data.response.usage.inputTokens,
-            event.data.response.usage.outputTokens
-        );
-        eventLogger.log(`updated usage information: ${JSON.stringify(usageTracker.get())}`);
+        usageTracker.track({
+            type: "LLM_USAGE",
+            modelName: agentConfig[agentName]?.model || "unknown",
+            inputTokens: event.data.response.usage.inputTokens,
+            outputTokens: event.data.response.usage.outputTokens,
+            context: "agents_runtime.llm_usage",
+        });
     }
 }
 
@@ -802,7 +807,7 @@ async function* handleNativeHandoffEvent(
     originalHandoffs: Record<string, any[]>,
     eventLogger: PrefixLogger,
     loopLogger: PrefixLogger
-): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage> | { newAgentName: string; shouldContinue?: boolean }> {
+): AsyncIterable<z.infer<typeof ZOutMessage> | { newAgentName: string; shouldContinue?: boolean }> {
     eventLogger.log(`🔄 NATIVE HANDOFF EVENT: ${agentName} -> ${event.item.targetAgent.name}`);
 
     // skip if its the same agent
@@ -912,7 +917,7 @@ async function* handleHandoffEvent(
     originalHandoffs: Record<string, Agent[]>,
     eventLogger: PrefixLogger,
     loopLogger: PrefixLogger
-): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage> | { newAgentName: string }> {
+): AsyncIterable<z.infer<typeof ZOutMessage> | { newAgentName: string }> {
     eventLogger.log(`🔄 HANDOFF EVENT: ${agentName} -> ${event.item.targetAgent.name}`);
 
     // skip if its the same agent
@@ -979,7 +984,7 @@ async function* handleToolCallResult(
     event: any,
     turnMsgs: z.infer<typeof Message>[],
     eventLogger: PrefixLogger
-): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage>> {
+): AsyncIterable<z.infer<typeof ZOutMessage>> {
     const m: z.infer<typeof Message> = {
         role: 'tool',
         content: event.item.rawItem.output.text,
@@ -1008,7 +1013,7 @@ async function* handleMessageOutput(
     eventLogger: PrefixLogger,
     loopLogger: PrefixLogger,
     getAgentState: (agentName: string) => AgentState
-): AsyncIterable<z.infer<typeof ZOutMessage> | z.infer<typeof ZUsage> | { newAgentName: string | null; shouldContinue: boolean }> {
+): AsyncIterable<z.infer<typeof ZOutMessage> | { newAgentName: string | null; shouldContinue: boolean }> {
     // check response visibility - could be an agent or pipeline
     const agentConfigObj = agentConfig[agentName];
     const pipelineConfigObj = pipelineConfig[agentName];
@@ -1249,7 +1254,7 @@ export async function* streamResponse(
 
     // create agents with feature flag support
     const createAgentsFunction = USE_NATIVE_HANDOFFS ? createAgentsWithNativeHandoffs : createAgentsLegacy;
-    const { agents, originalInstructions, originalHandoffs } = createAgentsFunction(logger, projectId, workflow, agentConfig, tools, promptConfig, pipelineConfig);
+    const { agents, originalInstructions, originalHandoffs } = createAgentsFunction(logger, usageTracker, projectId, workflow, agentConfig, tools, promptConfig, pipelineConfig);
     
     logger.log(`Using ${USE_NATIVE_HANDOFFS ? 'NATIVE SDK' : 'LEGACY'} handoffs`);
 
@@ -1359,7 +1364,7 @@ export async function* streamResponse(
 
             switch (event.type) {
                 case 'raw_model_stream_event':
-                    yield* handleRawModelStreamEvent(event, agentName!, turnMsgs, usageTracker, eventLogger, getAgentState);
+                    yield* handleRawModelStreamEvent(event, agentConfig, agentName!, turnMsgs, usageTracker, eventLogger, getAgentState);
                     break;
 
                 case 'run_item_stream_event':
