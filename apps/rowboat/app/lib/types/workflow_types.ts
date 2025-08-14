@@ -92,7 +92,6 @@ export const WorkflowPipeline = z.object({
     order: z.number().int().optional(),
 });
 
-
 export const Workflow = z.object({
     agents: z.array(WorkflowAgent),
     prompts: z.array(WorkflowPrompt),
