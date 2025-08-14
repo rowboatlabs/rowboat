@@ -1,5 +1,6 @@
 .DS_Store
 .env
+env.txt
 .vscode/
 data/
 .venv/
