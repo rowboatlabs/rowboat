@@ -1,6 +1,6 @@
 "use client";
 import { MCPServer, WithStringId } from "../../../lib/types/types";
-import { DataSource } from "../../../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { Project } from "../../../lib/types/project_types";
 import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
@@ -32,7 +32,7 @@ export function App({
 }) {
     const [mode, setMode] = useState<'draft' | 'live'>('draft');
     const [project, setProject] = useState<WithStringId<z.infer<typeof Project>> | null>(null);
-    const [dataSources, setDataSources] = useState<WithStringId<z.infer<typeof DataSource>>[] | null>(null);
+    const [dataSources, setDataSources] = useState<z.infer<typeof DataSource>[] | null>(null);
     const [projectConfig, setProjectConfig] = useState<z.infer<typeof Project> | null>(null);
     const [loading, setLoading] = useState(false);
     const [eligibleModels, setEligibleModels] = useState<z.infer<typeof ModelsResponse> | "*">("*");

@@ -72,7 +72,7 @@ export function Form({
         const first100Urls = urlsArray.slice(0, 100);
         await addDocsToDataSource({
             projectId,
-            sourceId: source._id,
+            sourceId: source.id,
             docData: first100Urls.map(url => ({
                 name: url,
                 data: {
@@ -82,7 +82,7 @@ export function Form({
             })),
         });
         if (onSuccess) {
-            onSuccess(source._id);
+            onSuccess(source.id);
         }
     }
 
@@ -97,7 +97,7 @@ export function Form({
         });
 
         if (onSuccess) {
-            onSuccess(source._id);
+            onSuccess(source.id);
         }
     }
 
@@ -115,7 +115,7 @@ export function Form({
         const content = formData.get('content') as string;
         await addDocsToDataSource({
             projectId,
-            sourceId: source._id,
+            sourceId: source.id,
             docData: [{
                 name: 'text',
                 data: {
@@ -126,7 +126,7 @@ export function Form({
         });
 
         if (onSuccess) {
-            onSuccess(source._id);
+            onSuccess(source.id);
         }
     }
 

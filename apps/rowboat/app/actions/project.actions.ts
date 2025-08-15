@@ -1,6 +1,6 @@
 'use server';
 import { redirect } from "next/navigation";
-import { db, dataSourcesCollection, projectsCollection } from "../lib/mongodb";
+import { db, projectsCollection } from "../lib/mongodb";
 import { z } from 'zod';
 import crypto from 'crypto';
 import { revalidatePath } from "next/cache";
@@ -19,6 +19,7 @@ import { IListApiKeysController } from "@/src/interface-adapters/controllers/api
 import { IDeleteApiKeyController } from "@/src/interface-adapters/controllers/api-keys/delete-api-key.controller";
 import { IApiKeysRepository } from "@/src/application/repositories/api-keys.repository.interface";
 import { IProjectMembersRepository } from "@/src/application/repositories/project-members.repository.interface";
+import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
 
 const projectActionAuthorizationPolicy = container.resolve<IProjectActionAuthorizationPolicy>('projectActionAuthorizationPolicy');
 const createApiKeyController = container.resolve<ICreateApiKeyController>('createApiKeyController');
@@ -26,6 +27,7 @@ const listApiKeysController = container.resolve<IListApiKeysController>('listApi
 const deleteApiKeyController = container.resolve<IDeleteApiKeyController>('deleteApiKeyController');
 const apiKeysRepository = container.resolve<IApiKeysRepository>('apiKeysRepository');
 const projectMembersRepository = container.resolve<IProjectMembersRepository>('projectMembersRepository');
+const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
 
 export async function listTemplates() {
     const templatesArray = Object.entries(templates)
@@ -234,23 +236,8 @@ export async function deleteProject(projectId: string) {
     // delete api keys
     await apiKeysRepository.deleteAll(projectId);
 
-    // delete embeddings
-    const sources = await dataSourcesCollection.find({
-        projectId,
-    }, {
-        projection: {
-            _id: true,
-        }
-    }).toArray();
-
-    const ids = sources.map(s => s._id);
-
-    // delete data sources
-    await dataSourcesCollection.deleteMany({
-        _id: {
-            $in: ids,
-        }
-    });
+    // delete sources
+    await dataSourcesRepository.deleteByProjectId(projectId);
 
     // delete project members
     await projectMembersRepository.deleteByProjectId(projectId);

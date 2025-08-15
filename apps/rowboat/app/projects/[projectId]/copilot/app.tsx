@@ -5,7 +5,7 @@ import { useRef, useState, createContext, useContext, useCallback, forwardRef, u
 import { CopilotChatContext } from "../../../lib/types/copilot_types";
 import { CopilotMessage } from "../../../lib/types/copilot_types";
 import { Workflow } from "@/app/lib/types/workflow_types";
-import { DataSource } from "@/app/lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { Action as WorkflowDispatch } from "@/app/projects/[projectId]/workflow/workflow_editor";
 import { Panel } from "@/components/common/panel-common";
@@ -14,7 +14,6 @@ import { Messages } from "./components/messages";
 import { CopyIcon, CheckIcon, PlusIcon, XIcon, InfoIcon, Sparkles } from "lucide-react";
 import { useCopilot } from "./use-copilot";
 import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
-import { WithStringId } from "@/app/lib/types/types";
 
 const CopilotContext = createContext<{
     workflow: z.infer<typeof Workflow> | null;
@@ -33,7 +32,7 @@ interface AppProps {
     onCopyJson?: (data: { messages: any[] }) => void;
     onMessagesChange?: (messages: z.infer<typeof CopilotMessage>[]) => void;
     isInitialState?: boolean;
-    dataSources?: WithStringId<z.infer<typeof DataSource>>[];
+    dataSources?: z.infer<typeof DataSource>[];
 }
 
 const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message: string) => void }, AppProps>(function App({
@@ -277,7 +276,7 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     chatContext?: z.infer<typeof CopilotChatContext>;
     dispatch: (action: WorkflowDispatch) => void;
     isInitialState?: boolean;
-    dataSources?: WithStringId<z.infer<typeof DataSource>>[];
+    dataSources?: z.infer<typeof DataSource>[];
 }>(({
     projectId,
     workflow,

@@ -2,7 +2,7 @@ import React, { forwardRef, useImperativeHandle } from "react";
 import { z } from "zod";
 import { WorkflowPrompt, WorkflowAgent, WorkflowTool, WorkflowPipeline, Workflow } from "../../../lib/types/workflow_types";
 import { Project } from "../../../lib/types/project_types";
-import { DataSource } from "../../../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { WithStringId } from "../../../lib/types/types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
@@ -48,7 +48,7 @@ interface EntityListProps {
     tools: z.infer<typeof WorkflowTool>[];
     prompts: z.infer<typeof WorkflowPrompt>[];
     pipelines: z.infer<typeof WorkflowPipeline>[];
-    dataSources: WithStringId<z.infer<typeof DataSource>>[];
+    dataSources: z.infer<typeof DataSource>[];
     workflow: z.infer<typeof Workflow>;
     selectedEntity: {
         type: "agent" | "tool" | "prompt" | "datasource" | "pipeline" | "visualise";
@@ -1071,14 +1071,14 @@ export const EntityList = forwardRef<
                                                             className={clsx(
                                                                 "flex items-center gap-2 px-3 py-2 rounded-md min-h-[24px] cursor-pointer",
                                                                 {
-                                                                    "bg-indigo-50 dark:bg-indigo-950/30": selectedEntity?.type === "datasource" && selectedEntity.name === dataSource._id,
-                                                                    "hover:bg-zinc-50 dark:hover:bg-zinc-800": !(selectedEntity?.type === "datasource" && selectedEntity.name === dataSource._id)
+                                                                    "bg-indigo-50 dark:bg-indigo-950/30": selectedEntity?.type === "datasource" && selectedEntity.name === dataSource.id,
+                                                                    "hover:bg-zinc-50 dark:hover:bg-zinc-800": !(selectedEntity?.type === "datasource" && selectedEntity.name === dataSource.id)
                                                                 }
                                                             )}
-                                                            onClick={() => handleSelectDataSource(dataSource._id)}
+                                                            onClick={() => handleSelectDataSource(dataSource.id)}
                                                         >
                                                             <div
-                                                                ref={selectedEntity?.type === "datasource" && selectedEntity.name === dataSource._id ? selectedRef : undefined}
+                                                                ref={selectedEntity?.type === "datasource" && selectedEntity.name === dataSource.id ? selectedRef : undefined}
                                                                 className="flex-1 flex items-center gap-2 text-sm text-left"
                                                             >
                                                                 <div className="shrink-0 flex items-center justify-center w-3 h-3">
@@ -1097,7 +1097,7 @@ export const EntityList = forwardRef<
                                                                         name={dataSource.name} 
                                                                         onDelete={async () => {
                                                                             if (window.confirm(`Are you sure you want to delete the data source "${dataSource.name}"?`)) {
-                                                                                await deleteDataSource(projectId, dataSource._id);
+                                                                                await deleteDataSource(projectId, dataSource.id);
                                                                                 onDataSourcesUpdated?.();
                                                                             }
                                                                         }} 

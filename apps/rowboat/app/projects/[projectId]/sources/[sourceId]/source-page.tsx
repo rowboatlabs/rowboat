@@ -1,6 +1,5 @@
 'use client';
-import { WithStringId } from "../../../../lib/types/types";
-import { DataSource } from "../../../../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { ToggleSource } from "../components/toggle-source";
 import { Spinner } from "@heroui/react";
 import { SourceStatus } from "../components/source-status";
@@ -28,7 +27,7 @@ export function SourcePage({
     sourceId: string;
     projectId: string;
 }) {
-    const [source, setSource] = useState<WithStringId<z.infer<typeof DataSource>> | null>(null);
+    const [source, setSource] = useState<z.infer<typeof DataSource> | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [showSaveSuccess, setShowSaveSuccess] = useState(false);
     const [billingError, setBillingError] = useState<string | null>(null);

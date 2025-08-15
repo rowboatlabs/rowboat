@@ -2,8 +2,8 @@ import '../lib/loadenv';
 import FirecrawlApp from '@mendable/firecrawl-js';
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { z } from 'zod';
-import { dataSourceDocsCollection, dataSourcesCollection } from '../lib/mongodb';
-import { EmbeddingRecord, DataSourceDoc, DataSource } from "../lib/types/datasource_types";
+import { dataSourceDocsCollection } from '../lib/mongodb';
+import { EmbeddingRecord, DataSourceDoc } from "../lib/types/datasource_types";
 import { WithId } from 'mongodb';
 import { embedMany } from 'ai';
 import { embeddingModel } from '../lib/embedding';
@@ -13,6 +13,11 @@ import crypto from 'crypto';
 import { USE_BILLING } from '../lib/feature_flags';
 import { authorize, getCustomerIdForProject, logUsage, UsageTracker } from '../lib/billing';
 import { BillingError } from '@/src/entities/errors/common';
+import { DataSource } from '@/src/entities/models/data-source';
+import { IDataSourcesRepository } from '@/src/application/repositories/data-sources.repository.interface';
+import { container } from '@/di/container';
+
+const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
 
 const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
 
@@ -21,11 +26,6 @@ const splitter = new RecursiveCharacterTextSplitter({
     chunkSize: 1024,
     chunkOverlap: 20,
 });
-
-const second = 1000;
-const minute = 60 * second;
-const hour = 60 * minute;
-const day = 24 * hour;
 
 async function retryable<T>(fn: () => Promise<T>, maxAttempts: number = 3): Promise<T> {
     let attempts = 0;
@@ -41,7 +41,7 @@ async function retryable<T>(fn: () => Promise<T>, maxAttempts: number = 3): Prom
     }
 }
 
-async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTracker, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>>) {
+async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTracker, job: z.infer<typeof DataSource>, doc: WithId<z.infer<typeof DataSourceDoc>>) {
     const logger = _logger
         .child(doc._id.toString())
         .child(doc.name);
@@ -91,7 +91,7 @@ async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTrack
         vector: embedding,
         payload: {
             projectId: job.projectId,
-            sourceId: job._id.toString(),
+            sourceId: job.id,
             docId: doc._id.toString(),
             content: splits[i].pageContent,
             title: scrapeResult.metadata?.title || '',
@@ -116,7 +116,7 @@ async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTrack
     });
 }
 
-async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<typeof DataSource>>, doc: WithId<z.infer<typeof DataSourceDoc>>): Promise<void> {
+async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof DataSource>, doc: WithId<z.infer<typeof DataSourceDoc>>): Promise<void> {
     const logger = _logger
         .child(doc._id.toString())
         .child(doc.name);
@@ -135,7 +135,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                 {
                     key: "sourceId",
                     match: {
-                        value: job._id.toString(),
+                        value: job.id,
                     }
                 },
                 {
@@ -157,71 +157,23 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
 (async () => {
     while (true) {
         const now = Date.now();
-        let job: WithId<z.infer<typeof DataSource>> | null = null;
+        let job: z.infer<typeof DataSource> | null = null;
 
         // first try to find a job that needs deleting
-        job = await dataSourcesCollection.findOneAndUpdate({
-            status: "deleted",
-            "data.type": "urls",
-            $or: [
-                { attempts: { $exists: false } },
-                { attempts: { $lte: 3 } }
-            ]
-        }, { $set: { lastAttemptAt: new Date().toISOString() }, $inc: { attempts: 1 } }, { returnDocument: "after", sort: { createdAt: 1 } });
+        job = await dataSourcesRepository.pollDeleteJob(["urls"]);
 
         if (job === null) {
-
-            job = await dataSourcesCollection.findOneAndUpdate(
-                {
-                    $and: [
-                        { 'data.type': { $eq: "urls" } },
-                        {
-                            $or: [
-                                // if the job has never been attempted
-                                {
-                                    status: "pending",
-                                    attempts: 0,
-                                },
-                                // if the job was attempted but wasn't completed in the last hour
-                                {
-                                    status: "pending",
-                                    lastAttemptAt: { $lt: new Date(now - 1 * hour).toISOString() },
-                                },
-                                // if the job errored out but hasn't been retried 3 times yet
-                                {
-                                    status: "error",
-                                    attempts: { $lt: 3 },
-                                },
-                                // if the job errored out but hasn't been retried in the last 5 minutes
-                                {
-                                    status: "error",
-                                    lastAttemptAt: { $lt: new Date(now - 1 * hour).toISOString() },
-                                },
-                            ]
-                        }
-                    ]
-                },
-                {
-                    $set: {
-                        status: "pending",
-                        lastAttemptAt: new Date().toISOString(),
-                    },
-                    $inc: {
-                        attempts: 1
-                    },
-                },
-                { returnDocument: "after", sort: { createdAt: 1 } }
-            );
+            job = await dataSourcesRepository.pollPendingJob(["urls"]);
         }
 
         if (job === null) {
             // if no doc found, sleep for a bit and start again
-            await new Promise(resolve => setTimeout(resolve, 5 * second));
+            await new Promise(resolve => setTimeout(resolve, 5 * 1000));
             continue;
         }
 
-        const logger = new PrefixLogger(`${job._id.toString()}-${job.version}`);
-        logger.log(`Starting job ${job._id}. Type: ${job.data.type}. Status: ${job.status}`);
+        const logger = new PrefixLogger(`${job.id}-${job.version}`);
+        logger.log(`Starting job ${job.id}. Type: ${job.data.type}. Status: ${job.status}`);
         let errors = false;
 
         try {
@@ -236,7 +188,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                     filter: {
                         must: [
                             { key: "projectId", match: { value: job.projectId } },
-                            { key: "sourceId", match: { value: job._id.toString() } },
+                            { key: "sourceId", match: { value: job.id } },
                         ],
                     },
                 });
@@ -244,14 +196,12 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
                 // delete all docs for this source
                 logger.log("Deleting docs from db");
                 await dataSourceDocsCollection.deleteMany({
-                    sourceId: job._id.toString(),
+                    sourceId: job.id,
                 });
 
                 // delete the source record from db
                 logger.log("Deleting source record from db");
-                await dataSourcesCollection.deleteOne({
-                    _id: job._id,
-                });
+                await dataSourcesRepository.delete(job.id);
 
                 logger.log("Job deleted");
                 continue;
@@ -259,7 +209,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
 
             // fetch docs that need updating
             const pendingDocs = await dataSourceDocsCollection.find({
-                sourceId: job._id.toString(),
+                sourceId: job.id,
                 status: { $in: ["pending", "error"] },
             }).toArray();
 
@@ -316,7 +266,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
 
             // fetch docs that need to be deleted
             const deletedDocs = await dataSourceDocsCollection.find({
-                sourceId: job._id.toString(),
+                sourceId: job.id,
                 status: "deleted",
             }).toArray();
 
@@ -342,40 +292,23 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: WithId<z.infer<ty
         } catch (e) {
             if (e instanceof BillingError) {
                 logger.log("Billing error:", e.message);
-                await dataSourcesCollection.updateOne({
-                    _id: job._id,
-                    version: job.version,
-                }, {
-                    $set: {
-                        status: "error",
-                        billingError: e.message,
-                        lastUpdatedAt: new Date().toISOString(),
-                    }
+                await dataSourcesRepository.release(job.id, job.version, {
+                    status: "error",
+                    billingError: e.message,
                 });
             }
             logger.log("Error processing job; will retry:", e);
-            await dataSourcesCollection.updateOne({
-                _id: job._id,
-                version: job.version,
-            }, {
-                $set: {
-                    status: "error",
-                    lastUpdatedAt: new Date().toISOString(),
-                }
+            await dataSourcesRepository.release(job.id, job.version, {
+                status: "error",
             });
             continue;
         }
 
         // mark job as complete
         logger.log("Marking job as completed...");
-        await dataSourcesCollection.updateOne({
-            _id: job._id,
-            version: job.version,
-        }, {
-            $set: {
-                status: errors ? "error" : "ready",
-                ...(errors ? { error: "There were some errors processing this job" } : {}),
-            }
+        await dataSourcesRepository.release(job.id, job.version, {
+            status: errors ? "error" : "ready",
+            ...(errors ? { error: "There were some errors processing this job" } : {}),
         });
     }
 })();

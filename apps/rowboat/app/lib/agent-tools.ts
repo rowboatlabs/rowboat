@@ -11,17 +11,21 @@ import crypto from "crypto";
 // Internal dependencies
 import { embeddingModel } from '../lib/embedding';
 import { getMcpClient } from "./mcp";
-import { dataSourceDocsCollection, dataSourcesCollection, projectsCollection } from "./mongodb";
+import { dataSourceDocsCollection, projectsCollection } from "./mongodb";
 import { qdrantClient } from '../lib/qdrant';
 import { EmbeddingRecord } from "./types/datasource_types";
 import { WorkflowAgent, WorkflowTool } from "./types/workflow_types";
 import { PrefixLogger } from "./utils";
 import { UsageTracker } from "./billing";
+import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
+import { container } from "@/di/container";
 
 // Provider configuration
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
 const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
+
+const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
 
 const openai = createOpenAI({
     apiKey: PROVIDER_API_KEY,
@@ -109,14 +113,19 @@ export async function invokeRagTool(
     });
 
     // Fetch all data sources for this project
-    const sources = await dataSourcesCollection.find({
-        projectId: projectId,
-        active: true,
-    }).toArray();
+    const sources = [];
+    let cursor = undefined;
+    do {
+        const resp = await dataSourcesRepository.list(projectId, {
+            active: true,
+        }, cursor);
+        sources.push(...resp.items);
+        cursor = resp.nextCursor;
+    } while(cursor);
+
     const validSourceIds = sources
-        .filter(s => sourceIds.includes(s._id.toString())) // id should be in sourceIds
-        .filter(s => s.active) // should be active
-        .map(s => s._id.toString());
+        .filter(s => sourceIds.includes(s.id)) // id should be in sourceIds
+        .map(s => s.id);
     logger.log(`valid source ids: ${validSourceIds.join(', ')}`);
 
     // if no sources found, return empty response

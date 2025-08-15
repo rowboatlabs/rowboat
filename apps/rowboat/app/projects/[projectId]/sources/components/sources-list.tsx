@@ -7,14 +7,14 @@ import { SelfUpdatingSourceStatus } from "./self-updating-source-status";
 import { DataSourceIcon } from "../../../../lib/components/datasource-icon";
 import { useEffect, useState } from "react";
 import { WithStringId } from "../../../../lib/types/types";
-import { DataSource } from "../../../../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { listDataSources } from "../../../../actions/data-source.actions";
 import { Panel } from "@/components/common/panel-common";
 import { PlusIcon } from "lucide-react";
 
 export function SourcesList({ projectId }: { projectId: string }) {
-    const [sources, setSources] = useState<WithStringId<z.infer<typeof DataSource>>[]>([]);
+    const [sources, setSources] = useState<z.infer<typeof DataSource>[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -115,12 +115,12 @@ export function SourcesList({ projectId }: { projectId: string }) {
                                     <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                         {sources.map((source) => (
                                             <tr 
-                                                key={source._id}
+                                                key={source.id}
                                                 className="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
                                             >
                                                 <td className="px-6 py-4 text-left">
                                                     <Link
-                                                        href={`/projects/${projectId}/sources/${source._id}`}
+                                                        href={`/projects/${projectId}/sources/${source.id}`}
                                                         size="lg"
                                                         isBlock
                                                         className="text-sm text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 truncate block"
@@ -158,7 +158,7 @@ export function SourcesList({ projectId }: { projectId: string }) {
                                                     <td className="px-6 py-4 text-left">
                                                         <div className="text-sm">
                                                             <SelfUpdatingSourceStatus 
-                                                                sourceId={source._id} 
+                                                                sourceId={source.id} 
                                                                 projectId={projectId} 
                                                                 initialStatus={source.status} 
                                                                 compact={true} 
@@ -169,7 +169,7 @@ export function SourcesList({ projectId }: { projectId: string }) {
                                                 <td className="px-6 py-4 text-left">
                                                     <ToggleSource 
                                                         projectId={projectId} 
-                                                        sourceId={source._id} 
+                                                        sourceId={source.id} 
                                                         active={source.active} 
                                                         compact={true} 
                                                         className="bg-default-100" 

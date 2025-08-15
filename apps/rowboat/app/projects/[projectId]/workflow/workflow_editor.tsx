@@ -2,7 +2,7 @@
 import React, { useReducer, Reducer, useState, useCallback, useEffect, useRef, createContext, useContext } from "react";
 import { MCPServer, Message, WithStringId } from "../../../lib/types/types";
 import { Workflow, WorkflowTool, WorkflowPrompt, WorkflowAgent, WorkflowPipeline } from "../../../lib/types/workflow_types";
-import { DataSource } from "../../../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { Project } from "../../../lib/types/project_types";
 import { produce, applyPatches, enablePatches, produceWithPatches, Patch } from 'immer';
 import { AgentConfig } from "../entities/agent_config";
@@ -821,7 +821,7 @@ export function WorkflowEditor({
     chatWidgetHost,
 }: {
     projectId: string;
-    dataSources: WithStringId<z.infer<typeof DataSource>>[];
+    dataSources: z.infer<typeof DataSource>[];
     workflow: z.infer<typeof Workflow>;
     useRag: boolean;
     useRagUploads: boolean;

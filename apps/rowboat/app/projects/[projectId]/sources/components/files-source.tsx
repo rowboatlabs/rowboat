@@ -1,6 +1,7 @@
 "use client";
 import { WithStringId } from "../../../../lib/types/types";
-import { DataSourceDoc, DataSource } from "../../../../lib/types/datasource_types";
+import { DataSourceDoc } from "../../../../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
 import { useDropzone } from "react-dropzone";
@@ -183,7 +184,7 @@ export function FilesSource({
     type,
 }: {
     projectId: string,
-    dataSource: WithStringId<z.infer<typeof DataSource>>,
+    dataSource: z.infer<typeof DataSource>,
     handleReload: () => void;
     type: 'files_local' | 'files_s3';
 }) {
@@ -193,7 +194,7 @@ export function FilesSource({
     const onDrop = useCallback(async (acceptedFiles: File[]) => {
         setUploading(true);
         try {
-            const urls = await getUploadUrlsForFilesDataSource(projectId, dataSource._id, acceptedFiles.map(file => ({
+            const urls = await getUploadUrlsForFilesDataSource(projectId, dataSource.id, acceptedFiles.map(file => ({
                 name: file.name,
                 type: file.type,
                 size: file.size,
@@ -243,7 +244,7 @@ export function FilesSource({
 
             await addDocsToDataSource({
                 projectId,
-                sourceId: dataSource._id,
+                sourceId: dataSource.id,
                 docData,
             });
 
@@ -255,7 +256,7 @@ export function FilesSource({
         } finally {
             setUploading(false);
         }
-    }, [projectId, dataSource._id, handleReload, type]);
+    }, [projectId, dataSource.id, handleReload, type]);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
@@ -300,12 +301,12 @@ export function FilesSource({
                 <PaginatedFileList
                     key={fileListKey}
                     projectId={projectId}
-                    sourceId={dataSource._id}
+                    sourceId={dataSource.id}
                     handleReload={handleReload}
                     onDelete={async (docId) => {
                         await deleteDocsFromDataSource({
                             projectId,
-                            sourceId: dataSource._id,
+                            sourceId: dataSource.id,
                             docIds: [docId],
                         });
                         handleReload();

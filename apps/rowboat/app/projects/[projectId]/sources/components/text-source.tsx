@@ -1,6 +1,6 @@
 "use client";
 import { WithStringId } from "../../../../lib/types/types";
-import { DataSource } from "../../../../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { useState, useEffect } from "react";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,7 +15,7 @@ export function TextSource({
     handleReload,
 }: {
     projectId: string,
-    dataSource: WithStringId<z.infer<typeof DataSource>>,
+    dataSource: z.infer<typeof DataSource>,
     handleReload: () => void;
 }) {
     const [content, setContent] = useState("");
@@ -31,7 +31,7 @@ export function TextSource({
             try {
                 const { files } = await listDocsInDataSource({
                     projectId,
-                    sourceId: dataSource._id,
+                    sourceId: dataSource.id,
                     limit: 1,
                 });
 
@@ -55,7 +55,7 @@ export function TextSource({
         return () => {
             ignore = true;
         };
-    }, [projectId, dataSource._id]);
+    }, [projectId, dataSource.id]);
 
     async function handleSubmit(formData: FormData) {
         setIsSaving(true);
@@ -66,7 +66,7 @@ export function TextSource({
             if (docId) {
                 await deleteDocsFromDataSource({
                     projectId,
-                    sourceId: dataSource._id,
+                    sourceId: dataSource.id,
                     docIds: [docId],
                 });
             }
@@ -74,7 +74,7 @@ export function TextSource({
             // Add new doc
             await addDocsToDataSource({
                 projectId,
-                sourceId: dataSource._id,
+                sourceId: dataSource.id,
                 docData: [{
                     name: 'text',
                     data: {

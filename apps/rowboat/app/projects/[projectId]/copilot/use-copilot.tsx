@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { getCopilotResponseStream } from "@/app/actions/copilot.actions";
 import { CopilotMessage } from "@/app/lib/types/copilot_types";
 import { Workflow } from "@/app/lib/types/workflow_types";
-import { DataSource } from "@/app/lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { WithStringId } from "@/app/lib/types/types";
 
@@ -10,7 +10,7 @@ interface UseCopilotParams {
     projectId: string;
     workflow: z.infer<typeof Workflow>;
     context: any;
-    dataSources?: WithStringId<z.infer<typeof DataSource>>[];
+    dataSources?: z.infer<typeof DataSource>[];
 }
 
 interface UseCopilotResult {

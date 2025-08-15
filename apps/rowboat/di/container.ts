@@ -72,6 +72,9 @@ import { CreateApiKeyController } from "@/src/interface-adapters/controllers/api
 import { ListApiKeysController } from "@/src/interface-adapters/controllers/api-keys/list-api-keys.controller";
 import { DeleteApiKeyController } from "@/src/interface-adapters/controllers/api-keys/delete-api-key.controller";
 
+// Data sources
+import { MongoDBDataSourcesRepository } from "@/src/infrastructure/repositories/mongodb.data-sources.repository";
+
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
     strict: true,
@@ -110,6 +113,10 @@ container.register({
     createApiKeyController: asClass(CreateApiKeyController).singleton(),
     listApiKeysController: asClass(ListApiKeysController).singleton(),
     deleteApiKeyController: asClass(DeleteApiKeyController).singleton(),
+
+    // data sources
+    // ---
+    dataSourcesRepository: asClass(MongoDBDataSourcesRepository).singleton(),
 
     // jobs
     // ---

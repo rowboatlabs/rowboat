@@ -1,6 +1,6 @@
 "use client";
 import { WithStringId } from "../../../lib/types/types";
-import { DataSource } from "../../../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { XIcon, FileIcon, GlobeIcon, AlertTriangle, CheckCircle, Circle, ExternalLinkIcon, Type, PlusIcon, Edit3Icon, DownloadIcon, Trash2 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
@@ -24,7 +24,7 @@ export function DataSourceConfig({
     handleClose: () => void,
     onDataSourceUpdate?: () => void
 }) {
-    const [dataSource, setDataSource] = useState<WithStringId<z.infer<typeof DataSource>> | null>(null);
+    const [dataSource, setDataSource] = useState<z.infer<typeof DataSource> | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     

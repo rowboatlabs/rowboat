@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Workflow } from "./workflow_types";
 import { Message } from "./types";
-import { DataSource } from "./datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 
 export const CopilotUserMessage = z.object({
     role: z.literal('user'),
@@ -52,9 +52,7 @@ export const CopilotAPIRequest = z.object({
     messages: z.array(CopilotMessage),
     workflow: Workflow,
     context: CopilotChatContext.nullable(),
-    dataSources: z.array(DataSource.extend({
-        _id: z.string(),
-    })).optional(),
+    dataSources: z.array(DataSource).optional(),
 });
 export const CopilotAPIResponse = z.union([
     z.object({

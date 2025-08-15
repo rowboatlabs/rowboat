@@ -1,7 +1,6 @@
 "use client";
-import { WithStringId } from "../../../lib/types/types";
 import { WorkflowPrompt, WorkflowAgent, Workflow, WorkflowTool } from "../../../lib/types/workflow_types";
-import { DataSource } from "../../../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { PlusIcon, Sparkles, X as XIcon, ChevronDown, ChevronRight, Trash2, Maximize2, Minimize2, StarIcon, DatabaseIcon, UserIcon, Settings, Info } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
@@ -59,7 +58,7 @@ export function AgentConfig({
     agents: z.infer<typeof WorkflowAgent>[],
     tools: z.infer<typeof WorkflowTool>[],
     prompts: z.infer<typeof WorkflowPrompt>[],
-    dataSources: WithStringId<z.infer<typeof DataSource>>[],
+    dataSources: z.infer<typeof DataSource>[],
     handleUpdate: (agent: z.infer<typeof WorkflowAgent>) => void,
     handleClose: () => void,
     useRag: boolean,
@@ -726,12 +725,12 @@ export function AgentConfig({
                                                 startContent={<PlusIcon className="w-4 h-4 text-gray-500" />}
                                             >
                                                 {dataSources
-                                                    .filter((ds) => !(agent.ragDataSources || []).includes(ds._id))
+                                                    .filter((ds) => !(agent.ragDataSources || []).includes(ds.id))
                                                     .length > 0 ? (
                                                     dataSources
-                                                        .filter((ds) => !(agent.ragDataSources || []).includes(ds._id))
+                                                        .filter((ds) => !(agent.ragDataSources || []).includes(ds.id))
                                                         .map((ds) => (
-                                                            <SelectItem key={ds._id}>
+                                                            <SelectItem key={ds.id}>
                                                                 {ds.name}
                                                             </SelectItem>
                                                         ))
@@ -775,7 +774,7 @@ export function AgentConfig({
                                     {agent.ragDataSources !== undefined && agent.ragDataSources.length > 0 && (
                                         <div className="flex flex-col gap-2 mt-2">
                                             {(agent.ragDataSources || []).map((source) => {
-                                                const ds = dataSources.find((ds) => ds._id === source);
+                                                const ds = dataSources.find((ds) => ds.id === source);
                                                 return (
                                                     <div
                                                         key={source}

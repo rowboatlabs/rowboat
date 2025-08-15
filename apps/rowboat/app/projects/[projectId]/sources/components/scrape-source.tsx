@@ -1,6 +1,7 @@
 "use client";
 import { WithStringId } from "../../../../lib/types/types";
-import { DataSourceDoc, DataSource } from "../../../../lib/types/datasource_types";
+import { DataSourceDoc } from "../../../../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { Recrawl } from "./web-recrawl";
 import { deleteDocsFromDataSource, listDocsInDataSource, recrawlWebDataSource, addDocsToDataSource } from "../../../../actions/data-source.actions";
@@ -125,7 +126,7 @@ export function ScrapeSource({
     handleReload,
 }: {
     projectId: string,
-    dataSource: WithStringId<z.infer<typeof DataSource>>,
+    dataSource: z.infer<typeof DataSource>,
     handleReload: () => void;
 }) {
     const [fileListKey, setFileListKey] = useState(0);
@@ -162,7 +163,7 @@ export function ScrapeSource({
                                 
                                 await addDocsToDataSource({
                                     projectId,
-                                    sourceId: dataSource._id,
+                                    sourceId: dataSource.id,
                                     docData: first100Urls.map(url => ({
                                         name: url,
                                         data: {
@@ -210,11 +211,11 @@ export function ScrapeSource({
                     <UrlList
                         key={fileListKey}
                         projectId={projectId}
-                        sourceId={dataSource._id}
+                        sourceId={dataSource.id}
                         onDelete={async (docId) => {
                             await deleteDocsFromDataSource({
                                 projectId,
-                                sourceId: dataSource._id,
+                                sourceId: dataSource.id,
                                 docIds: [docId],
                             });
                             handleReload();
@@ -231,9 +232,9 @@ export function ScrapeSource({
                 >
                     <Recrawl 
                         projectId={projectId} 
-                        sourceId={dataSource._id} 
+                        sourceId={dataSource.id} 
                         handleRefresh={async () => {
-                            await recrawlWebDataSource(projectId, dataSource._id);
+                            await recrawlWebDataSource(projectId, dataSource.id);
                             handleReload();
                             setFileListKey(prev => prev + 1);
                         }} 

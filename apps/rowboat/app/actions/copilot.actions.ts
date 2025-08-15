@@ -5,13 +5,12 @@ import {
 } from "../lib/types/copilot_types";
 import { 
     Workflow} from "../lib/types/workflow_types";
-import { DataSource } from "../lib/types/datasource_types";
+import { DataSource } from "@/src/entities/models/data-source";
 import { z } from 'zod';
 import { projectAuthCheck } from "./project.actions";
 import { redisClient } from "../lib/redis";
 import { authorizeUserAction, logUsage } from "./billing.actions";
 import { USE_BILLING } from "../lib/feature_flags";
-import { WithStringId } from "../lib/types/types";
 import { getEditAgentInstructionsResponse } from "../lib/copilot/copilot";
 import { container } from "@/di/container";
 import { IUsageQuotaPolicy } from "@/src/application/policies/usage-quota.policy.interface";
@@ -24,7 +23,7 @@ export async function getCopilotResponseStream(
     messages: z.infer<typeof CopilotMessage>[],
     current_workflow_config: z.infer<typeof Workflow>,
     context: z.infer<typeof CopilotChatContext> | null,
-    dataSources?: WithStringId<z.infer<typeof DataSource>>[]
+    dataSources?: z.infer<typeof DataSource>[]
 ): Promise<{
     streamId: string;
 } | { billingError: string }> {

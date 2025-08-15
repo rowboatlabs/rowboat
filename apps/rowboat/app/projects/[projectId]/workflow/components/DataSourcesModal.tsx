@@ -7,7 +7,7 @@ import { Form } from '../../sources/new/form';
 import { FilesSource } from '../../sources/components/files-source';
 import { getDataSource } from '../../../../actions/data-source.actions';
 import { WithStringId } from '../../../../lib/types/types';
-import { DataSource } from '../../../../lib/types/datasource_types';
+import { DataSource } from "@/src/entities/models/data-source";
 import { z } from 'zod';
 
 interface DataSourcesModalProps {
@@ -30,7 +30,7 @@ export function DataSourcesModal({
   useRagScraping
 }: DataSourcesModalProps) {
   const [currentView, setCurrentView] = useState<'form' | 'upload'>('form');
-  const [createdSource, setCreatedSource] = useState<WithStringId<z.infer<typeof DataSource>> | null>(null);
+  const [createdSource, setCreatedSource] = useState<z.infer<typeof DataSource> | null>(null);
 
   const handleDataSourceCreated = async (sourceId: string) => {
     // Get the created data source
