@@ -100,13 +100,12 @@ export function ComposeBoxCopilot({
                         disabled={loading}
                         placeholder="Type a message..."
                         autoResize={true}
-                        maxHeight={120}
+                        maxHeight={200}
                         className={`
-                            min-h-0!
+                            min-h-6
                             border-0! shadow-none! ring-0!
                             bg-transparent
                             resize-none
-                            overflow-y-auto
                             [&::-webkit-scrollbar]:w-1
                             [&::-webkit-scrollbar-track]:bg-transparent
                             [&::-webkit-scrollbar-thumb]:bg-gray-300
@@ -294,7 +293,7 @@ function CopilotStatusBar({
         );
     };
     return (
-        <div className="w-auto max-w-[calc(100%-16px)] mx-auto flex items-center px-3 py-1 pt-2.5 pb-5 mt-2 -mb-3 rounded-xl bg-zinc-50 dark:bg-zinc-900/90 border border-zinc-300 dark:border-zinc-700 shadow-md dark:shadow-zinc-950/10 backdrop-blur-sm transition-all z-0 relative mx-2 overflow-visible">
+        <div className="w-auto max-w-[calc(100%-16px)] mx-auto flex items-center px-3 py-1 pt-2.5 pb-5 mt-2 -mb-3 rounded-xl bg-white/90 dark:bg-zinc-800/90 border border-zinc-300 dark:border-zinc-700 shadow-md dark:shadow-zinc-950/10 backdrop-blur-sm transition-all z-0 relative mx-2 overflow-visible">
             {/* Left: context + status/ticker, flex-1, truncate as needed */}
             <div className="flex items-center gap-2 flex-1 min-w-0 overflow-visible">
                 {renderContext()}

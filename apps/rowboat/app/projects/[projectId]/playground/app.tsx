@@ -7,7 +7,7 @@ import { Chat } from "./components/chat";
 import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@heroui/react";
-import { CheckIcon, CopyIcon, PlusIcon, InfoIcon, BugIcon, BugOffIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, PlusIcon, InfoIcon, BugIcon, BugOffIcon, MessageCircle } from "lucide-react";
 
 export function App({
     hidden = false,
@@ -56,16 +56,11 @@ export function App({
                 className={`${hidden ? 'hidden' : 'block'}`}
                 variant="playground"
                 tourTarget="playground"
-                title={
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                            <div className="font-semibold text-zinc-700 dark:text-zinc-300">
-                                Playground
-                            </div>
-                            <Tooltip content="Test your workflow and chat with your agents in real-time">
-                                <InfoIcon className="w-4 h-4 text-gray-400 cursor-help" />
-                            </Tooltip>
-                        </div>
+                icon={<MessageCircle className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
+                title="Playground"
+                subtitle="Chat with your assistant"
+                rightActions={
+                    <div className="flex items-center gap-2">
                         <Button
                             variant="primary"
                             size="sm"
@@ -90,10 +85,6 @@ export function App({
                                 <BugOffIcon className="w-4 h-4" />
                             )}
                         </Button>
-                    </div>
-                }
-                rightActions={
-                    <div className="flex items-center gap-3">
                         <Button
                             variant="secondary"
                             size="sm"

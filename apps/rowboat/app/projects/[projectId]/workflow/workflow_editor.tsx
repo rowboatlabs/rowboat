@@ -38,6 +38,7 @@ import { InputField } from "@/app/lib/components/input-field";
 import { VoiceSection } from "../config/components/voice";
 import { ChatWidgetSection } from "../config/components/project";
 import { TriggersModal } from "./components/TriggersModal";
+import { TopBar } from "./components/TopBar";
 
 enablePatches();
 
@@ -1221,161 +1222,31 @@ export function WorkflowEditor({
             onSelectTool: handleSelectTool,
             onSelectPrompt: handleSelectPrompt,
         }}>
-            <div className="flex flex-col h-full relative">
-                <div className="shrink-0 flex justify-between items-center pb-6">
-                    <div className="workflow-version-selector flex items-center gap-4 px-2 text-gray-800 dark:text-gray-100">
-                        {/* Project Name Editor */}
-                        <div className="flex flex-col min-w-0 max-w-xs">
-                            <InputField
-                                type="text"
-                                value={localProjectName}
-                                onChange={handleProjectNameChange}
-                                error={projectNameError}
-                                placeholder="Project name..."
-                                className="text-lg font-semibold !min-h-[24px] !py-0.5 !border !border-gray-200 dark:!border-gray-700 !rounded-lg"
-                                inline={true}
-                            />
-                        </div>
-                        
-                        <div className="h-6 w-px bg-gray-300 dark:bg-gray-600"></div>
-                        
-                        <div className="flex items-center gap-2">
-                            {state.present.publishing && <Spinner size="sm" />}
-                            {isLive && <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-2">
-                                <RadioIcon size={16} />
-                                Live workflow
-                            </div>}
-                            {!isLive && <div className="bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-2">
-                                <PenLine size={16} />
-                                Draft workflow
-                            </div>}
-
-                            {/* Download JSON icon button, with tooltip, to the left of the menu */}
-                            <Tooltip content="Download Assistant JSON">
-                                <button
-                                    onClick={handleDownloadJSON}
-                                    className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
-                                    aria-label="Download JSON"
-                                    type="button"
-                                >
-                                    <DownloadIcon size={20} />
-                                </button>
-                            </Tooltip>
-                        </div>
-                    </div>
-                    {showCopySuccess && <div className="flex items-center gap-2">
-                        <div className="text-green-500">Copied to clipboard</div>
-                    </div>}
-                    <div className="flex items-center gap-2">
-                        {isLive && <div className="flex items-center gap-2">
-                            <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-2">
-                                <AlertTriangle size={16} />
-                                This version is locked. Changes applied will not be reflected.
-                            </div>
-                        </div>}
-                        
-                        {!isLive && <>
-                            <button
-                                className="p-1 text-gray-400 hover:text-black hover:cursor-pointer"
-                                title="Undo"
-                                disabled={state.currentIndex <= 0}
-                                onClick={() => dispatch({ type: "undo" })}
-                            >
-                                <UndoIcon size={16} />
-                            </button>
-                            <button
-                                className="p-1 text-gray-400 hover:text-black hover:cursor-pointer"
-                                title="Redo"
-                                disabled={state.currentIndex >= state.patches.length}
-                                onClick={() => dispatch({ type: "redo" })}
-                            >
-                                <RedoIcon size={16} />
-                            </button>
-                        </>}
-                        
-                        {/* Deploy CTA - always visible */}
-                        <div className="flex">
-                            <Button
-                                variant="solid"
-                                size="md"
-                                onPress={handlePublishWorkflow}
-                                className="gap-2 px-4 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-r-none"
-                                startContent={<RocketIcon size={16} />}
-                                data-tour-target="deploy"
-                            >
-                                Deploy
-                            </Button>
-                            <Dropdown>
-                                <DropdownTrigger>
-                                    <Button
-                                        variant="solid"
-                                        size="md"
-                                        className="min-w-0 px-2 bg-green-600 hover:bg-green-700 border-l-1 border-green-500 text-white font-semibold text-sm rounded-l-none"
-                                    >
-                                        <ChevronDownIcon size={14} />
-                                    </Button>
-                                </DropdownTrigger>
-                                <DropdownMenu aria-label="Deploy actions">
-                                    <DropdownItem
-                                        key="settings"
-                                        startContent={<SettingsIcon size={16} />}
-                                        onPress={onSettingsModalOpen}
-                                    >
-                                        API & SDK settings
-                                    </DropdownItem>
-                                    <DropdownItem
-                                        key="manage-triggers"
-                                        startContent={<ZapIcon size={16} />}
-                                        onPress={onTriggersModalOpen}
-                                    >
-                                        Manage triggers
-                                    </DropdownItem>
-                                    {!isLive ? (
-                                        <>
-                                            <DropdownItem
-                                                key="view-live"
-                                                startContent={<RadioIcon size={16} />}
-                                                onPress={() => onChangeMode('live')}
-                                            >
-                                                View live version
-                                            </DropdownItem>
-                                            <DropdownItem
-                                                key="reset-to-live"
-                                                startContent={<AlertTriangle size={16} />}
-                                                onPress={handleRevertToLive}
-                                                className="text-red-600 dark:text-red-400"
-                                            >
-                                                Reset to live version
-                                            </DropdownItem>
-                                        </>
-                                    ) : null}
-                                </DropdownMenu>
-                            </Dropdown>
-                        </div>
-                        
-                        {isLive && <div className="flex items-center gap-2">
-                            <Button
-                                variant="solid"
-                                size="md"
-                                onPress={() => onChangeMode('draft')}
-                                className="gap-2 px-4 bg-gray-600 hover:bg-gray-700 text-white font-semibold text-sm"
-                            >
-                                Switch to draft
-                            </Button>
-                        </div>}
-                        
-                        {!isLive && <Button
-                            variant="solid"
-                            size="md"
-                            onPress={() => setShowCopilot(!showCopilot)}
-                            className="gap-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm"
-                            startContent={showCopilot ? null : <Sparkles size={16} />}
-                        >
-                            {showCopilot ? "Hide Skipper" : "Skipper"}
-                        </Button>}
-                    </div>
-                </div>
-                <ResizablePanelGroup direction="horizontal" className="grow flex overflow-auto gap-1">
+            <div className="h-full flex flex-col gap-5">
+                {/* Top Bar - Isolated like sidebar */}
+                <TopBar
+                    localProjectName={localProjectName}
+                    projectNameError={projectNameError}
+                    onProjectNameChange={handleProjectNameChange}
+                    publishing={state.present.publishing}
+                    isLive={isLive}
+                    showCopySuccess={showCopySuccess}
+                    canUndo={state.currentIndex > 0}
+                    canRedo={state.currentIndex < state.patches.length}
+                    showCopilot={showCopilot}
+                    onUndo={() => dispatch({ type: "undo" })}
+                    onRedo={() => dispatch({ type: "redo" })}
+                    onDownloadJSON={handleDownloadJSON}
+                    onPublishWorkflow={handlePublishWorkflow}
+                    onChangeMode={onChangeMode}
+                    onRevertToLive={handleRevertToLive}
+                    onToggleCopilot={() => setShowCopilot(!showCopilot)}
+                    onSettingsModalOpen={onSettingsModalOpen}
+                    onTriggersModalOpen={onTriggersModalOpen}
+                />
+                
+                {/* Content Area */}
+                <ResizablePanelGroup direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
                     <ResizablePanel minSize={10} defaultSize={PANEL_RATIOS.entityList}>
                         <div className="flex flex-col h-full">
                             <EntityList

@@ -47,7 +47,6 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(({
     }
   }, [propValue, isEditing]);
 
-  /*
   useEffect(() => {
     if (!autoResize) return;
     
@@ -69,7 +68,6 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(({
     window.addEventListener('resize', adjustHeight);
     return () => window.removeEventListener('resize', adjustHeight);
   }, [localValue, autoResize, maxHeight, textareaRef]);
-  */
 
   const validateAndUpdate = (value: string) => {
     if (validate) {

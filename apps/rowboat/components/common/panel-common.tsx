@@ -33,6 +33,8 @@ export function ActionButton({
 
 interface PanelProps {
     title: React.ReactNode;
+    subtitle?: string;
+    icon?: React.ReactNode;
     rightActions?: React.ReactNode;
     actions?: React.ReactNode;
     children: React.ReactNode;
@@ -47,6 +49,8 @@ interface PanelProps {
 
 export function Panel({
     title,
+    subtitle,
+    icon,
     rightActions,
     actions,
     children,
@@ -65,8 +69,8 @@ export function Panel({
             "flex flex-col rounded-xl border relative w-full",
             // Only apply overflow-hidden if no custom overflow is set (for backward compatibility)
             overflow ? undefined : "overflow-hidden",
-            variant === 'copilot' ? "border-blue-200 dark:border-blue-800" : "border-zinc-200 dark:border-zinc-800",
-            "bg-white dark:bg-zinc-900",
+            variant === 'copilot' ? "border-transparent" : "border-zinc-200 dark:border-zinc-800",
+            variant === 'copilot' ? "bg-zinc-50 dark:bg-zinc-900" : "bg-white dark:bg-zinc-900",
             maxHeight ? "max-h-(--panel-height)" : "h-full",
             className
         )}
@@ -93,7 +97,8 @@ export function Panel({
         )}
         <div 
             className={clsx(
-                "shrink-0 border-b border-zinc-100 dark:border-zinc-800 relative",
+                "shrink-0 border-b relative",
+                variant === 'copilot' ? "border-zinc-300 dark:border-zinc-700" : "border-zinc-100 dark:border-zinc-800",
                 {
                     "flex flex-col gap-3 px-4 py-3": variant === 'projects',
                     "flex items-center justify-between h-[53px] p-3": isEntityList,
@@ -113,7 +118,34 @@ export function Panel({
             ) : variant === 'copilot' ? (
                 <>
                     <div className="flex items-center gap-2">
-                        {title}
+                        {icon && icon}
+                        <div className="flex flex-col">
+                            <div className="font-semibold text-zinc-700 dark:text-zinc-300">
+                                {title}
+                            </div>
+                            {subtitle && (
+                                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                    {subtitle}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    {rightActions}
+                </>
+            ) : variant === 'playground' ? (
+                <>
+                    <div className="flex items-center gap-2">
+                        {icon && icon}
+                        <div className="flex flex-col">
+                            <div className="font-semibold text-zinc-700 dark:text-zinc-300">
+                                {title}
+                            </div>
+                            {subtitle && (
+                                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                    {subtitle}
+                                </div>
+                            )}
+                        </div>
                     </div>
                     {rightActions}
                 </>

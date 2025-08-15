@@ -7,11 +7,11 @@ import { CopilotMessage } from "../../../lib/types/copilot_types";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { DataSource } from "@/app/lib/types/datasource_types";
 import { z } from "zod";
-import { Action as WorkflowDispatch } from "../workflow/workflow_editor";
+import { Action as WorkflowDispatch } from "@/app/projects/[projectId]/workflow/workflow_editor";
 import { Panel } from "@/components/common/panel-common";
 import { ComposeBoxCopilot } from "@/components/common/compose-box-copilot";
 import { Messages } from "./components/messages";
-import { CopyIcon, CheckIcon, PlusIcon, XIcon, InfoIcon } from "lucide-react";
+import { CopyIcon, CheckIcon, PlusIcon, XIcon, InfoIcon, Sparkles } from "lucide-react";
 import { useCopilot } from "./use-copilot";
 import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { WithStringId } from "@/app/lib/types/types";
@@ -225,7 +225,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         </div>
                     </div>
                 )}
-                <div className="shrink-0 px-1 pb-6">
+                <div className="shrink-0 px-1">
                     {responseError && (
                         <div className="mb-4 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex gap-2 justify-between items-center text-sm">
                             <p className="text-red-600 dark:text-red-400">{responseError}</p>
@@ -322,16 +322,11 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
                 variant="copilot"
                 tourTarget="copilot"
                 showWelcome={messages.length === 0}
-                title={
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                            <div className="font-semibold text-zinc-700 dark:text-zinc-300">
-                                Skipper
-                            </div>
-                            <Tooltip content="A copilot to help you build and modify your workflow">
-                                <InfoIcon className="w-4 h-4 text-gray-400 cursor-help" />
-                            </Tooltip>
-                        </div>
+                icon={<Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />}
+                title="Skipper"
+                subtitle="Build your assistant"
+                rightActions={
+                    <div className="flex items-center gap-2">
                         <Button
                             variant="primary"
                             size="sm"
@@ -342,10 +337,6 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
                         >
                             <PlusIcon className="w-4 h-4" />
                         </Button>
-                    </div>
-                }
-                rightActions={
-                    <div className="flex items-center gap-3">
                         <Button
                             variant="secondary"
                             size="sm"
