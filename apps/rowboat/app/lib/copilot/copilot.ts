@@ -9,7 +9,7 @@ import { PrefixLogger } from "../utils";
 import zodToJsonSchema from "zod-to-json-schema";
 import { COPILOT_INSTRUCTIONS_EDIT_AGENT } from "./copilot_edit_agent";
 import { COPILOT_INSTRUCTIONS_MULTI_AGENT } from "./copilot_multi_agent";
-import { COPILOT_MULTI_AGENT_EXAMPLE_1 } from "./example_multi_agent_1";
+import { COPILOT_MULTI_AGENT_EXAMPLES } from "./examples";
 import { CURRENT_WORKFLOW_PROMPT } from "./current_workflow";
 import { USE_COMPOSIO_TOOLS } from "../feature_flags";
 import { composio, getTool } from "../composio/composio";
@@ -24,7 +24,7 @@ const WORKFLOW_SCHEMA = JSON.stringify(zodToJsonSchema(Workflow));
 
 const SYSTEM_PROMPT = [
     COPILOT_INSTRUCTIONS_MULTI_AGENT,
-    COPILOT_MULTI_AGENT_EXAMPLE_1,
+    COPILOT_MULTI_AGENT_EXAMPLES,
     CURRENT_WORKFLOW_PROMPT,
 ]
     .join('\n\n')
