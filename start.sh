@@ -26,13 +26,7 @@ export USE_KLAVIS_TOOLS=true
 CMD="docker compose"
 CMD="$CMD --profile setup_qdrant"
 CMD="$CMD --profile qdrant"
-CMD="$CMD --profile rag_text_worker"
-CMD="$CMD --profile rag_files_worker"
-
-# enable rag urls worker
-if [ "$USE_RAG_SCRAPING" = "true" ]; then
-  CMD="$CMD --profile rag_urls_worker"
-fi
+CMD="$CMD --profile rag-worker"
 
 # Add more mappings as needed
 # if [ "$SOME_OTHER_ENV" = "true" ]; then

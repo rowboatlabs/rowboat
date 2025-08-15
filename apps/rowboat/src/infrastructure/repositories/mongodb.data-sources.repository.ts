@@ -141,10 +141,9 @@ export class MongoDBDataSourcesRepository implements IDataSourcesRepository {
         await this.collection.deleteMany({ projectId });
     }
 
-    async pollDeleteJob(types: string[]): Promise<z.infer<typeof DataSource> | null> {
+    async pollDeleteJob(): Promise<z.infer<typeof DataSource> | null> {
         const result = await this.collection.findOneAndUpdate({
             status: "deleted",
-            "data.type": { $in: types },
             $or: [
                 { attempts: { $exists: false } },
                 { attempts: { $lte: 3 } }
@@ -156,12 +155,11 @@ export class MongoDBDataSourcesRepository implements IDataSourcesRepository {
         return { ...rest, id: _id.toString() };
     }
 
-    async pollPendingJob(types: string[]): Promise<z.infer<typeof DataSource> | null> {
+    async pollPendingJob(): Promise<z.infer<typeof DataSource> | null> {
         const now = Date.now();
 
         const result = await this.collection.findOneAndUpdate({
             $and: [
-                { 'data.type': { $in: types } },
                 {
                     $or: [
                         // if the job has never been attempted

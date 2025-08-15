@@ -103,17 +103,15 @@ export interface IDataSourcesRepository {
 
     /**
      * Polls for a datasource that is pending delete and returns it
-     * @param types - The types of datasources to poll for.
      * @returns The datasource if found, otherwise null.
      */
-    pollDeleteJob(types: string[]): Promise<z.infer<typeof DataSource> | null>;
+    pollDeleteJob(): Promise<z.infer<typeof DataSource> | null>;
 
     /**
      * Polls for a datasource that is pending processing and returns it
-     * @param types - The types of datasources to poll for.
      * @returns The datasource if found, otherwise null.
      */
-    pollPendingJob(types: string[]): Promise<z.infer<typeof DataSource> | null>;
+    pollPendingJob(): Promise<z.infer<typeof DataSource> | null>;
 
     /**
      * Releases a datasource by its ID and version.

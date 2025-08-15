@@ -149,63 +149,21 @@ services:
       - QDRANT_API_KEY=${QDRANT_API_KEY}
     restart: no
 
-  rag_files_worker:
+  rag-worker:
     build:
       context: ./apps/rowboat
       dockerfile: scripts.Dockerfile
-    command: ["npm", "run", "ragFilesWorker"]
-    profiles: [ "rag_files_worker" ]
+    command: ["npm", "run", "rag-worker"]
+    profiles: [ "rag-worker" ]
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - EMBEDDING_PROVIDER_BASE_URL=${EMBEDDING_PROVIDER_BASE_URL}
-      - EMBEDDING_PROVIDER_API_KEY=${EMBEDDING_PROVIDER_API_KEY}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
-      - MONGODB_CONNECTION_STRING=mongodb://mongo:27017/rowboat
-      - REDIS_URL=redis://redis:6379
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - RAG_UPLOADS_S3_BUCKET=${RAG_UPLOADS_S3_BUCKET}
       - RAG_UPLOADS_S3_REGION=${RAG_UPLOADS_S3_REGION}
-      - QDRANT_URL=http://qdrant:6333
-      - QDRANT_API_KEY=${QDRANT_API_KEY}
       - RAG_UPLOADS_DIR=/app/uploads
       - USE_GEMINI_FILE_PARSING=${USE_GEMINI_FILE_PARSING}
-      - USE_BILLING=${USE_BILLING}
-      - BILLING_API_URL=${BILLING_API_URL}
-      - BILLING_API_KEY=${BILLING_API_KEY}
-    restart: unless-stopped
-    volumes:
-      - uploads:/app/uploads
-
-  rag_urls_worker:
-    build:
-      context: ./apps/rowboat
-      dockerfile: scripts.Dockerfile
-    command: ["npm", "run", "ragUrlsWorker"]
-    profiles: [ "rag_urls_worker" ]
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - EMBEDDING_PROVIDER_BASE_URL=${EMBEDDING_PROVIDER_BASE_URL}
-      - EMBEDDING_PROVIDER_API_KEY=${EMBEDDING_PROVIDER_API_KEY}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
-      - MONGODB_CONNECTION_STRING=mongodb://mongo:27017/rowboat
-      - REDIS_URL=redis://redis:6379
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-      - QDRANT_URL=http://qdrant:6333
-      - QDRANT_API_KEY=${QDRANT_API_KEY}
-      - USE_BILLING=${USE_BILLING}
-      - BILLING_API_URL=${BILLING_API_URL}
-      - BILLING_API_KEY=${BILLING_API_KEY}
-    restart: unless-stopped
-
-  rag_text_worker:
-    build:
-      context: ./apps/rowboat
-      dockerfile: scripts.Dockerfile
-    command: ["npm", "run", "ragTextWorker"]
-    profiles: [ "rag_text_worker" ]
-    environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - EMBEDDING_PROVIDER_BASE_URL=${EMBEDDING_PROVIDER_BASE_URL}
       - EMBEDDING_PROVIDER_API_KEY=${EMBEDDING_PROVIDER_API_KEY}
