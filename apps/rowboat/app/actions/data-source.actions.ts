@@ -9,9 +9,9 @@ import { WithStringId } from "../lib/types/types";
 import { DataSourceDoc } from "../lib/types/datasource_types";
 import { DataSource } from "@/src/entities/models/data-source";
 import { uploadsS3Client } from "../lib/uploads_s3_client";
-import { container } from "@/di/container";
 import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
 import { NotAuthorizedError } from "@/src/entities/errors/common";
+import { container } from "@/di/container";
 
 const dataSourcesRepository = container.resolve<IDataSourcesRepository>("dataSourcesRepository");
 

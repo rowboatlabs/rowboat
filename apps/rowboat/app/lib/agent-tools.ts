@@ -17,6 +17,7 @@ import { EmbeddingRecord } from "./types/datasource_types";
 import { WorkflowAgent, WorkflowTool } from "./types/workflow_types";
 import { PrefixLogger } from "./utils";
 import { UsageTracker } from "./billing";
+import { DataSource } from "@/src/entities/models/data-source";
 import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
 import { container } from "@/di/container";
 
@@ -24,8 +25,6 @@ import { container } from "@/di/container";
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
 const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
-
-const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
 
 const openai = createOpenAI({
     apiKey: PROVIDER_API_KEY,
@@ -96,6 +95,8 @@ export async function invokeRagTool(
     logger.log(`returnType: ${returnType}`);
     logger.log(`k: ${k}`);
 
+    const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
+
     // Create embedding for question
     const { embedding, usage } = await embed({
         model: embeddingModel,
@@ -113,7 +114,7 @@ export async function invokeRagTool(
     });
 
     // Fetch all data sources for this project
-    const sources = [];
+    const sources: z.infer<typeof DataSource>[] = [];
     let cursor = undefined;
     do {
         const resp = await dataSourcesRepository.list(projectId, {

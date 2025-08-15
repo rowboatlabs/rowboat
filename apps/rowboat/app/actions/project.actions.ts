@@ -12,7 +12,6 @@ import { Project } from "../lib/types/project_types";
 import { USE_AUTH } from "../lib/feature_flags";
 import { authorizeUserAction } from "./billing.actions";
 import { Workflow } from "../lib/types/workflow_types";
-import { container } from "@/di/container";
 import { IProjectActionAuthorizationPolicy } from "@/src/application/policies/project-action-authorization.policy";
 import { ICreateApiKeyController } from "@/src/interface-adapters/controllers/api-keys/create-api-key.controller";
 import { IListApiKeysController } from "@/src/interface-adapters/controllers/api-keys/list-api-keys.controller";
@@ -20,6 +19,7 @@ import { IDeleteApiKeyController } from "@/src/interface-adapters/controllers/ap
 import { IApiKeysRepository } from "@/src/application/repositories/api-keys.repository.interface";
 import { IProjectMembersRepository } from "@/src/application/repositories/project-members.repository.interface";
 import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
+import { container } from "@/di/container";
 
 const projectActionAuthorizationPolicy = container.resolve<IProjectActionAuthorizationPolicy>('projectActionAuthorizationPolicy');
 const createApiKeyController = container.resolve<ICreateApiKeyController>('createApiKeyController');
