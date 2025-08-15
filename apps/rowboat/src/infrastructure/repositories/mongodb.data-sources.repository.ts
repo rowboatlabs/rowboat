@@ -34,6 +34,10 @@ export class MongoDBDataSourcesRepository implements IDataSourcesRepository {
             attempts: 0,
             version: 1,
             createdAt: now,
+            error: null,
+            billingError: null,
+            lastAttemptAt: null,
+            lastUpdatedAt: null,
         };
 
         await this.collection.insertOne({

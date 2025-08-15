@@ -176,6 +176,8 @@ services:
       - BILLING_API_URL=${BILLING_API_URL}
       - BILLING_API_KEY=${BILLING_API_KEY}
     restart: unless-stopped
+    volumes:
+      - uploads:/app/uploads
 
   jobs-worker:
     build:

@@ -21,12 +21,11 @@ export const UpdateSchema = DataSource
         billingError: true,
         error: true,
         description: true,
+        status: true,
+        active: true,
+        attempts: true,
     })
-    .extend({
-        status: DataSource.shape.status.optional(),
-        active: DataSource.shape.active.optional(),
-        attempts: DataSource.shape.attempts.optional(),
-    });
+    .partial();
 
 /**
  * Filters schema for listing DataSources. Supports optional filtering by active and deleted status.
@@ -39,11 +38,13 @@ export const ListFiltersSchema = z.object({
 /**
  * Schema for the payload of a release operation.
  */
-export const ReleasePayloadSchema = DataSource.pick({
-    status: true,
-    error: true,
-    billingError: true,
-});
+export const ReleasePayloadSchema = DataSource
+    .pick({
+        status: true,
+        error: true,
+        billingError: true,
+    })
+    .partial();
 
 /**
  * Repository interface for managing DataSource entities in the persistence layer.

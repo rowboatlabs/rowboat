@@ -3,7 +3,7 @@ import { z } from "zod";
 export const DataSource = z.object({
     id: z.string(),
     name: z.string(),
-    description: z.string().optional(),
+    description: z.string(),
     projectId: z.string(),
     active: z.boolean().default(true),
     status: z.enum([
@@ -13,13 +13,12 @@ export const DataSource = z.object({
         'deleted',
     ]),
     version: z.number(),
-    error: z.string().optional(),
-    billingError: z.string().optional(),
+    error: z.string().nullable(),
+    billingError: z.string().nullable(),
     createdAt: z.string().datetime(),
-    lastUpdatedAt: z.string().datetime().optional(),
+    lastUpdatedAt: z.string().datetime().nullable(),
     attempts: z.number(),
-    lastAttemptAt: z.string().datetime().optional(),
-    pendingRefresh: z.boolean().default(false).optional(),
+    lastAttemptAt: z.string().datetime().nullable(),
     data: z.discriminatedUnion('type', [
         z.object({
             type: z.literal('urls'),

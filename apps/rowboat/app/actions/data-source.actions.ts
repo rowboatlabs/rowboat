@@ -67,7 +67,7 @@ export async function createDataSource({
     return await dataSourcesRepository.create({
         projectId,
         name: name,
-        description,
+        description: description || "",
         data,
         status: _status as z.infer<typeof DataSource>['status'],
     });
@@ -95,7 +95,7 @@ export async function recrawlWebDataSource(projectId: string, sourceId: string) 
     // mark data source as pending
     await dataSourcesRepository.update(sourceId, {
         status: 'pending',
-        billingError: undefined,
+        billingError: null,
         attempts: 0,
     }, true);
 }
