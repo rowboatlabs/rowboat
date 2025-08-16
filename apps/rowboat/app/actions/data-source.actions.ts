@@ -1,6 +1,5 @@
 'use server';
 import { ObjectId, WithId } from "mongodb";
-import { dataSourceDocsCollection } from "../lib/mongodb";
 import { z } from 'zod';
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -11,9 +10,11 @@ import { DataSource } from "@/src/entities/models/data-source";
 import { uploadsS3Client } from "../lib/uploads_s3_client";
 import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
 import { NotAuthorizedError } from "@/src/entities/errors/common";
+import { IDataSourceDocsRepository } from "@/src/application/repositories/data-source-docs.repository.interface";
 import { container } from "@/di/container";
 
 const dataSourcesRepository = container.resolve<IDataSourcesRepository>("dataSourcesRepository");
+const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>("dataSourceDocsRepository");
 
 export async function getDataSource(projectId: string, sourceId: string): Promise<z.infer<typeof DataSource>> {
     await projectAuthCheck(projectId);
@@ -82,15 +83,7 @@ export async function recrawlWebDataSource(projectId: string, sourceId: string) 
     }
 
     // mark all files as queued
-    await dataSourceDocsCollection.updateMany({
-        sourceId: sourceId,
-    }, {
-        $set: {
-            status: 'pending',
-            lastUpdatedAt: (new Date()).toISOString(),
-            attempts: 0,
-        }
-    });
+    await dataSourceDocsRepository.markSourceDocsPending(sourceId);
 
     // mark data source as pending
     await dataSourcesRepository.update(sourceId, {
@@ -137,22 +130,10 @@ export async function addDocsToDataSource({
     await projectAuthCheck(projectId);
     const source = await getDataSource(projectId, sourceId);
 
-    await dataSourceDocsCollection.insertMany(docData.map(doc => {
-        const record: z.infer<typeof DataSourceDoc> = {
-            sourceId,
-            name: doc.name,
-            status: 'pending',
-            createdAt: new Date().toISOString(),
-            data: doc.data,
-            version: 1,
-        };
-        if (!doc._id) {
-            return record;
-        }
-        const recordWithId = record as WithId<z.infer<typeof DataSourceDoc>>;
-        recordWithId._id = new ObjectId(doc._id);
-        return recordWithId;
-    }));
+    await dataSourceDocsRepository.bulkCreate(projectId, sourceId, docData.map(doc => ({
+        name: doc.name,
+        data: doc.data,
+    })));
 
     // Only set status to pending when files are added
     if (docData.length > 0 && (source.data.type === 'files_local' || source.data.type === 'files_s3')) {
@@ -175,63 +156,41 @@ export async function listDocsInDataSource({
     page?: number,
     limit?: number,
 }): Promise<{
-    files: WithStringId<z.infer<typeof DataSourceDoc>>[],
+    files: z.infer<typeof DataSourceDoc>[],
     total: number
 }> {
     await projectAuthCheck(projectId);
     await getDataSource(projectId, sourceId);
 
-    // Get total count
-    const total = await dataSourceDocsCollection.countDocuments({
-        sourceId,
-        status: { $ne: 'deleted' },
-    });
-
-    // Fetch docs with pagination
-    const docs = await dataSourceDocsCollection.find({
-        sourceId,
-        status: { $ne: 'deleted' },
-    })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .toArray();
+    // fetch all docs
+    const docs = [];
+    let cursor = undefined;
+    do {
+        const result = await dataSourceDocsRepository.list(sourceId, undefined, cursor);
+        docs.push(...result.items);
+        cursor = result.nextCursor;
+    } while (cursor);
 
     return {
-        files: docs.map(f => ({ ...f, _id: f._id.toString() })),
-        total
+        files: docs,
+        total: docs.length,
     };
 }
 
-export async function deleteDocsFromDataSource({
+export async function deleteDocFromDataSource({
     projectId,
     sourceId,
-    docIds,
+    docId,
 }: {
     projectId: string,
     sourceId: string,
-    docIds: string[],
+    docId: string,
 }): Promise<void> {
     await projectAuthCheck(projectId);
     await getDataSource(projectId, sourceId);
 
     // mark for deletion
-    await dataSourceDocsCollection.updateMany(
-        {
-            sourceId,
-            _id: {
-                $in: docIds.map(id => new ObjectId(id))
-            }
-        },
-        {
-            $set: {
-                status: "deleted",
-                lastUpdatedAt: new Date().toISOString(),
-            },
-            $inc: {
-                version: 1,
-            },
-        }
-    );
+    await dataSourceDocsRepository.markAsDeleted(docId);
 
     // mark data source as pending
     await dataSourcesRepository.update(sourceId, {
@@ -248,13 +207,13 @@ export async function getDownloadUrlForFile(
 ): Promise<string> {
     await projectAuthCheck(projectId);
     await getDataSource(projectId, sourceId);
-    const file = await dataSourceDocsCollection.findOne({
-        sourceId,
-        _id: new ObjectId(fileId),
-        'data.type': { $in: ['file_local', 'file_s3'] },
-    });
+
+    const file = await dataSourceDocsRepository.fetch(fileId);
     if (!file) {
         throw new Error('File not found');
+    }
+    if (file.sourceId !== sourceId) {
+        throw new NotAuthorizedError('You cannot access this file');
     }
 
     // if local, return path

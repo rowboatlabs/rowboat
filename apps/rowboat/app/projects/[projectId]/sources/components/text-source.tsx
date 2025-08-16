@@ -1,12 +1,11 @@
 "use client";
-import { WithStringId } from "../../../../lib/types/types";
 import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { useState, useEffect } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { FormStatusButton } from "../../../../lib/components/form-status-button";
 import { Spinner } from "@heroui/react";
-import { addDocsToDataSource, deleteDocsFromDataSource, listDocsInDataSource } from "../../../../actions/data-source.actions";
+import { addDocsToDataSource, deleteDocFromDataSource, listDocsInDataSource } from "../../../../actions/data-source.actions";
 import { Section } from "./section";
 
 export function TextSource({
@@ -41,7 +40,7 @@ export function TextSource({
                     const doc = files[0];
                     if (doc.data.type === 'text') {
                         setContent(doc.data.content);
-                        setDocId(doc._id);
+                        setDocId(doc.id);
                     }
                 }
             } catch (error) {
@@ -64,10 +63,10 @@ export function TextSource({
 
             // Delete existing doc if it exists
             if (docId) {
-                await deleteDocsFromDataSource({
+                await deleteDocFromDataSource({
                     projectId,
                     sourceId: dataSource.id,
-                    docIds: [docId],
+                    docId: docId,
                 });
             }
 

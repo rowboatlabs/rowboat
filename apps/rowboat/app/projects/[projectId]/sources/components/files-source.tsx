@@ -1,11 +1,10 @@
 "use client";
-import { WithStringId } from "../../../../lib/types/types";
 import { DataSourceDoc } from "@/src/entities/models/data-source-doc";
 import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { deleteDocsFromDataSource, getUploadUrlsForFilesDataSource, addDocsToDataSource, getDownloadUrlForFile, listDocsInDataSource } from "../../../../actions/data-source.actions";
+import { deleteDocFromDataSource, getUploadUrlsForFilesDataSource, addDocsToDataSource, getDownloadUrlForFile, listDocsInDataSource } from "../../../../actions/data-source.actions";
 import { RelativeTime } from "@primer/react";
 import { Pagination, Spinner } from "@heroui/react";
 import { DownloadIcon } from "lucide-react";
@@ -19,7 +18,7 @@ function FileListItem({
 }: {
     projectId: string,
     sourceId: string,
-    file: WithStringId<z.infer<typeof DataSourceDoc>>,
+    file: z.infer<typeof DataSourceDoc>,
     onDelete: (fileId: string) => Promise<void>;
 }) {
     const [isDeleting, setIsDeleting] = useState(false);
@@ -28,7 +27,7 @@ function FileListItem({
     const handleDeleteClick = async () => {
         setIsDeleting(true);
         try {
-            await onDelete(file._id);
+            await onDelete(file.id);
         } finally {
             setIsDeleting(false);
         }
@@ -37,7 +36,7 @@ function FileListItem({
     const handleDownloadClick = async () => {
         setIsDownloading(true);
         try {
-            const url = await getDownloadUrlForFile(projectId, sourceId, file._id);
+            const url = await getDownloadUrlForFile(projectId, sourceId, file.id);
             window.open(url, '_blank');
         } catch (error) {
             console.error('Download failed:', error);
@@ -101,7 +100,7 @@ function PaginatedFileList({
     handleReload: () => void;
     onDelete: (fileId: string) => Promise<void>;
 }) {
-    const [files, setFiles] = useState<WithStringId<z.infer<typeof DataSourceDoc>>[]>([]);
+    const [files, setFiles] = useState<z.infer<typeof DataSourceDoc>[]>([]);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(false);
@@ -155,7 +154,7 @@ function PaginatedFileList({
                 <div className="space-y-3">
                     {files.map(file => (
                         <FileListItem
-                            key={file._id}
+                            key={file.id}
                             file={file}
                             projectId={projectId}
                             sourceId={sourceId}
@@ -304,10 +303,10 @@ export function FilesSource({
                     sourceId={dataSource.id}
                     handleReload={handleReload}
                     onDelete={async (docId) => {
-                        await deleteDocsFromDataSource({
+                        await deleteDocFromDataSource({
                             projectId,
                             sourceId: dataSource.id,
-                            docIds: [docId],
+                            docId: docId,
                         });
                         handleReload();
                         setFileListKey(prev => prev + 1);

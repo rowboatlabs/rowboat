@@ -75,6 +75,7 @@ import { DeleteApiKeyController } from "@/src/interface-adapters/controllers/api
 
 // Data sources
 import { MongoDBDataSourcesRepository } from "@/src/infrastructure/repositories/mongodb.data-sources.repository";
+import { MongoDBDataSourceDocsRepository } from "@/src/infrastructure/repositories/mongodb.data-source-docs.repository";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -118,6 +119,7 @@ container.register({
     // data sources
     // ---
     dataSourcesRepository: asClass(MongoDBDataSourcesRepository).singleton(),
+    dataSourceDocsRepository: asClass(MongoDBDataSourceDocsRepository).singleton(),
 
     // jobs
     // ---

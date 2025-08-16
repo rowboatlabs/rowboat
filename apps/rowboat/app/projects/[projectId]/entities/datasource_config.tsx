@@ -1,5 +1,4 @@
 "use client";
-import { WithStringId } from "../../../lib/types/types";
 import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { XIcon, FileIcon, GlobeIcon, AlertTriangle, CheckCircle, Circle, ExternalLinkIcon, Type, PlusIcon, Edit3Icon, DownloadIcon, Trash2 } from "lucide-react";
@@ -8,7 +7,7 @@ import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
 import { DataSourceIcon } from "@/app/lib/components/datasource-icon";
 import { Tooltip } from "@heroui/react";
-import { getDataSource, listDocsInDataSource, deleteDocsFromDataSource, getDownloadUrlForFile, addDocsToDataSource, getUploadUrlsForFilesDataSource } from "@/app/actions/data-source.actions";
+import { getDataSource, listDocsInDataSource, deleteDocFromDataSource, getDownloadUrlForFile, addDocsToDataSource, getUploadUrlsForFilesDataSource } from "@/app/actions/data-source.actions";
 import { InputField } from "@/app/lib/components/input-field";
 import { DataSourceDoc } from "@/src/entities/models/data-source-doc";
 import { RelativeTime } from "@primer/react";
@@ -29,7 +28,7 @@ export function DataSourceConfig({
     const [error, setError] = useState<string | null>(null);
     
     // Files-related state
-    const [files, setFiles] = useState<WithStringId<z.infer<typeof DataSourceDoc>>[]>([]);
+    const [files, setFiles] = useState<z.infer<typeof DataSourceDoc>[]>([]);
     const [filesLoading, setFilesLoading] = useState(false);
     const [filesPage, setFilesPage] = useState(1);
     const [filesTotal, setFilesTotal] = useState(0);
@@ -153,7 +152,7 @@ export function DataSourceConfig({
     };
 
     // URLs-related state
-    const [urls, setUrls] = useState<WithStringId<z.infer<typeof DataSourceDoc>>[]>([]);
+    const [urls, setUrls] = useState<z.infer<typeof DataSourceDoc>[]>([]);
     const [urlsLoading, setUrlsLoading] = useState(false);
     const [urlsPage, setUrlsPage] = useState(1);
     const [urlsTotal, setUrlsTotal] = useState(0);
@@ -218,10 +217,10 @@ export function DataSourceConfig({
         if (!window.confirm('Are you sure you want to delete this file?')) return;
         
         try {
-            await deleteDocsFromDataSource({
+            await deleteDocFromDataSource({
                 projectId,
                 sourceId: dataSourceId,
-                docIds: [fileId],
+                docId: fileId,
             });
             // Reload files
             await loadFiles(projectId, dataSourceId, filesPage);
@@ -253,10 +252,10 @@ export function DataSourceConfig({
         if (!window.confirm('Are you sure you want to delete this URL?')) return;
         
         try {
-            await deleteDocsFromDataSource({
+            await deleteDocFromDataSource({
                 projectId,
                 sourceId: dataSourceId,
-                docIds: [urlId],
+                docId: urlId,
             });
             // Reload URLs
             await loadUrls(projectId, dataSourceId, urlsPage);
@@ -285,10 +284,10 @@ export function DataSourceConfig({
             });
             
             if (files.length > 0) {
-                await deleteDocsFromDataSource({
+                await deleteDocFromDataSource({
                     projectId,
                     sourceId: dataSourceId,
-                    docIds: [files[0]._id],
+                    docId: files[0].id,
                 });
             }
 
@@ -676,7 +675,7 @@ export function DataSourceConfig({
                                 <div className="space-y-2">
                                     {files.map((file) => (
                                         <div
-                                            key={file._id}
+                                            key={file.id}
                                             className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border"
                                         >
                                             <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -696,7 +695,7 @@ export function DataSourceConfig({
                                                 {(file.data.type === 'file_local' || file.data.type === 'file_s3') && (
                                                     <Tooltip content="Download file">
                                                         <button
-                                                            onClick={() => handleDownloadFile(file._id)}
+                                                            onClick={() => handleDownloadFile(file.id)}
                                                             className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
                                                         >
                                                             <DownloadIcon className="w-4 h-4 text-gray-500" />
@@ -705,7 +704,7 @@ export function DataSourceConfig({
                                                 )}
                                                 <Tooltip content="Delete file">
                                                     <button
-                                                        onClick={() => handleDeleteFile(file._id)}
+                                                        onClick={() => handleDeleteFile(file.id)}
                                                         className="p-1 hover:bg-red-100 dark:hover:bg-red-900/20 rounded transition-colors"
                                                     >
                                                         <Trash2 className="w-4 h-4 text-red-500" />
@@ -805,7 +804,7 @@ export function DataSourceConfig({
                                 <div className="space-y-2">
                                     {urls.map((url) => (
                                         <div
-                                            key={url._id}
+                                            key={url.id}
                                             className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border"
                                         >
                                             <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -834,7 +833,7 @@ export function DataSourceConfig({
                                             <div className="flex items-center gap-2">
                                                 <Tooltip content="Delete URL">
                                                     <button
-                                                        onClick={() => handleDeleteUrl(url._id)}
+                                                        onClick={() => handleDeleteUrl(url.id)}
                                                         className="p-1 hover:bg-red-100 dark:hover:bg-red-900/20 rounded transition-colors"
                                                     >
                                                         <Trash2 className="w-4 h-4 text-red-500" />

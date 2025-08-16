@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs/promises';
 import fsSync from 'fs';
-import { dataSourceDocsCollection } from '@/app/lib/mongodb';
-import { ObjectId } from 'mongodb';
+import { container } from '@/di/container';
+import { IDataSourceDocsRepository } from '@/src/application/repositories/data-source-docs.repository.interface';
 
 const UPLOADS_DIR = process.env.RAG_UPLOADS_DIR || '/uploads';
+
+const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>('dataSourceDocsRepository');
 
 // PUT endpoint to handle file uploads
 export async function PUT(request: NextRequest, props: { params: Promise<{ fileId: string }> }) {
@@ -42,7 +44,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ fileI
     const filePath = path.join(UPLOADS_DIR, fileId);
 
     // get mimetype from database
-    const doc = await dataSourceDocsCollection.findOne({ _id: new ObjectId(fileId) });
+    const doc = await dataSourceDocsRepository.fetch(fileId);
     if (!doc) {
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }

@@ -2,10 +2,8 @@ import '../lib/loadenv';
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import FirecrawlApp from '@mendable/firecrawl-js';
 import { z } from 'zod';
-import { dataSourceDocsCollection } from '../lib/mongodb';
 import { EmbeddingRecord } from "../lib/types/datasource_types";
 import { DataSourceDoc } from "@/src/entities/models/data-source-doc";
-import { WithId } from 'mongodb';
 import { embedMany, generateText } from 'ai';
 import { embeddingModel } from '../lib/embedding';
 import { qdrantClient } from '../lib/qdrant';
@@ -22,6 +20,7 @@ import { authorize, getCustomerIdForProject, logUsage, UsageTracker } from '../l
 import { BillingError } from '@/src/entities/errors/common';
 import { DataSource } from '@/src/entities/models/data-source';
 import { IDataSourcesRepository } from '@/src/application/repositories/data-sources.repository.interface';
+import { IDataSourceDocsRepository } from '@/src/application/repositories/data-source-docs.repository.interface';
 import { container } from '@/di/container';
 
 const FILE_PARSING_PROVIDER_API_KEY = process.env.FILE_PARSING_PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
@@ -29,6 +28,7 @@ const FILE_PARSING_PROVIDER_BASE_URL = process.env.FILE_PARSING_PROVIDER_BASE_UR
 const FILE_PARSING_MODEL = process.env.FILE_PARSING_MODEL || 'gpt-4o';
 
 const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
+const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>('dataSourceDocsRepository');
 
 const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY || "test" });
 
@@ -79,20 +79,20 @@ async function retryable<T>(fn: () => Promise<T>, maxAttempts: number = 3): Prom
     }
 }
 
-async function runProcessFilePipeline(_logger: PrefixLogger, usageTracker: UsageTracker, job: z.infer<typeof DataSource>, doc: WithId<z.infer<typeof DataSourceDoc>>) {
+async function runProcessFilePipeline(_logger: PrefixLogger, usageTracker: UsageTracker, job: z.infer<typeof DataSource>, doc: z.infer<typeof DataSourceDoc>) {
     if (doc.data.type !== 'file_local' && doc.data.type !== 'file_s3') {
         throw new Error("Invalid data source type");
     }
 
     const logger = _logger
-        .child(doc._id.toString())
+        .child(doc.id)
         .child(doc.name);
 
     // Get file content
     let fileData: Buffer;
     if (doc.data.type === 'file_local') {
         logger.log("Fetching file from local");
-        fileData = await getLocalFileContent(path.join(UPLOADS_DIR, doc._id.toString()));
+        fileData = await getLocalFileContent(path.join(UPLOADS_DIR, doc.id));
     } else {
         logger.log("Fetching file from S3");
         fileData = await getS3FileContent(doc.data.s3Key);
@@ -176,7 +176,7 @@ async function runProcessFilePipeline(_logger: PrefixLogger, usageTracker: Usage
         payload: {
             projectId: job.projectId,
             sourceId: job.id,
-            docId: doc._id.toString(),
+            docId: doc.id,
             content: splits[i].pageContent,
             title: doc.name,
             name: doc.name,
@@ -188,21 +188,15 @@ async function runProcessFilePipeline(_logger: PrefixLogger, usageTracker: Usage
 
     // store content in doc record
     logger.log("Storing content in doc record");
-    await dataSourceDocsCollection.updateOne({
-        _id: doc._id,
-        version: doc.version,
-    }, {
-        $set: {
-            content: markdown,
-            status: "ready",
-            lastUpdatedAt: new Date().toISOString(),
-        }
+    await dataSourceDocsRepository.updateByVersion(doc.id, doc.version, {
+        content: markdown,
+        status: "ready",
     });
 }
 
-async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTracker, job: z.infer<typeof DataSource>, doc: WithId<z.infer<typeof DataSourceDoc>>) {
+async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTracker, job: z.infer<typeof DataSource>, doc: z.infer<typeof DataSourceDoc>) {
     const logger = _logger
-        .child(doc._id.toString())
+        .child(doc.id)
         .child(doc.name);
 
     // scrape the url using firecrawl
@@ -251,7 +245,7 @@ async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTrack
         payload: {
             projectId: job.projectId,
             sourceId: job.id,
-            docId: doc._id.toString(),
+            docId: doc.id,
             content: splits[i].pageContent,
             title: scrapeResult.metadata?.title || '',
             name: doc.name,
@@ -263,21 +257,15 @@ async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTrack
 
     // store scraped markdown in doc record
     logger.log("Storing scraped markdown in doc record");
-    await dataSourceDocsCollection.updateOne({
-        _id: doc._id,
-        version: doc.version,
-    }, {
-        $set: {
-            content: scrapeResult.markdown,
-            status: "ready",
-            lastUpdatedAt: new Date().toISOString(),
-        }
+    await dataSourceDocsRepository.updateByVersion(doc.id, doc.version, {
+        content: scrapeResult.markdown,
+        status: "ready",
     });
 }
 
-async function runProcessTextPipeline(_logger: PrefixLogger, usageTracker: UsageTracker, job: z.infer<typeof DataSource>, doc: WithId<z.infer<typeof DataSourceDoc>>) {
+async function runProcessTextPipeline(_logger: PrefixLogger, usageTracker: UsageTracker, job: z.infer<typeof DataSource>, doc: z.infer<typeof DataSourceDoc>) {
     const logger = _logger
-        .child(doc._id.toString())
+        .child(doc.id)
         .child(doc.name);
 
     if (doc.data.type !== 'text') {
@@ -309,7 +297,7 @@ async function runProcessTextPipeline(_logger: PrefixLogger, usageTracker: Usage
         payload: {
             projectId: job.projectId,
             sourceId: job.id,
-            docId: doc._id.toString(),
+            docId: doc.id,
             content: splits[i].pageContent,
             title: doc.name,
             name: doc.name,
@@ -321,21 +309,15 @@ async function runProcessTextPipeline(_logger: PrefixLogger, usageTracker: Usage
 
     // store content in doc record
     logger.log("Storing content in doc record");
-    await dataSourceDocsCollection.updateOne({
-        _id: doc._id,
-        version: doc.version,
-    }, {
-        $set: {
-            content: doc.data.content,
-            status: "ready",
-            lastUpdatedAt: new Date().toISOString(),
-        }
+    await dataSourceDocsRepository.updateByVersion(doc.id, doc.version, {
+        content: doc.data.content,
+        status: "ready",
     });
 }
 
-async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof DataSource>, doc: WithId<z.infer<typeof DataSourceDoc>>): Promise<void> {
+async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof DataSource>, doc: z.infer<typeof DataSourceDoc>): Promise<void> {
     const logger = _logger
-        .child(doc._id.toString())
+        .child(doc.id)
         .child(doc.name);
 
     // Delete embeddings from qdrant
@@ -358,7 +340,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof Da
                 {
                     key: "docId",
                     match: {
-                        value: doc._id.toString(),
+                        value: doc.id,
                     }
                 }
             ],
@@ -367,7 +349,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof Da
 
     // Delete docs from db
     logger.log("Deleting doc from db");
-    await dataSourceDocsCollection.deleteOne({ _id: doc._id });
+    await dataSourceDocsRepository.delete(doc.id);
 }
 
 // fetch next job from mongodb
@@ -408,9 +390,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof Da
 
                 // delete all docs for this source
                 logger.log("Deleting docs from db");
-                await dataSourceDocsCollection.deleteMany({
-                    sourceId: job.id,
-                });
+                await dataSourceDocsRepository.deleteBySourceId(job.id);
 
                 // delete the source record from db
                 logger.log("Deleting source record from db");
@@ -421,10 +401,15 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof Da
             }
 
             // fetch docs that need updating
-            const pendingDocs = await dataSourceDocsCollection.find({
-                sourceId: job.id,
-                status: { $in: ["pending", "error"] },
-            }).toArray();
+            const pendingDocs = [];
+            let cursor = undefined;
+            do {
+                const result = await dataSourceDocsRepository.list(job.id, {
+                    status: ["pending", "error"],
+                }, cursor);
+                pendingDocs.push(...result.items);
+                cursor = result.nextCursor;
+            } while (cursor);
 
             logger.log(`Found ${pendingDocs.length} docs to process`);
 
@@ -464,14 +449,9 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof Da
                 } catch (e: any) {
                     errors = true;
                     logger.log("Error processing doc:", e);
-                    await dataSourceDocsCollection.updateOne({
-                        _id: doc._id,
-                        version: doc.version,
-                    }, {
-                        $set: {
-                            status: "error",
-                            error: e.message,
-                        }
+                    await dataSourceDocsRepository.updateByVersion(doc.id, doc.version, {
+                        status: "error",
+                        error: e.message,
                     });
                 } finally {
                     // log usage in billing
@@ -484,10 +464,15 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof Da
             }
 
             // fetch docs that need to be deleted
-            const deletedDocs = await dataSourceDocsCollection.find({
-                sourceId: job.id,
-                status: "deleted",
-            }).toArray();
+            const deletedDocs = [];
+            cursor = undefined;
+            do {
+                const result = await dataSourceDocsRepository.list(job.id, {
+                    status: ["deleted"],
+                }, cursor);
+                deletedDocs.push(...result.items);
+                cursor = result.nextCursor;
+            } while (cursor);
 
             logger.log(`Found ${deletedDocs.length} docs to delete`);
 
@@ -497,14 +482,9 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof Da
                 } catch (e: any) {
                     errors = true;
                     logger.log("Error deleting doc:", e);
-                    await dataSourceDocsCollection.updateOne({
-                        _id: doc._id,
-                        version: doc.version,
-                    }, {
-                        $set: {
-                            status: "error",
-                            error: e.message,
-                        }
+                    await dataSourceDocsRepository.updateByVersion(doc.id, doc.version, {
+                        status: "error",
+                        error: e.message,
                     });
                 }
             }

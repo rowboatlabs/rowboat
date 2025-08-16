@@ -6,10 +6,7 @@ import { z } from "zod";
  * Schema for creating a new DataSourceDoc. Requires projectId, sourceId, name, status, and data fields.
  */
 export const CreateSchema = DataSourceDoc.pick({
-    projectId: true,
-    sourceId: true,
     name: true,
-    status: true,
     data: true,
 });
 
@@ -25,16 +22,6 @@ export const UpdateSchema = DataSourceDoc
     .partial();
 
 /**
- * Schema used to perform bulk updates across multiple DataSourceDocs. Allows updating status and attempts fields.
- */
-export const BulkUpdateSchema = DataSourceDoc
-    .pick({
-        status: true,
-        attempts: true,
-    })
-    .partial();
-
-/**
  * Filters schema for listing DataSourceDocs. Supports optional filtering by one or more statuses.
  */
 export const ListFiltersSchema = z.object({
@@ -46,11 +33,17 @@ export const ListFiltersSchema = z.object({
  */
 export interface IDataSourceDocsRepository {
     /**
-     * Creates a new DataSourceDoc with the provided data.
+     * Creates multiple DataSourceDocs with the provided data.
+     * @param projectId - The project ID to create the DataSourceDocs for.
+     * @param sourceId - The source ID to create the DataSourceDocs for.
      * @param data - The data required to create a DataSourceDoc (see CreateSchema).
-     * @returns The created DataSourceDoc object.
+     * @returns The IDs of the created DataSourceDocs.
      */
-    create(data: z.infer<typeof CreateSchema>): Promise<z.infer<typeof DataSourceDoc>>;
+    bulkCreate(
+        projectId: string,
+        sourceId: string,
+        data: z.infer<typeof CreateSchema>[]
+    ): Promise<string[]>;
 
     /**
      * Fetches a DataSourceDoc by its unique identifier.
@@ -58,6 +51,13 @@ export interface IDataSourceDocsRepository {
      * @returns The DataSourceDoc object if found, otherwise null.
      */
     fetch(id: string): Promise<z.infer<typeof DataSourceDoc> | null>;
+
+    /**
+     * Fetches multiple DataSourceDocs by their unique identifiers.
+     * @param ids - The unique IDs of the DataSourceDocs.
+     * @returns The DataSourceDocs objects that were found
+     */
+    bulkFetch(ids: string[]): Promise<z.infer<typeof DataSourceDoc>[]>;
 
     /**
      * Lists DataSourceDocs for a given source, with optional filters, cursor, and limit for pagination.
@@ -75,21 +75,29 @@ export interface IDataSourceDocsRepository {
     ): Promise<z.infer<ReturnType<typeof PaginatedList<typeof DataSourceDoc>>>>;
 
     /**
-     * Updates an existing DataSourceDoc by its ID and version with the provided data.
-     * @param id - The unique ID of the DataSourceDoc to update.
-     * @param version - The current version of the DataSourceDoc for optimistic concurrency control.
-     * @param data - The fields to update (see UpdateSchema).
-     * @returns The updated DataSourceDoc object.
+     * Marks all docs for a given source as pending.
+     * @param sourceId - The source ID to mark docs for.
      */
-    update(id: string, version: number, data: z.infer<typeof UpdateSchema>): Promise<z.infer<typeof DataSourceDoc>>;
+    markSourceDocsPending(sourceId: string): Promise<void>;
 
     /**
-     * Applies updates to multiple DataSourceDocs belonging to the provided source.
-     * @param sourceId - The source ID whose documents should be updated.
-     * @param data - An array of updates to apply (see BulkUpdateSchema).
-     * @param bumpVersion - Optional flag to increment the version for updated documents.
+     * Marks a DataSourceDoc as deleted.
+     * @param id - The unique ID of the DataSourceDoc to mark as deleted.
      */
-    bulkUpdate(sourceId: string, data: z.infer<typeof BulkUpdateSchema>[], bumpVersion?: boolean): Promise<void>;
+    markAsDeleted(id: string): Promise<void>;
+
+    /**
+     * Updates an existing DataSourceDoc by its ID and version with the provided data.
+     * @param id - The unique ID of the DataSourceDoc to update.
+     * @param version - Version of the DataSourceDoc for optimistic concurrency control.
+     * @param data - Fields to update (see UpdateSchema).
+     * @returns The updated DataSourceDoc object.
+     */
+    updateByVersion(
+        id: string,
+        version: number,
+        data: z.infer<typeof UpdateSchema>
+    ): Promise<z.infer<typeof DataSourceDoc>>;
 
     /**
      * Deletes a DataSourceDoc by its unique identifier.
@@ -102,5 +110,5 @@ export interface IDataSourceDocsRepository {
      * Deletes all DataSourceDocs associated with a given source ID.
      * @param sourceId - The source ID whose documents should be deleted.
      */
-    bulkDelete(sourceId: string): Promise<void>;
+    deleteBySourceId(sourceId: string): Promise<void>;
 }
