@@ -280,7 +280,7 @@ export async function getUploadUrlsForFilesDataSource(
     return urls;
 }
 
-export async function updateDataSource({
+export async function updateDataSourceDescription({
     projectId,
     sourceId,
     description,

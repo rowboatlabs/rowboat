@@ -1,5 +1,10 @@
 import { asClass, createContainer, InjectionMode } from "awilix";
 
+// Services
+import { RedisPubSubService } from "@/src/infrastructure/services/redis.pub-sub.service";
+import { S3UploadsStorageService } from "@/src/infrastructure/services/s3.uploads-storage.service";
+import { LocalUploadsStorageService } from "@/src/infrastructure/services/local.uploads-storage.service";
+
 import { RunConversationTurnUseCase } from "@/src/application/use-cases/conversations/run-conversation-turn.use-case";
 import { MongoDBConversationsRepository } from "@/src/infrastructure/repositories/mongodb.conversations.repository";
 import { RunCachedTurnController } from "@/src/interface-adapters/controllers/conversations/run-cached-turn.controller";
@@ -29,7 +34,6 @@ import { ListComposioTriggerDeploymentsController } from "@/src/interface-adapte
 import { ListComposioTriggerTypesController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/list-composio-trigger-types.controller";
 import { DeleteComposioConnectedAccountController } from "@/src/interface-adapters/controllers/composio/delete-composio-connected-account.controller";
 import { HandleComposioWebhookRequestController } from "@/src/interface-adapters/controllers/composio/webhook/handle-composio-webhook-request.controller";
-import { RedisPubSubService } from "@/src/infrastructure/services/redis.pub-sub.service";
 import { JobsWorker } from "@/src/application/workers/jobs.worker";
 import { JobRulesWorker } from "@/src/application/workers/job-rules.worker";
 import { ListJobsUseCase } from "@/src/application/use-cases/jobs/list-jobs.use-case";
@@ -76,6 +80,30 @@ import { DeleteApiKeyController } from "@/src/interface-adapters/controllers/api
 // Data sources
 import { MongoDBDataSourcesRepository } from "@/src/infrastructure/repositories/mongodb.data-sources.repository";
 import { MongoDBDataSourceDocsRepository } from "@/src/infrastructure/repositories/mongodb.data-source-docs.repository";
+import { CreateDataSourceUseCase } from "@/src/application/use-cases/data-sources/create-data-source.use-case";
+import { FetchDataSourceUseCase } from "@/src/application/use-cases/data-sources/fetch-data-source.use-case";
+import { ListDataSourcesUseCase } from "@/src/application/use-cases/data-sources/list-data-sources.use-case";
+import { UpdateDataSourceUseCase } from "@/src/application/use-cases/data-sources/update-data-source.use-case";
+import { DeleteDataSourceUseCase } from "@/src/application/use-cases/data-sources/delete-data-source.use-case";
+import { ToggleDataSourceUseCase } from "@/src/application/use-cases/data-sources/toggle-data-source.use-case";
+import { CreateDataSourceController } from "@/src/interface-adapters/controllers/data-sources/create-data-source.controller";
+import { FetchDataSourceController } from "@/src/interface-adapters/controllers/data-sources/fetch-data-source.controller";
+import { ListDataSourcesController } from "@/src/interface-adapters/controllers/data-sources/list-data-sources.controller";
+import { UpdateDataSourceDescriptionController } from "@/src/interface-adapters/controllers/data-sources/update-data-source.controller";
+import { DeleteDataSourceController } from "@/src/interface-adapters/controllers/data-sources/delete-data-source.controller";
+import { ToggleDataSourceController } from "@/src/interface-adapters/controllers/data-sources/toggle-data-source.controller";
+import { AddDocsToDataSourceUseCase } from "@/src/application/use-cases/data-sources/add-docs-to-data-source.use-case";
+import { ListDocsInDataSourceUseCase } from "@/src/application/use-cases/data-sources/list-docs-in-data-source.use-case";
+import { DeleteDocFromDataSourceUseCase } from "@/src/application/use-cases/data-sources/delete-doc-from-data-source.use-case";
+import { RecrawlWebDataSourceUseCase } from "@/src/application/use-cases/data-sources/recrawl-web-data-source.use-case";
+import { GetUploadUrlsForFilesUseCase } from "@/src/application/use-cases/data-sources/get-upload-urls-for-files.use-case";
+import { GetDownloadUrlForFileUseCase } from "@/src/application/use-cases/data-sources/get-download-url-for-file.use-case";
+import { AddDocsToDataSourceController } from "@/src/interface-adapters/controllers/data-sources/add-docs-to-data-source.controller";
+import { ListDocsInDataSourceController } from "@/src/interface-adapters/controllers/data-sources/list-docs-in-data-source.controller";
+import { DeleteDocFromDataSourceController } from "@/src/interface-adapters/controllers/data-sources/delete-doc-from-data-source.controller";
+import { RecrawlWebDataSourceController } from "@/src/interface-adapters/controllers/data-sources/recrawl-web-data-source.controller";
+import { GetUploadUrlsForFilesController } from "@/src/interface-adapters/controllers/data-sources/get-upload-urls-for-files.controller";
+import { GetDownloadUrlForFileController } from "@/src/interface-adapters/controllers/data-sources/get-download-url-for-file.controller";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -92,6 +120,8 @@ container.register({
     // ---
     cacheService: asClass(RedisCacheService).singleton(),
     pubSubService: asClass(RedisPubSubService).singleton(),
+    s3UploadsStorageService: asClass(S3UploadsStorageService).singleton(),
+    localUploadsStorageService: asClass(LocalUploadsStorageService).singleton(),
 
     // policies
     // ---
@@ -120,6 +150,30 @@ container.register({
     // ---
     dataSourcesRepository: asClass(MongoDBDataSourcesRepository).singleton(),
     dataSourceDocsRepository: asClass(MongoDBDataSourceDocsRepository).singleton(),
+    createDataSourceUseCase: asClass(CreateDataSourceUseCase).singleton(),
+    fetchDataSourceUseCase: asClass(FetchDataSourceUseCase).singleton(),
+    listDataSourcesUseCase: asClass(ListDataSourcesUseCase).singleton(),
+    updateDataSourceUseCase: asClass(UpdateDataSourceUseCase).singleton(),
+    deleteDataSourceUseCase: asClass(DeleteDataSourceUseCase).singleton(),
+    toggleDataSourceUseCase: asClass(ToggleDataSourceUseCase).singleton(),
+    createDataSourceController: asClass(CreateDataSourceController).singleton(),
+    fetchDataSourceController: asClass(FetchDataSourceController).singleton(),
+    listDataSourcesController: asClass(ListDataSourcesController).singleton(),
+    updateDataSourceController: asClass(UpdateDataSourceDescriptionController).singleton(),
+    deleteDataSourceController: asClass(DeleteDataSourceController).singleton(),
+    toggleDataSourceController: asClass(ToggleDataSourceController).singleton(),
+    addDocsToDataSourceUseCase: asClass(AddDocsToDataSourceUseCase).singleton(),
+    listDocsInDataSourceUseCase: asClass(ListDocsInDataSourceUseCase).singleton(),
+    deleteDocFromDataSourceUseCase: asClass(DeleteDocFromDataSourceUseCase).singleton(),
+    recrawlWebDataSourceUseCase: asClass(RecrawlWebDataSourceUseCase).singleton(),
+    getUploadUrlsForFilesUseCase: asClass(GetUploadUrlsForFilesUseCase).singleton(),
+    getDownloadUrlForFileUseCase: asClass(GetDownloadUrlForFileUseCase).singleton(),
+    addDocsToDataSourceController: asClass(AddDocsToDataSourceController).singleton(),
+    listDocsInDataSourceController: asClass(ListDocsInDataSourceController).singleton(),
+    deleteDocFromDataSourceController: asClass(DeleteDocFromDataSourceController).singleton(),
+    recrawlWebDataSourceController: asClass(RecrawlWebDataSourceController).singleton(),
+    getUploadUrlsForFilesController: asClass(GetUploadUrlsForFilesController).singleton(),
+    getDownloadUrlForFileController: asClass(GetDownloadUrlForFileController).singleton(),
 
     // jobs
     // ---
