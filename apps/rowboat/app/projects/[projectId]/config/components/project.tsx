@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useState, useCallback } from "react";
 import { Spinner, Dropdown, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure } from "@heroui/react";
 import { Button } from "@/components/ui/button";
-import { getProjectConfig, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret, updateProjectName } from "../../../../actions/project.actions";
+import { getProjectConfig, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret, updateProjectName, saveWorkflow } from "../../../../actions/project.actions";
 import { CopyButton } from "../../../../../components/common/copy-button";
 import { EyeIcon, EyeOffIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { WithStringId } from "../../../../lib/types/types";
@@ -14,6 +14,13 @@ import { Label } from "../../../../lib/components/label";
 import { sectionHeaderStyles, sectionDescriptionStyles } from './shared-styles';
 import { clsx } from "clsx";
 import { InputField } from "../../../../lib/components/input-field";
+import { Project, ComposioConnectedAccount } from "../../../../lib/types/project_types";
+import { getToolkit, listComposioTriggerDeployments, deleteComposioTriggerDeployment } from "../../../../actions/composio.actions";
+import { deleteConnectedAccount } from "../../../../actions/composio.actions";
+import { PictureImg } from "@/components/ui/picture-img";
+import { UnlinkIcon, AlertTriangle, Trash2 } from "lucide-react";
+import { ProjectWideChangeConfirmationModal } from "@/components/common/project-wide-change-confirmation-modal";
+import { Workflow } from "../../../../lib/types/workflow_types";
 
 export function Section({
     title,
@@ -408,6 +415,329 @@ export function ChatWidgetSection({ projectId, chatWidgetHost }: { projectId: st
     );
 }
 
+interface ConnectedToolkit {
+    slug: string;
+    name: string;
+    logo: string;
+    connectedAccount: z.infer<typeof ComposioConnectedAccount> | null;
+}
+
+function DisconnectToolkitsSection({ projectId, onProjectConfigUpdated }: { 
+    projectId: string; 
+    onProjectConfigUpdated?: () => void;
+}) {
+    const [loading, setLoading] = useState(false);
+    const [connectedToolkits, setConnectedToolkits] = useState<ConnectedToolkit[]>([]);
+    const [disconnectingToolkit, setDisconnectingToolkit] = useState<string | null>(null);
+    const [removingToolkit, setRemovingToolkit] = useState<string | null>(null);
+    const [showDisconnectModal, setShowDisconnectModal] = useState(false);
+    const [showRemoveModal, setShowRemoveModal] = useState(false);
+    const [selectedToolkit, setSelectedToolkit] = useState<ConnectedToolkit | null>(null);
+
+    const loadConnectedToolkits = useCallback(async () => {
+        setLoading(true);
+        try {
+            const project = await getProjectConfig(projectId);
+            const connectedAccounts = project.composioConnectedAccounts || {};
+            const workflow = project.draftWorkflow;
+            
+            // Get all connected accounts (both active and inactive)
+            const allConnections = Object.entries(connectedAccounts);
+            
+            // Get all Composio toolkits used in workflow tools (even if not connected)
+            const workflowToolkitSlugs = new Set<string>();
+            if (workflow?.tools) {
+                workflow.tools.forEach(tool => {
+                    if (tool.isComposio && tool.composioData?.toolkitSlug) {
+                        workflowToolkitSlugs.add(tool.composioData.toolkitSlug);
+                    }
+                });
+            }
+            
+            // Combine connected accounts and workflow toolkits
+            const allToolkitSlugs = new Set([
+                ...allConnections.map(([slug]) => slug),
+                ...workflowToolkitSlugs
+            ]);
+
+            // Fetch toolkit details for each toolkit
+            const toolkitPromises = Array.from(allToolkitSlugs).map(async (slug) => {
+                try {
+                    const toolkit = await getToolkit(projectId, slug);
+                    const connectedAccount = connectedAccounts[slug];
+                    
+                    return {
+                        slug,
+                        name: toolkit.name,
+                        logo: toolkit.meta.logo,
+                        connectedAccount: connectedAccount || null // null if not connected
+                    };
+                } catch (error) {
+                    console.error(`Failed to fetch toolkit ${slug}:`, error);
+                    return null;
+                }
+            });
+
+            const toolkits = (await Promise.all(toolkitPromises)).filter(Boolean) as (ConnectedToolkit | ConnectedToolkit & { connectedAccount: null })[];
+            setConnectedToolkits(toolkits);
+        } catch (error) {
+            console.error('Failed to load connected toolkits:', error);
+        } finally {
+            setLoading(false);
+        }
+    }, [projectId]);
+
+    useEffect(() => {
+        loadConnectedToolkits();
+    }, [loadConnectedToolkits]);
+
+    const handleDisconnectClick = (toolkit: ConnectedToolkit) => {
+        setSelectedToolkit(toolkit);
+        setShowDisconnectModal(true);
+    };
+
+    const handleRemoveClick = (toolkit: ConnectedToolkit) => {
+        setSelectedToolkit(toolkit);
+        setShowRemoveModal(true);
+    };
+
+    const handleConfirmDisconnect = async () => {
+        if (!selectedToolkit || !selectedToolkit.connectedAccount) return;
+        
+        setDisconnectingToolkit(selectedToolkit.slug);
+        try {
+            await deleteConnectedAccount(
+                projectId, 
+                selectedToolkit.slug, 
+                selectedToolkit.connectedAccount.id
+            );
+            
+            // Update toolkit status in local state to show as disconnected
+            setConnectedToolkits(prev => 
+                prev.map(toolkit => 
+                    toolkit.slug === selectedToolkit.slug 
+                        ? { ...toolkit, connectedAccount: { ...toolkit.connectedAccount!, status: 'INITIATED' as const } }
+                        : toolkit
+                )
+            );
+            
+            // Notify parent of config update
+            onProjectConfigUpdated?.();
+        } catch (error) {
+            console.error('Disconnect failed:', error);
+        } finally {
+            setDisconnectingToolkit(null);
+            setShowDisconnectModal(false);
+            setSelectedToolkit(null);
+        }
+    };
+
+    const handleConfirmRemove = async () => {
+        if (!selectedToolkit) return;
+        
+        setRemovingToolkit(selectedToolkit.slug);
+        try {
+            // Step 1: Get current project and workflow
+            const project = await getProjectConfig(projectId);
+            const currentWorkflow = project.draftWorkflow;
+            
+            if (currentWorkflow) {
+                // Step 2: Remove all tools from this toolkit from the workflow
+                const updatedTools = currentWorkflow.tools.filter(tool => 
+                    !tool.isComposio || tool.composioData?.toolkitSlug !== selectedToolkit.slug
+                );
+                
+                // Step 3: Update the workflow
+                const updatedWorkflow: z.infer<typeof Workflow> = {
+                    ...currentWorkflow,
+                    tools: updatedTools
+                };
+                
+                await saveWorkflow(projectId, updatedWorkflow);
+            }
+            
+            // Step 4: Delete all triggers for this toolkit
+            const triggers = await listComposioTriggerDeployments({ projectId });
+            const toolkitTriggers = triggers.items.filter(trigger => trigger.toolkitSlug === selectedToolkit.slug);
+            
+            for (const trigger of toolkitTriggers) {
+                try {
+                    await deleteComposioTriggerDeployment({
+                        projectId,
+                        deploymentId: trigger.id
+                    });
+                } catch (error) {
+                    console.error(`Failed to delete trigger ${trigger.id}:`, error);
+                    // Continue with other triggers
+                }
+            }
+            
+            // Step 5: Disconnect the account (if connected)
+            if (selectedToolkit.connectedAccount) {
+                await deleteConnectedAccount(
+                    projectId, 
+                    selectedToolkit.slug, 
+                    selectedToolkit.connectedAccount.id
+                );
+            }
+            
+            // Remove from local state
+            setConnectedToolkits(prev => 
+                prev.filter(toolkit => toolkit.slug !== selectedToolkit.slug)
+            );
+            
+            // Notify parent of config update
+            onProjectConfigUpdated?.();
+        } catch (error) {
+            console.error('Remove toolkit failed:', error);
+        } finally {
+            setRemovingToolkit(null);
+            setShowRemoveModal(false);
+            setSelectedToolkit(null);
+        }
+    };
+
+    return (
+        <>
+            <Section 
+                title="Composio Toolkits"
+                description="Manage your Composio toolkits. Shows all toolkits added to your project, whether connected or not. Disconnect to temporarily disable access, or Remove to permanently delete all tools and triggers."
+            >
+                <div className="space-y-4">
+                    {loading ? (
+                        <Spinner size="sm" />
+                    ) : connectedToolkits.length > 0 ? (
+                        <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                            {connectedToolkits.map((toolkit) => (
+                                <div 
+                                    key={toolkit.slug}
+                                    className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 last:border-0"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 flex items-center justify-center">
+                                            {toolkit.logo ? (
+                                                <PictureImg
+                                                    src={toolkit.logo}
+                                                    alt={`${toolkit.name} logo`}
+                                                    className="w-full h-full object-contain rounded"
+                                                />
+                                            ) : (
+                                                <div className="w-full h-full bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center">
+                                                    <span className="text-xs font-medium text-gray-500">
+                                                        {toolkit.name.charAt(0).toUpperCase()}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <div className="font-medium text-gray-900 dark:text-gray-100">
+                                                {toolkit.name}
+                                            </div>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                {toolkit.connectedAccount?.status === 'ACTIVE' ? (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-green-300 bg-green-50 text-green-700 dark:bg-green-900 dark:text-green-200 dark:border-green-700">
+                                                        <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                                                        Connected
+                                                    </span>
+                                                ) : toolkit.connectedAccount ? (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-gray-300 bg-gray-50 text-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:border-gray-700">
+                                                        <span className="w-2 h-2 bg-gray-500 rounded-full"></span>
+                                                        Disconnected
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-yellow-300 bg-yellow-50 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200 dark:border-yellow-700">
+                                                        <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                                                        Not Connected
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {toolkit.connectedAccount?.status === 'ACTIVE' ? (
+                                            <Button
+                                                size="sm"
+                                                variant="secondary"
+                                                startContent={<UnlinkIcon className="w-4 h-4" />}
+                                                onClick={() => handleDisconnectClick(toolkit)}
+                                                disabled={disconnectingToolkit === toolkit.slug || removingToolkit === toolkit.slug}
+                                                isLoading={disconnectingToolkit === toolkit.slug}
+                                            >
+                                                {disconnectingToolkit === toolkit.slug ? 'Disconnecting...' : 'Disconnect'}
+                                            </Button>
+                                        ) : toolkit.connectedAccount ? (
+                                            <Button
+                                                size="sm"
+                                                variant="secondary"
+                                                disabled={true}
+                                            >
+                                                Disconnected
+                                            </Button>
+                                        ) : (
+                                            <Button
+                                                size="sm"
+                                                variant="secondary"
+                                                disabled={true}
+                                            >
+                                                Not Connected
+                                            </Button>
+                                        )}
+                                        <Button
+                                            size="sm"
+                                            variant="secondary"
+                                            color="danger"
+                                            startContent={<Trash2 className="w-4 h-4" />}
+                                            onClick={() => handleRemoveClick(toolkit)}
+                                            disabled={disconnectingToolkit === toolkit.slug || removingToolkit === toolkit.slug}
+                                            isLoading={removingToolkit === toolkit.slug}
+                                        >
+                                            {removingToolkit === toolkit.slug ? 'Removing...' : 'Remove'}
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                            <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                            <p className="text-sm">No toolkits found</p>
+                            <p className="text-xs mt-1">Connect toolkits from the workflow editor or triggers to manage them here</p>
+                        </div>
+                    )}
+                </div>
+            </Section>
+
+            {/* Disconnect Confirmation Modal */}
+            <ProjectWideChangeConfirmationModal
+                isOpen={showDisconnectModal}
+                onClose={() => {
+                    setShowDisconnectModal(false);
+                    setSelectedToolkit(null);
+                }}
+                onConfirm={handleConfirmDisconnect}
+                title={`Disconnect ${selectedToolkit?.name || 'Toolkit'}`}
+                confirmationQuestion={`Are you sure you want to disconnect the ${selectedToolkit?.name || 'toolkit'}? This will remove access to all its tools and disable any triggers from this toolkit. Your workflows may stop working properly if they depend on this toolkit.`}
+                confirmButtonText="Disconnect"
+                isLoading={disconnectingToolkit !== null}
+            />
+
+            {/* Remove Toolkit Confirmation Modal */}
+            <ProjectWideChangeConfirmationModal
+                isOpen={showRemoveModal}
+                onClose={() => {
+                    setShowRemoveModal(false);
+                    setSelectedToolkit(null);
+                }}
+                onConfirm={handleConfirmRemove}
+                title={`Remove ${selectedToolkit?.name || 'Toolkit'}`}
+                confirmationQuestion={`Are you sure you want to remove the ${selectedToolkit?.name || 'toolkit'} and all its tools and triggers? This will permanently delete all tools and triggers from this toolkit and disconnect it. Your workflows may stop working properly if they depend on this toolkit.`}
+                confirmButtonText="Remove Toolkit"
+                isLoading={removingToolkit !== null}
+            />
+        </>
+    );
+}
+
 function DeleteProjectSection({ projectId }: { projectId: string }) {
     const [loadingInitial, setLoadingInitial] = useState(false);
     const [deletingProject, setDeletingProject] = useState(false);
@@ -545,6 +875,7 @@ export function SimpleProjectSection({
         <div className="p-6 space-y-6">
             <ProjectNameSection projectId={projectId} onProjectConfigUpdated={onProjectConfigUpdated} />
             <SecretSection projectId={projectId} />
+            <DisconnectToolkitsSection projectId={projectId} onProjectConfigUpdated={onProjectConfigUpdated} />
             <DeleteProjectSection projectId={projectId} />
         </div>
     );
