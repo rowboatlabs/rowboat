@@ -2,7 +2,7 @@ import { MongoClient } from "mongodb";
 import { User } from "./types/types";
 import { Workflow } from "./types/workflow_types";
 import { Project } from "./types/project_types";
-import { DataSourceDoc } from "./types/datasource_types";
+import { DataSourceDoc } from "@/src/entities/models/data-source-doc";
 import { TwilioConfig, TwilioInboundCall } from "./types/voice_types";
 import { z } from 'zod';
 import { apiV1 } from "rowboat-shared";

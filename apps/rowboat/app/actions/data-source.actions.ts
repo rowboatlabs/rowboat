@@ -6,7 +6,7 @@ import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { projectAuthCheck } from "./project.actions";
 import { WithStringId } from "../lib/types/types";
-import { DataSourceDoc } from "../lib/types/datasource_types";
+import { DataSourceDoc } from "@/src/entities/models/data-source-doc";
 import { DataSource } from "@/src/entities/models/data-source";
 import { uploadsS3Client } from "../lib/uploads_s3_client";
 import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";

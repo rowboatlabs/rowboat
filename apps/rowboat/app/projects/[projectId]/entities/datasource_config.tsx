@@ -10,7 +10,7 @@ import { DataSourceIcon } from "@/app/lib/components/datasource-icon";
 import { Tooltip } from "@heroui/react";
 import { getDataSource, listDocsInDataSource, deleteDocsFromDataSource, getDownloadUrlForFile, addDocsToDataSource, getUploadUrlsForFilesDataSource } from "@/app/actions/data-source.actions";
 import { InputField } from "@/app/lib/components/input-field";
-import { DataSourceDoc } from "../../../lib/types/datasource_types";
+import { DataSourceDoc } from "@/src/entities/models/data-source-doc";
 import { RelativeTime } from "@primer/react";
 import { Pagination, Spinner, Button as HeroButton, Textarea as HeroTextarea } from "@heroui/react";
 import { useDropzone } from "react-dropzone";

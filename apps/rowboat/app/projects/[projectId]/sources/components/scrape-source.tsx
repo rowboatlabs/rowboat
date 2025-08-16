@@ -1,6 +1,6 @@
 "use client";
 import { WithStringId } from "../../../../lib/types/types";
-import { DataSourceDoc } from "../../../../lib/types/datasource_types";
+import { DataSourceDoc } from "@/src/entities/models/data-source-doc";
 import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { Recrawl } from "./web-recrawl";
