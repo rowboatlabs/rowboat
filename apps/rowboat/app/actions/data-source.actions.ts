@@ -1,10 +1,9 @@
 'use server';
-import { ObjectId, WithId } from "mongodb";
+import { ObjectId } from "mongodb";
 import { z } from 'zod';
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { projectAuthCheck } from "./project.actions";
-import { WithStringId } from "../lib/types/types";
 import { DataSourceDoc } from "@/src/entities/models/data-source-doc";
 import { DataSource } from "@/src/entities/models/data-source";
 import { uploadsS3Client } from "../lib/uploads_s3_client";
@@ -122,7 +121,6 @@ export async function addDocsToDataSource({
     projectId: string,
     sourceId: string,
     docData: {
-        _id?: string,
         name: string,
         data: z.infer<typeof DataSourceDoc>['data']
     }[]
