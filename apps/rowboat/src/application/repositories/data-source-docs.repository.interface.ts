@@ -111,4 +111,10 @@ export interface IDataSourceDocsRepository {
      * @param sourceId - The source ID whose documents should be deleted.
      */
     deleteBySourceId(sourceId: string): Promise<void>;
+
+    /**
+     * Deletes all DataSourceDocs associated with a given project ID.
+     * @param projectId - The project ID whose documents should be deleted.
+     */
+    deleteByProjectId(projectId: string): Promise<void>;
 }

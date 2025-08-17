@@ -163,4 +163,8 @@ export class MongoDBDataSourceDocsRepository implements IDataSourceDocsRepositor
     async deleteBySourceId(sourceId: string): Promise<void> {
         await this.collection.deleteMany({ sourceId });
     }
+
+    async deleteByProjectId(projectId: string): Promise<void> {
+        await this.collection.deleteMany({ projectId });
+    }
 }

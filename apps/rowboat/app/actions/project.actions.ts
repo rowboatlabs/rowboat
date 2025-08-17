@@ -19,6 +19,7 @@ import { IDeleteApiKeyController } from "@/src/interface-adapters/controllers/ap
 import { IApiKeysRepository } from "@/src/application/repositories/api-keys.repository.interface";
 import { IProjectMembersRepository } from "@/src/application/repositories/project-members.repository.interface";
 import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
+import { IDataSourceDocsRepository } from "@/src/application/repositories/data-source-docs.repository.interface";
 import { container } from "@/di/container";
 
 const projectActionAuthorizationPolicy = container.resolve<IProjectActionAuthorizationPolicy>('projectActionAuthorizationPolicy');
@@ -28,6 +29,7 @@ const deleteApiKeyController = container.resolve<IDeleteApiKeyController>('delet
 const apiKeysRepository = container.resolve<IApiKeysRepository>('apiKeysRepository');
 const projectMembersRepository = container.resolve<IProjectMembersRepository>('projectMembersRepository');
 const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
+const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>('dataSourceDocsRepository');
 
 export async function listTemplates() {
     const templatesArray = Object.entries(templates)
@@ -236,7 +238,8 @@ export async function deleteProject(projectId: string) {
     // delete api keys
     await apiKeysRepository.deleteAll(projectId);
 
-    // delete sources
+    // delete data sources data
+    await dataSourceDocsRepository.deleteByProjectId(projectId);
     await dataSourcesRepository.deleteByProjectId(projectId);
 
     // delete project members
