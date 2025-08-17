@@ -13,7 +13,7 @@ import { TextareaWithSend } from "@/app/components/ui/textarea-with-send";
 import { Workflow } from '../../lib/types/workflow_types';
 import { PictureImg } from '@/components/ui/picture-img';
 import { Tabs, Tab } from "@/components/ui/tabs";
-import { Project } from "@/app/lib/types/project_types";
+import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import Link from 'next/link';
 

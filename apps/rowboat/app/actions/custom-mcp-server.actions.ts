@@ -3,7 +3,7 @@
 import { projectsCollection } from '../lib/mongodb';
 import { z } from 'zod';
 import { projectAuthCheck } from './project.actions';
-import { CustomMcpServer } from '../lib/types/project_types';
+import { CustomMcpServer } from "@/src/entities/models/project";
 import { getMcpClient } from '../lib/mcp';
 import { WorkflowTool } from '../lib/types/workflow_types';
 import { authCheck } from './auth.actions';

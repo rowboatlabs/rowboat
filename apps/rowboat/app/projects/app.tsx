@@ -1,6 +1,6 @@
 'use client';
 
-import { Project } from "../lib/types/project_types";
+import { Project } from "@/src/entities/models/project";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { listProjects } from "../actions/project.actions";

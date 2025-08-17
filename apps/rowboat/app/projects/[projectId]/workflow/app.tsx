@@ -1,7 +1,7 @@
 "use client";
 import { MCPServer, WithStringId } from "../../../lib/types/types";
 import { DataSource } from "@/src/entities/models/data-source";
-import { Project } from "../../../lib/types/project_types";
+import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
 import { WorkflowEditor } from "./workflow_editor";

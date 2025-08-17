@@ -9,7 +9,7 @@ import { listToolkits } from '@/app/actions/composio.actions';
 import { getProjectConfig } from '@/app/actions/project.actions';
 import { z } from 'zod';
 import { ZToolkit, ZListResponse, ZTool } from '@/app/lib/composio/composio';
-import { Project } from '@/app/lib/types/project_types';
+import { Project } from "@/src/entities/models/project";
 import { ToolkitCard } from './ToolkitCard';
 import { Workflow } from '@/app/lib/types/workflow_types';
 

@@ -8,7 +8,7 @@ import { templates } from "../lib/project_templates";
 import { authCheck } from "./auth.actions";
 import { User, WithStringId } from "../lib/types/types";
 import { ApiKey } from "@/src/entities/models/api-key";
-import { Project } from "../lib/types/project_types";
+import { Project } from "@/src/entities/models/project";
 import { USE_AUTH } from "../lib/feature_flags";
 import { authorizeUserAction } from "./billing.actions";
 import { Workflow } from "../lib/types/workflow_types";

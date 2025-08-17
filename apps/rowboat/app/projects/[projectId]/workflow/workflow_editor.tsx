@@ -3,7 +3,7 @@ import React, { useReducer, Reducer, useState, useCallback, useEffect, useRef, c
 import { MCPServer, Message, WithStringId } from "../../../lib/types/types";
 import { Workflow, WorkflowTool, WorkflowPrompt, WorkflowAgent, WorkflowPipeline } from "../../../lib/types/workflow_types";
 import { DataSource } from "@/src/entities/models/data-source";
-import { Project } from "../../../lib/types/project_types";
+import { Project } from "@/src/entities/models/project";
 import { produce, applyPatches, enablePatches, produceWithPatches, Patch } from 'immer';
 import { AgentConfig } from "../entities/agent_config";
 import { PipelineConfig } from "../entities/pipeline_config";

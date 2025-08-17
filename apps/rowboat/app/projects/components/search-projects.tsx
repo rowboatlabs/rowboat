@@ -1,4 +1,4 @@
-import { Project } from "@/app/lib/types/project_types";
+import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import { ProjectList } from "./project-list";
 import { HorizontalDivider } from "@/components/ui/horizontal-divider";

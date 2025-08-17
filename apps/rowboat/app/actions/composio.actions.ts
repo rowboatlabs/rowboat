@@ -16,7 +16,7 @@ import {
     ZAuthScheme,
     ZCredentials,
 } from "@/app/lib/composio/composio";
-import { ComposioConnectedAccount } from "@/app/lib/types/project_types";
+import { ComposioConnectedAccount } from "@/src/entities/models/project";
 import { getProjectConfig, projectAuthCheck } from "./project.actions";
 import { projectsCollection } from "../lib/mongodb";
 import { container } from "@/di/container";
