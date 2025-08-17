@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Info, Plus, Trash2 } from 'lucide-react';
 import { z } from 'zod';
 import { Workflow, WorkflowTool } from '@/app/lib/types/workflow_types';
-import { getProjectConfig } from '@/app/actions/project.actions';
+import { fetchProject } from '@/app/actions/project.actions';
 import { addServer, removeServer } from '@/app/actions/custom-mcp-server.actions';
 import { fetchTools } from "@/app/actions/custom-mcp-server.actions";
 import { ServerCard } from './ServerCard';
@@ -50,7 +50,7 @@ export function CustomMcpServers({ tools: workflowTools, onAddTool }: CustomMcpS
     setLoading(true);
     setError(null);
     try {
-      const project = await getProjectConfig(projectId);
+      const project = await fetchProject(projectId);
       setServers(project.customMcpServers || {});
     } catch (err: any) {
       setError(err?.message || 'Failed to load servers');

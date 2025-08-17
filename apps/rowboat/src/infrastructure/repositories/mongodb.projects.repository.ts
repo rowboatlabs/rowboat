@@ -16,10 +16,20 @@ export class MongodbProjectsRepository implements IProjectsRepository {
     private collection = db.collection<z.infer<typeof docSchema>>('projects');
 
     async create(data: z.infer<typeof CreateSchema>): Promise<z.infer<typeof Project>> {
+        const now = new Date();
+
+        const wflow = {
+            ...data.workflow,
+            lastUpdatedAt: now.toISOString(),
+        };
+
         const id = crypto.randomUUID();
+
         const doc = {
             ...data,
-            createdAt: new Date().toISOString(),
+            liveWorkflow: wflow,
+            draftWorkflow: wflow,
+            createdAt: now.toISOString(),
         };
         await this.collection.insertOne({
             ...doc,
@@ -41,6 +51,10 @@ export class MongodbProjectsRepository implements IProjectsRepository {
             ...rest,
             id,
         };
+    }
+
+    async countCreatedProjects(createdByUserId: string): Promise<number> {
+        return await this.collection.countDocuments({ createdByUserId });
     }
 
     async addComposioConnectedAccount(projectId: string, data: z.infer<typeof AddComposioConnectedAccountSchema>): Promise<z.infer<typeof Project>> {

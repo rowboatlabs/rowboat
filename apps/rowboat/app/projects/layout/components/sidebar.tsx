@@ -19,7 +19,7 @@ import {
   LogsIcon,
   Clock
 } from "lucide-react";
-import { getProjectConfig } from "@/app/actions/project.actions";
+import { fetchProject } from "@/app/actions/project.actions";
 import { createProjectWithOptions } from "../../lib/project-creation-utils";
 import { useTheme } from "@/app/providers/theme-provider";
 import { USE_PRODUCT_TOUR } from '@/app/lib/feature_flags';
@@ -56,7 +56,7 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
     async function fetchProjectName() {
       if (!isProjectsRoute && projectId) {
         try {
-          const project = await getProjectConfig(projectId);
+          const project = await fetchProject(projectId);
           setProjectName(project.name);
         } catch (error) {
           console.error('Failed to fetch project name:', error);

@@ -1353,7 +1353,7 @@ const ComposioCard = ({
             const connectedAccountId = projectConfig?.composioConnectedAccounts?.[card.slug]?.id;
             try {
                 if (connectedAccountId) {
-                    await deleteConnectedAccount(projectId, card.slug, connectedAccountId);
+                    await deleteConnectedAccount(projectId, card.slug);
                 }
             } catch (err) {
                 // ignore error, continue to remove tools
@@ -1375,7 +1375,7 @@ const ComposioCard = ({
         setIsProcessingAuth(true);
         try {
             if (connectedAccountId) {
-                await deleteConnectedAccount(projectId, card.slug, connectedAccountId);
+                await deleteConnectedAccount(projectId, card.slug);
                 onProjectToolsUpdated?.();
             }
         } catch (err: any) {

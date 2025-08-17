@@ -14,7 +14,6 @@ const inputSchema = z.object({
     apiKey: z.string().optional(),
     projectId: z.string(),
     toolkitSlug: z.string(),
-    connectedAccountId: z.string(),
 });
 
 export interface IDeleteComposioConnectedAccountUseCase {
@@ -67,19 +66,19 @@ export class DeleteComposioConnectedAccountUseCase implements IDeleteComposioCon
 
         // ensure connected account exists
         const account = project.composioConnectedAccounts?.[request.toolkitSlug];
-        if (!account || account.id !== request.connectedAccountId) {
+        if (!account) {
             throw new BadRequestError('Invalid connected account');
         }
 
         // delete the connected account from composio
         // this will also delete any trigger instances associated with the connected account
-        const result = await deleteConnectedAccount(request.connectedAccountId);
+        const result = await deleteConnectedAccount(account.id);
         if (!result.success) {
-            throw new Error(`Failed to delete connected account ${request.connectedAccountId}`);
+            throw new Error(`Failed to delete connected account ${account.id}`);
         }
 
         // delete trigger deployments data from db
-        await this.composioTriggerDeploymentsRepository.deleteByConnectedAccountId(request.connectedAccountId);
+        await this.composioTriggerDeploymentsRepository.deleteByConnectedAccountId(account.id);
 
         // get auth config data
         const authConfig = await getAuthConfig(account.authConfigId);

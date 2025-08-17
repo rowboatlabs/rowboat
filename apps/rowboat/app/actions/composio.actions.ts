@@ -17,14 +17,14 @@ import {
     ZCredentials,
 } from "@/app/lib/composio/composio";
 import { ComposioConnectedAccount } from "@/src/entities/models/project";
-import { getProjectConfig, projectAuthCheck } from "./project.actions";
+import { fetchProject, projectAuthCheck } from "./project.actions";
 import { projectsCollection } from "../lib/mongodb";
 import { container } from "@/di/container";
 import { ICreateComposioTriggerDeploymentController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/create-composio-trigger-deployment.controller";
 import { IListComposioTriggerDeploymentsController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/list-composio-trigger-deployments.controller";
 import { IDeleteComposioTriggerDeploymentController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/delete-composio-trigger-deployment.controller";
 import { IListComposioTriggerTypesController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/list-composio-trigger-types.controller";
-import { IDeleteComposioConnectedAccountController } from "@/src/interface-adapters/controllers/composio/delete-composio-connected-account.controller";
+import { IDeleteComposioConnectedAccountController } from "@/src/interface-adapters/controllers/projects/delete-composio-connected-account.controller";
 import { authCheck } from "./auth.actions";
 
 const createComposioTriggerDeploymentController = container.resolve<ICreateComposioTriggerDeploymentController>("createComposioTriggerDeploymentController");
@@ -166,7 +166,7 @@ export async function syncConnectedAccount(projectId: string, toolkitSlug: strin
     await projectAuthCheck(projectId);
 
     // ensure that the connected account belongs to this project
-    const project = await getProjectConfig(projectId);
+    const project = await fetchProject(projectId);
     const account = project.composioConnectedAccounts?.[toolkitSlug];
     if (!account || account.id !== connectedAccountId) {
         throw new Error(`Connected account ${connectedAccountId} not found in project ${projectId}`);
@@ -200,7 +200,7 @@ export async function syncConnectedAccount(projectId: string, toolkitSlug: strin
     return account;
 }
 
-export async function deleteConnectedAccount(projectId: string, toolkitSlug: string, connectedAccountId: string): Promise<boolean> {
+export async function deleteConnectedAccount(projectId: string, toolkitSlug: string): Promise<boolean> {
     const user = await authCheck();
 
     await deleteComposioConnectedAccountController.execute({
@@ -208,7 +208,6 @@ export async function deleteConnectedAccount(projectId: string, toolkitSlug: str
         userId: user._id,
         projectId,
         toolkitSlug,
-        connectedAccountId,
     });
 
     return true;

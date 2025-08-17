@@ -1,6 +1,6 @@
 import { BadRequestError } from "@/src/entities/errors/common";
 import z from "zod";
-import { IDeleteComposioConnectedAccountUseCase } from "@/src/application/use-cases/composio/delete-composio-connected-account.use-case";
+import { IDeleteComposioConnectedAccountUseCase } from "@/src/application/use-cases/projects/delete-composio-connected-account.use-case";
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
@@ -8,7 +8,6 @@ const inputSchema = z.object({
     apiKey: z.string().optional(),
     projectId: z.string(),
     toolkitSlug: z.string(),
-    connectedAccountId: z.string(),
 });
 
 export interface IDeleteComposioConnectedAccountController {
@@ -32,7 +31,7 @@ export class DeleteComposioConnectedAccountController implements IDeleteComposio
         if (!result.success) {
             throw new BadRequestError(`Invalid request: ${JSON.stringify(result.error)}`);
         }
-        const { caller, userId, apiKey, projectId, toolkitSlug, connectedAccountId } = result.data;
+        const { caller, userId, apiKey, projectId, toolkitSlug } = result.data;
 
         // execute use case
         return await this.deleteComposioConnectedAccountUseCase.execute({
@@ -41,7 +40,6 @@ export class DeleteComposioConnectedAccountController implements IDeleteComposio
             apiKey,
             projectId,
             toolkitSlug,
-            connectedAccountId,
         });
     }
 }

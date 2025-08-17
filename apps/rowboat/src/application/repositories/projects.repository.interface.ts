@@ -5,13 +5,15 @@ import { Workflow } from "@/app/lib/types/workflow_types";
 /**
  * Schema for creating a new project. Includes name, creator, and optional workflows and secret.
  */
-export const CreateSchema = Project.pick({
-    name: true,
-    createdByUserId: true,
-    draftWorkflow: true,
-    liveWorkflow: true,
-    secret: true,
-});
+export const CreateSchema = Project
+    .pick({
+        name: true,
+        createdByUserId: true,
+        secret: true,
+    })
+    .extend({
+        workflow: Workflow.omit({ lastUpdatedAt: true }),
+    });
 
 /**
  * Schema for adding a Composio connected account to a project.
@@ -48,6 +50,13 @@ export interface IProjectsRepository {
      * @returns The Project object if found, otherwise null.
      */
     fetch(id: string): Promise<z.infer<typeof Project> | null>;
+
+    /**
+     * Count projects created by user
+     * @param createdByUserId - The creator user ID.
+     * @returns The number of projects created by the user.
+     */
+    countCreatedProjects(createdByUserId: string): Promise<number>;
 
     /**
      * Adds a Composio connected account to a project.

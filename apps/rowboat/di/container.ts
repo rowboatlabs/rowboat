@@ -25,14 +25,12 @@ import { CreateComposioTriggerDeploymentUseCase } from "@/src/application/use-ca
 import { ListComposioTriggerDeploymentsUseCase } from "@/src/application/use-cases/composio-trigger-deployments/list-composio-trigger-deployments.use-case";
 import { DeleteComposioTriggerDeploymentUseCase } from "@/src/application/use-cases/composio-trigger-deployments/delete-composio-trigger-deployment.use-case";
 import { ListComposioTriggerTypesUseCase } from "@/src/application/use-cases/composio-trigger-deployments/list-composio-trigger-types.use-case";
-import { DeleteComposioConnectedAccountUseCase } from "@/src/application/use-cases/composio/delete-composio-connected-account.use-case";
 import { HandleCompsioWebhookRequestUseCase } from "@/src/application/use-cases/composio/webhook/handle-composio-webhook-request.use-case";
 import { MongoDBJobsRepository } from "@/src/infrastructure/repositories/mongodb.jobs.repository";
 import { CreateComposioTriggerDeploymentController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/create-composio-trigger-deployment.controller";
 import { DeleteComposioTriggerDeploymentController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/delete-composio-trigger-deployment.controller";
 import { ListComposioTriggerDeploymentsController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/list-composio-trigger-deployments.controller";
 import { ListComposioTriggerTypesController } from "@/src/interface-adapters/controllers/composio-trigger-deployments/list-composio-trigger-types.controller";
-import { DeleteComposioConnectedAccountController } from "@/src/interface-adapters/controllers/composio/delete-composio-connected-account.controller";
 import { HandleComposioWebhookRequestController } from "@/src/interface-adapters/controllers/composio/webhook/handle-composio-webhook-request.controller";
 import { JobsWorker } from "@/src/application/workers/jobs.worker";
 import { JobRulesWorker } from "@/src/application/workers/job-rules.worker";
@@ -44,6 +42,12 @@ import { FetchJobUseCase } from "@/src/application/use-cases/jobs/fetch-job.use-
 import { FetchJobController } from "@/src/interface-adapters/controllers/jobs/fetch-job.controller";
 import { FetchConversationUseCase } from "@/src/application/use-cases/conversations/fetch-conversation.use-case";
 import { FetchConversationController } from "@/src/interface-adapters/controllers/conversations/fetch-conversation.controller";
+
+// Projects
+import { CreateProjectUseCase } from "@/src/application/use-cases/projects/create-project.use-case";
+import { CreateProjectController } from "@/src/interface-adapters/controllers/projects/create-project.controller";
+import { DeleteComposioConnectedAccountUseCase } from "@/src/application/use-cases/projects/delete-composio-connected-account.use-case";
+import { DeleteComposioConnectedAccountController } from "@/src/interface-adapters/controllers/projects/delete-composio-connected-account.controller";
 
 // Scheduled Job Rules
 import { MongoDBScheduledJobRulesRepository } from "@/src/infrastructure/repositories/mongodb.scheduled-job-rules.repository";
@@ -209,11 +213,16 @@ container.register({
     toggleRecurringJobRuleController: asClass(ToggleRecurringJobRuleController).singleton(),
     deleteRecurringJobRuleController: asClass(DeleteRecurringJobRuleController).singleton(),
 
+    // projects
+    // ---
+    createProjectUseCase: asClass(CreateProjectUseCase).singleton(),
+    createProjectController: asClass(CreateProjectController).singleton(),
+    deleteComposioConnectedAccountController: asClass(DeleteComposioConnectedAccountController).singleton(),
+    deleteComposioConnectedAccountUseCase: asClass(DeleteComposioConnectedAccountUseCase).singleton(),
+
     // composio
     // ---
-    deleteComposioConnectedAccountUseCase: asClass(DeleteComposioConnectedAccountUseCase).singleton(),
     handleCompsioWebhookRequestUseCase: asClass(HandleCompsioWebhookRequestUseCase).singleton(),
-    deleteComposioConnectedAccountController: asClass(DeleteComposioConnectedAccountController).singleton(),
     handleComposioWebhookRequestController: asClass(HandleComposioWebhookRequestController).singleton(),
 
     // composio trigger deployments

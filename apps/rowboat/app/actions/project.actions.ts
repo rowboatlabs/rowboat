@@ -22,6 +22,8 @@ import { IDataSourcesRepository } from "@/src/application/repositories/data-sour
 import { IDataSourceDocsRepository } from "@/src/application/repositories/data-source-docs.repository.interface";
 import { container } from "@/di/container";
 import { qdrantClient } from "../lib/qdrant";
+import { ICreateProjectController } from "@/src/interface-adapters/controllers/projects/create-project.controller";
+import { BillingError } from "@/src/entities/errors/common";
 
 const projectActionAuthorizationPolicy = container.resolve<IProjectActionAuthorizationPolicy>('projectActionAuthorizationPolicy');
 const createApiKeyController = container.resolve<ICreateApiKeyController>('createApiKeyController');
@@ -31,6 +33,7 @@ const apiKeysRepository = container.resolve<IApiKeysRepository>('apiKeysReposito
 const projectMembersRepository = container.resolve<IProjectMembersRepository>('projectMembersRepository');
 const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
 const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>('dataSourceDocsRepository');
+const createProjectController = container.resolve<ICreateProjectController>('createProjectController');
 
 export async function listTemplates() {
     const templatesArray = Object.entries(templates)
@@ -55,101 +58,58 @@ export async function projectAuthCheck(projectId: string) {
     });
 }
 
-async function createBaseProject(
-    name: string,
-    user: WithStringId<z.infer<typeof User>>,
-    workflow?: z.infer<typeof Workflow>
-): Promise<{ id: string } | { billingError: string }> {
-    // fetch project count for this user
-    const projectCount = await projectsCollection.countDocuments({
-        createdByUserId: user._id,
-    });
-    // billing limit check
-    const authResponse = await authorizeUserAction({
-        type: 'create_project',
-        data: {
-            existingProjectCount: projectCount,
-        },
-    });
-    if (!authResponse.success) {
-        return { billingError: authResponse.error || 'Billing error' };
-    }
-
-    // choose a fallback name
-    if (!name) {
-        name = `Assistant ${projectCount + 1}`;
-    }
-
-    const projectId = crypto.randomUUID();
-    const chatClientId = crypto.randomBytes(16).toString('base64url');
-    const secret = crypto.randomBytes(32).toString('hex');
-
-    // Create project
-    await projectsCollection.insertOne({
-        _id: projectId,
-        name,
-        createdAt: (new Date()).toISOString(),
-        lastUpdatedAt: (new Date()).toISOString(),
-        createdByUserId: user._id,
-        draftWorkflow: workflow,
-        liveWorkflow: workflow,
-        chatClientId,
-        secret,
-        testRunCounter: 0,
-    });
-
-    // Add user to project
-    await projectMembersRepository.create({
-        userId: user._id,
-        projectId,
-    });
-
-    // Add first api key
-    await createApiKey(projectId);
-
-    return { id: projectId };
-}
-
 export async function createProject(formData: FormData): Promise<{ id: string } | { billingError: string }> {
     const user = await authCheck();
     const name = formData.get('name') as string | null;
     const templateKey = formData.get('template') as string | null;
 
-    const { agents, prompts, tools, startAgent } = templates[templateKey || 'default'];
-    const response = await createBaseProject(name || '', user, {
-        agents,
-        prompts,
-        tools,
-        startAgent,
-        lastUpdatedAt: (new Date()).toISOString(),
-    });
-    if ('billingError' in response) {
-        return response;
-    }
+    try {
+        const project = await createProjectController.execute({
+            userId: user._id,
+            data: {
+                name: name || '',
+                mode: {
+                    template: templateKey || 'default',
+                },
+            },
+        });
 
-    const projectId = response.id;
-    return { id: projectId };
+        return { id: project.id };
+    } catch (error) {
+        if (error instanceof BillingError) {
+            return { billingError: error.message };
+        }
+        throw error;
+    }
 }
 
 export async function createProjectFromWorkflowJson(formData: FormData): Promise<{ id: string } | { billingError: string }> {
     const user = await authCheck();
     const name = formData.get('name') as string | null;
-
     const workflowJson = formData.get('workflowJson') as string;
-    const workflow = Workflow.parse(JSON.parse(workflowJson));
-    const response = await createBaseProject(name || 'Imported project', user, {
-        ...workflow,
-        lastUpdatedAt: (new Date()).toISOString(),
-    });
-    if ('billingError' in response) {
-        return response;
-    }
 
-    const projectId = response.id;
-    return { id: projectId };
+    try {
+        const project = await createProjectController.execute({
+            userId: user._id,
+            data: {
+                name: name || '',
+                mode: {
+                    workflowJson,
+                },
+            },
+        });
+
+        return { id: project.id };
+    } catch (error) {
+        if (error instanceof BillingError) {
+            return { billingError: error.message };
+        }
+        throw error;
+    }
 }
 
-export async function getProjectConfig(projectId: string): Promise<WithStringId<z.infer<typeof Project>>> {
+export async function fetchProject(projectId: string): Promise<z.infer<typeof Project>> {
+    const user = await authCheck();
     await projectAuthCheck(projectId);
     const project = await projectsCollection.findOne({
         _id: projectId,
@@ -302,7 +262,7 @@ export async function publishWorkflow(projectId: string, workflow: z.infer<typeo
 export async function revertToLiveWorkflow(projectId: string) {
     await projectAuthCheck(projectId);
 
-    const project = await getProjectConfig(projectId);
+    const project = await fetchProject(projectId);
     const workflow = project.liveWorkflow;
 
     if (!workflow) {

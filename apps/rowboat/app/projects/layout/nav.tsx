@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import Menu from "./menu";
-import { getProjectConfig } from "@/app/actions/project.actions";
+import { fetchProject } from "@/app/actions/project.actions";
 import { FolderOpenIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 
 export function Nav({
@@ -17,7 +17,7 @@ export function Nav({
 
     useEffect(() => {
         async function getProject() {
-            const project = await getProjectConfig(projectId);
+            const project = await fetchProject(projectId);
             setProjectName(project.name);
         }
         getProject();

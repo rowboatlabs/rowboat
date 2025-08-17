@@ -37,19 +37,27 @@ export class UsageTracker{
     }
 }
 
+export async function getCustomerForUserId(userId: string): Promise<WithStringId<z.infer<typeof Customer>> | null> {
+    const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+    if (!user) {
+        throw new Error("User not found");
+    }
+    if (!user.billingCustomerId) {
+        return null;
+    }
+    return await getBillingCustomer(user.billingCustomerId);
+}
+
 export async function getCustomerIdForProject(projectId: string): Promise<string> {
     const project = await projectsCollection.findOne({ _id: projectId });
     if (!project) {
         throw new Error("Project not found");
     }
-    const user = await usersCollection.findOne({ _id: new ObjectId(project.createdByUserId) });
-    if (!user) {
-        throw new Error("User not found");
-    }
-    if (!user.billingCustomerId) {
+    const customer = await getCustomerForUserId(project.createdByUserId);
+    if (!customer) {
         throw new Error("User has no billing customer id");
     }
-    return user.billingCustomerId;
+    return customer._id;
 }
 
 export async function getBillingCustomer(id: string): Promise<WithStringId<z.infer<typeof Customer>> | null> {

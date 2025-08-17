@@ -8,7 +8,7 @@ import { WorkflowEditor } from "./workflow_editor";
 import { Spinner } from "@heroui/react";
 import { listDataSources } from "../../../actions/data-source.actions";
 import { revertToLiveWorkflow } from "@/app/actions/project.actions";
-import { getProjectConfig } from "@/app/actions/project.actions";
+import { fetchProject } from "@/app/actions/project.actions";
 import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
 import { getEligibleModels } from "@/app/actions/billing.actions";
 import { ModelsResponse } from "@/app/lib/types/billing_types";
@@ -53,7 +53,7 @@ export function App({
             dataSources,
             eligibleModels,
         ] = await Promise.all([
-            getProjectConfig(projectId),
+            fetchProject(projectId),
             listDataSources(projectId),
             getEligibleModels(),
         ]);
@@ -69,7 +69,7 @@ export function App({
 
     const handleProjectToolsUpdate = useCallback(async () => {
         // Lightweight refresh for tool-only updates
-        const projectConfig = await getProjectConfig(projectId);
+        const projectConfig = await fetchProject(projectId);
         
         setProject(projectConfig);
         setProjectConfig(projectConfig);
@@ -88,7 +88,7 @@ export function App({
 
     const handleProjectConfigUpdate = useCallback(async () => {
         // Refresh project config when project name or other settings change
-        const updatedProjectConfig = await getProjectConfig(projectId);
+        const updatedProjectConfig = await fetchProject(projectId);
         setProject(updatedProjectConfig);
         setProjectConfig(updatedProjectConfig);
     }, [projectId]);

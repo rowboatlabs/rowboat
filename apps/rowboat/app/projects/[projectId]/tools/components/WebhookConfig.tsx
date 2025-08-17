@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Spinner, Button, Input } from "@heroui/react";
-import { getProjectConfig, updateWebhookUrl } from "@/app/actions/project.actions";
+import { fetchProject, updateWebhookUrl } from "@/app/actions/project.actions";
 import { clsx } from "clsx";
 import { ProjectWideChangeConfirmationModal } from '@/components/common/project-wide-change-confirmation-modal';
 
@@ -21,7 +21,7 @@ export function WebhookConfig({ projectId }: { projectId: string }) {
 
         async function loadConfig() {
             try {
-                const project = await getProjectConfig(projectId);
+                const project = await fetchProject(projectId);
                 if (mounted) {
                     setWebhookUrl(project.webhookUrl || null);
                     setEditValue(project.webhookUrl || '');

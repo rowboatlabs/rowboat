@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { RefreshCw, Search } from 'lucide-react';
 import clsx from 'clsx';
 import { listToolkits } from '@/app/actions/composio.actions';
-import { getProjectConfig } from '@/app/actions/project.actions';
+import { fetchProject } from '@/app/actions/project.actions';
 import { z } from 'zod';
 import { ZToolkit, ZListResponse, ZTool } from '@/app/lib/composio/composio';
 import { Project } from "@/src/entities/models/project";
@@ -42,7 +42,7 @@ export function SelectComposioToolkit({
 
   const loadProjectConfig = useCallback(async () => {
     try {
-      const config = await getProjectConfig(projectId);
+      const config = await fetchProject(projectId);
       setProjectConfig(config);
     } catch (err: any) {
       console.error('Error fetching project config:', err);

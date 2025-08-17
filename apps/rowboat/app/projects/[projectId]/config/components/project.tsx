@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useState, useCallback } from "react";
 import { Spinner, Dropdown, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure } from "@heroui/react";
 import { Button } from "@/components/ui/button";
-import { getProjectConfig, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret, updateProjectName, saveWorkflow } from "../../../../actions/project.actions";
+import { fetchProject, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret, updateProjectName, saveWorkflow } from "../../../../actions/project.actions";
 import { CopyButton } from "../../../../../components/common/copy-button";
 import { EyeIcon, EyeOffIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { WithStringId } from "../../../../lib/types/types";
@@ -80,7 +80,7 @@ function ProjectNameSection({
 
     useEffect(() => {
         setLoading(true);
-        getProjectConfig(projectId).then((project) => {
+        fetchProject(projectId).then((project) => {
             setProjectName(project?.name);
             setLoading(false);
         });
@@ -140,7 +140,7 @@ function SecretSection({ projectId }: { projectId: string }) {
 
     useEffect(() => {
         setLoading(true);
-        getProjectConfig(projectId).then((project) => {
+        fetchProject(projectId).then((project) => {
             setSecret(project.secret);
             setLoading(false);
         });
@@ -367,7 +367,7 @@ export function ChatWidgetSection({ projectId, chatWidgetHost }: { projectId: st
 
     useEffect(() => {
         setLoading(true);
-        getProjectConfig(projectId).then((project) => {
+        fetchProject(projectId).then((project) => {
             setChatClientId(project.chatClientId);
             setLoading(false);
         });
@@ -695,7 +695,7 @@ function DeleteProjectSection({ projectId }: { projectId: string }) {
 
     useEffect(() => {
         setLoadingInitial(true);
-        getProjectConfig(projectId).then((project) => {
+        fetchProject(projectId).then((project) => {
             setProjectName(project.name);
             setLoadingInitial(false);
         });
