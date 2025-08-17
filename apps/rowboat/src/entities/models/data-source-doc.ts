@@ -27,6 +27,7 @@ export const DataSourceDoc = z.object({
             name: z.string(),
             size: z.number(),
             mimeType: z.string(),
+            path: z.string(),
         }),
         z.object({
             type: z.literal('file_s3'),

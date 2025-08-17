@@ -61,9 +61,10 @@ export class GetDownloadUrlForFileUseCase implements IGetDownloadUrlForFileUseCa
         await this.usageQuotaPolicy.assertAndConsume(file.projectId);
 
         if (file.data.type === 'file_local') {
-            return await this.localUploadsStorageService.getDownloadUrl(fileId);
+            // use the file id instead of path here
+            return await this.localUploadsStorageService.getDownloadUrl(file.id);
         } else if (file.data.type === 'file_s3') {
-            return await this.s3UploadsStorageService.getDownloadUrl(file.data.s3Key);
+            return await this.s3UploadsStorageService.getDownloadUrl(file.id);
         }
 
         throw new NotFoundError('Invalid file type');

@@ -41,8 +41,6 @@ export async function GET(request: NextRequest, props: { params: Promise<{ fileI
         return NextResponse.json({ error: 'Missing file ID' }, { status: 400 });
     }
 
-    const filePath = path.join(UPLOADS_DIR, fileId);
-
     // get mimetype from database
     const doc = await dataSourceDocsRepository.fetch(fileId);
     if (!doc) {
@@ -56,6 +54,9 @@ export async function GET(request: NextRequest, props: { params: Promise<{ fileI
     const fileName = doc.data.name;
 
     try {
+        // strip uploads dir from path
+        const filePath = path.join(UPLOADS_DIR, doc.data.path.split('/api/uploads/')[1]);
+
         // Check if file exists
         await fs.access(filePath);
         // Create a readable stream

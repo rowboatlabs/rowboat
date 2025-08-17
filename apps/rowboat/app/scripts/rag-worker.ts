@@ -9,11 +9,7 @@ import { embeddingModel } from '../lib/embedding';
 import { qdrantClient } from '../lib/qdrant';
 import { PrefixLogger } from "../lib/utils";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { uploadsS3Client } from '../lib/uploads_s3_client';
-import fs from 'fs/promises';
 import crypto from 'crypto';
-import path from 'path';
 import { createOpenAI } from '@ai-sdk/openai';
 import { USE_BILLING, USE_GEMINI_FILE_PARSING } from '../lib/feature_flags';
 import { authorize, getCustomerIdForProject, logUsage, UsageTracker } from '../lib/billing';
@@ -21,6 +17,7 @@ import { BillingError } from '@/src/entities/errors/common';
 import { DataSource } from '@/src/entities/models/data-source';
 import { IDataSourcesRepository } from '@/src/application/repositories/data-sources.repository.interface';
 import { IDataSourceDocsRepository } from '@/src/application/repositories/data-source-docs.repository.interface';
+import { IUploadsStorageService } from '@/src/application/services/uploads-storage.service.interface';
 import { container } from '@/di/container';
 
 const FILE_PARSING_PROVIDER_API_KEY = process.env.FILE_PARSING_PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
@@ -29,6 +26,8 @@ const FILE_PARSING_MODEL = process.env.FILE_PARSING_MODEL || 'gpt-4o';
 
 const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
 const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>('dataSourceDocsRepository');
+const localUploadsStorageService = container.resolve<IUploadsStorageService>('localUploadsStorageService');
+const s3UploadsStorageService = container.resolve<IUploadsStorageService>('s3UploadsStorageService');
 
 const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY || "test" });
 
@@ -36,8 +35,6 @@ const openai = createOpenAI({
     apiKey: FILE_PARSING_PROVIDER_API_KEY,
     baseURL: FILE_PARSING_PROVIDER_BASE_URL,
 });
-
-const UPLOADS_DIR = process.env.RAG_UPLOADS_DIR || '/uploads';
 
 const splitter = new RecursiveCharacterTextSplitter({
     separators: ['\n\n', '\n', '. ', '.', ''],
@@ -47,23 +44,6 @@ const splitter = new RecursiveCharacterTextSplitter({
 
 // Configure Google Gemini API
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || '');
-
-async function getLocalFileContent(path: string): Promise<Buffer> {
-    return await fs.readFile(path);
-}
-
-async function getS3FileContent(s3Key: string): Promise<Buffer> {
-    const command = new GetObjectCommand({
-        Bucket: process.env.RAG_UPLOADS_S3_BUCKET,
-        Key: s3Key,
-    });
-    const response = await uploadsS3Client.send(command);
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of response.Body as any) {
-        chunks.push(chunk);
-    }
-    return Buffer.concat(chunks);
-}
 
 async function retryable<T>(fn: () => Promise<T>, maxAttempts: number = 3): Promise<T> {
     let attempts = 0;
@@ -92,10 +72,10 @@ async function runProcessFilePipeline(_logger: PrefixLogger, usageTracker: Usage
     let fileData: Buffer;
     if (doc.data.type === 'file_local') {
         logger.log("Fetching file from local");
-        fileData = await getLocalFileContent(path.join(UPLOADS_DIR, doc.id));
+        fileData = await localUploadsStorageService.getFileContents(doc.id);
     } else {
         logger.log("Fetching file from S3");
-        fileData = await getS3FileContent(doc.data.s3Key);
+        fileData = await s3UploadsStorageService.getFileContents(doc.id);
     }
 
     let markdown = "";

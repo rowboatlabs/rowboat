@@ -59,12 +59,10 @@ export class AddDocsToDataSourceUseCase implements IAddDocsToDataSourceUseCase {
 
         await this.dataSourceDocsRepository.bulkCreate(source.projectId, sourceId, docs);
 
-        if (docs.length > 0 && (source.data.type === 'files_local' || source.data.type === 'files_s3')) {
-            await this.dataSourcesRepository.update(sourceId, {
-                status: "pending",
-                billingError: null,
-                attempts: 0,
-            }, true);
-        }
+        await this.dataSourcesRepository.update(sourceId, {
+            status: "pending",
+            billingError: null,
+            attempts: 0,
+        }, true);
     }
 }

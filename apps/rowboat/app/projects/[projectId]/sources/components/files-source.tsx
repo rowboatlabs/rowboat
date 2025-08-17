@@ -226,6 +226,7 @@ export function FilesSource({
                         name: file.name,
                         size: file.size,
                         mimeType: file.type,
+                        path: urls[index].path,
                     },
                 }));
             }
