@@ -9,11 +9,9 @@ import { addDocsToDataSource, deleteDocFromDataSource, listDocsInDataSource } fr
 import { Section } from "./section";
 
 export function TextSource({
-    projectId,
     dataSource,
     handleReload,
 }: {
-    projectId: string,
     dataSource: z.infer<typeof DataSource>,
     handleReload: () => void;
 }) {
@@ -29,7 +27,6 @@ export function TextSource({
             setIsLoading(true);
             try {
                 const { files } = await listDocsInDataSource({
-                    projectId,
                     sourceId: dataSource.id,
                     limit: 1,
                 });
@@ -54,7 +51,7 @@ export function TextSource({
         return () => {
             ignore = true;
         };
-    }, [projectId, dataSource.id]);
+    }, [dataSource.id]);
 
     async function handleSubmit(formData: FormData) {
         setIsSaving(true);
@@ -64,15 +61,12 @@ export function TextSource({
             // Delete existing doc if it exists
             if (docId) {
                 await deleteDocFromDataSource({
-                    projectId,
-                    sourceId: dataSource.id,
                     docId: docId,
                 });
             }
 
             // Add new doc
             await addDocsToDataSource({
-                projectId,
                 sourceId: dataSource.id,
                 docData: [{
                     name: 'text',

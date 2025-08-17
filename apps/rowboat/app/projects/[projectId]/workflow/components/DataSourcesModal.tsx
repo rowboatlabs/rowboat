@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Form } from '../../sources/new/form';
 import { FilesSource } from '../../sources/components/files-source';
 import { getDataSource } from '../../../../actions/data-source.actions';
-import { WithStringId } from '../../../../lib/types/types';
 import { DataSource } from "@/src/entities/models/data-source";
 import { z } from 'zod';
 
@@ -34,7 +33,7 @@ export function DataSourcesModal({
 
   const handleDataSourceCreated = async (sourceId: string) => {
     // Get the created data source
-    const source = await getDataSource(projectId, sourceId);
+    const source = await getDataSource(sourceId);
     
     // If it's a files data source, show the upload interface
     if (source.data.type === 'files_local' || source.data.type === 'files_s3') {
@@ -93,7 +92,6 @@ export function DataSourcesModal({
           ) : (
             createdSource && (
               <FilesSource
-                projectId={projectId}
                 dataSource={createdSource}
                 handleReload={handleFilesUploaded}
                 type={createdSource.data.type as 'files_local' | 'files_s3'}

@@ -6,12 +6,10 @@ import { z } from 'zod';
 import { SourceStatus } from "./source-status";
 
 export function SelfUpdatingSourceStatus({
-    projectId,
     sourceId,
     initialStatus,
     compact = false,
 }: {
-    projectId: string;
     sourceId: string,
     initialStatus: z.infer<typeof DataSource>['status'],
     compact?: boolean;
@@ -26,7 +24,7 @@ export function SelfUpdatingSourceStatus({
             if (ignore) {
                 return;
             }
-            const source = await getDataSource(projectId, sourceId);
+            const source = await getDataSource(sourceId);
             setStatus(source.status);
             timeoutId = setTimeout(check, 15 * 1000);
         }
@@ -41,7 +39,7 @@ export function SelfUpdatingSourceStatus({
                 clearTimeout(timeoutId);
             }
         };
-    }, [status, projectId, sourceId]);
+    }, [status, sourceId]);
 
-    return <SourceStatus status={status} compact={compact} projectId={projectId} />;
+    return <SourceStatus status={status} compact={compact} />;
 }

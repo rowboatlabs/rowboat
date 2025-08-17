@@ -5,11 +5,9 @@ import { CheckCircleIcon, XCircleIcon, ClockIcon } from "lucide-react";
 
 export function SourceStatus({
     status,
-    projectId,
     compact = false,
 }: {
     status: z.infer<typeof DataSource>['status'],
-    projectId: string,
     compact?: boolean;
 }) {
     return (

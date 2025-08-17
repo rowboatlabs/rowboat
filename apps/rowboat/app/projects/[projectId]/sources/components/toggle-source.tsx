@@ -4,13 +4,11 @@ import { Spinner } from "@heroui/react";
 import { useState } from "react";
 
 export function ToggleSource({
-    projectId,
     sourceId,
     active,
     compact = false,
     className
 }: {
-    projectId: string;
     sourceId: string;
     active: boolean;
     compact?: boolean;
@@ -22,7 +20,7 @@ export function ToggleSource({
     async function handleToggle() {
         setLoading(true);
         try {
-            await toggleDataSource(projectId, sourceId, !isActive);
+            await toggleDataSource(sourceId, !isActive);
             setIsActive(!isActive);
         } finally {
             setLoading(false);

@@ -1097,7 +1097,7 @@ export const EntityList = forwardRef<
                                                                         name={dataSource.name} 
                                                                         onDelete={async () => {
                                                                             if (window.confirm(`Are you sure you want to delete the data source "${dataSource.name}"?`)) {
-                                                                                await deleteDataSource(projectId, dataSource.id);
+                                                                                await deleteDataSource(dataSource.id);
                                                                                 onDataSourcesUpdated?.();
                                                                             }
                                                                         }} 

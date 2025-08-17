@@ -71,7 +71,6 @@ export function Form({
         // pick first 100
         const first100Urls = urlsArray.slice(0, 100);
         await addDocsToDataSource({
-            projectId,
             sourceId: source.id,
             docData: first100Urls.map(url => ({
                 name: url,
@@ -114,7 +113,6 @@ export function Form({
 
         const content = formData.get('content') as string;
         await addDocsToDataSource({
-            projectId,
             sourceId: source.id,
             docData: [{
                 name: 'text',

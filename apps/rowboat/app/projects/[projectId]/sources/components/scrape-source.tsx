@@ -51,8 +51,7 @@ function UrlListItem({ file, onDelete }: {
     );
 }
 
-function UrlList({ projectId, sourceId, onDelete }: {
-    projectId: string,
+function UrlList({ sourceId, onDelete }: {
     sourceId: string,
     onDelete: (fileId: string) => Promise<void>,
 }) {
@@ -69,7 +68,7 @@ function UrlList({ projectId, sourceId, onDelete }: {
         async function fetchFiles() {
             setLoading(true);
             try {
-                const { files, total } = await listDocsInDataSource({ projectId, sourceId, page, limit: 10 });
+                const { files, total } = await listDocsInDataSource({ sourceId, page, limit: 10 });
                 if (!ignore) {
                     setFiles(files);
                     setTotal(total);
@@ -86,7 +85,7 @@ function UrlList({ projectId, sourceId, onDelete }: {
         return () => {
             ignore = true;
         };
-    }, [projectId, sourceId, page]);
+    }, [sourceId, page]);
 
     return (
         <div className="mt-6 space-y-4">
@@ -120,11 +119,9 @@ function UrlList({ projectId, sourceId, onDelete }: {
 }
 
 export function ScrapeSource({
-    projectId,
     dataSource,
     handleReload,
 }: {
-    projectId: string,
     dataSource: z.infer<typeof DataSource>,
     handleReload: () => void;
 }) {
@@ -161,7 +158,6 @@ export function ScrapeSource({
                                 const first100Urls = urlsArray.slice(0, 100);
                                 
                                 await addDocsToDataSource({
-                                    projectId,
                                     sourceId: dataSource.id,
                                     docData: first100Urls.map(url => ({
                                         name: url,
@@ -209,12 +205,9 @@ export function ScrapeSource({
 
                     <UrlList
                         key={fileListKey}
-                        projectId={projectId}
                         sourceId={dataSource.id}
                         onDelete={async (docId) => {
                             await deleteDocFromDataSource({
-                                projectId,
-                                sourceId: dataSource.id,
                                 docId: docId,
                             });
                             handleReload();
@@ -230,10 +223,8 @@ export function ScrapeSource({
                     description="Update the content by scraping the URLs again."
                 >
                     <Recrawl 
-                        projectId={projectId} 
-                        sourceId={dataSource.id} 
                         handleRefresh={async () => {
-                            await recrawlWebDataSource(projectId, dataSource.id);
+                            await recrawlWebDataSource(dataSource.id);
                             handleReload();
                             setFileListKey(prev => prev + 1);
                         }} 

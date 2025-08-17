@@ -6,7 +6,6 @@ import { ToggleSource } from "./toggle-source";
 import { SelfUpdatingSourceStatus } from "./self-updating-source-status";
 import { DataSourceIcon } from "../../../../lib/components/datasource-icon";
 import { useEffect, useState } from "react";
-import { WithStringId } from "../../../../lib/types/types";
 import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";
 import { listDataSources } from "../../../../actions/data-source.actions";
@@ -159,7 +158,6 @@ export function SourcesList({ projectId }: { projectId: string }) {
                                                         <div className="text-sm">
                                                             <SelfUpdatingSourceStatus 
                                                                 sourceId={source.id} 
-                                                                projectId={projectId} 
                                                                 initialStatus={source.status} 
                                                                 compact={true} 
                                                             />
@@ -168,7 +166,6 @@ export function SourcesList({ projectId }: { projectId: string }) {
                                                 )}
                                                 <td className="px-6 py-4 text-left">
                                                     <ToggleSource 
-                                                        projectId={projectId} 
                                                         sourceId={source.id} 
                                                         active={source.active} 
                                                         compact={true} 

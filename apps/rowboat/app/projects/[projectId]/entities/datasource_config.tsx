@@ -43,22 +43,22 @@ export function DataSourceConfig({
                 const currentProjectId = pathParts[2]; // /projects/[projectId]/workflow
                 setProjectId(currentProjectId);
                 
-                const ds = await getDataSource(currentProjectId, dataSourceId);
+                const ds = await getDataSource(dataSourceId);
                 setDataSource(ds);
                 
                 // Load files if it's a files data source
                 if (ds.data.type === 'files_local' || ds.data.type === 'files_s3') {
-                    await loadFiles(currentProjectId, dataSourceId, 1);
+                    await loadFiles(dataSourceId, 1);
                 }
                 
                 // Load URLs if it's a URLs data source
                 if (ds.data.type === 'urls') {
-                    await loadUrls(currentProjectId, dataSourceId, 1);
+                    await loadUrls(dataSourceId, 1);
                 }
                 
                 // Load text content if it's a text data source
                 if (ds.data.type === 'text') {
-                    await loadTextContent(currentProjectId, dataSourceId);
+                    await loadTextContent(dataSourceId);
                 }
             } catch (err) {
                 console.error('Failed to load data source:', err);
@@ -90,7 +90,7 @@ export function DataSourceConfig({
             }
             
             try {
-                const updatedSource = await getDataSource(projectId, dataSourceId);
+                const updatedSource = await getDataSource(dataSourceId);
                 if (!ignore) {
                     setDataSource(updatedSource);
                     onDataSourceUpdate?.(); // Notify parent of status change
@@ -123,20 +123,19 @@ export function DataSourceConfig({
     // Helper function to update data source and notify parent
     const updateDataSourceAndNotify = useCallback(async () => {
         try {
-            const updatedSource = await getDataSource(projectId, dataSourceId);
+            const updatedSource = await getDataSource(dataSourceId);
             setDataSource(updatedSource);
             onDataSourceUpdate?.();
         } catch (err) {
             console.error('Failed to reload data source:', err);
         }
-    }, [projectId, dataSourceId, onDataSourceUpdate]);
+    }, [dataSourceId, onDataSourceUpdate]);
 
     // Load files function
-    const loadFiles = async (projectId: string, sourceId: string, page: number) => {
+    const loadFiles = async (sourceId: string, page: number) => {
         try {
             setFilesLoading(true);
             const { files, total } = await listDocsInDataSource({
-                projectId,
                 sourceId,
                 page,
                 limit: 10,
@@ -170,11 +169,10 @@ export function DataSourceConfig({
     const [uploadingFiles, setUploadingFiles] = useState(false);
 
     // Load URLs function
-    const loadUrls = async (projectId: string, sourceId: string, page: number) => {
+    const loadUrls = async (sourceId: string, page: number) => {
         try {
             setUrlsLoading(true);
             const { files, total } = await listDocsInDataSource({
-                projectId,
                 sourceId,
                 page,
                 limit: 10,
@@ -190,11 +188,10 @@ export function DataSourceConfig({
     };
 
     // Load text content function
-    const loadTextContent = async (projectId: string, sourceId: string) => {
+    const loadTextContent = async (sourceId: string) => {
         try {
             setTextLoading(true);
             const { files } = await listDocsInDataSource({
-                projectId,
                 sourceId,
                 limit: 1,
             });
@@ -218,12 +215,10 @@ export function DataSourceConfig({
         
         try {
             await deleteDocFromDataSource({
-                projectId,
-                sourceId: dataSourceId,
                 docId: fileId,
             });
             // Reload files
-            await loadFiles(projectId, dataSourceId, filesPage);
+            await loadFiles(dataSourceId, filesPage);
             
             // Reload data source to get updated status
             await updateDataSourceAndNotify();
@@ -235,7 +230,7 @@ export function DataSourceConfig({
     // Handle file download
     const handleDownloadFile = async (fileId: string) => {
         try {
-            const url = await getDownloadUrlForFile(projectId, dataSourceId, fileId);
+            const url = await getDownloadUrlForFile(fileId);
             window.open(url, '_blank');
         } catch (err) {
             console.error('Failed to download file:', err);
@@ -244,7 +239,7 @@ export function DataSourceConfig({
 
     // Handle page change
     const handlePageChange = (page: number) => {
-        loadFiles(projectId, dataSourceId, page);
+        loadFiles(dataSourceId, page);
     };
 
     // Handle URL deletion
@@ -253,12 +248,10 @@ export function DataSourceConfig({
         
         try {
             await deleteDocFromDataSource({
-                projectId,
-                sourceId: dataSourceId,
                 docId: urlId,
             });
             // Reload URLs
-            await loadUrls(projectId, dataSourceId, urlsPage);
+            await loadUrls(dataSourceId, urlsPage);
             
             // Reload data source to get updated status
             await updateDataSourceAndNotify();
@@ -269,7 +262,7 @@ export function DataSourceConfig({
 
     // Handle URL page change
     const handleUrlPageChange = (page: number) => {
-        loadUrls(projectId, dataSourceId, page);
+        loadUrls(dataSourceId, page);
     };
 
     // Handle text content update
@@ -278,22 +271,18 @@ export function DataSourceConfig({
         try {
             // Delete existing text doc if it exists
             const { files } = await listDocsInDataSource({
-                projectId,
                 sourceId: dataSourceId,
                 limit: 1,
             });
             
             if (files.length > 0) {
                 await deleteDocFromDataSource({
-                    projectId,
-                    sourceId: dataSourceId,
                     docId: files[0].id,
                 });
             }
 
             // Add new text doc
             await addDocsToDataSource({
-                projectId,
                 sourceId: dataSourceId,
                 docData: [{
                     name: 'text',
@@ -326,7 +315,6 @@ export function DataSourceConfig({
             const first100Urls = urlsArray.slice(0, 100);
             
             await addDocsToDataSource({
-                projectId,
                 sourceId: dataSourceId,
                 docData: first100Urls.map(url => ({
                     name: url,
@@ -338,7 +326,7 @@ export function DataSourceConfig({
             });
             
             setShowAddUrlForm(false);
-            await loadUrls(projectId, dataSourceId, urlsPage);
+            await loadUrls(dataSourceId, urlsPage);
             
             // Reload data source to get updated status
             await updateDataSourceAndNotify();
@@ -355,7 +343,7 @@ export function DataSourceConfig({
         
         setUploadingFiles(true);
         try {
-            const urls = await getUploadUrlsForFilesDataSource(projectId, dataSourceId, acceptedFiles.map(file => ({
+            const urls = await getUploadUrlsForFilesDataSource(dataSourceId, acceptedFiles.map(file => ({
                 name: file.name,
                 type: file.type,
                 size: file.size,
@@ -407,12 +395,11 @@ export function DataSourceConfig({
             }
 
             await addDocsToDataSource({
-                projectId,
                 sourceId: dataSourceId,
                 docData,
             });
 
-            await loadFiles(projectId, dataSourceId, filesPage);
+            await loadFiles(dataSourceId, filesPage);
             
             // Reload data source to get updated status
             await updateDataSourceAndNotify();
@@ -421,7 +408,7 @@ export function DataSourceConfig({
         } finally {
             setUploadingFiles(false);
         }
-    }, [projectId, dataSourceId, dataSource, filesPage, updateDataSourceAndNotify]);
+    }, [dataSourceId, dataSource, filesPage, updateDataSourceAndNotify]);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop: onFileDrop,
