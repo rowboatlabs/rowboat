@@ -89,7 +89,7 @@ import { ToggleDataSourceUseCase } from "@/src/application/use-cases/data-source
 import { CreateDataSourceController } from "@/src/interface-adapters/controllers/data-sources/create-data-source.controller";
 import { FetchDataSourceController } from "@/src/interface-adapters/controllers/data-sources/fetch-data-source.controller";
 import { ListDataSourcesController } from "@/src/interface-adapters/controllers/data-sources/list-data-sources.controller";
-import { UpdateDataSourceDescriptionController } from "@/src/interface-adapters/controllers/data-sources/update-data-source.controller";
+import { UpdateDataSourceController } from "@/src/interface-adapters/controllers/data-sources/update-data-source.controller";
 import { DeleteDataSourceController } from "@/src/interface-adapters/controllers/data-sources/delete-data-source.controller";
 import { ToggleDataSourceController } from "@/src/interface-adapters/controllers/data-sources/toggle-data-source.controller";
 import { AddDocsToDataSourceUseCase } from "@/src/application/use-cases/data-sources/add-docs-to-data-source.use-case";
@@ -159,7 +159,7 @@ container.register({
     createDataSourceController: asClass(CreateDataSourceController).singleton(),
     fetchDataSourceController: asClass(FetchDataSourceController).singleton(),
     listDataSourcesController: asClass(ListDataSourcesController).singleton(),
-    updateDataSourceController: asClass(UpdateDataSourceDescriptionController).singleton(),
+    updateDataSourceController: asClass(UpdateDataSourceController).singleton(),
     deleteDataSourceController: asClass(DeleteDataSourceController).singleton(),
     toggleDataSourceController: asClass(ToggleDataSourceController).singleton(),
     addDocsToDataSourceUseCase: asClass(AddDocsToDataSourceUseCase).singleton(),

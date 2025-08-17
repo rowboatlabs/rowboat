@@ -1,46 +1,53 @@
 'use server';
-import { ObjectId } from "mongodb";
 import { z } from 'zod';
-import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { projectAuthCheck } from "./project.actions";
 import { DataSourceDoc } from "@/src/entities/models/data-source-doc";
 import { DataSource } from "@/src/entities/models/data-source";
-import { uploadsS3Client } from "../lib/uploads_s3_client";
-import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
-import { NotAuthorizedError } from "@/src/entities/errors/common";
-import { IDataSourceDocsRepository } from "@/src/application/repositories/data-source-docs.repository.interface";
 import { container } from "@/di/container";
+import { IFetchDataSourceController } from "@/src/interface-adapters/controllers/data-sources/fetch-data-source.controller";
+import { authCheck } from "./auth.actions";
+import { IListDataSourcesController } from "@/src/interface-adapters/controllers/data-sources/list-data-sources.controller";
+import { ICreateDataSourceController } from "@/src/interface-adapters/controllers/data-sources/create-data-source.controller";
+import { IRecrawlWebDataSourceController } from "@/src/interface-adapters/controllers/data-sources/recrawl-web-data-source.controller";
+import { IDeleteDataSourceController } from "@/src/interface-adapters/controllers/data-sources/delete-data-source.controller";
+import { IToggleDataSourceController } from "@/src/interface-adapters/controllers/data-sources/toggle-data-source.controller";
+import { IAddDocsToDataSourceController } from "@/src/interface-adapters/controllers/data-sources/add-docs-to-data-source.controller";
+import { IListDocsInDataSourceController } from "@/src/interface-adapters/controllers/data-sources/list-docs-in-data-source.controller";
+import { IDeleteDocFromDataSourceController } from "@/src/interface-adapters/controllers/data-sources/delete-doc-from-data-source.controller";
+import { IGetDownloadUrlForFileController } from "@/src/interface-adapters/controllers/data-sources/get-download-url-for-file.controller";
+import { IGetUploadUrlsForFilesController } from "@/src/interface-adapters/controllers/data-sources/get-upload-urls-for-files.controller";
+import { IUpdateDataSourceController } from "@/src/interface-adapters/controllers/data-sources/update-data-source.controller";
 
-const dataSourcesRepository = container.resolve<IDataSourcesRepository>("dataSourcesRepository");
-const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>("dataSourceDocsRepository");
+const fetchDataSourceController = container.resolve<IFetchDataSourceController>("fetchDataSourceController");
+const listDataSourcesController = container.resolve<IListDataSourcesController>("listDataSourcesController");
+const createDataSourceController = container.resolve<ICreateDataSourceController>("createDataSourceController");
+const recrawlWebDataSourceController = container.resolve<IRecrawlWebDataSourceController>("recrawlWebDataSourceController");
+const deleteDataSourceController = container.resolve<IDeleteDataSourceController>("deleteDataSourceController");
+const toggleDataSourceController = container.resolve<IToggleDataSourceController>("toggleDataSourceController");
+const addDocsToDataSourceController = container.resolve<IAddDocsToDataSourceController>("addDocsToDataSourceController");
+const listDocsInDataSourceController = container.resolve<IListDocsInDataSourceController>("listDocsInDataSourceController");
+const deleteDocFromDataSourceController = container.resolve<IDeleteDocFromDataSourceController>("deleteDocFromDataSourceController");
+const getDownloadUrlForFileController = container.resolve<IGetDownloadUrlForFileController>("getDownloadUrlForFileController");
+const getUploadUrlsForFilesController = container.resolve<IGetUploadUrlsForFilesController>("getUploadUrlsForFilesController");
+const updateDataSourceController = container.resolve<IUpdateDataSourceController>("updateDataSourceController");
 
-export async function getDataSource(projectId: string, sourceId: string): Promise<z.infer<typeof DataSource>> {
-    await projectAuthCheck(projectId);
-    const source = await dataSourcesRepository.fetch(sourceId);
-    if (!source) {
-        throw new Error('Invalid data source');
-    }
-    if (source.projectId !== projectId) {
-        throw new NotAuthorizedError('You cannot access this datasource');
-    }
+export async function getDataSource(sourceId: string): Promise<z.infer<typeof DataSource>> {
+    const user = await authCheck();
 
-    return source;
+    return await fetchDataSourceController.execute({
+        caller: 'user',
+        userId: user._id,
+        sourceId,
+    });
 }
 
 export async function listDataSources(projectId: string): Promise<z.infer<typeof DataSource>[]> {
-    await projectAuthCheck(projectId);
+    const user = await authCheck();
 
-    // list all sources
-    const sources = [];
-    let cursor = undefined;
-    do {
-        const result = await dataSourcesRepository.list(projectId, undefined, cursor);
-        sources.push(...result.items);
-        cursor = result.nextCursor;
-    } while (cursor);
-
-    return sources;
+    return await listDataSourcesController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId,
+    });
 }
 
 export async function createDataSource({
@@ -56,100 +63,76 @@ export async function createDataSource({
     data: z.infer<typeof DataSource>['data'],
     status?: 'pending' | 'ready',
 }): Promise<z.infer<typeof DataSource>> {
-    await projectAuthCheck(projectId);
-
-    let _status = "pending";
-    // Only set status for non-file data sources
-    if (status && data.type !== 'files_local' && data.type !== 'files_s3') {
-        _status = status;
-    }
-
-    return await dataSourcesRepository.create({
-        projectId,
-        name: name,
-        description: description || "",
-        data,
-        status: _status as z.infer<typeof DataSource>['status'],
+    const user = await authCheck();
+    return await createDataSourceController.execute({
+        caller: 'user',
+        userId: user._id,
+        data: {
+            projectId,
+            name,
+            description: description || '',
+            status,
+            data,
+        },
     });
 }
 
-export async function recrawlWebDataSource(projectId: string, sourceId: string) {
-    await projectAuthCheck(projectId);
+export async function recrawlWebDataSource(sourceId: string) {
+    const user = await authCheck();
 
-    const source = await getDataSource(projectId, sourceId);
-    if (source.data.type !== 'urls') {
-        throw new Error('Invalid data source type');
-    }
-
-    // mark all files as queued
-    await dataSourceDocsRepository.markSourceDocsPending(sourceId);
-
-    // mark data source as pending
-    await dataSourcesRepository.update(sourceId, {
-        status: 'pending',
-        billingError: null,
-        attempts: 0,
-    }, true);
+    return await recrawlWebDataSourceController.execute({
+        caller: 'user',
+        userId: user._id,
+        sourceId,
+    });
 }
 
-export async function deleteDataSource(projectId: string, sourceId: string) {
-    await projectAuthCheck(projectId);
-    await getDataSource(projectId, sourceId);
+export async function deleteDataSource(sourceId: string) {
+    const user = await authCheck();
 
-    // mark data source as deleted
-    await dataSourcesRepository.update(sourceId, {
-        status: 'deleted',
-        billingError: undefined,
-        attempts: 0,
-    }, true);
+    return await deleteDataSourceController.execute({
+        caller: 'user',
+        userId: user._id,
+        sourceId,
+    });
 }
 
-export async function toggleDataSource(projectId: string, sourceId: string, active: boolean) {
-    await projectAuthCheck(projectId);
-    await getDataSource(projectId, sourceId);
+export async function toggleDataSource(sourceId: string, active: boolean) {
+    const user = await authCheck();
 
-    await dataSourcesRepository.update(sourceId, {
+    return await toggleDataSourceController.execute({
+        caller: 'user',
+        userId: user._id,
+        sourceId,
         active,
     });
 }
 
 export async function addDocsToDataSource({
-    projectId,
     sourceId,
     docData,
 }: {
-    projectId: string,
     sourceId: string,
     docData: {
         name: string,
         data: z.infer<typeof DataSourceDoc>['data']
     }[]
 }): Promise<void> {
-    await projectAuthCheck(projectId);
-    const source = await getDataSource(projectId, sourceId);
+    const user = await authCheck();
 
-    await dataSourceDocsRepository.bulkCreate(projectId, sourceId, docData.map(doc => ({
-        name: doc.name,
-        data: doc.data,
-    })));
-
-    // Only set status to pending when files are added
-    if (docData.length > 0 && (source.data.type === 'files_local' || source.data.type === 'files_s3')) {
-        await dataSourcesRepository.update(sourceId, {
-            status: "pending",
-            billingError: undefined,
-            attempts: 0,
-        }, true);
-    }
+    return await addDocsToDataSourceController.execute({
+        caller: 'user',
+        userId: user._id,
+        sourceId,
+        docs: docData,
+    });
 }
 
 export async function listDocsInDataSource({
-    projectId,
     sourceId,
     page = 1,
     limit = 10,
 }: {
-    projectId: string,
     sourceId: string,
     page?: number,
     limit?: number,
@@ -157,17 +140,13 @@ export async function listDocsInDataSource({
     files: z.infer<typeof DataSourceDoc>[],
     total: number
 }> {
-    await projectAuthCheck(projectId);
-    await getDataSource(projectId, sourceId);
+    const user = await authCheck();
 
-    // fetch all docs
-    const docs = [];
-    let cursor = undefined;
-    do {
-        const result = await dataSourceDocsRepository.list(sourceId, undefined, cursor);
-        docs.push(...result.items);
-        cursor = result.nextCursor;
-    } while (cursor);
+    const docs = await listDocsInDataSourceController.execute({
+        caller: 'user',
+        userId: user._id,
+        sourceId,
+    });
 
     return {
         files: docs,
@@ -176,60 +155,31 @@ export async function listDocsInDataSource({
 }
 
 export async function deleteDocFromDataSource({
-    projectId,
-    sourceId,
     docId,
 }: {
-    projectId: string,
-    sourceId: string,
     docId: string,
 }): Promise<void> {
-    await projectAuthCheck(projectId);
-    await getDataSource(projectId, sourceId);
-
-    // mark for deletion
-    await dataSourceDocsRepository.markAsDeleted(docId);
-
-    // mark data source as pending
-    await dataSourcesRepository.update(sourceId, {
-        status: 'pending',
-        billingError: undefined,
-        attempts: 0,
-    }, true);
+    const user = await authCheck();
+    return await deleteDocFromDataSourceController.execute({
+        caller: 'user',
+        userId: user._id,
+        docId,
+    });
 }
 
 export async function getDownloadUrlForFile(
-    projectId: string,
-    sourceId: string,
     fileId: string
 ): Promise<string> {
-    await projectAuthCheck(projectId);
-    await getDataSource(projectId, sourceId);
+    const user = await authCheck();
 
-    const file = await dataSourceDocsRepository.fetch(fileId);
-    if (!file) {
-        throw new Error('File not found');
-    }
-    if (file.sourceId !== sourceId) {
-        throw new NotAuthorizedError('You cannot access this file');
-    }
-
-    // if local, return path
-    if (file.data.type === 'file_local') {
-        return `/api/uploads/${fileId}`;
-    } else if (file.data.type === 'file_s3') {
-        const command = new GetObjectCommand({
-            Bucket: process.env.RAG_UPLOADS_S3_BUCKET,
-            Key: file.data.s3Key,
-        });
-        return await getSignedUrl(uploadsS3Client, command, { expiresIn: 60 }); // URL valid for 1 minute
-    }
-
-    throw new Error('Invalid file type');
+    return await getDownloadUrlForFileController.execute({
+        caller: 'user',
+        userId: user._id,
+        fileId,
+    });
 }
 
 export async function getUploadUrlsForFilesDataSource(
-    projectId: string,
     sourceId: string,
     files: { name: string; type: string; size: number }[]
 ): Promise<{
@@ -237,62 +187,31 @@ export async function getUploadUrlsForFilesDataSource(
     uploadUrl: string,
     path: string,
 }[]> {
-    await projectAuthCheck(projectId);
-    const source = await getDataSource(projectId, sourceId);
-    if (source.data.type !== 'files_local' && source.data.type !== 'files_s3') {
-        throw new Error('Invalid files data source');
-    }
+    const user = await authCheck();
 
-    const urls: {
-        fileId: string,
-        uploadUrl: string,
-        path: string,
-    }[] = [];
-
-    for (const file of files) {
-        const fileId = new ObjectId().toString();
-
-        if (source.data.type === 'files_s3') {
-            // Generate presigned URL
-            const projectIdPrefix = projectId.slice(0, 2); // 2 characters from the start of the projectId
-            const path = `datasources/files/${projectIdPrefix}/${projectId}/${sourceId}/${fileId}/${file.name}`;
-            const command = new PutObjectCommand({
-                Bucket: process.env.RAG_UPLOADS_S3_BUCKET,
-                Key: path,
-                ContentType: file.type,
-            });
-            const uploadUrl = await getSignedUrl(uploadsS3Client, command, { expiresIn: 10 * 60 }); // valid for 10 minutes
-            urls.push({
-                fileId,
-                uploadUrl,
-                path,
-            });
-        } else if (source.data.type === 'files_local') {
-            // Generate local upload URL
-            urls.push({
-                fileId,
-                uploadUrl: '/api/uploads/' + fileId,
-                path: '/api/uploads/' + fileId,
-            });
-        }
-    }
-
-    return urls;
+    return await getUploadUrlsForFilesController.execute({
+        caller: 'user',
+        userId: user._id,
+        sourceId,
+        files,
+    });
 }
 
-export async function updateDataSourceDescription({
-    projectId,
+export async function updateDataSource({
     sourceId,
     description,
 }: {
-    projectId: string,
     sourceId: string,
     description: string,
 }) {
-    await projectAuthCheck(projectId);
-    await getDataSource(projectId, sourceId);
+    const user = await authCheck();
 
-    await dataSourcesRepository.update(sourceId, {
-        description,
-    }, true);
+    return await updateDataSourceController.execute({
+        caller: 'user',
+        userId: user._id,
+        sourceId,
+        data: {
+            description,
+        },
+    });
 }

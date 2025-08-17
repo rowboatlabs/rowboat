@@ -7,7 +7,6 @@ const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
     userId: z.string().optional(),
     apiKey: z.string().optional(),
-    projectId: z.string(),
     sourceId: z.string(),
     docs: z.array(DocCreateSchema),
 });
@@ -28,7 +27,7 @@ export class AddDocsToDataSourceController implements IAddDocsToDataSourceContro
         if (!result.success) {
             throw new BadRequestError(`Invalid request: ${JSON.stringify(result.error)}`);
         }
-        const { caller, userId, apiKey, projectId, sourceId, docs } = result.data;
-        return await this.addDocsToDataSourceUseCase.execute({ caller, userId, apiKey, projectId, sourceId, docs });
+        const { caller, userId, apiKey, sourceId, docs } = result.data;
+        return await this.addDocsToDataSourceUseCase.execute({ caller, userId, apiKey, sourceId, docs });
     }
 }

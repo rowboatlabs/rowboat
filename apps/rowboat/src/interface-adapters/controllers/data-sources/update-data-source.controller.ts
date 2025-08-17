@@ -15,11 +15,11 @@ const inputSchema = z.object({
         .partial(),
 });
 
-export interface IUpdateDataSourceDescriptionController {
+export interface IUpdateDataSourceController {
     execute(request: z.infer<typeof inputSchema>): Promise<z.infer<typeof DataSource>>;
 }
 
-export class UpdateDataSourceDescriptionController implements IUpdateDataSourceDescriptionController {
+export class UpdateDataSourceController implements IUpdateDataSourceController {
     private readonly updateDataSourceUseCase: IUpdateDataSourceUseCase;
 
     constructor({ updateDataSourceUseCase }: { updateDataSourceUseCase: IUpdateDataSourceUseCase }) {
