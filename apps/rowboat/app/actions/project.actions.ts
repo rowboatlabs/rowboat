@@ -21,6 +21,7 @@ import { IProjectMembersRepository } from "@/src/application/repositories/projec
 import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
 import { IDataSourceDocsRepository } from "@/src/application/repositories/data-source-docs.repository.interface";
 import { container } from "@/di/container";
+import { qdrantClient } from "../lib/qdrant";
 
 const projectActionAuthorizationPolicy = container.resolve<IProjectActionAuthorizationPolicy>('projectActionAuthorizationPolicy');
 const createApiKeyController = container.resolve<ICreateApiKeyController>('createApiKeyController');
@@ -241,6 +242,13 @@ export async function deleteProject(projectId: string) {
     // delete data sources data
     await dataSourceDocsRepository.deleteByProjectId(projectId);
     await dataSourcesRepository.deleteByProjectId(projectId);
+    await qdrantClient.delete("embeddings", {
+        filter: {
+            must: [
+                { key: "projectId", match: { value: projectId } },
+            ],
+        },
+    });
 
     // delete project members
     await projectMembersRepository.deleteByProjectId(projectId);
