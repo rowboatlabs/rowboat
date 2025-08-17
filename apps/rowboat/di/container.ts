@@ -108,6 +108,24 @@ import { DeleteDocFromDataSourceController } from "@/src/interface-adapters/cont
 import { RecrawlWebDataSourceController } from "@/src/interface-adapters/controllers/data-sources/recrawl-web-data-source.controller";
 import { GetUploadUrlsForFilesController } from "@/src/interface-adapters/controllers/data-sources/get-upload-urls-for-files.controller";
 import { GetDownloadUrlForFileController } from "@/src/interface-adapters/controllers/data-sources/get-download-url-for-file.controller";
+import { DeleteProjectController } from "@/src/interface-adapters/controllers/projects/delete-project.controller";
+import { DeleteProjectUseCase } from "@/src/application/use-cases/projects/delete-project.use-case";
+import { ListProjectsUseCase } from "@/src/application/use-cases/projects/list-projects.use-case";
+import { ListProjectsController } from "@/src/interface-adapters/controllers/projects/list-projects.controller";
+import { FetchProjectUseCase } from "@/src/application/use-cases/projects/fetch-project.use-case";
+import { FetchProjectController } from "@/src/interface-adapters/controllers/projects/fetch-project.controller";
+import { RotateSecretUseCase } from "@/src/application/use-cases/projects/rotate-secret.use-case";
+import { RotateSecretController } from "@/src/interface-adapters/controllers/projects/rotate-secret.controller";
+import { UpdateWebhookUrlUseCase } from "@/src/application/use-cases/projects/update-webhook-url.use-case";
+import { UpdateWebhookUrlController } from "@/src/interface-adapters/controllers/projects/update-webhook-url.controller";
+import { UpdateProjectNameUseCase } from "@/src/application/use-cases/projects/update-project-name.use-case";
+import { UpdateProjectNameController } from "@/src/interface-adapters/controllers/projects/update-project-name.controller";
+import { UpdateDraftWorkflowUseCase } from "@/src/application/use-cases/projects/update-draft-workflow.use-case";
+import { UpdateDraftWorkflowController } from "@/src/interface-adapters/controllers/projects/update-draft-workflow.controller";
+import { UpdateLiveWorkflowUseCase } from "@/src/application/use-cases/projects/update-live-workflow.use-case";
+import { UpdateLiveWorkflowController } from "@/src/interface-adapters/controllers/projects/update-live-workflow.controller";
+import { RevertToLiveWorkflowUseCase } from "@/src/application/use-cases/projects/revert-to-live-workflow.use-case";
+import { RevertToLiveWorkflowController } from "@/src/interface-adapters/controllers/projects/revert-to-live-workflow.controller";
 
 export const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -217,6 +235,24 @@ container.register({
     // ---
     createProjectUseCase: asClass(CreateProjectUseCase).singleton(),
     createProjectController: asClass(CreateProjectController).singleton(),
+    fetchProjectUseCase: asClass(FetchProjectUseCase).singleton(),
+    fetchProjectController: asClass(FetchProjectController).singleton(),
+    listProjectsUseCase: asClass(ListProjectsUseCase).singleton(),
+    listProjectsController: asClass(ListProjectsController).singleton(),
+    rotateSecretUseCase: asClass(RotateSecretUseCase).singleton(),
+    rotateSecretController: asClass(RotateSecretController).singleton(),
+    updateWebhookUrlUseCase: asClass(UpdateWebhookUrlUseCase).singleton(),
+    updateWebhookUrlController: asClass(UpdateWebhookUrlController).singleton(),
+    updateProjectNameUseCase: asClass(UpdateProjectNameUseCase).singleton(),
+    updateProjectNameController: asClass(UpdateProjectNameController).singleton(),
+    updateDraftWorkflowUseCase: asClass(UpdateDraftWorkflowUseCase).singleton(),
+    updateDraftWorkflowController: asClass(UpdateDraftWorkflowController).singleton(),
+    updateLiveWorkflowUseCase: asClass(UpdateLiveWorkflowUseCase).singleton(),
+    updateLiveWorkflowController: asClass(UpdateLiveWorkflowController).singleton(),
+    revertToLiveWorkflowUseCase: asClass(RevertToLiveWorkflowUseCase).singleton(),
+    revertToLiveWorkflowController: asClass(RevertToLiveWorkflowController).singleton(),
+    deleteProjectUseCase: asClass(DeleteProjectUseCase).singleton(),
+    deleteProjectController: asClass(DeleteProjectController).singleton(),      
     deleteComposioConnectedAccountController: asClass(DeleteComposioConnectedAccountController).singleton(),
     deleteComposioConnectedAccountUseCase: asClass(DeleteComposioConnectedAccountUseCase).singleton(),
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ComposioConnectedAccount, CustomMcpServer, Project } from "@/src/entities/models/project";
 import { Workflow } from "@/app/lib/types/workflow_types";
+import { PaginatedList } from "@/src/entities/common/paginated-list";
 
 /**
  * Schema for creating a new project. Includes name, creator, and optional workflows and secret.
@@ -57,6 +58,13 @@ export interface IProjectsRepository {
      * @returns The number of projects created by the user.
      */
     countCreatedProjects(createdByUserId: string): Promise<number>;
+
+    /**
+     * Lists projects for a user.
+     * @param userId - The user ID.
+     * @returns The list of projects.
+     */
+    listProjects(userId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Project>>>>;
 
     /**
      * Adds a Composio connected account to a project.

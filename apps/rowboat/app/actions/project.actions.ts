@@ -24,6 +24,12 @@ import { container } from "@/di/container";
 import { qdrantClient } from "../lib/qdrant";
 import { ICreateProjectController } from "@/src/interface-adapters/controllers/projects/create-project.controller";
 import { BillingError } from "@/src/entities/errors/common";
+import { IFetchProjectController } from "@/src/interface-adapters/controllers/projects/fetch-project.controller";
+import { IListProjectsController } from "@/src/interface-adapters/controllers/projects/list-projects.controller";
+import { IRotateSecretController } from "@/src/interface-adapters/controllers/projects/rotate-secret.controller";
+import { IUpdateWebhookUrlController } from "@/src/interface-adapters/controllers/projects/update-webhook-url.controller";
+import { IUpdateProjectNameController } from "@/src/interface-adapters/controllers/projects/update-project-name.controller";
+import { IDeleteProjectController } from "@/src/interface-adapters/controllers/projects/delete-project.controller";
 
 const projectActionAuthorizationPolicy = container.resolve<IProjectActionAuthorizationPolicy>('projectActionAuthorizationPolicy');
 const createApiKeyController = container.resolve<ICreateApiKeyController>('createApiKeyController');
@@ -34,6 +40,12 @@ const projectMembersRepository = container.resolve<IProjectMembersRepository>('p
 const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
 const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>('dataSourceDocsRepository');
 const createProjectController = container.resolve<ICreateProjectController>('createProjectController');
+const fetchProjectController = container.resolve<IFetchProjectController>('fetchProjectController');
+const listProjectsController = container.resolve<IListProjectsController>('listProjectsController');
+const rotateSecretController = container.resolve<IRotateSecretController>('rotateSecretController');
+const updateWebhookUrlController = container.resolve<IUpdateWebhookUrlController>('updateWebhookUrlController');
+const updateProjectNameController = container.resolve<IUpdateProjectNameController>('updateProjectNameController');
+const deleteProjectController = container.resolve<IDeleteProjectController>('deleteProjectController');
 
 export async function listTemplates() {
     const templatesArray = Object.entries(templates)
@@ -110,48 +122,53 @@ export async function createProjectFromWorkflowJson(formData: FormData): Promise
 
 export async function fetchProject(projectId: string): Promise<z.infer<typeof Project>> {
     const user = await authCheck();
-    await projectAuthCheck(projectId);
-    const project = await projectsCollection.findOne({
-        _id: projectId,
+    const project = await fetchProjectController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId,
     });
+
     if (!project) {
-        throw new Error('Project config not found');
+        throw new Error('Project not found');
     }
+
     return project;
 }
 
 export async function listProjects(): Promise<z.infer<typeof Project>[]> {
     const user = await authCheck();
-    const memberships = [];
+
+    const projects = [];
     let cursor = undefined;
     do {
-        const result = await projectMembersRepository.findByUserId(user._id, cursor);
-        memberships.push(...result.items);
+        const result = await listProjectsController.execute({
+            userId: user._id,
+            cursor,
+        });
+        projects.push(...result.items);
         cursor = result.nextCursor;
     } while (cursor);
-    const projectIds = memberships.map((m) => m.projectId);
-    const projects = await projectsCollection.find({
-        _id: { $in: projectIds },
-    }).toArray();
+
     return projects;
 }
 
 export async function rotateSecret(projectId: string): Promise<string> {
-    await projectAuthCheck(projectId);
-    const secret = crypto.randomBytes(32).toString('hex');
-    await projectsCollection.updateOne(
-        { _id: projectId },
-        { $set: { secret } }
-    );
-    return secret;
+    const user = await authCheck();
+    return await rotateSecretController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId,
+    });
 }
 
 export async function updateWebhookUrl(projectId: string, url: string) {
-    await projectAuthCheck(projectId);
-    await projectsCollection.updateOne(
-        { _id: projectId },
-        { $set: { webhookUrl: url } }
-    );
+    const user = await authCheck();
+    await updateWebhookUrlController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId,
+        url,
+    });
 }
 
 export async function createApiKey(projectId: string): Promise<z.infer<typeof ApiKey>> {
@@ -183,49 +200,21 @@ export async function listApiKeys(projectId: string): Promise<z.infer<typeof Api
 }
 
 export async function updateProjectName(projectId: string, name: string) {
-    await projectAuthCheck(projectId);
-    await projectsCollection.updateOne({ _id: projectId }, { $set: { name } });
-    revalidatePath(`/projects/${projectId}`, 'layout');
-}
-
-interface McpServerDeletionError {
-    serverName: string;
-    error: string;
+    const user = await authCheck();
+    await updateProjectNameController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId,
+        name,
+    });
 }
 
 export async function deleteProject(projectId: string) {
-    await projectAuthCheck(projectId);
-
-    // delete api keys
-    await apiKeysRepository.deleteAll(projectId);
-
-    // delete data sources data
-    await dataSourceDocsRepository.deleteByProjectId(projectId);
-    await dataSourcesRepository.deleteByProjectId(projectId);
-    await qdrantClient.delete("embeddings", {
-        filter: {
-            must: [
-                { key: "projectId", match: { value: projectId } },
-            ],
-        },
-    });
-
-    // delete project members
-    await projectMembersRepository.deleteByProjectId(projectId);
-
-    // delete workflow versions
-    await db.collection('agent_workflows').deleteMany({
+    const user = await authCheck();
+    await deleteProjectController.execute({
+        caller: 'user',
+        userId: user._id,
         projectId,
-    });
-
-    // delete scenarios
-    await db.collection('test_scenarios').deleteMany({
-        projectId,
-    });
-
-    // delete project
-    await projectsCollection.deleteOne({
-        _id: projectId,
     });
 
     redirect('/projects');

@@ -3,6 +3,8 @@ import { CreateSchema, IProjectsRepository, AddComposioConnectedAccountSchema, A
 import { NotFoundError } from "@/src/entities/errors/common";
 import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
+import { IProjectMembersRepository } from "@/src/application/repositories/project-members.repository.interface";
+import { PaginatedList } from "@/src/entities/common/paginated-list";
 
 const docSchema = Project
     .omit({
@@ -13,7 +15,16 @@ const docSchema = Project
     });
 
 export class MongodbProjectsRepository implements IProjectsRepository {
+    private readonly projectMembersRepository: IProjectMembersRepository;
     private collection = db.collection<z.infer<typeof docSchema>>('projects');
+
+    constructor({
+        projectMembersRepository,
+    }: {
+        projectMembersRepository: IProjectMembersRepository,
+    }) {
+        this.projectMembersRepository = projectMembersRepository;
+    }
 
     async create(data: z.infer<typeof CreateSchema>): Promise<z.infer<typeof Project>> {
         const now = new Date();
@@ -55,6 +66,21 @@ export class MongodbProjectsRepository implements IProjectsRepository {
 
     async countCreatedProjects(createdByUserId: string): Promise<number> {
         return await this.collection.countDocuments({ createdByUserId });
+    }
+
+    async listProjects(userId: string, cursor?: string, limit?: number): Promise<z.infer<ReturnType<typeof PaginatedList<typeof Project>>>> {
+        const memberships = await this.projectMembersRepository.findByUserId(userId, cursor, limit);
+        const projectIds = memberships.items.map((m) => m.projectId);
+        const projects = await this.collection.find({
+            _id: { $in: projectIds },
+        }).toArray();
+        return {
+            items: projects.map((p) => ({
+                ...p,
+                id: p._id,
+            })),
+            nextCursor: memberships.nextCursor,
+        };
     }
 
     async addComposioConnectedAccount(projectId: string, data: z.infer<typeof AddComposioConnectedAccountSchema>): Promise<z.infer<typeof Project>> {
