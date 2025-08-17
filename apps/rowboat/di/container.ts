@@ -48,6 +48,18 @@ import { CreateProjectUseCase } from "@/src/application/use-cases/projects/creat
 import { CreateProjectController } from "@/src/interface-adapters/controllers/projects/create-project.controller";
 import { DeleteComposioConnectedAccountUseCase } from "@/src/application/use-cases/projects/delete-composio-connected-account.use-case";
 import { DeleteComposioConnectedAccountController } from "@/src/interface-adapters/controllers/projects/delete-composio-connected-account.controller";
+import { CreateComposioManagedConnectedAccountUseCase } from "@/src/application/use-cases/projects/create-composio-managed-connected-account.use-case";
+import { CreateCustomConnectedAccountUseCase } from "@/src/application/use-cases/projects/create-custom-connected-account.use-case";
+import { SyncConnectedAccountUseCase } from "@/src/application/use-cases/projects/sync-connected-account.use-case";
+import { ListComposioToolkitsUseCase } from "@/src/application/use-cases/projects/list-composio-toolkits.use-case";
+import { GetComposioToolkitUseCase } from "@/src/application/use-cases/projects/get-composio-toolkit.use-case";
+import { ListComposioToolsUseCase } from "@/src/application/use-cases/projects/list-composio-tools.use-case";
+import { CreateComposioManagedConnectedAccountController } from "@/src/interface-adapters/controllers/projects/create-composio-managed-connected-account.controller";
+import { CreateCustomConnectedAccountController } from "@/src/interface-adapters/controllers/projects/create-custom-connected-account.controller";
+import { SyncConnectedAccountController } from "@/src/interface-adapters/controllers/projects/sync-connected-account.controller";
+import { ListComposioToolkitsController } from "@/src/interface-adapters/controllers/projects/list-composio-toolkits.controller";
+import { GetComposioToolkitController } from "@/src/interface-adapters/controllers/projects/get-composio-toolkit.controller";
+import { ListComposioToolsController } from "@/src/interface-adapters/controllers/projects/list-composio-tools.controller";
 
 // Scheduled Job Rules
 import { MongoDBScheduledJobRulesRepository } from "@/src/infrastructure/repositories/mongodb.scheduled-job-rules.repository";
@@ -255,6 +267,18 @@ container.register({
     deleteProjectController: asClass(DeleteProjectController).singleton(),      
     deleteComposioConnectedAccountController: asClass(DeleteComposioConnectedAccountController).singleton(),
     deleteComposioConnectedAccountUseCase: asClass(DeleteComposioConnectedAccountUseCase).singleton(),
+    createComposioManagedConnectedAccountUseCase: asClass(CreateComposioManagedConnectedAccountUseCase).singleton(),
+    createComposioManagedConnectedAccountController: asClass(CreateComposioManagedConnectedAccountController).singleton(),
+    createCustomConnectedAccountUseCase: asClass(CreateCustomConnectedAccountUseCase).singleton(),
+    createCustomConnectedAccountController: asClass(CreateCustomConnectedAccountController).singleton(),
+    syncConnectedAccountUseCase: asClass(SyncConnectedAccountUseCase).singleton(),
+    syncConnectedAccountController: asClass(SyncConnectedAccountController).singleton(),
+    listComposioToolkitsUseCase: asClass(ListComposioToolkitsUseCase).singleton(),
+    listComposioToolkitsController: asClass(ListComposioToolkitsController).singleton(),
+    getComposioToolkitUseCase: asClass(GetComposioToolkitUseCase).singleton(),
+    getComposioToolkitController: asClass(GetComposioToolkitController).singleton(),
+    listComposioToolsUseCase: asClass(ListComposioToolsUseCase).singleton(),
+    listComposioToolsController: asClass(ListComposioToolsController).singleton(),
 
     // composio
     // ---
