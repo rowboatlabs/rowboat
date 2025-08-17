@@ -429,9 +429,7 @@ function DisconnectToolkitsSection({ projectId, onProjectConfigUpdated }: {
     const [loading, setLoading] = useState(false);
     const [connectedToolkits, setConnectedToolkits] = useState<ConnectedToolkit[]>([]);
     const [disconnectingToolkit, setDisconnectingToolkit] = useState<string | null>(null);
-    const [removingToolkit, setRemovingToolkit] = useState<string | null>(null);
     const [showDisconnectModal, setShowDisconnectModal] = useState(false);
-    const [showRemoveModal, setShowRemoveModal] = useState(false);
     const [selectedToolkit, setSelectedToolkit] = useState<ConnectedToolkit | null>(null);
 
     const loadConnectedToolkits = useCallback(async () => {
@@ -496,46 +494,12 @@ function DisconnectToolkitsSection({ projectId, onProjectConfigUpdated }: {
         setShowDisconnectModal(true);
     };
 
-    const handleRemoveClick = (toolkit: ConnectedToolkit) => {
-        setSelectedToolkit(toolkit);
-        setShowRemoveModal(true);
-    };
+
 
     const handleConfirmDisconnect = async () => {
-        if (!selectedToolkit || !selectedToolkit.connectedAccount) return;
-        
-        setDisconnectingToolkit(selectedToolkit.slug);
-        try {
-            await deleteConnectedAccount(
-                projectId, 
-                selectedToolkit.slug, 
-                selectedToolkit.connectedAccount.id
-            );
-            
-            // Update toolkit status in local state to show as disconnected
-            setConnectedToolkits(prev => 
-                prev.map(toolkit => 
-                    toolkit.slug === selectedToolkit.slug 
-                        ? { ...toolkit, connectedAccount: { ...toolkit.connectedAccount!, status: 'INITIATED' as const } }
-                        : toolkit
-                )
-            );
-            
-            // Notify parent of config update
-            onProjectConfigUpdated?.();
-        } catch (error) {
-            console.error('Disconnect failed:', error);
-        } finally {
-            setDisconnectingToolkit(null);
-            setShowDisconnectModal(false);
-            setSelectedToolkit(null);
-        }
-    };
-
-    const handleConfirmRemove = async () => {
         if (!selectedToolkit) return;
         
-        setRemovingToolkit(selectedToolkit.slug);
+        setDisconnectingToolkit(selectedToolkit.slug);
         try {
             // Step 1: Get current project and workflow
             const project = await getProjectConfig(projectId);
@@ -589,19 +553,21 @@ function DisconnectToolkitsSection({ projectId, onProjectConfigUpdated }: {
             // Notify parent of config update
             onProjectConfigUpdated?.();
         } catch (error) {
-            console.error('Remove toolkit failed:', error);
+            console.error('Disconnect failed:', error);
         } finally {
-            setRemovingToolkit(null);
-            setShowRemoveModal(false);
+            setDisconnectingToolkit(null);
+            setShowDisconnectModal(false);
             setSelectedToolkit(null);
         }
     };
+
+
 
     return (
         <>
             <Section 
                 title="Composio Toolkits"
-                description="Manage your Composio toolkits. Shows all toolkits added to your project, whether connected or not. Disconnect to temporarily disable access, or Remove to permanently delete all tools and triggers."
+                description="Manage your Composio toolkits. Shows all toolkits added to your project, whether connected or not. Disconnect to remove all tools, triggers, and connections."
             >
                 <div className="space-y-4">
                     {loading ? (
@@ -660,7 +626,7 @@ function DisconnectToolkitsSection({ projectId, onProjectConfigUpdated }: {
                                                 variant="secondary"
                                                 startContent={<UnlinkIcon className="w-4 h-4" />}
                                                 onClick={() => handleDisconnectClick(toolkit)}
-                                                disabled={disconnectingToolkit === toolkit.slug || removingToolkit === toolkit.slug}
+                                                disabled={disconnectingToolkit === toolkit.slug}
                                                 isLoading={disconnectingToolkit === toolkit.slug}
                                             >
                                                 {disconnectingToolkit === toolkit.slug ? 'Disconnecting...' : 'Disconnect'}
@@ -682,17 +648,7 @@ function DisconnectToolkitsSection({ projectId, onProjectConfigUpdated }: {
                                                 Not Connected
                                             </Button>
                                         )}
-                                        <Button
-                                            size="sm"
-                                            variant="secondary"
-                                            color="danger"
-                                            startContent={<Trash2 className="w-4 h-4" />}
-                                            onClick={() => handleRemoveClick(toolkit)}
-                                            disabled={disconnectingToolkit === toolkit.slug || removingToolkit === toolkit.slug}
-                                            isLoading={removingToolkit === toolkit.slug}
-                                        >
-                                            {removingToolkit === toolkit.slug ? 'Removing...' : 'Remove'}
-                                        </Button>
+
                                     </div>
                                 </div>
                             ))}
@@ -716,24 +672,12 @@ function DisconnectToolkitsSection({ projectId, onProjectConfigUpdated }: {
                 }}
                 onConfirm={handleConfirmDisconnect}
                 title={`Disconnect ${selectedToolkit?.name || 'Toolkit'}`}
-                confirmationQuestion={`Are you sure you want to disconnect the ${selectedToolkit?.name || 'toolkit'}? This will remove access to all its tools and disable any triggers from this toolkit. Your workflows may stop working properly if they depend on this toolkit.`}
+                confirmationQuestion={`Are you sure you want to disconnect the ${selectedToolkit?.name || 'toolkit'}? This will permanently remove all its tools, triggers, and connections. Your workflows may stop working properly if they depend on this toolkit.`}
                 confirmButtonText="Disconnect"
                 isLoading={disconnectingToolkit !== null}
             />
 
-            {/* Remove Toolkit Confirmation Modal */}
-            <ProjectWideChangeConfirmationModal
-                isOpen={showRemoveModal}
-                onClose={() => {
-                    setShowRemoveModal(false);
-                    setSelectedToolkit(null);
-                }}
-                onConfirm={handleConfirmRemove}
-                title={`Remove ${selectedToolkit?.name || 'Toolkit'}`}
-                confirmationQuestion={`Are you sure you want to remove the ${selectedToolkit?.name || 'toolkit'} and all its tools and triggers? This will permanently delete all tools and triggers from this toolkit and disconnect it. Your workflows may stop working properly if they depend on this toolkit.`}
-                confirmButtonText="Remove Toolkit"
-                isLoading={removingToolkit !== null}
-            />
+
         </>
     );
 }
