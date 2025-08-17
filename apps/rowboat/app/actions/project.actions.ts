@@ -1,27 +1,17 @@
 'use server';
-import { redirect } from "next/navigation";
-import { db, projectsCollection } from "../lib/mongodb";
 import { z } from 'zod';
-import crypto from 'crypto';
-import { revalidatePath } from "next/cache";
+import { container } from "@/di/container";
+import { redirect } from "next/navigation";
 import { templates } from "../lib/project_templates";
 import { authCheck } from "./auth.actions";
-import { User, WithStringId } from "../lib/types/types";
 import { ApiKey } from "@/src/entities/models/api-key";
 import { Project } from "@/src/entities/models/project";
 import { USE_AUTH } from "../lib/feature_flags";
-import { authorizeUserAction } from "./billing.actions";
 import { Workflow } from "../lib/types/workflow_types";
 import { IProjectActionAuthorizationPolicy } from "@/src/application/policies/project-action-authorization.policy";
 import { ICreateApiKeyController } from "@/src/interface-adapters/controllers/api-keys/create-api-key.controller";
 import { IListApiKeysController } from "@/src/interface-adapters/controllers/api-keys/list-api-keys.controller";
 import { IDeleteApiKeyController } from "@/src/interface-adapters/controllers/api-keys/delete-api-key.controller";
-import { IApiKeysRepository } from "@/src/application/repositories/api-keys.repository.interface";
-import { IProjectMembersRepository } from "@/src/application/repositories/project-members.repository.interface";
-import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
-import { IDataSourceDocsRepository } from "@/src/application/repositories/data-source-docs.repository.interface";
-import { container } from "@/di/container";
-import { qdrantClient } from "../lib/qdrant";
 import { ICreateProjectController } from "@/src/interface-adapters/controllers/projects/create-project.controller";
 import { BillingError } from "@/src/entities/errors/common";
 import { IFetchProjectController } from "@/src/interface-adapters/controllers/projects/fetch-project.controller";
@@ -30,15 +20,14 @@ import { IRotateSecretController } from "@/src/interface-adapters/controllers/pr
 import { IUpdateWebhookUrlController } from "@/src/interface-adapters/controllers/projects/update-webhook-url.controller";
 import { IUpdateProjectNameController } from "@/src/interface-adapters/controllers/projects/update-project-name.controller";
 import { IDeleteProjectController } from "@/src/interface-adapters/controllers/projects/delete-project.controller";
+import { IUpdateDraftWorkflowController } from "@/src/interface-adapters/controllers/projects/update-draft-workflow.controller";
+import { IUpdateLiveWorkflowController } from "@/src/interface-adapters/controllers/projects/update-live-workflow.controller";
+import { IRevertToLiveWorkflowController } from "@/src/interface-adapters/controllers/projects/revert-to-live-workflow.controller";
 
 const projectActionAuthorizationPolicy = container.resolve<IProjectActionAuthorizationPolicy>('projectActionAuthorizationPolicy');
 const createApiKeyController = container.resolve<ICreateApiKeyController>('createApiKeyController');
 const listApiKeysController = container.resolve<IListApiKeysController>('listApiKeysController');
 const deleteApiKeyController = container.resolve<IDeleteApiKeyController>('deleteApiKeyController');
-const apiKeysRepository = container.resolve<IApiKeysRepository>('apiKeysRepository');
-const projectMembersRepository = container.resolve<IProjectMembersRepository>('projectMembersRepository');
-const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
-const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>('dataSourceDocsRepository');
 const createProjectController = container.resolve<ICreateProjectController>('createProjectController');
 const fetchProjectController = container.resolve<IFetchProjectController>('fetchProjectController');
 const listProjectsController = container.resolve<IListProjectsController>('listProjectsController');
@@ -46,6 +35,9 @@ const rotateSecretController = container.resolve<IRotateSecretController>('rotat
 const updateWebhookUrlController = container.resolve<IUpdateWebhookUrlController>('updateWebhookUrlController');
 const updateProjectNameController = container.resolve<IUpdateProjectNameController>('updateProjectNameController');
 const deleteProjectController = container.resolve<IDeleteProjectController>('deleteProjectController');
+const updateDraftWorkflowController = container.resolve<IUpdateDraftWorkflowController>('updateDraftWorkflowController');
+const updateLiveWorkflowController = container.resolve<IUpdateLiveWorkflowController>('updateLiveWorkflowController');
+const revertToLiveWorkflowController = container.resolve<IRevertToLiveWorkflowController>('revertToLiveWorkflowController');
 
 export async function listTemplates() {
     const templatesArray = Object.entries(templates)
@@ -221,49 +213,30 @@ export async function deleteProject(projectId: string) {
 }
 
 export async function saveWorkflow(projectId: string, workflow: z.infer<typeof Workflow>) {
-    await projectAuthCheck(projectId);
-
-    // update the project's draft workflow
-    workflow.lastUpdatedAt = new Date().toISOString();
-    await projectsCollection.updateOne({
-        _id: projectId,
-    }, {
-        $set: {
-            draftWorkflow: workflow,
-        },
+    const user = await authCheck();
+    await updateDraftWorkflowController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId,
+        workflow,
     });
 }
 
 export async function publishWorkflow(projectId: string, workflow: z.infer<typeof Workflow>) {
-    await projectAuthCheck(projectId);
-
-    // update the project's draft workflow
-    workflow.lastUpdatedAt = new Date().toISOString();
-    await projectsCollection.updateOne({
-        _id: projectId,
-    }, {
-        $set: {
-            liveWorkflow: workflow,
-        },
+    const user = await authCheck();
+    await updateLiveWorkflowController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId,
+        workflow,
     });
 }
 
 export async function revertToLiveWorkflow(projectId: string) {
-    await projectAuthCheck(projectId);
-
-    const project = await fetchProject(projectId);
-    const workflow = project.liveWorkflow;
-
-    if (!workflow) {
-        throw new Error('No live workflow found');
-    }
-
-    workflow.lastUpdatedAt = new Date().toISOString();
-    await projectsCollection.updateOne({
-        _id: projectId,
-    }, {
-        $set: {
-            draftWorkflow: workflow,
-        },
+    const user = await authCheck();
+    await revertToLiveWorkflowController.execute({
+        caller: 'user',
+        userId: user._id,
+        projectId,
     });
 }
