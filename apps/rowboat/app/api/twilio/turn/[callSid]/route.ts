@@ -1,5 +1,5 @@
 import { getResponse } from "@/app/lib/agents";
-import { projectsCollection, twilioInboundCallsCollection } from "@/app/lib/mongodb";
+import { twilioInboundCallsCollection } from "@/app/lib/mongodb";
 import { PrefixLogger } from "@/app/lib/utils";
 import VoiceResponse from "twilio/lib/twiml/VoiceResponse";
 import { z } from "zod";
@@ -15,6 +15,8 @@ export async function POST(
     request: Request,
     { params }: { params: Promise<{ callSid: string }> }
 ) {
+    return new Response('Not implemented', { status: 501 });
+    /*
     const { callSid } = await params;
     let logger = new PrefixLogger(`turn:${callSid}`);
     logger.log("Received turn");
@@ -93,4 +95,5 @@ export async function POST(
         action: `/api/twilio/turn/${callSid}`,
     });
     return XmlResponse(response);
+    */
 }

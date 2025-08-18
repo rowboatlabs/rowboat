@@ -230,6 +230,7 @@ export function WebhookUrlSection({
     </Section>;
 }
 
+/*
 export function ChatWidgetSection({
     projectId,
     chatWidgetHost,
@@ -282,6 +283,7 @@ export function ChatWidgetSection({
         />}
     </Section>;
 }
+*/
 
 export function DeleteProjectSection({
     projectId,

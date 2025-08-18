@@ -1499,6 +1499,7 @@ export function WorkflowEditor({
                 </Modal>
                 
                 {/* Chat Widget Modal */}
+                {/*
                 <Modal 
                     isOpen={isChatWidgetModalOpen} 
                     onClose={onChatWidgetModalClose}
@@ -1519,6 +1520,7 @@ export function WorkflowEditor({
                         </ModalBody>
                     </ModalContent>
                 </Modal>
+                */}
                 
                 {/* Triggers Management Modal */}
                 <TriggersModal

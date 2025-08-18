@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { apiV1 } from "rowboat-shared";
-import { projectsCollection, chatsCollection, chatMessagesCollection } from "../../../../../../lib/mongodb";
+import { chatsCollection, chatMessagesCollection } from "../../../../../../lib/mongodb";
 import { z } from "zod";
 import { ObjectId, WithId } from "mongodb";
 import { authCheck } from "../../../utils";
@@ -112,6 +112,8 @@ export async function POST(
     req: NextRequest,
     { params }: { params: Promise<{ chatId: string }> }
 ): Promise<Response> {
+    return new Response('Not implemented', { status: 501 });
+    /*
     return await authCheck(req, async (session) => {
         const { chatId } = await params;
         const logger = new PrefixLogger(`widget-chat:${chatId}`);
@@ -234,4 +236,5 @@ export async function POST(
             _id: undefined,
         });
     });
+    */
 }

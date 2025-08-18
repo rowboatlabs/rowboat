@@ -31,7 +31,7 @@ export function App({
     chatWidgetHost: string;
 }) {
     const [mode, setMode] = useState<'draft' | 'live'>('draft');
-    const [project, setProject] = useState<WithStringId<z.infer<typeof Project>> | null>(null);
+    const [project, setProject] = useState<z.infer<typeof Project> | null>(null);
     const [dataSources, setDataSources] = useState<z.infer<typeof DataSource>[] | null>(null);
     const [projectConfig, setProjectConfig] = useState<z.infer<typeof Project> | null>(null);
     const [loading, setLoading] = useState(false);

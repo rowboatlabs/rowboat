@@ -4,9 +4,10 @@ import { SignJWT, jwtVerify } from "jose";
 import { z } from "zod";
 import { Session } from "../../utils";
 import { apiV1 } from "rowboat-shared";
-import { projectsCollection } from "../../../../../lib/mongodb";
 
 export async function POST(req: NextRequest): Promise<Response> {
+    return new Response('Not implemented', { status: 501 });
+    /*
     return await clientIdCheck(req, async (projectId) => {
         // decode and validate JWT
         const json = await req.json();
@@ -52,4 +53,5 @@ export async function POST(req: NextRequest): Promise<Response> {
 
         return Response.json(response);
     });
+    */
 }

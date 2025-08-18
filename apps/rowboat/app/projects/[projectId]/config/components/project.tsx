@@ -361,6 +361,7 @@ function ApiKeysSection({ projectId }: { projectId: string }) {
     </Section>;
 }
 
+/*
 export function ChatWidgetSection({ projectId, chatWidgetHost }: { projectId: string, chatWidgetHost: string }) {
     const [loading, setLoading] = useState(false);
     const [chatClientId, setChatClientId] = useState<string | null>(null);
@@ -414,6 +415,7 @@ export function ChatWidgetSection({ projectId, chatWidgetHost }: { projectId: st
         </Section>
     );
 }
+*/
 
 interface ConnectedToolkit {
     slug: string;
@@ -803,7 +805,7 @@ export function ProjectSection({
         <div className="p-6 space-y-6">
             <ProjectIdSection projectId={projectId} />
             <ApiKeysSection projectId={projectId} />
-            {useChatWidget && <ChatWidgetSection projectId={projectId} chatWidgetHost={chatWidgetHost} />}
+            {/*{useChatWidget && <ChatWidgetSection projectId={projectId} chatWidgetHost={chatWidgetHost} />}*/}
         </div>
     );
 }
