@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { fetchProject, createApiKey, deleteApiKey, listApiKeys, deleteProject, rotateSecret, updateProjectName, saveWorkflow } from "../../../../actions/project.actions";
 import { CopyButton } from "../../../../../components/common/copy-button";
 import { EyeIcon, EyeOffIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { WithStringId } from "../../../../lib/types/types";
 import { ApiKey } from "@/src/entities/models/api-key";
 import { z } from "zod";
 import { RelativeTime } from "@primer/react";
@@ -437,7 +436,7 @@ function DisconnectToolkitsSection({ projectId, onProjectConfigUpdated }: {
     const loadConnectedToolkits = useCallback(async () => {
         setLoading(true);
         try {
-            const project = await getProjectConfig(projectId);
+            const project = await fetchProject(projectId);
             const connectedAccounts = project.composioConnectedAccounts || {};
             const workflow = project.draftWorkflow;
             
@@ -504,7 +503,7 @@ function DisconnectToolkitsSection({ projectId, onProjectConfigUpdated }: {
         setDisconnectingToolkit(selectedToolkit.slug);
         try {
             // Step 1: Get current project and workflow
-            const project = await getProjectConfig(projectId);
+            const project = await fetchProject(projectId);
             const currentWorkflow = project.draftWorkflow;
             
             if (currentWorkflow) {
@@ -543,7 +542,6 @@ function DisconnectToolkitsSection({ projectId, onProjectConfigUpdated }: {
                 await deleteConnectedAccount(
                     projectId, 
                     selectedToolkit.slug, 
-                    selectedToolkit.connectedAccount.id
                 );
             }
             
