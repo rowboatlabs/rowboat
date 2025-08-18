@@ -1,5 +1,5 @@
 import { getResponse } from "@/app/lib/agents";
-import { projectsCollection, twilioConfigsCollection, twilioInboundCallsCollection } from "@/app/lib/mongodb";
+import { twilioConfigsCollection, twilioInboundCallsCollection } from "@/app/lib/mongodb";
 import { PrefixLogger } from "@/app/lib/utils";
 import VoiceResponse from "twilio/lib/twiml/VoiceResponse";
 import { z } from "zod";
@@ -64,9 +64,10 @@ export async function POST(request: Request) {
     // fetch project and extract live workflow
     // if workflow not found, reject the call
     const projectId = twilioConfig.project_id;
-    const project = await projectsCollection.findOne({
-        _id: projectId,
-    });
+    // const project = await projectsCollection.findOne({
+    //     _id: projectId,
+    // });
+    const project = null;
     if (!project) {
         logger.log(`Project ${projectId} not found`);
         return reject('rejected');

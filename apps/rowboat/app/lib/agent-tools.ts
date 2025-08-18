@@ -10,7 +10,6 @@ import crypto from "crypto";
 // Internal dependencies
 import { embeddingModel } from '../lib/embedding';
 import { getMcpClient } from "./mcp";
-import { projectsCollection } from "./mongodb";
 import { qdrantClient } from '../lib/qdrant';
 import { EmbeddingRecord } from "./types/datasource_types";
 import { WorkflowAgent, WorkflowTool } from "./types/workflow_types";
@@ -20,6 +19,7 @@ import { DataSource } from "@/src/entities/models/data-source";
 import { IDataSourcesRepository } from "@/src/application/repositories/data-sources.repository.interface";
 import { IDataSourceDocsRepository } from "@/src/application/repositories/data-source-docs.repository.interface";
 import { container } from "@/di/container";
+import { IProjectsRepository } from "@/src/application/repositories/projects.repository.interface";
 
 // Provider configuration
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
@@ -195,9 +195,9 @@ export async function invokeWebhookTool(
     logger.log(`name: ${name}`);
     logger.log(`input: ${JSON.stringify(input)}`);
 
-    const project = await projectsCollection.findOne({
-        "_id": projectId,
-    });
+    const projectsRepository = container.resolve<IProjectsRepository>('projectsRepository');
+
+    const project = await projectsRepository.fetch(projectId);
     if (!project) {
         throw new Error('Project not found');
     }
@@ -278,7 +278,8 @@ export async function invokeMcpTool(
     logger.log(`mcpServerName: ${mcpServerName}`);
 
     // Get project configuration
-    const project = await projectsCollection.findOne({ _id: projectId });
+    const projectsRepository = container.resolve<IProjectsRepository>('projectsRepository');
+    const project = await projectsRepository.fetch(projectId);
     if (!project) {
         throw new Error(`project ${projectId} not found`);
     }
@@ -317,7 +318,8 @@ export async function invokeComposioTool(
 
     let connectedAccountId: string | undefined = undefined;
     if (!noAuth) {
-        const project = await projectsCollection.findOne({ _id: projectId });
+        const projectsRepository = container.resolve<IProjectsRepository>('projectsRepository');
+        const project = await projectsRepository.fetch(projectId);
         if (!project) {
             throw new Error(`project ${projectId} not found`);
         }

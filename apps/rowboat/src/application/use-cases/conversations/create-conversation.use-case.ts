@@ -1,5 +1,4 @@
 import { BadRequestError, NotFoundError } from '@/src/entities/errors/common';
-import { projectsCollection } from "@/app/lib/mongodb";
 import { IConversationsRepository } from "@/src/application/repositories/conversations.repository.interface";
 import { z } from "zod";
 import { Conversation } from "@/src/entities/models/conversation";
@@ -7,6 +6,7 @@ import { Workflow } from "@/app/lib/types/workflow_types";
 import { IUsageQuotaPolicy } from '../../policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '../../policies/project-action-authorization.policy';
 import { Reason } from '@/src/entities/models/turn';
+import { IProjectsRepository } from '../../repositories/projects.repository.interface';
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api", "job_worker"]),
@@ -26,19 +26,23 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
     private readonly conversationsRepository: IConversationsRepository;
     private readonly usageQuotaPolicy: IUsageQuotaPolicy;
     private readonly projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy;
+    private readonly projectsRepository: IProjectsRepository;
 
     constructor({
         conversationsRepository,
         usageQuotaPolicy,
         projectActionAuthorizationPolicy,
+        projectsRepository,
     }: {
         conversationsRepository: IConversationsRepository,
         usageQuotaPolicy: IUsageQuotaPolicy,
         projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy,
+        projectsRepository: IProjectsRepository,
     }) {
         this.conversationsRepository = conversationsRepository;
         this.usageQuotaPolicy = usageQuotaPolicy;
         this.projectActionAuthorizationPolicy = projectActionAuthorizationPolicy;
+        this.projectsRepository = projectsRepository;
     }
 
     async execute(data: z.infer<typeof inputSchema>): Promise<z.infer<typeof Conversation>> {
@@ -61,9 +65,7 @@ export class CreateConversationUseCase implements ICreateConversationUseCase {
 
         // if workflow is not provided, fetch workflow
         if (!workflow) {
-            const project = await projectsCollection.findOne({
-                _id: projectId,
-            });
+            const project = await this.projectsRepository.fetch(projectId);
             if (!project) {
                 throw new NotFoundError('Project not found');
             }

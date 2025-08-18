@@ -9,7 +9,6 @@ import { apiV1 } from "rowboat-shared";
 const client = new MongoClient(process.env["MONGODB_CONNECTION_STRING"] || "mongodb://localhost:27017");
 
 export const db = client.db("rowboat");
-export const projectsCollection = db.collection<z.infer<typeof Project>>("projects");
 export const agentWorkflowsCollection = db.collection<z.infer<typeof Workflow>>("agent_workflows");
 export const chatsCollection = db.collection<z.infer<typeof apiV1.Chat>>("chats");
 export const chatMessagesCollection = db.collection<z.infer<typeof apiV1.ChatMessage>>("chat_messages");

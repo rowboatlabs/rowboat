@@ -54,12 +54,16 @@ import { SyncConnectedAccountUseCase } from "@/src/application/use-cases/project
 import { ListComposioToolkitsUseCase } from "@/src/application/use-cases/projects/list-composio-toolkits.use-case";
 import { GetComposioToolkitUseCase } from "@/src/application/use-cases/projects/get-composio-toolkit.use-case";
 import { ListComposioToolsUseCase } from "@/src/application/use-cases/projects/list-composio-tools.use-case";
+import { AddCustomMcpServerUseCase } from "@/src/application/use-cases/projects/add-custom-mcp-server.use-case";
+import { RemoveCustomMcpServerUseCase } from "@/src/application/use-cases/projects/remove-custom-mcp-server.use-case";
 import { CreateComposioManagedConnectedAccountController } from "@/src/interface-adapters/controllers/projects/create-composio-managed-connected-account.controller";
 import { CreateCustomConnectedAccountController } from "@/src/interface-adapters/controllers/projects/create-custom-connected-account.controller";
 import { SyncConnectedAccountController } from "@/src/interface-adapters/controllers/projects/sync-connected-account.controller";
 import { ListComposioToolkitsController } from "@/src/interface-adapters/controllers/projects/list-composio-toolkits.controller";
 import { GetComposioToolkitController } from "@/src/interface-adapters/controllers/projects/get-composio-toolkit.controller";
 import { ListComposioToolsController } from "@/src/interface-adapters/controllers/projects/list-composio-tools.controller";
+import { AddCustomMcpServerController } from "@/src/interface-adapters/controllers/projects/add-custom-mcp-server.controller";
+import { RemoveCustomMcpServerController } from "@/src/interface-adapters/controllers/projects/remove-custom-mcp-server.controller";
 
 // Scheduled Job Rules
 import { MongoDBScheduledJobRulesRepository } from "@/src/infrastructure/repositories/mongodb.scheduled-job-rules.repository";
@@ -279,6 +283,10 @@ container.register({
     getComposioToolkitController: asClass(GetComposioToolkitController).singleton(),
     listComposioToolsUseCase: asClass(ListComposioToolsUseCase).singleton(),
     listComposioToolsController: asClass(ListComposioToolsController).singleton(),
+    addCustomMcpServerUseCase: asClass(AddCustomMcpServerUseCase).singleton(),
+    addCustomMcpServerController: asClass(AddCustomMcpServerController).singleton(),
+    removeCustomMcpServerUseCase: asClass(RemoveCustomMcpServerUseCase).singleton(),
+    removeCustomMcpServerController: asClass(RemoveCustomMcpServerController).singleton(),
 
     // composio
     // ---

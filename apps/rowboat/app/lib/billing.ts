@@ -2,10 +2,14 @@ import { WithStringId } from './types/types';
 import { z } from 'zod';
 import { Customer, AuthorizeRequest, AuthorizeResponse, LogUsageRequest, UsageResponse, CustomerPortalSessionResponse, PricesResponse, UpdateSubscriptionPlanRequest, UpdateSubscriptionPlanResponse, ModelsResponse, UsageItem } from './types/billing_types';
 import { ObjectId } from 'mongodb';
-import { projectsCollection, usersCollection } from './mongodb';
+import { usersCollection } from './mongodb';
 import { redirect } from 'next/navigation';
 import { getUserFromSessionId, requireAuth } from './auth';
 import { USE_BILLING } from './feature_flags';
+import { container } from '@/di/container';
+import { IProjectsRepository } from '@/src/application/repositories/projects.repository.interface';
+
+const projectsRepository = container.resolve<IProjectsRepository>('projectsRepository');
 
 const BILLING_API_URL = process.env.BILLING_API_URL || 'http://billing';
 const BILLING_API_KEY = process.env.BILLING_API_KEY || 'test';
@@ -49,7 +53,7 @@ export async function getCustomerForUserId(userId: string): Promise<WithStringId
 }
 
 export async function getCustomerIdForProject(projectId: string): Promise<string> {
-    const project = await projectsCollection.findOne({ _id: projectId });
+    const project = await projectsRepository.fetch(projectId);
     if (!project) {
         throw new Error("Project not found");
     }
