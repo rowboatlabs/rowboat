@@ -14,7 +14,7 @@ import { Label } from "../../../../lib/components/label";
 import { sectionHeaderStyles, sectionDescriptionStyles } from './shared-styles';
 import { clsx } from "clsx";
 import { InputField } from "../../../../lib/components/input-field";
-import { Project, ComposioConnectedAccount } from "../../../../lib/types/project_types";
+import { ComposioConnectedAccount } from "@/src/entities/models/project";
 import { getToolkit, listComposioTriggerDeployments, deleteComposioTriggerDeployment } from "../../../../actions/composio.actions";
 import { deleteConnectedAccount } from "../../../../actions/composio.actions";
 import { PictureImg } from "@/components/ui/picture-img";
