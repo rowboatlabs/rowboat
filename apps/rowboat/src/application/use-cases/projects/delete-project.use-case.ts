@@ -26,7 +26,7 @@ export class DeleteProjectUseCase implements IDeleteProjectUseCase {
     private readonly dataSourceDocsRepository: IDataSourceDocsRepository;
     private readonly dataSourcesRepository: IDataSourcesRepository;
 
-    constructor({ projectsRepository, projectMembersRepository, projectActionAuthorizationPolicy, apiKeysRepository, dataSourceDocsRepository, dataSourcesRepository, qdrantClient }: {
+    constructor({ projectsRepository, projectMembersRepository, projectActionAuthorizationPolicy, apiKeysRepository, dataSourceDocsRepository, dataSourcesRepository}: {
         projectsRepository: IProjectsRepository,
         projectMembersRepository: IProjectMembersRepository,
         projectActionAuthorizationPolicy: IProjectActionAuthorizationPolicy,

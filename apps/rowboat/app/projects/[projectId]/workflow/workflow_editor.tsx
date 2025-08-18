@@ -36,7 +36,6 @@ import { Button as CustomButton } from "@/components/ui/button";
 import { ConfigApp } from "../config/app";
 import { InputField } from "@/app/lib/components/input-field";
 import { VoiceSection } from "../config/components/voice";
-import { ChatWidgetSection } from "../config/components/project";
 import { TriggersModal } from "./components/TriggersModal";
 import { TopBar } from "./components/TopBar";
 
@@ -808,7 +807,6 @@ export function WorkflowEditor({
     useRagUploads,
     useRagS3Uploads,
     useRagScraping,
-    mcpServerUrls,
     defaultModel,
     projectConfig,
     eligibleModels,
@@ -827,7 +825,6 @@ export function WorkflowEditor({
     useRagUploads: boolean;
     useRagS3Uploads: boolean;
     useRagScraping: boolean;
-    mcpServerUrls: Array<z.infer<typeof MCPServer>>;
     defaultModel: string;
     projectConfig: z.infer<typeof Project>;
     eligibleModels: z.infer<typeof ModelsResponse> | "*";

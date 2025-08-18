@@ -36,7 +36,6 @@ export function App({
     const [projectConfig, setProjectConfig] = useState<z.infer<typeof Project> | null>(null);
     const [loading, setLoading] = useState(false);
     const [eligibleModels, setEligibleModels] = useState<z.infer<typeof ModelsResponse> | "*">("*");
-    const [projectMcpServers, setProjectMcpServers] = useState<Array<z.infer<typeof MCPServer>>>([]);
 
     console.log('workflow app.tsx render');
 
@@ -61,9 +60,6 @@ export function App({
         setProject(project);
         setDataSources(dataSources);
         setEligibleModels(eligibleModels);
-        if (project.mcpServers) {
-            setProjectMcpServers(project.mcpServers);
-        }
         setLoading(false);
     }, [projectId]);
 
@@ -73,11 +69,6 @@ export function App({
         
         setProject(projectConfig);
         setProjectConfig(projectConfig);
-        
-        // Update MCP servers if they changed
-        if (projectConfig.mcpServers) {
-            setProjectMcpServers(projectConfig.mcpServers);
-        }
     }, [projectId]);
 
     const handleDataSourcesUpdate = useCallback(async () => {
@@ -146,7 +137,6 @@ export function App({
             useRagUploads={useRagUploads}
             useRagS3Uploads={useRagS3Uploads}
             useRagScraping={useRagScraping}
-            mcpServerUrls={projectMcpServers}
             defaultModel={defaultModel}
             eligibleModels={eligibleModels}
             onChangeMode={handleSetMode}

@@ -9,8 +9,6 @@ import { USE_BILLING } from './feature_flags';
 import { container } from '@/di/container';
 import { IProjectsRepository } from '@/src/application/repositories/projects.repository.interface';
 
-const projectsRepository = container.resolve<IProjectsRepository>('projectsRepository');
-
 const BILLING_API_URL = process.env.BILLING_API_URL || 'http://billing';
 const BILLING_API_KEY = process.env.BILLING_API_KEY || 'test';
 
@@ -53,6 +51,7 @@ export async function getCustomerForUserId(userId: string): Promise<WithStringId
 }
 
 export async function getCustomerIdForProject(projectId: string): Promise<string> {
+    const projectsRepository = container.resolve<IProjectsRepository>('projectsRepository');
     const project = await projectsRepository.fetch(projectId);
     if (!project) {
         throw new Error("Project not found");
