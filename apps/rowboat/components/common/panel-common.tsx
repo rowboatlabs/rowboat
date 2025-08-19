@@ -82,11 +82,47 @@ export function Panel({
         data-tour-target={tourTarget}
     >
         {variant === 'copilot' && showWelcome && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none -mt-16">
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none -mt-8">
                 {/* Replace Sparkles icon with mascot image */}
-                <Image src={mascot} alt="Rowboat Mascot" width={192} height={192} className="object-contain mb-2 animate-float" />
+                <Image src={mascot} alt="Rowboat Mascot" width={192} height={192} className="object-contain mb-4 animate-float" />
+                
+                {/* Welcome/Intro Section */}
+                <div className="text-center max-w-md px-6 mb-4">
+                                         <h3 className="text-xl font-semibold text-zinc-700 dark:text-zinc-300 mb-3 text-center">
+                         👋 Welcome to Rowboat!
+                     </h3>
+                                              <p className="text-base text-zinc-600 dark:text-zinc-400 mb-6 text-center">
+                             I&apos;m your copilot for building agents and adding tools to them.
+                         </p>
+                         <p className="text-base text-zinc-600 dark:text-zinc-400 mb-4 text-center">
+                             Here&apos;s what you can do in Rowboat:
+                         </p>
+                     <div className="space-y-3 max-w-2xl mx-auto text-left">
+                         <div className="flex items-start gap-3">
+                             <span className="text-lg">⚡</span>
+                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Build AI agents instantly – Configure with natural language.</span>
+                         </div>
+                         <div className="flex items-start gap-3">
+                             <span className="text-lg">🔌</span>
+                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Connect your tools – Add integrations in a click.</span>
+                         </div>
+                         <div className="flex items-start gap-3">
+                             <span className="text-lg">📂</span>
+                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Power with knowledge – Upload files for RAG.</span>
+                         </div>
+                         <div className="flex items-start gap-3">
+                             <span className="text-lg">🔄</span>
+                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Automate workflows – Set up triggers and actions.</span>
+                         </div>
+                         <div className="flex items-start gap-3">
+                             <span className="text-lg">🚀</span>
+                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Deploy anywhere – Use via API or SDK.</span>
+                         </div>
+                     </div>
+                </div>
+                
                 {SHOW_COPILOT_MARQUEE && (
-                    <div className="relative mt-8 max-w-full px-8">
+                    <div className="relative mt-4 max-w-full px-8">
                         <div className="font-mono text-sm whitespace-nowrap text-blue-400/60 dark:text-blue-500/40 font-small inline-flex">
                             <div className="overflow-hidden w-0 animate-typing">What can I help you build?</div>
                             <div className="border-r-2 border-blue-400 dark:border-blue-500 animate-cursor">&nbsp;</div>
