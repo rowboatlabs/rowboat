@@ -1,6 +1,5 @@
 .DS_Store
 .env
-.env.swp
 .vscode/
 data/
 .venv/
