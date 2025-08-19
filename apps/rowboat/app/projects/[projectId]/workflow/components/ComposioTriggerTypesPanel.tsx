@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Button, Card, CardBody, CardHeader, Spinner } from '@heroui/react';
+import { Button, Card, CardBody, Spinner } from '@heroui/react';
 import { ChevronLeft, ChevronRight, ZapIcon, ArrowLeft } from 'lucide-react';
 import { z } from 'zod';
 import { ComposioTriggerType } from '@/src/entities/models/composio-trigger-type';
 import { listComposioTriggerTypes } from '@/app/actions/composio.actions';
 import { ZToolkit } from "@/src/application/lib/composio/types";
+import { PictureImg } from '@/components/ui/picture-img';
 
 interface ComposioTriggerTypesPanelProps {
   toolkit: z.infer<typeof ZToolkit>;
@@ -151,32 +152,42 @@ export function ComposioTriggerTypesPanel({
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
             {triggerTypes.map((triggerType) => (
-              <Card 
-                key={triggerType.slug} 
-                className="cursor-pointer hover:shadow-md transition-shadow"
+              <Card
+                key={triggerType.slug}
+                className="group p-6 rounded-xl transition-all duration-200 cursor-pointer bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-md dark:shadow-gray-900/20 hover:shadow-lg dark:hover:shadow-gray-900/30 hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50/50 hover:-translate-y-1 min-h-[200px] flex flex-col"
                 isPressable
                 onPress={() => handleTriggerTypeSelect(triggerType)}
               >
-                <CardHeader className="flex gap-3">
-                  <div className="flex items-center justify-center w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                    <ZapIcon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <div className="flex flex-col">
-                    <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                <div className="flex items-start gap-3 mb-2">
+                  {toolkit.meta?.logo ? (
+                    <PictureImg
+                      src={toolkit.meta.logo}
+                      alt={`${toolkit.name} logo`}
+                      className="w-8 h-8 rounded-md object-cover flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-md">
+                      <ZapIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate text-left">
                       {triggerType.name}
+                    </h3>
+                  </div>
+                </div>
+                <CardBody className="pt-0 px-0 flex-1 flex flex-col">
+                  <div className="flex-1">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-3">
+                      {triggerType.description}
                     </p>
                   </div>
-                </CardHeader>
-                <CardBody className="pt-0">
-                  <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
-                    {triggerType.description}
-                  </p>
-                  <div className="mt-3 flex justify-end">
-                    <Button 
-                      size="sm" 
-                      variant="flat" 
+                  <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="flat"
                       color="primary"
                       onPress={() => handleTriggerTypeSelect(triggerType)}
                     >
