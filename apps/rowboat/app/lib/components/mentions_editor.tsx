@@ -97,13 +97,20 @@ export default function MentionEditor({
 }) {
     const containerRef = useRef<HTMLDivElement>(null);
     const quillRef = useRef<Quill | null>(null);
+    const atValuesRef = useRef<Match[]>(atValues);
+    const onValueChangeRef = useRef<typeof onValueChange>(onValueChange);
+    const externalValueRef = useRef<string>(value);
+    const isApplyingExternalRef = useRef<boolean>(false);
 
     function getMarkdown(): string {
         if (!quillRef.current) {
             return "";
         }
         // generate markdown representation of content
-        const markdown = quillRef.current.getContents().map((op) => {
+        const delta = quillRef.current.getContents() as unknown as Delta;
+        // Quill Delta has .ops
+        const ops: any[] = (delta as any).ops || [];
+        const markdown = ops.map((op) => {
             if (op.insert && typeof op.insert === 'object' && 'mention' in op.insert) {
                 const mentionOp = op.insert as { mention: Match };
                 return `[@${mentionOp.mention.id}](#mention)`;
@@ -120,6 +127,20 @@ export default function MentionEditor({
         navigator.clipboard.writeText(getMarkdown());
     }
 
+    // Keep refs up to date without re-initializing Quill
+    useEffect(() => {
+        atValuesRef.current = atValues;
+    }, [atValues]);
+
+    useEffect(() => {
+        onValueChangeRef.current = onValueChange;
+    }, [onValueChange]);
+
+    useEffect(() => {
+        externalValueRef.current = value;
+    }, [value]);
+
+    // Initialize Quill once
     useEffect(() => {
         if (!containerRef.current) {
             return;
@@ -140,15 +161,14 @@ export default function MentionEditor({
                         mentionDenotationChars: ["@"],
                         showDenotationChar: true,
                         source: async function (searchTerm: string, renderList: (values: Match[], searchTerm: string) => void) {
+                            const list = atValuesRef.current || [];
                             if (searchTerm.length === 0) {
-                                renderList(atValues, searchTerm);
+                                renderList(list, searchTerm);
                             } else {
-                                const matches = [];
-                                for (let i = 0; i < atValues.length; i++) {
-                                    if (
-                                        atValues[i].value.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1
-                                    ) {
-                                        matches.push(atValues[i]);
+                                const matches: Match[] = [];
+                                for (let i = 0; i < list.length; i++) {
+                                    if (list[i].value.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1) {
+                                        matches.push(list[i]);
                                     }
                                 }
                                 renderList(matches, searchTerm);
@@ -165,15 +185,18 @@ export default function MentionEditor({
             });
 
             // clear the quill contents
-            quill.setContents([]);
+            quill.setText('', Quill.sources.SILENT);
 
             // convert the markdown to parts
-            const parts = markdownToParts(value, atValues);
+            const parts = markdownToParts(externalValueRef.current, atValuesRef.current);
             insertPartsIntoQuill(quill, parts);
 
             quill.on(Quill.events.TEXT_CHANGE, (delta: Delta, oldDelta: Delta, source: string) => {
-                if (onValueChange) {
-                    onValueChange(getMarkdown());
+                if (isApplyingExternalRef.current) {
+                    return;
+                }
+                if (onValueChangeRef.current) {
+                    onValueChangeRef.current(getMarkdown());
                 }
             });
             quillRef.current = quill;
@@ -193,7 +216,22 @@ export default function MentionEditor({
                 quillRef.current.off(Quill.events.TEXT_CHANGE);
             }
         }
-    }, [atValues, onValueChange, placeholder, value, autoFocus]);
+        // Mount once
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Sync external value into the editor without re-initializing
+    useEffect(() => {
+        if (!quillRef.current) return;
+        const current = getMarkdown();
+        if (value === current) return;
+        const quill = quillRef.current;
+        isApplyingExternalRef.current = true;
+        quill.setText('', Quill.sources.SILENT);
+        const parts = markdownToParts(value, atValuesRef.current);
+        insertPartsIntoQuill(quill, parts);
+        isApplyingExternalRef.current = false;
+    }, [value]);
 
     return <div className="relative">
         <button className="absolute top-2 right-2 z-10">

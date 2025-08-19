@@ -251,7 +251,7 @@ function TextInputField({
                     <div className="w-full min-h-[300px]">
                         <MentionsEditor
                             atValues={mentionsAtValues}
-                            value={value}
+                            value={localValue}
                             placeholder={placeholder}
                             onValueChange={setLocalValue}
                             autoFocus
@@ -337,14 +337,14 @@ function TextInputField({
                     "whitespace-pre-wrap": multiline,
                     "flex items-center": !multiline,
                 })}>
-                    {value ? (
+                    {(mentions ? localValue : value) ? (
                         <>
                             {markdown ? (
                                 <div className={clsx("prose prose-sm max-w-none", {
                                     "max-h-[420px] overflow-y-auto": multiline
                                 })}>
                                     <MarkdownContent 
-                                        content={value} 
+                                        content={mentions ? localValue : value} 
                                         atValues={mentionsAtValues} 
                                         onMentionNavigate={handleMentionNavigate} 
                                     />
@@ -355,7 +355,7 @@ function TextInputField({
                                     "max-h-[420px] overflow-y-auto": multiline
                                 })}>
                                     <MarkdownContent 
-                                        content={value} 
+                                        content={mentions ? localValue : value} 
                                         atValues={mentionsAtValues} 
                                         onMentionNavigate={handleMentionNavigate} 
                                     />
