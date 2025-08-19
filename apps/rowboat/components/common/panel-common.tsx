@@ -100,23 +100,23 @@ export function Panel({
                      <div className="space-y-3 max-w-2xl mx-auto text-left">
                          <div className="flex items-start gap-3">
                              <span className="text-lg">⚡</span>
-                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Build AI agents instantly – Configure with natural language.</span>
+                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Build AI agents instantly with natural language.</span>
                          </div>
                          <div className="flex items-start gap-3">
                              <span className="text-lg">🔌</span>
-                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Connect your tools – Add integrations in a click.</span>
+                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Connect tools with one-click integrations.</span>
                          </div>
                          <div className="flex items-start gap-3">
                              <span className="text-lg">📂</span>
-                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Power with knowledge – Upload files for RAG.</span>
+                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Power with knowledge by adding documents for RAG.</span>
                          </div>
                          <div className="flex items-start gap-3">
                              <span className="text-lg">🔄</span>
-                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Automate workflows – Set up triggers and actions.</span>
+                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Automate workflows by setting up triggers and actions.</span>
                          </div>
                          <div className="flex items-start gap-3">
                              <span className="text-lg">🚀</span>
-                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Deploy anywhere – Use via API or SDK.</span>
+                             <span className="text-sm text-zinc-600 dark:text-zinc-400">Deploy anywhere via API or SDK.</span>
                          </div>
                      </div>
                 </div>
