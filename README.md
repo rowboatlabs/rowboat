@@ -37,18 +37,19 @@
 </h5>
 
 - ✨ **Start from an idea -> copilot builds your multi-agent workflows**
-   - E.g. "Build me an assistant for a food delivery company to handle delivery status and missing items. Include the necessary tools."
-- 🌐 **Connect MCP servers**
-   - Add the MCP servers in settings -> import the tools into Rowboat.     
-- 📞 **Integrate into your app using the HTTP API or Python SDK**
-   - Grab the project ID and generated API key from settings and use the API.
+   - E.g. "Build me an assistant that can help me manage my Gmail and Slack"
+- 🌐 **Connect MCP servers or choose from built-in tools such as G Suite**
+   - Ask the copilot to add the right tools like Hubspot or add your MCP server url
+- 📞 **Add event triggers or integrate into your app**
+   - Invoke the assistant on triggers like an incoming email or at specific times
+   - Or integrate it into your product using the HTTP API or Python SDK
 
 Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents!
 
 ## Quick start
 1. Set your OpenAI key
       ```bash
-   export OPENAI_API_KEY=your-openai-api-key
+   export OPENAI_API_KEY=your-openai-api-key   
    ```
       
 2. Clone the repository and start Rowboat
@@ -59,15 +60,31 @@ Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents
    ```
 
 3. Access the app at [http://localhost:3000](http://localhost:3000).
+    
+#### Built-in tools
+To enable agents to use built-in tools, set your Compsio key
+```bash
+export USE_COMPOSIO=true
+export COMPOSIO_API_KEY=your-composio-api-key      
+```
+## Demos
 
-Note: We have added native RAG support including file-uploads and URL scraping. See the [RAG](https://docs.rowboatlabs.com/using_rag) section of our docs for this.
+#### Build me a assistant that can browse Reddit for me and help me keep up with Gmail 
+[![Screenshot 2025-04-23 at 00 25 31](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/6r7P4Vlcn2g)
 
-Note: See the [Using custom LLM providers](https://docs.rowboatlabs.com/setup/#using-custom-llm-providers) section of our docs for using custom providers like OpenRouter and LiteLLM.
+#### Build me an meeting prep assistant that can you do research of Google calendar invite guests and send that to my slack
+[![Screenshot 2025-04-23 at 00 25 31](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/KZTP4xZM2DY)
 
-## Demo
+#### Build a customer support assistant
+[![Screenshot 2025-04-23 at 00 25 31](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/KZTP4xZM2DY)
 
-#### Create a multi-agent assistant with MCP tools by chatting with Rowboat
-[![Screenshot 2025-04-23 at 00 25 31](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/YRTCw9UHRbU)
+## Advanced Setup: RAG, Multi-LLM & Event Triggers
+1. To enable native RAG support including file-uploads and URL scraping, see [RAG](https://docs.rowboatlabs.com/using_rag)
+
+2. You can use any LLM provider including aggregators like OpenRouter and LiteLLM - see [Using custom LLM providers](https://docs.rowboatlabs.com/setup/#using-custom-llm-providers)
+
+3. To enable external event triggers, see [Triggers](https://docs.rowboatlabs.com/using_triggers)
+
 
 ## Integrate with Rowboat agents
 
