@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { ComposioTriggerDeployment } from '@/src/entities/models/composio-trigger-deployment';
 import { ComposioTriggerType } from '@/src/entities/models/composio-trigger-type';
 import { isToday, isThisWeek, isThisMonth } from '@/lib/utils/date';
-import { listComposioTriggerDeployments, deleteComposioTriggerDeployment, createComposioTriggerDeployment, listComposioTriggerTypes } from '@/app/actions/composio.actions';
+import { listComposioTriggerDeployments, deleteComposioTriggerDeployment, createComposioTriggerDeployment } from '@/app/actions/composio.actions';
 import { SelectComposioToolkit } from '../../tools/components/SelectComposioToolkit';
 import { ComposioTriggerTypesPanel } from '../../workflow/components/ComposioTriggerTypesPanel';
 import { TriggerConfigForm } from '../../workflow/components/TriggerConfigForm';
@@ -19,6 +19,15 @@ import { Project } from "@/src/entities/models/project";
 import { fetchProject } from '@/app/actions/project.actions';
 
 type TriggerDeployment = z.infer<typeof ComposioTriggerDeployment>;
+
+function formatSlugToTitleCase(slug: string): string {
+  return slug
+    .replace(/[-_.]/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
 
 export function TriggersTab({ projectId }: { projectId: string }) {
   const [triggers, setTriggers] = useState<TriggerDeployment[]>([]);
@@ -31,7 +40,6 @@ export function TriggersTab({ projectId }: { projectId: string }) {
   const [isSubmittingTrigger, setIsSubmittingTrigger] = useState(false);
   const [deletingTrigger, setDeletingTrigger] = useState<string | null>(null);
   const [projectConfig, setProjectConfig] = useState<z.infer<typeof Project> | null>(null);
-  const [triggerTypeNames, setTriggerTypeNames] = useState<Record<string, string>>({});
   const [expandedTrigger, setExpandedTrigger] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState<boolean>(false);
@@ -45,31 +53,6 @@ export function TriggersTab({ projectId }: { projectId: string }) {
       console.error('Error fetching project config:', err);
     }
   }, [projectId]);
-
-  const loadTriggerTypeNames = useCallback(async () => {
-    try {
-      const names: Record<string, string> = {};
-      
-      // Get unique toolkit slugs from existing triggers
-      const uniqueToolkits = [...new Set(triggers.map(t => t.toolkitSlug))];
-      
-      // Fetch trigger types for each toolkit
-      for (const toolkitSlug of uniqueToolkits) {
-        try {
-          const response = await listComposioTriggerTypes(toolkitSlug);
-          response.items.forEach(triggerType => {
-            names[triggerType.slug] = triggerType.name;
-          });
-        } catch (err) {
-          console.error(`Error fetching trigger types for ${toolkitSlug}:`, err);
-        }
-      }
-      
-      setTriggerTypeNames(names);
-    } catch (err: any) {
-      console.error('Error loading trigger type names:', err);
-    }
-  }, [triggers]);
 
   const sections = useMemo(() => {
     const groups: Record<string, TriggerDeployment[]> = {
@@ -225,10 +208,8 @@ export function TriggersTab({ projectId }: { projectId: string }) {
   }, [showCreateFlow, loadTriggers]);
 
   useEffect(() => {
-    if (triggers.length > 0) {
-      loadTriggerTypeNames();
-    }
-  }, [triggers, loadTriggerTypeNames]);
+    // No-op: trigger names are now derived from slug locally
+  }, [triggers]);
 
   const renderTriggerList = () => {
     if (loading) {
@@ -355,7 +336,7 @@ export function TriggersTab({ projectId }: { projectId: string }) {
                                     Active
                                   </span>
                                   <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                    {triggerTypeNames[trigger.triggerTypeSlug] || trigger.triggerTypeSlug}
+                                    {formatSlugToTitleCase(trigger.triggerTypeSlug)}
                                   </span>
                                 </div>
                                 <div className="text-sm text-gray-500 dark:text-gray-400">
