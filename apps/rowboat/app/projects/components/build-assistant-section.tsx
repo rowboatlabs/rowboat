@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { listTemplates, listProjects } from "@/app/actions/project.actions";
 import { createProjectWithOptions, createProjectFromJsonWithOptions, createProjectFromTemplate } from "../lib/project-creation-utils";
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import clsx from 'clsx';
 import Image from 'next/image';
 import mascotImage from '@/public/mascot.png';
@@ -36,6 +36,8 @@ export function BuildAssistantSection() {
     const [selectedTab, setSelectedTab] = useState('new');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const [autoCreateLoading, setAutoCreateLoading] = useState(false);
 
     const totalPages = Math.ceil(projects.length / ITEMS_PER_PAGE);
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -102,6 +104,29 @@ export function BuildAssistantSection() {
         fetchTemplates();
         fetchProjects();
     }, []);
+
+    // Handle URL parameters for auto-creation and direct redirect to build view
+    useEffect(() => {
+        const urlPrompt = searchParams.get('prompt');
+        const urlTemplate = searchParams.get('template');
+
+        if (urlPrompt || urlTemplate) {
+            setAutoCreateLoading(true);
+            createProjectWithOptions({
+                template: urlTemplate || undefined,
+                prompt: urlPrompt || undefined,
+                router,
+                onError: (error) => {
+                    console.error('Error auto-creating project:', error);
+                    setAutoCreateLoading(false);
+                    // Fall back to showing the form with the prompt pre-filled
+                    if (urlPrompt) {
+                        setUserPrompt(urlPrompt);
+                    }
+                }
+            });
+        }
+    }, [searchParams, router]);
 
     const handleCreateAssistant = async () => {
         setIsCreating(true);
@@ -170,6 +195,15 @@ export function BuildAssistantSection() {
                 className="hidden"
                 onChange={handleFileChange}
             />
+            {autoCreateLoading && (
+                <div className="flex flex-col items-center justify-center min-h-screen">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mb-4"></div>
+                    <p className="text-gray-600 dark:text-gray-400">
+                        Creating your assistant...
+                    </p>
+                </div>
+            )}
+            {!autoCreateLoading && (
             <div className="px-8 py-16">
                 <div className="max-w-7xl mx-auto">
                     {/* Main Headline */}
@@ -445,6 +479,7 @@ export function BuildAssistantSection() {
                     )}
                 </div>
             </div>
+            )}
         </>
     );
 }
