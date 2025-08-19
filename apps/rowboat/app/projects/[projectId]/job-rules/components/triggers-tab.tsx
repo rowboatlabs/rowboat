@@ -20,14 +20,7 @@ import { fetchProject } from '@/app/actions/project.actions';
 
 type TriggerDeployment = z.infer<typeof ComposioTriggerDeployment>;
 
-function formatSlugToTitleCase(slug: string): string {
-  return slug
-    .replace(/[-_.]/g, ' ')
-    .split(' ')
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
-}
+// Removed friendly name computation; backend now provides friendly trigger name
 
 export function TriggersTab({ projectId }: { projectId: string }) {
   const [triggers, setTriggers] = useState<TriggerDeployment[]>([]);
@@ -331,12 +324,25 @@ export function TriggersTab({ projectId }: { projectId: string }) {
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
                               <a href={`/projects/${projectId}/job-rules/triggers/${trigger.id}`} className="block">
-                                <div className="flex items-center gap-3 mb-2">
-                                  <span className="text-sm font-medium text-green-600 dark:text-green-400">
-                                    Active
-                                  </span>
+                                <div className="flex items-center gap-3 mb-1">
+                                  {trigger.logo && (
+                                    <img
+                                      src={trigger.logo}
+                                      alt={`${trigger.toolkitSlug} logo`}
+                                      className="w-5 h-5 rounded"
+                                    />
+                                  )}
+                                  {trigger.toolkitSlug && (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-400">
+                                      {trigger.toolkitSlug}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="h-2" />
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="text-sm font-medium text-green-600 dark:text-green-400">Active</span>
                                   <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                    {formatSlugToTitleCase(trigger.triggerTypeSlug)}
+                                    {trigger.triggerTypeName}
                                   </span>
                                 </div>
                                 <div className="text-sm text-gray-500 dark:text-gray-400">
