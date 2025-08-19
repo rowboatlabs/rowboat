@@ -6,11 +6,7 @@ import { Metadata } from "next";
 import { HelpModalProvider } from "./providers/help-modal-provider";
 import { Auth0Provider } from "@auth0/nextjs-auth0";
 
-const inter = Inter({ 
-  subsets: ["latin"],
-  display: 'swap',
-  fallback: ['system-ui', 'arial']
-});
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: {
