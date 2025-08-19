@@ -220,15 +220,10 @@ export function RecurringJobRulesList({ projectId }: { projectId: string }) {
                                         disabled={loadingMore}
                                         variant="secondary"
                                         size="sm"
+                                        isLoading={loadingMore}
+                                        className="whitespace-nowrap"
                                     >
-                                        {loadingMore ? (
-                                            <>
-                                                <Spinner size="sm" />
-                                                Loading...
-                                            </>
-                                        ) : (
-                                            'Load More'
-                                        )}
+                                        {loadingMore ? 'Loading...' : 'Load More'}
                                     </Button>
                                 </div>
                             )}

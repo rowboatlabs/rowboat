@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Spinner, Link } from '@heroui/react';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/common/panel-common';
-import { Plus, Trash2, ZapIcon, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Trash2, ZapIcon, ChevronDown, ChevronUp, ArrowLeftIcon } from 'lucide-react';
 import { z } from 'zod';
 import { ComposioTriggerDeployment } from '@/src/entities/models/composio-trigger-deployment';
 import { ComposioTriggerType } from '@/src/entities/models/composio-trigger-type';
@@ -235,7 +235,7 @@ export function TriggersTab({ projectId }: { projectId: string }) {
             </div>
           }
           rightActions={
-            <Button variant="secondary" onClick={loadTriggers}>
+            <Button variant="secondary" onClick={loadTriggers} className="whitespace-nowrap">
               Try Again
             </Button>
           }
@@ -409,15 +409,10 @@ export function TriggersTab({ projectId }: { projectId: string }) {
                     disabled={loadingMore}
                     variant="secondary"
                     size="sm"
+                    isLoading={loadingMore}
+                    className="whitespace-nowrap"
                   >
-                    {loadingMore ? (
-                      <>
-                        <Spinner size="sm" />
-                        Loading...
-                      </>
-                    ) : (
-                      'Load More'
-                    )}
+                    {loadingMore ? 'Loading...' : 'Load More'}
                   </Button>
                 </div>
               )}
@@ -458,8 +453,10 @@ export function TriggersTab({ projectId }: { projectId: string }) {
             <Button
               variant="secondary"
               onClick={handleBackToList}
+              startContent={<ArrowLeftIcon className="w-4 h-4" />}
+              className="whitespace-nowrap"
             >
-              ← Back to Triggers
+              Back to Triggers
             </Button>
           </div>
 
