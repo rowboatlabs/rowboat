@@ -46,6 +46,8 @@
 
 Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents!
 
+☁️ Prefer a hosted version? Use our <b>[cloud](https://rowboatlabs.com)</b> to starting building agents right away!
+
 ## Quick start
 1. Set your OpenAI key
       ```bash
