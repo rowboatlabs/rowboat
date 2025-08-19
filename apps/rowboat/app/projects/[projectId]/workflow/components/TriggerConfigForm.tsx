@@ -199,7 +199,9 @@ export function TriggerConfigForm({
                         onChange={(e) => handleFieldChange(fieldName, e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md
                           bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100
-                          focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                          focus:outline-none focus:ring-0 focus:ring-transparent focus:ring-offset-0
+                          focus:border-blue-500 dark:focus:border-blue-400
+                          transition-all duration-200"
                         required={isRequired}
                       >
                         <option value="">Select {property.title || fieldName}</option>
@@ -234,6 +236,11 @@ export function TriggerConfigForm({
                     description={property.description}
                     isInvalid={!!fieldError}
                     errorMessage={fieldError}
+                    classNames={{
+                      base: "ring-0 !ring-0 outline-none !outline-none shadow-none !shadow-none focus:ring-0 !focus:ring-0 focus:ring-transparent !focus:ring-transparent focus-visible:ring-0 !focus-visible:ring-0 focus-visible:outline-none !focus-visible:outline-none focus-within:ring-0 !focus-within:ring-0 focus-within:shadow-none !focus-within:shadow-none",
+                      mainWrapper: "ring-0 !ring-0 outline-none !outline-none shadow-none !shadow-none focus:ring-0 !focus:ring-0 focus:ring-transparent !focus:ring-transparent focus-visible:ring-0 !focus-visible:ring-0 focus-visible:outline-none !focus-visible:outline-none focus-within:ring-0 !focus-within:ring-0 focus-within:shadow-none !focus-within:shadow-none",
+                      inputWrapper: "ring-0 !ring-0 outline-none !outline-none shadow-none !shadow-none focus:ring-0 !focus:ring-0 focus:ring-transparent !focus:ring-transparent focus-visible:ring-0 !focus-visible:ring-0 focus-visible:outline-none !focus-visible:outline-none focus-within:ring-0 !focus-within:ring-0 focus-within:shadow-none !focus-within:shadow-none data-[focus=true]:ring-0 group-data-[focus=true]:ring-0 data-[focus=true]:shadow-none group-data-[focus=true]:shadow-none",
+                    }}
                   />
                 );
               })}
