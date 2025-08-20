@@ -5,7 +5,6 @@ import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
 import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot } from "./types";
 import { PrefixLogger } from "@/app/lib/utils";
 import zodToJsonSchema from "zod-to-json-schema";
-import { COPILOT_INSTRUCTIONS_EDIT_AGENT } from "./copilot_edit_agent";
 import { COPILOT_INSTRUCTIONS_MULTI_AGENT } from "./copilot_multi_agent";
 import { COPILOT_MULTI_AGENT_EXAMPLE_1 } from "./example_multi_agent_1";
 import { CURRENT_WORKFLOW_PROMPT } from "./current_workflow";
@@ -234,12 +233,6 @@ export async function getEditAgentInstructionsResponse(
     // add the above prompts to the last user message
     updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt);
 
-    // call model
-    console.log("calling model", JSON.stringify({
-        model: COPILOT_MODEL,
-        system: COPILOT_INSTRUCTIONS_EDIT_AGENT,
-        messages: messages,
-    }));
     const { object, usage } = await generateObject({
         model: openai(COPILOT_MODEL),
         messages: [

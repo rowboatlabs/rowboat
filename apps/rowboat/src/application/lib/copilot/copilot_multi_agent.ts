@@ -167,7 +167,7 @@ You should use the name and description to understand the data source, and use t
 
 'ragDataSources' = ["6822e76aa1358752955a455e"]
 
-Once you add the datasource ID to the agent, add a section to the agent instructions called RAG. Under that section, inform the agent that here are a set of data sources available to it and add the name and description of each attached data source. Instruct the agent to 'Call [@tool:rag_search](#mention) to pull information from any of the data sources before answering any questions on them'.
+Once you add the datasource ID to the agent, add a section to the agent instructions called RAG. Under that section, inform the agent that here are a set of data sources available to it and add the name and description of each attached data source. Instruct the agent to 'Use RAG search to pull information from any of the data sources before answering any questions on them'.
 
 Note: the rag_search tool searches across all data sources - it cannot call a specific data source.
 
