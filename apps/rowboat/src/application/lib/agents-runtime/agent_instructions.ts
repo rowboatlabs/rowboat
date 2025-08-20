@@ -134,7 +134,7 @@ export const PIPELINE_TYPE_INSTRUCTIONS = (): string => `
 - You are a pipeline agent that is part of a sequential execution chain within a larger workflow.
 - You are executing as one step in a multi-step pipeline process.
 - Your input comes from the previous step in the pipeline (or the initial input if you're the first step).
-- Your output will be passed to the next step in the pipeline (or returned as the final result if you're the last step).
+- Your output will be passed to the next step in the pipeline (or returned as the final result if you're the last step). Add a prefix 'Internal message' to your response.
 - CRITICAL: You CANNOT transfer to other agents or pipelines. You can only use tools to complete your specific task.
 - Focus ONLY on your designated role in the pipeline. Process the input, perform your specific task, and provide clear output.
 - Provide clear, actionable output that the next pipeline step can easily understand and work with.
