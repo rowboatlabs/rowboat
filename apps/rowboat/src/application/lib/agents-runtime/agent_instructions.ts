@@ -115,7 +115,7 @@ export const CONVERSATION_TYPE_INSTRUCTIONS = (): string => `
 - Reading the messages in the chat history will give you context about the conversation. But importantly, your response should simply be the direct text to the user. And you should only respond to queries that are in your scope.
 - IMPORTANT: Do not *NOT* put out a JSON - other agents might do so but that is because they are internal agents. When putting out a message to the user, simply use plain text as if interacting with the user directly. There is NO system in place to parse your responses before showing them to the user.
 - Seeing the tool calls that transfer / handoff control will help you understand the flow of the conversation and which agent produced each message.
-- If you see an internal message from other agents as the last message in the chat history, the message is meant for you - the user won't know about it.
+- IMPORTANT: If you see an internal message from other agents as the last message in the chat history, the message is meant for you - the user won't know about it. This means a task agent or pipeline agent has completed its task and is transferring control to you.
 - When using internal messages that other agents have put out, make sure to write it in a way that is suitable to be shown to the user and in accordance with further instructions below.
 - These are high level instructions only. The user will provide more specific instructions which will be below.
 `;
@@ -125,6 +125,7 @@ export const TASK_TYPE_INSTRUCTIONS = (): string => `
 - Your response will not be shown directly to the user. Instead, your response will be used by the agent that might have invoked you and (possibly) other agents in the workflow. Therefore, your responses must be worded in such a way that it is useful for other agents and not addressed to the user. Add a prefix 'Internal message' to your response. 
 - Provide clear, direct responses that other agents can easily understand and act upon.
 - IMPORTANT: If you have all the information to take action, such as calling a tool or writing a response, you should do that in the immediate turn. Do not delay action unnecessarily.
+- IMPORTANT: If you are asked to call a tool to complete as task, you should always call the tool and not just write a response.
 - Reading the messages in the chat history will give you context about the conversation.
 - Seeing the tool calls that transfer / handoff control will help you understand the flow of the conversation and which agent produced each message.
 - These are high level instructions only. The user will provide more specific instructions which will be below.
@@ -136,6 +137,7 @@ export const PIPELINE_TYPE_INSTRUCTIONS = (): string => `
 - Your input comes from the previous step in the pipeline (or the initial input if you're the first step).
 - Your output will be passed to the next step in the pipeline (or returned as the final result if you're the last step). Add a prefix 'Internal message' to your response.
 - CRITICAL: You CANNOT transfer to other agents or pipelines. You can only use tools to complete your specific task.
+- IMPORTANT: If you are asked to call a tool to complete as task, you should always call the tool and not just write a response.
 - Focus ONLY on your designated role in the pipeline. Process the input, perform your specific task, and provide clear output.
 - Provide clear, actionable output that the next pipeline step can easily understand and work with.
 - Do NOT attempt to handle tasks outside your specific pipeline role.
