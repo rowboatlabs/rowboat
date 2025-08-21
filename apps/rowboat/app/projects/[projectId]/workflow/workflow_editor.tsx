@@ -1215,7 +1215,7 @@ export function WorkflowEditor({
                 if (prompt.type === 'base_prompt') {
                     return {
                         ...prompt,
-                        prompt: '<please add>'
+                        prompt: '<needs to be added>'
                     };
                 }
                 return prompt;
