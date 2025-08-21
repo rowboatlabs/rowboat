@@ -144,3 +144,23 @@ export const PIPELINE_TYPE_INSTRUCTIONS = (): string => `
 - Reading the message history will show you the pipeline execution flow up to your step.
 - These are high level instructions only. The user will provide more specific instructions which will be below.
 `;
+
+/**
+ * Instructions for providing variable context to agents
+ * Appends variable names and values to agent system prompts
+ */
+export const VARIABLES_CONTEXT_INSTRUCTIONS = (variablesList: Array<{name: string, value: string}>): string => {
+    if (!variablesList || variablesList.length === 0) {
+        return '';
+    }
+
+    const variablesText = variablesList
+        .map(variable => `${variable.name}: ${variable.value}`)
+        .join('\n');
+
+    return `
+# Variables Context
+Here is information that is already provided:
+${variablesText}
+`;
+};

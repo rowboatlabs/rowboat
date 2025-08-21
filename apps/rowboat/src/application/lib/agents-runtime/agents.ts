@@ -9,7 +9,7 @@ import crypto from "crypto";
 // Internal dependencies
 import { createTools, createRagTool } from "./agent-tools";
 import { ConnectedEntity, sanitizeTextWithMentions, Workflow, WorkflowAgent, WorkflowPipeline, WorkflowPrompt, WorkflowTool } from "@/app/lib/types/workflow_types";
-import { CHILD_TRANSFER_RELATED_INSTRUCTIONS, CONVERSATION_TYPE_INSTRUCTIONS, PIPELINE_TYPE_INSTRUCTIONS, RAG_INSTRUCTIONS, TASK_TYPE_INSTRUCTIONS } from "./agent_instructions";
+import { CHILD_TRANSFER_RELATED_INSTRUCTIONS, CONVERSATION_TYPE_INSTRUCTIONS, PIPELINE_TYPE_INSTRUCTIONS, RAG_INSTRUCTIONS, TASK_TYPE_INSTRUCTIONS, VARIABLES_CONTEXT_INSTRUCTIONS } from "./agent_instructions";
 import { PrefixLogger } from "@/app/lib/utils";
 import { Message, AssistantMessage, AssistantMessageWithToolCalls, ToolMessage } from "@/app/lib/types/types";
 import { UsageTracker } from "@/app/lib/billing";
@@ -99,6 +99,14 @@ function createAgent(
 ): { agent: Agent, entities: z.infer<typeof ConnectedEntity>[] } {
     const agentLogger = logger.child(`createAgent: ${config.name}`);
 
+    // Extract variables from workflow prompts (variables are stored as prompts with type 'base_prompt')
+    const variables = workflow.prompts
+        .filter(prompt => prompt.type === 'base_prompt')
+        .map(prompt => ({
+            name: prompt.name,
+            value: prompt.prompt
+        }));
+
     // Combine instructions and examples
     let instructions = `${RECOMMENDED_PROMPT_PREFIX}
 
@@ -121,6 +129,8 @@ ${config.outputVisibility === 'user_facing'
 ${config.instructions}
 
 ${config.examples ? ('# Examples\n' + config.examples) : ''}
+
+${VARIABLES_CONTEXT_INSTRUCTIONS(variables)}
 
 ${'-'.repeat(100)}
 
