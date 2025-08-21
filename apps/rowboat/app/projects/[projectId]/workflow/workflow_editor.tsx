@@ -1206,7 +1206,23 @@ export function WorkflowEditor({
     // Remove handleCopyJSON and add handleDownloadJSON
     function handleDownloadJSON() {
         const workflow = state.present.workflow;
-        const json = JSON.stringify(workflow, null, 2);
+        
+        // Create a copy of the workflow and replace variable values with dummy text
+        const workflowCopy = {
+            ...workflow,
+            prompts: workflow.prompts.map(prompt => {
+                // If this is a variable (base_prompt type), replace its value with dummy text
+                if (prompt.type === 'base_prompt') {
+                    return {
+                        ...prompt,
+                        prompt: '<please add>'
+                    };
+                }
+                return prompt;
+            })
+        };
+        
+        const json = JSON.stringify(workflowCopy, null, 2);
         const blob = new Blob([json], { type: 'application/json' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
