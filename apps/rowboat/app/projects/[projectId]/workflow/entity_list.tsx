@@ -64,6 +64,8 @@ interface EntityListProps {
     onAddTool: (tool: Partial<z.infer<typeof WorkflowTool>>) => void;
     onAddPrompt: (prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
     onUpdatePrompt: (name: string, prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
+    onAddPromptFromModal: (prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
+    onUpdatePromptFromModal: (name: string, prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
     onAddPipeline: (pipeline: Partial<z.infer<typeof WorkflowPipeline>>) => void;
     onAddAgentToPipeline: (pipelineName: string) => void;
     onToggleAgent: (name: string) => void;
@@ -495,6 +497,8 @@ export const EntityList = forwardRef<
     onAddTool,
     onAddPrompt,
     onUpdatePrompt,
+    onAddPromptFromModal,
+    onUpdatePromptFromModal,
     onAddPipeline,
     onAddAgentToPipeline,
     onToggleAgent,
@@ -1274,11 +1278,11 @@ export const EntityList = forwardRef<
                 }}
                 onConfirm={(name, value) => {
                     if (editingVariable) {
-                        // Update existing variable
-                        onUpdatePrompt(editingVariable.name, { name, prompt: value });
+                        // Update existing variable using modal-specific handler
+                        onUpdatePromptFromModal(editingVariable.name, { name, prompt: value });
                     } else {
-                        // Add new variable
-                        onAddPrompt({ name, prompt: value });
+                        // Add new variable using modal-specific handler
+                        onAddPromptFromModal({ name, prompt: value });
                     }
                     setShowAddVariableModal(false);
                     setEditingVariable(null);

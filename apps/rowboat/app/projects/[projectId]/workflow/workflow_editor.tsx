@@ -86,6 +86,9 @@ export type Action = {
     type: "add_prompt";
     prompt: Partial<z.infer<typeof WorkflowPrompt>>;
 } | {
+    type: "add_prompt_no_select";
+    prompt: Partial<z.infer<typeof WorkflowPrompt>>;
+} | {
     type: "add_pipeline";
     pipeline: Partial<z.infer<typeof WorkflowPipeline>>;
 } | {
@@ -141,6 +144,10 @@ export type Action = {
     name: string;
 } | {
     type: "update_prompt";
+    name: string;
+    prompt: Partial<z.infer<typeof WorkflowPrompt>>;
+} | {
+    type: "update_prompt_no_select";
     name: string;
     prompt: Partial<z.infer<typeof WorkflowPrompt>>;
 } | {
@@ -406,6 +413,26 @@ function reducer(state: State, action: Action): State {
                                 type: "prompt",
                                 name: action.prompt.name || newPromptName
                             };
+                            draft.pendingChanges = true;
+                            draft.chatKey++;
+                            break;
+                        }
+                        case "add_prompt_no_select": {
+                            if (isLive) {
+                                break;
+                            }
+                            let newPromptName = "New Variable";
+                            if (draft.workflow?.prompts.some((prompt) => prompt.name === newPromptName)) {
+                                newPromptName = `New Variable ${draft.workflow?.prompts.filter((prompt) =>
+                                    prompt.name.startsWith("New Variable")).length + 1}`;
+                            }
+                            draft.workflow?.prompts.push({
+                                name: newPromptName,
+                                type: "base_prompt",
+                                prompt: "",
+                                ...action.prompt
+                            });
+                            // Don't set selection - this is the key difference
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
@@ -751,6 +778,47 @@ function reducer(state: State, action: Action): State {
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
+                        case "update_prompt_no_select":
+                            if (isLive) {
+                                break;
+                            }
+
+                            // update prompt data
+                            draft.workflow.prompts = draft.workflow.prompts.map((prompt) =>
+                                prompt.name === action.name ? { ...prompt, ...action.prompt } : prompt
+                            );
+
+                            // if the prompt is renamed
+                            if (action.prompt.name && action.prompt.name !== action.name) {
+                                // update this prompts references in other agents / prompts
+                                draft.workflow.agents = draft.workflow.agents.map(agent => ({
+                                    ...agent,
+                                    instructions: agent.instructions.replace(
+                                        `[@prompt:${action.name}](#mention)`,
+                                        `[@prompt:${action.prompt.name}](#mention)`
+                                    )
+                                }));
+                                draft.workflow.prompts = draft.workflow.prompts.map(prompt => ({
+                                    ...prompt,
+                                    prompt: prompt.prompt.replace(
+                                        `[@prompt:${action.name}](#mention)`,
+                                        `[@prompt:${action.prompt.name}](#mention)`
+                                    )
+                                }));
+
+                                // if this is the selected prompt, update the selection
+                                if (draft.selection?.type === "prompt" && draft.selection.name === action.name) {
+                                    draft.selection = {
+                                        type: "prompt",
+                                        name: action.prompt.name
+                                    };
+                                }
+                            }
+
+                            // Don't set selection - this is the key difference
+                            draft.pendingChanges = true;
+                            draft.chatKey++;
+                            break;
                         case "toggle_agent":
                             if (isLive) {
                                 break;
@@ -1074,6 +1142,15 @@ export function WorkflowEditor({
         dispatch({ type: "update_prompt", name, prompt });
     }
 
+    // Modal-specific handlers that don't auto-select
+    function handleAddPromptFromModal(prompt: Partial<z.infer<typeof WorkflowPrompt>>) {
+        dispatch({ type: "add_prompt_no_select", prompt });
+    }
+
+    function handleUpdatePromptFromModal(name: string, prompt: Partial<z.infer<typeof WorkflowPrompt>>) {
+        dispatch({ type: "update_prompt_no_select", name, prompt });
+    }
+
     function handleDeletePrompt(name: string) {
         if (window.confirm(`Are you sure you want to delete the prompt "${name}"?`)) {
             dispatch({ type: "delete_prompt", name });
@@ -1311,6 +1388,8 @@ export function WorkflowEditor({
                                 onAddTool={handleAddTool}
                                 onAddPrompt={handleAddPrompt}
                                 onUpdatePrompt={handleUpdatePrompt}
+                                onAddPromptFromModal={handleAddPromptFromModal}
+                                onUpdatePromptFromModal={handleUpdatePromptFromModal}
                                 onAddPipeline={handleAddPipeline}
                                 onAddAgentToPipeline={handleAddAgentToPipeline}
                                 onToggleAgent={handleToggleAgent}
