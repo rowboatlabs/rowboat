@@ -55,11 +55,15 @@ export function createAtMentions({ agents, prompts, tools, pipelines = [], curre
 
     // Add prompts (always allowed)
     for (const prompt of prompts) {
-        const id = `prompt:${prompt.name}`;
+        // Use 'variable' for base_prompt types, 'prompt' for others
+        const isVariable = prompt.type === 'base_prompt';
+        const type = isVariable ? 'variable' : 'prompt';
+        const label = isVariable ? 'Variable' : 'Prompt';
+        const id = `${type}:${prompt.name}`;
         atMentions.push({
             id,
             value: id,
-            label: `Prompt: ${prompt.name}`,
+            label: `${label}: ${prompt.name}`,
             denotationChar: "@",
             link: id,
             target: "_self"

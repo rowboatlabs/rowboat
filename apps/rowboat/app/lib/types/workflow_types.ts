@@ -129,8 +129,8 @@ export function sanitizeTextWithMentions(
     sanitized: string;
     entities: z.infer<typeof ConnectedEntity>[];
 } {
-    // Regex to match [@type:name](#type:something) pattern where type is tool/prompt/agent/pipeline
-    const mentionRegex = /\[@(tool|prompt|agent|pipeline):([^\]]+)\]\(#mention\)/g;
+    // Regex to match [@type:name](#type:something) pattern where type is tool/prompt/agent/pipeline/variable
+    const mentionRegex = /\[@(tool|prompt|agent|pipeline|variable):([^\]]+)\]\(#mention\)/g;
     const seen = new Set<string>();
 
     // collect entities
@@ -144,8 +144,10 @@ export function sanitizeTextWithMentions(
             return true;
         })
         .map(match => {
+            // Treat @variable: as @prompt: internally
+            const type = match[1] === 'variable' ? 'prompt' : match[1];
             return {
-                type: match[1] as 'tool' | 'prompt' | 'agent' | 'pipeline',
+                type: type as 'tool' | 'prompt' | 'agent' | 'pipeline',
                 name: match[2],
             };
         })
@@ -176,6 +178,12 @@ export function sanitizeTextWithMentions(
         const id = `${entity.type}:${entity.name}`;
         const textToReplace = `[@${id}](#mention)`;
         text = text.replace(textToReplace, `[@${id}]`);
+        
+        // Also handle @variable: mentions for prompts
+        if (entity.type === 'prompt') {
+            const variableTextToReplace = `[@variable:${entity.name}](#mention)`;
+            text = text.replace(variableTextToReplace, `[@variable:${entity.name}]`);
+        }
     }
 
     return {
