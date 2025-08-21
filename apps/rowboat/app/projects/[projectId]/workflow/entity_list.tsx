@@ -97,6 +97,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({ entity, hasFilteredItems }) => 
 
 const ListItemWithMenu = ({ 
     name, 
+    value,
     isSelected, 
     onClick, 
     disabled, 
@@ -110,6 +111,7 @@ const ListItemWithMenu = ({
     isMocked,
 }: {
     name: string;
+    value?: string;
     isSelected?: boolean;
     onClick?: () => void;
     disabled?: boolean;
@@ -157,9 +159,34 @@ const ListItemWithMenu = ({
                         />
                     ) : icon}
                 </div>
-                <span className="text-xs">{name}</span>
+                {value ? (
+                    <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
+                        <Tooltip 
+                            content={name} 
+                            size="sm" 
+                            delay={500}
+                            isDisabled={name.length <= 20}
+                        >
+                            <span className="text-xs font-medium truncate">
+                                {name}
+                            </span>
+                        </Tooltip>
+                        <Tooltip 
+                            content={value} 
+                            size="sm" 
+                            delay={500}
+                            isDisabled={value.length <= 30}
+                        >
+                            <span className="text-xs text-zinc-600 dark:text-zinc-400 truncate">
+                                {value}
+                            </span>
+                        </Tooltip>
+                    </div>
+                ) : (
+                    <span className="text-xs">{name}</span>
+                )}
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 shrink-0">
                 {statusLabel}
                 {isMocked && (
                     <Tooltip content="Mocked" size="sm" delay={500}>
@@ -168,7 +195,9 @@ const ListItemWithMenu = ({
                         </div>
                     </Tooltip>
                 )}
-                {menuContent}
+                <div className="opacity-100">
+                    {menuContent}
+                </div>
             </div>
         </div>
     );
@@ -1164,6 +1193,7 @@ export const EntityList = forwardRef<
                                     </Button>
                                 </div>
                             }
+                        >
                             {expandedPanels.prompts && (
                                 <div className="h-[calc(100%-53px)] overflow-y-auto">
                                     <div className="p-2">
@@ -1173,6 +1203,7 @@ export const EntityList = forwardRef<
                                                     <ListItemWithMenu
                                                         key={`prompt-${index}`}
                                                         name={prompt.name}
+                                                        value={prompt.prompt}
                                                         isSelected={selectedEntity?.type === "prompt" && selectedEntity.name === prompt.name}
                                                         onClick={() => onSelectPrompt(prompt.name)}
                                                         selectedRef={selectedEntity?.type === "prompt" && selectedEntity.name === prompt.name ? selectedRef : undefined}
