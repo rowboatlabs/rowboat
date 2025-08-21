@@ -1310,6 +1310,7 @@ export function WorkflowEditor({
                                 onAddAgent={handleAddAgent}
                                 onAddTool={handleAddTool}
                                 onAddPrompt={handleAddPrompt}
+                                onUpdatePrompt={handleUpdatePrompt}
                                 onAddPipeline={handleAddPipeline}
                                 onAddAgentToPipeline={handleAddAgentToPipeline}
                                 onToggleAgent={handleToggleAgent}

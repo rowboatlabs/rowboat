@@ -63,6 +63,7 @@ interface EntityListProps {
     onAddAgent: (agent: Partial<z.infer<typeof WorkflowAgent>>) => void;
     onAddTool: (tool: Partial<z.infer<typeof WorkflowTool>>) => void;
     onAddPrompt: (prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
+    onUpdatePrompt: (name: string, prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
     onAddPipeline: (pipeline: Partial<z.infer<typeof WorkflowPipeline>>) => void;
     onAddAgentToPipeline: (pipelineName: string) => void;
     onToggleAgent: (name: string) => void;
@@ -493,6 +494,7 @@ export const EntityList = forwardRef<
     onAddAgent,
     onAddTool,
     onAddPrompt,
+    onUpdatePrompt,
     onAddPipeline,
     onAddAgentToPipeline,
     onToggleAgent,
@@ -520,6 +522,7 @@ export const EntityList = forwardRef<
     const [showToolsModal, setShowToolsModal] = useState(false);
     const [showDataSourcesModal, setShowDataSourcesModal] = useState(false);
     const [showAddVariableModal, setShowAddVariableModal] = useState(false);
+    const [editingVariable, setEditingVariable] = useState<{name: string; value: string} | null>(null);
     // State to track which toolkit's tools panel to open
     const [selectedToolkitSlug, setSelectedToolkitSlug] = useState<string | null>(null);
 
@@ -527,6 +530,11 @@ export const EntityList = forwardRef<
         onAddAgent({
             outputVisibility: agentType
         });
+    };
+
+    const handleVariableClick = (prompt: z.infer<typeof WorkflowPrompt>) => {
+        setEditingVariable({ name: prompt.name, value: prompt.prompt });
+        setShowAddVariableModal(true);
     };
     const selectedRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -1206,7 +1214,7 @@ export const EntityList = forwardRef<
                                                         name={prompt.name}
                                                         value={prompt.prompt}
                                                         isSelected={selectedEntity?.type === "prompt" && selectedEntity.name === prompt.name}
-                                                        onClick={() => onSelectPrompt(prompt.name)}
+                                                        onClick={() => handleVariableClick(prompt)}
                                                         selectedRef={selectedEntity?.type === "prompt" && selectedEntity.name === prompt.name ? selectedRef : undefined}
                                                         icon={<ScrollText className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />}
                                                         menuContent={
@@ -1260,11 +1268,24 @@ export const EntityList = forwardRef<
             />
             <AddVariableModal
                 isOpen={showAddVariableModal}
-                onClose={() => setShowAddVariableModal(false)}
-                onConfirm={(name, value) => {
-                    onAddPrompt({ name, prompt: value });
+                onClose={() => {
                     setShowAddVariableModal(false);
+                    setEditingVariable(null);
                 }}
+                onConfirm={(name, value) => {
+                    if (editingVariable) {
+                        // Update existing variable
+                        onUpdatePrompt(editingVariable.name, { name, prompt: value });
+                    } else {
+                        // Add new variable
+                        onAddPrompt({ name, prompt: value });
+                    }
+                    setShowAddVariableModal(false);
+                    setEditingVariable(null);
+                }}
+                initialName={editingVariable?.name}
+                initialValue={editingVariable?.value}
+                isEditing={!!editingVariable}
             />
         </div>
     );
@@ -1967,12 +1988,24 @@ interface AddVariableModalProps {
     isOpen: boolean;
     onClose: () => void;
     onConfirm: (name: string, value: string) => void;
+    initialName?: string;
+    initialValue?: string;
+    isEditing?: boolean;
 }
 
-function AddVariableModal({ isOpen, onClose, onConfirm }: AddVariableModalProps) {
+function AddVariableModal({ isOpen, onClose, onConfirm, initialName, initialValue, isEditing = false }: AddVariableModalProps) {
     const [name, setName] = useState('');
     const [value, setValue] = useState('');
     const [errors, setErrors] = useState<{ name?: string; value?: string }>({});
+
+    // Initialize form with values when modal opens
+    useEffect(() => {
+        if (isOpen) {
+            setName(initialName || '');
+            setValue(initialValue || '');
+            setErrors({});
+        }
+    }, [isOpen, initialName, initialValue]);
 
     const resetForm = () => {
         setName('');
@@ -2011,7 +2044,7 @@ function AddVariableModal({ isOpen, onClose, onConfirm }: AddVariableModalProps)
                 <ModalHeader>
                     <div className="flex items-center gap-2">
                         <PenLine className="w-5 h-5 text-indigo-600" />
-                        <span>Add Variable</span>
+                        <span>{isEditing ? 'Edit Variable' : 'Add Variable'}</span>
                     </div>
                 </ModalHeader>
                 <ModalBody className="space-y-4">
@@ -2073,7 +2106,7 @@ function AddVariableModal({ isOpen, onClose, onConfirm }: AddVariableModalProps)
                         variant="primary"
                         onClick={handleConfirm}
                     >
-                        Add Variable
+                        {isEditing ? 'Update Variable' : 'Add Variable'}
                     </Button>
                 </ModalFooter>
             </ModalContent>
