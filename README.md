@@ -50,11 +50,11 @@ Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents
 
 ## Quick start
 1. Set your OpenAI key
-      ```bash
-   export OPENAI_API_KEY=your-openai-api-key   
+   ```bash
+   export OPENAI_API_KEY=your-openai-api-key  
    ```
       
-2. Clone the repository and start Rowboat
+2. Clone the repository and start Rowboat (requires Docker)
    ```bash
    git clone git@github.com:rowboatlabs/rowboat.git
    cd rowboat
@@ -63,12 +63,12 @@ Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents
 
 3. Access the app at [http://localhost:3000](http://localhost:3000).
     
-#### Built-in tools
-To enable agents to use built-in tools, set your Compsio key
-```bash
-export USE_COMPOSIO=true
-export COMPOSIO_API_KEY=your-composio-api-key      
-```
+4. Optional: Tools Library - set your Composio key
+   ```bash
+   export USE_COMPOSIO=true
+   export COMPOSIO_API_KEY=your-composio-api-key      
+   ```
+
 ## Demos
 
 #### Build me a assistant that can browse Reddit for me and help me keep up with Gmail 
