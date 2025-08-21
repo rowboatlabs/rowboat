@@ -37,12 +37,12 @@
 </h5>
 
 - ✨ **Start from an idea -> copilot builds your multi-agent workflows**
-   - E.g. "Build me an assistant that can help me manage my Gmail and Slack"
-- 🌐 **Connect MCP servers or choose from built-in tools such as G Suite**
-   - Ask the copilot to add the right tools like Hubspot or add your MCP server url
-- 📞 **Add event triggers or integrate into your app**
-   - Invoke the assistant on triggers like an incoming email or at specific times
-   - Or integrate it into your product using the HTTP API or Python SDK
+   - E.g. "Build me an assistant to schedule interviews, send follow-ups, and update my spreadsheet…".
+- 🌐 **Choose from built-in tools or connect any MCP server**
+   - Add tools via the copilot to connect with Google Workspace, Salesforce, HubSpot, and more, or hook up your own MCP server.
+- 📞 **Automate using triggers or integrate into your app**
+   - Automatically run agents on events like incoming emails, calendar invites, or on schedule.
+   - Or use our HTTP API / Python SDK to integrate directly into your app.
 
 Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents!
 
