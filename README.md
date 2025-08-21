@@ -71,14 +71,10 @@ Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents
 
 ## Demos
 
-#### Build me a assistant that can browse Reddit for me and help me keep up with Gmail 
-[![Screenshot 2025-04-23 at 00 25 31](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/6r7P4Vlcn2g)
+#### Create a meeting-prep assistant by chatting with the copilot.
 
-#### Build me an meeting prep assistant that can you do research of Google calendar invite guests and send that to my slack
-[![Screenshot 2025-04-23 at 00 25 31](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/KZTP4xZM2DY)
+[![smaller1_2](https://github.com/user-attachments/assets/f425c1e8-6fd8-4d87-adb5-2d2e5d5af247)](https://youtu.be/KZTP4xZM2DY)
 
-#### Build a customer support assistant
-[![Screenshot 2025-04-23 at 00 25 31](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/KZTP4xZM2DY)
 
 ## Advanced Setup: RAG, Multi-LLM & Event Triggers
 1. To enable native RAG support including file-uploads and URL scraping, see [RAG](https://docs.rowboatlabs.com/using_rag)
