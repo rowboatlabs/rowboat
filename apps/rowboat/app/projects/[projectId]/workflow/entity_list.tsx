@@ -519,6 +519,7 @@ export const EntityList = forwardRef<
     const [showAgentTypeModal, setShowAgentTypeModal] = useState(false);
     const [showToolsModal, setShowToolsModal] = useState(false);
     const [showDataSourcesModal, setShowDataSourcesModal] = useState(false);
+    const [showAddVariableModal, setShowAddVariableModal] = useState(false);
     // State to track which toolkit's tools panel to open
     const [selectedToolkitSlug, setSelectedToolkitSlug] = useState<string | null>(null);
 
@@ -1183,7 +1184,7 @@ export const EntityList = forwardRef<
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             setExpandedPanels(prev => ({ ...prev, prompts: true }));
-                                            onAddPrompt({});
+                                            setShowAddVariableModal(true);
                                         }}
                                         className={`group ${buttonClasses}`}
                                         showHoverContent={true}
@@ -1256,6 +1257,14 @@ export const EntityList = forwardRef<
                 useRagUploads={useRagUploads}
                 useRagS3Uploads={useRagS3Uploads}
                 useRagScraping={useRagScraping}
+            />
+            <AddVariableModal
+                isOpen={showAddVariableModal}
+                onClose={() => setShowAddVariableModal(false)}
+                onConfirm={(name, value) => {
+                    onAddPrompt({ name, prompt: value });
+                    setShowAddVariableModal(false);
+                }}
             />
         </div>
     );
@@ -1947,6 +1956,124 @@ function AgentTypeModal({ isOpen, onClose, onConfirm, onCreatePipeline }: AgentT
                         onClick={handleConfirm}
                     >
                         {selectedType === 'pipeline' ? 'Create Pipeline' : 'Create Agent'}
+                    </Button>
+                </ModalFooter>
+            </ModalContent>
+        </Modal>
+    );
+}
+
+interface AddVariableModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onConfirm: (name: string, value: string) => void;
+}
+
+function AddVariableModal({ isOpen, onClose, onConfirm }: AddVariableModalProps) {
+    const [name, setName] = useState('');
+    const [value, setValue] = useState('');
+    const [errors, setErrors] = useState<{ name?: string; value?: string }>({});
+
+    const resetForm = () => {
+        setName('');
+        setValue('');
+        setErrors({});
+    };
+
+    const handleClose = () => {
+        resetForm();
+        onClose();
+    };
+
+    const handleConfirm = () => {
+        const newErrors: { name?: string; value?: string } = {};
+        
+        if (!name.trim()) {
+            newErrors.name = 'Variable name is required';
+        }
+        
+        if (!value.trim()) {
+            newErrors.value = 'Variable value is required';
+        }
+
+        if (Object.keys(newErrors).length > 0) {
+            setErrors(newErrors);
+            return;
+        }
+
+        onConfirm(name.trim(), value.trim());
+        resetForm();
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={handleClose} size="md">
+            <ModalContent>
+                <ModalHeader>
+                    <div className="flex items-center gap-2">
+                        <PenLine className="w-5 h-5 text-indigo-600" />
+                        <span>Add Variable</span>
+                    </div>
+                </ModalHeader>
+                <ModalBody className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Variable Name
+                        </label>
+                        <input
+                            type="text"
+                            value={name}
+                            onChange={(e) => {
+                                setName(e.target.value);
+                                if (errors.name) setErrors(prev => ({ ...prev, name: undefined }));
+                            }}
+                            placeholder="Enter variable name (e.g., greeting_message)"
+                            className={clsx(
+                                "w-full px-3 py-2 border rounded-md text-sm",
+                                "focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500",
+                                "dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100",
+                                errors.name ? "border-red-500" : "border-gray-300 dark:border-gray-600"
+                            )}
+                        />
+                        {errors.name && (
+                            <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.name}</p>
+                        )}
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Variable Value
+                        </label>
+                        <textarea
+                            value={value}
+                            onChange={(e) => {
+                                setValue(e.target.value);
+                                if (errors.value) setErrors(prev => ({ ...prev, value: undefined }));
+                            }}
+                            placeholder="Enter the variable value..."
+                            rows={4}
+                            className={clsx(
+                                "w-full px-3 py-2 border rounded-md text-sm resize-none",
+                                "focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500",
+                                "dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100",
+                                errors.value ? "border-red-500" : "border-gray-300 dark:border-gray-600"
+                            )}
+                        />
+                        {errors.value && (
+                            <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.value}</p>
+                        )}
+                    </div>
+                </ModalBody>
+                <ModalFooter>
+                    <Button
+                        variant="secondary"
+                        onClick={handleClose}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        variant="primary"
+                        onClick={handleConfirm}
+                    >
+                        Add Variable
                     </Button>
                 </ModalFooter>
             </ModalContent>
