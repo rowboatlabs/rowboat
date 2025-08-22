@@ -35,18 +35,11 @@
 
 
 </h5>
+<p align="center">
+⚡ Build AI agents instantly with natural language. | 🔌 Connect tools with one-click integrations. | 📂 Power with knowledge by adding documents for RAG. | 🔄 Automate workflows by setting up triggers and actions. | 🚀 Deploy anywhere via API or SDK.<br><br>
+☁️ Prefer a hosted version? Use our <b><a href="https://rowboatlabs.com">cloud</a></b> to starting building agents right away!
+</p>
 
-- ✨ **Start from an idea -> copilot builds your multi-agent workflows**
-   - E.g. "Build me an assistant to schedule interviews, send follow-ups, and update my spreadsheet…".
-- 🌐 **Choose from built-in tools or connect any MCP server**
-   - Add tools via the copilot to connect with Google Workspace, Salesforce, HubSpot, and more, or hook up your own MCP server.
-- 📞 **Automate using triggers or integrate into your app**
-   - Automatically run agents on events like incoming emails, calendar invites, or on schedule.
-   - Or use our HTTP API / Python SDK to integrate directly into your app.
-
-Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents!
-
-☁️ Prefer a hosted version? Use our <b>[cloud](https://rowboatlabs.com)</b> to starting building agents right away!
 
 ## Quick start
 1. Set your OpenAI key
@@ -62,18 +55,14 @@ Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents
    ```
 
 3. Access the app at [http://localhost:3000](http://localhost:3000).
-    
-4. Optional: Tools Library - set your Composio key
-   ```bash
-   export USE_COMPOSIO=true
-   export COMPOSIO_API_KEY=your-composio-api-key      
-   ```
+
+To add tools, RAG, more LLMs, and  triggers checkout the [Advanced](#advanced) section below.
 
 ## Demos
 #### Create a meeting-prep assistant by chatting with the copilot.
 [![meeting-prep](https://github.com/user-attachments/assets/9d183c5a-5ea5-4b08-a72a-86cc3a8f548d)](https://youtu.be/KZTP4xZM2DY)
 
-## Advanced Setup: RAG, Multi-LLM & Event Triggers
+## Advanced
 1. To enable native RAG support including file-uploads and URL scraping, see [RAG](https://docs.rowboatlabs.com/using_rag)
 
 2. You can use any LLM provider including aggregators like OpenRouter and LiteLLM - see [Using custom LLM providers](https://docs.rowboatlabs.com/setup/#using-custom-llm-providers)
