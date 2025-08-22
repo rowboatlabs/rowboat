@@ -60,7 +60,9 @@ To add tools, RAG, more LLMs, and  triggers checkout the [Advanced](#advanced) s
 
 ## Demos
 #### Create a meeting-prep assistant by chatting with the copilot.
-[![meeting-prep](https://github.com/user-attachments/assets/9d183c5a-5ea5-4b08-a72a-86cc3a8f548d)](https://youtu.be/KZTP4xZM2DY)
+[![meeting-prep](https://github.com/user-attachments/assets/27755ef5-6549-476f-b9c0-50bef8770384)](https://youtu.be/KZTP4xZM2DY)
+
+The full demo is available [here](https://youtu.be/KZTP4xZM2DY)
 
 ## Advanced
 1. To enable native RAG support including file-uploads and URL scraping, see [RAG](https://docs.rowboatlabs.com/using_rag)
