@@ -59,10 +59,9 @@
 To add tools, RAG, more LLMs, and  triggers checkout the [Advanced](#advanced) section below.
 
 ## Demos
-#### Create a meeting-prep assistant by chatting with the copilot.
+#### Meeting-prep assistant
+Chat with the copilot to build a meeting-prep workflow, then add a Google Calendar invite as a trigger. Watch the full demo [here](https://youtu.be/KZTP4xZM2DY).
 [![meeting-prep](https://github.com/user-attachments/assets/27755ef5-6549-476f-b9c0-50bef8770384)](https://youtu.be/KZTP4xZM2DY)
-
-The full demo is available [here](https://youtu.be/KZTP4xZM2DY)
 
 ## Advanced
 1. To enable native RAG support including file-uploads and URL scraping, see [RAG](https://docs.rowboatlabs.com/using_rag)
