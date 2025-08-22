@@ -60,7 +60,7 @@ To add tools, RAG, more LLMs, and  triggers checkout the [Advanced](#advanced) s
 
 ## Demos
 #### Meeting-prep assistant
-Chat with the copilot to build a meeting-prep workflow, then add a Google Calendar invite as a trigger. Watch the full demo [here](https://youtu.be/KZTP4xZM2DY).
+Chat with the copilot to build a meeting-prep workflow, then add a calendar invite as a trigger. Watch the full demo [here](https://youtu.be/KZTP4xZM2DY).
 [![meeting-prep](https://github.com/user-attachments/assets/27755ef5-6549-476f-b9c0-50bef8770384)](https://youtu.be/KZTP4xZM2DY)
 
 #### Customer support assistant
@@ -68,7 +68,7 @@ Chat with the copilot to build a customer support assistant, then connect your M
 [![output](https://github.com/user-attachments/assets/97485fd7-64c3-4d60-a627-f756a89dee64)](https://youtu.be/Xfo-OfgOl8w)
 
 #### Personal assistant
-Chat with the copilot to build a personal assistant, then connect your Reddit and Gmail. Watch the full demo [here](https://youtu.be/6r7P4Vlcn2g).
+Chat with the copilot to build a personal assistant. Watch the full demo [here](https://youtu.be/6r7P4Vlcn2g).
 [![personal-assistant](https://github.com/user-attachments/assets/0f1c0ffd-23ba-4b49-8bfb-ec7a846f1332)](https://youtu.be/6r7P4Vlcn2g)
 
 ## Advanced
