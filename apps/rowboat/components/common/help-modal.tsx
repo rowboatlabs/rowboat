@@ -56,7 +56,7 @@ export function HelpModal({ isOpen, onClose, onStartTour }: HelpModalProps) {
                     </a>
 
                     <a 
-                        href="https://discord.gg/gtbGcqF4"
+                        href="https://discord.gg/rxB8pzHxaS"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="block"
