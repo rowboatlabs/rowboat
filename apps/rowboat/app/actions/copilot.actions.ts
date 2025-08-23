@@ -3,7 +3,7 @@ import {
     CopilotAPIRequest,
     CopilotChatContext, CopilotMessage,
     DataSourceSchemaForCopilot,
-} from "../../src/application/lib/copilot/types";
+} from "../../src/entities/models/copilot";
 import { 
     Workflow} from "../lib/types/workflow_types";
 import { z } from 'zod';

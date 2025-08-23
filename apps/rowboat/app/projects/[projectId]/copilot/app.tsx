@@ -2,8 +2,8 @@
 import { Button } from "@/components/ui/button";
 import { Dropdown, DropdownItem, DropdownMenu, DropdownSection, DropdownTrigger, Spinner, Tooltip } from "@heroui/react";
 import { useRef, useState, createContext, useContext, useCallback, forwardRef, useImperativeHandle, useEffect, Ref } from "react";
-import { CopilotChatContext } from "../../../../src/application/lib/copilot/types";
-import { CopilotMessage } from "../../../../src/application/lib/copilot/types";
+import { CopilotChatContext } from "../../../../src/entities/models/copilot";
+import { CopilotMessage } from "../../../../src/entities/models/copilot";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";

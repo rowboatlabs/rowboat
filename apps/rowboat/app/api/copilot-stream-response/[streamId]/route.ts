@@ -1,7 +1,7 @@
 import { getCustomerIdForProject, logUsage, UsageTracker } from "@/app/lib/billing";
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { redisClient } from "@/app/lib/redis";
-import { CopilotAPIRequest } from "@/src/application/lib/copilot/types";
+import { CopilotAPIRequest } from "@/src/entities/models/copilot";
 import { streamMultiAgentResponse } from "@/src/application/lib/copilot/copilot";
 
 export const maxDuration = 300;

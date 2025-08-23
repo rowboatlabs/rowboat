@@ -2,7 +2,7 @@ import z from "zod";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject, streamText, tool } from "ai";
 import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
-import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot } from "./types";
+import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot } from "../../../entities/models/copilot";
 import { PrefixLogger } from "@/app/lib/utils";
 import zodToJsonSchema from "zod-to-json-schema";
 import { COPILOT_INSTRUCTIONS_EDIT_AGENT } from "./copilot_edit_agent";
