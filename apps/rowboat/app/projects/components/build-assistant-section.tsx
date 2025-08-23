@@ -22,6 +22,14 @@ import { SHOW_PREBUILT_CARDS } from '@/app/lib/feature_flags';
 
 const ITEMS_PER_PAGE = 6;
 
+const copilotPrompts = {
+    "Blog assistant": "Build an assistant to help with writing a blog post and updating it on google docs",
+    "Meeting prep workflow": "Build a meeting prep pipeline which takes a google calendar invite as input and performs research on the guests using Duckduckgo search and send an email to me",
+    "Scheduling assistant": "Build a scheduling assistant that helps users manage their calendar, book meetings, find available time slots, send reminders, and optimize their daily schedule based on priorities and preferences",
+    "Reddit & HN assistant": "Build an assistant that helps me with browsing Reddit and Hacker News",
+    "CRM assistant": "Build an assistant that helps me with my CRM"
+};
+
 export function BuildAssistantSection() {
     const [userPrompt, setUserPrompt] = useState('');
     const [isCreating, setIsCreating] = useState(false);
@@ -84,6 +92,12 @@ export function BuildAssistantSection() {
     // Handle template selection
     const handleTemplateSelect = async (templateId: string) => {
         await createProjectFromTemplate(templateId, router);
+    };
+
+    // Handle prompt card selection
+    const handlePromptSelect = (prompt: string) => {
+        setUserPrompt(prompt);
+        setPromptError(null);
     };
 
     const fetchProjects = async () => {
@@ -309,6 +323,28 @@ export function BuildAssistantSection() {
                                                     </p>
                                                 )}
                                                 </div>
+                                            </div>
+                                        </div>
+                                        
+                                        {/* Predefined Prompt Cards */}
+                                        <div className="mt-8">
+                                            <div className="flex flex-wrap gap-3 justify-center">
+                                                {Object.entries(copilotPrompts).map(([name, prompt]) => (
+                                                    <button
+                                                        key={name}
+                                                        onClick={() => handlePromptSelect(prompt)}
+                                                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-all duration-200 hover:shadow-sm"
+                                                    >
+                                                        <span className="w-4 h-4 flex items-center justify-center">
+                                                            {name === 'Blog assistant' && '📝'}
+                                                            {name === 'Meeting prep workflow' && '📅'}
+                                                            {name === 'Scheduling assistant' && '✅'}
+                                                            {name === 'Reddit & HN assistant' && '🔍'}
+                                                            {name === 'CRM assistant' && '📊'}
+                                                        </span>
+                                                        {name}
+                                                    </button>
+                                                ))}
                                             </div>
                                         </div>
                                     </div>
