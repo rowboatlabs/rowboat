@@ -5,23 +5,23 @@
 1. Once you are set up, you should be able to login to the Studio via Auth0's login options (Gmail, Github etc.). 
 - For the open source installation, the URL for Studio is [http://localhost:3000](http://localhost:3000)
 - To use our hosted app, the URL for Studio is [https://app.rowboatlabs.com](https://app.rowboatlabs.com/)
-<br>
+<br />
 
 2. Once in Studio, create a new blank project or browse through one of the example projects:
 ![Create Project](img/project-page.png)
-<br>
+<br />
 
 3. Use the copilot to help you build agents:
 ![Use Copilot](img/use-copilot.png)
-<br>
+<br />
 
 4. Ensure that the correct agent is set as the "start agent":
 ![Set Start Agent](img/start-agent.png)
-<br>
+<br />
 
 5. Test out a chat in the playground to verify the agents' behavior:
 ![Testing Chat](img/testing-chat.png)
-<br>
+<br />
 
 ### Testing the Chat API
 

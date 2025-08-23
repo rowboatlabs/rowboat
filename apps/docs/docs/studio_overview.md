@@ -1,5 +1,5 @@
 # Building Assistants in Studio
-This is a guide to building your first assistant on RowBoat Studio, with examples.<br>
+This is a guide to building your first assistant on RowBoat Studio, with examples.<br />
 
 Prerequisite:
 

@@ -35,23 +35,23 @@ Refer to our [Github Readme for Local Development](https://github.com/rowboatlab
 ### Testing Studio
 
 1. Once you are set up, you should be able to login to the Studio (default local URL: [http://localhost:3000](http://localhost:8000)) via Auth0's login options (Gmail, Github etc.)
-<br>
+<br />
 
 2. Once in Studio, create a new blank project or use one of the example templates:
 ![Create Project](img/project-page.png)
-<br>
+<br />
 
 3. Use the copilot to help you build agents:
 ![Use Copilot](img/use-copilot.png)
-<br>
+<br />
 
 4. Ensure that the correct agent is set as the "start agent":
 ![Set Start Agent](img/start-agent.png)
-<br>
+<br />
 
 5. Test out a chat in the playground to verify the agents' behavior:
 ![Testing Chat](img/testing-chat.png)
-<br>
+<br />
 
 ### Testing the Chat API
 
