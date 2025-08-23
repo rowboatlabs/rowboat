@@ -1,33 +1,47 @@
 ---
-title: "RAG"
+title: "RAG (Data)"
 description: "How to use our inbuilt RAG"
 icon: "database"
 ---
 
 # Using RAG in Rowboat
 
-Rowboat provides multiple ways to enhance your agents' context with Retrieval-Augmented Generation (RAG). This guide will help you set up and use each RAG features.
+Rowboat provides multiple ways to enhance your agents' context with Retrieval-Augmented Generation (RAG). This guide will help you set up and use each RAG feature.
+
+<Info>RAG is called "Data" on the build view in the Rowboat UI. </Info>
 
 ---
 
-<Note> Text RAG and local file uploads are enabled by default - no configuration needed! Just start using them right away. </Note>
+## Types of RAG
+
+| RAG Type | Description | Configuration Required |
+|----------|-------------|------------------------|
+| **Text RAG** | Process and reason over text content directly | No configuration needed |
+| **File Uploads** | Upload PDF files directly from your device | No configuration needed |
+| **URL Scraping** | Scrape content from web URLs using Firecrawl | Requires API key setup |
+
+<Note> URL Scraping does not require any setup in the managed version of Rowboat. </Note>
+
+<Frame>
+  <img src="/docs/img/rag-adding-data.png" className="w-full max-w-[800px] rounded-xl" alt="Adding data sources for RAG in Rowboat" />
+</Frame>
+
 
 ## RAG Features
 
 ### 1. Text RAG
-✅ Enabled by default:
 
-- Process and reason over text content directly
-- No configuration required
+Process and reason over text content directly
 
-### 2. Local File Uploads
-✅ Enabled by default:
+
+### 2. File Uploads
 
 - Upload PDF files directly from your device  
-- Files are stored locally  
-- No configuration required  
+- **Open Source Version**: Files are stored locally on your machine
+- **Managed Version**: Files are stored in cloud S3 storage
 - Files are parsed using OpenAI by default  
-- For larger files, we recommend using Gemini models — see below.
+
+<Note> You can also use Google's Gemini model for parsing as it is better at parsing larger files. </Note>
 
 #### 2.1 Using Gemini for File Parsing
 
@@ -39,73 +53,16 @@ export USE_GEMINI_FILE_PARSING=true
 export GOOGLE_API_KEY=your_google_api_key
 ```
 
+
 ### 3. URL Scraping
-Rowboat uses Firecrawl for URL scraping. To enable URL scraping, set the following variables:
+
+Rowboat uses Firecrawl for URL scraping. You can have a maximum of 100 URLs.
+
+**Open Source Version**: To enable URL scraping, set the following variables:
 
 ```bash
 export USE_RAG_SCRAPING=true
 export FIRECRAWL_API_KEY=your_firecrawl_api_key
 ```
 
----
-
-## Advanced RAG features
-
-### 1. File Uploads Backed by S3
-To enable S3 file uploads, set the following variables:
-
-```bash
-# Enable S3 uploads
-export USE_RAG_S3_UPLOADS=true
-
-# S3 Configuration
-export AWS_ACCESS_KEY_ID=your_access_key
-export AWS_SECRET_ACCESS_KEY=your_secret_key
-export RAG_UPLOADS_S3_BUCKET=your_bucket_name
-export RAG_UPLOADS_S3_REGION=your_region
-```
-
-### 2. Changing Default Parsing Model
-
-By default, uploaded PDF files are parsed using `gpt-4o`. You can customize this by setting the following:
-
-```bash
-# Override the default parsing model
-export FILE_PARSING_MODEL=your-preferred-model
-```
-
-You can also change the model provider like so:
-```bash
-# Optional: Override the parsing provider settings
-export FILE_PARSING_PROVIDER_BASE_URL=your-provider-base-url
-export FILE_PARSING_PROVIDER_API_KEY=your-provider-api-key
-```
-
-### 3. Embedding Model Options
-
-By default, Rowboat uses OpenAI's `text-embedding-3-small` model for generating embeddings. You can customize this by setting the following:
-
-```bash
-# Override the default embedding model
-export EMBEDDING_MODEL=your-preferred-model
-export EMBEDDING_VECTOR_SIZE=1536
-```
-
-<Warning> The default size for the vectors index is 1536. If you change this value, then you must delete the index and set it up again: </Warning>
-
-```bash
-docker-compose --profile delete_qdrant --profile qdrant up --build delete_qdrant qdrant
-```
-followed by:
-```bash
-./start # this will recreate the index
-```
-
-You can also change the model provider like so:
-```bash
-# Optional: Override the embedding provider settings
-export EMBEDDING_PROVIDER_BASE_URL=your-provider-base-url
-export EMBEDDING_PROVIDER_API_KEY=your-provider-api-key
-```
-
-If you don't specify the provider settings, Rowboat will use OpenAI as the default provider.
+**Managed Version**: No configuration required - URL scraping is handled automatically.
