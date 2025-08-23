@@ -12,6 +12,7 @@ import { CURRENT_WORKFLOW_PROMPT } from "./current_workflow";
 import { USE_COMPOSIO_TOOLS } from "@/app/lib/feature_flags";
 import { composio, getTool } from "../composio/composio";
 import { UsageTracker } from "@/app/lib/billing";
+import { CopilotStreamEvent } from "@/src/entities/models/copilot";
 
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
@@ -34,30 +35,6 @@ const openai = createOpenAI({
     baseURL: PROVIDER_BASE_URL,
     compatibility: "strict",
 });
-
-const ZTextEvent = z.object({
-    content: z.string(),
-});
-
-const ZToolCallEvent = z.object({
-    type: z.literal('tool-call'),
-    toolName: z.string(),
-    toolCallId: z.string(),
-    args: z.record(z.any()),
-    query: z.string().optional(),
-});
-
-const ZToolResultEvent = z.object({
-    type: z.literal('tool-result'),
-    toolCallId: z.string(),
-    result: z.any(),
-});
-
-const ZDoneEvent = z.object({
-    done: z.literal(true),
-});
-
-const ZEvent = z.union([ZTextEvent, ZToolCallEvent, ZToolResultEvent, ZDoneEvent]);
 
 const composioToolSearchToolSuggestion = z.object({
     toolkit: z.string(),
@@ -273,7 +250,7 @@ export async function* streamMultiAgentResponse(
     messages: z.infer<typeof CopilotMessage>[],
     workflow: z.infer<typeof Workflow>,
     dataSources: z.infer<typeof DataSourceSchemaForCopilot>[]
-): AsyncIterable<z.infer<typeof ZEvent>> {
+): AsyncIterable<z.infer<typeof CopilotStreamEvent>> {
     const logger = new PrefixLogger('copilot /stream');
     logger.log('context', context);
     logger.log('projectId', projectId);
@@ -375,9 +352,4 @@ export async function* streamMultiAgentResponse(
         projectId, 
         totalChunks: chunkCount 
     });
-
-    // done
-    yield {
-        done: true,
-    };
 }

@@ -1,70 +1,45 @@
-import { getCustomerIdForProject, logUsage, UsageTracker } from "@/app/lib/billing";
-import { USE_BILLING } from "@/app/lib/feature_flags";
-import { redisClient } from "@/app/lib/redis";
-import { CopilotAPIRequest } from "@/src/entities/models/copilot";
-import { streamMultiAgentResponse } from "@/src/application/lib/copilot/copilot";
+import { container } from "@/di/container";
+import { IRunCopilotCachedTurnController } from "@/src/interface-adapters/controllers/copilot/run-copilot-cached-turn.controller";
+import { requireAuth } from "@/app/lib/auth";
 
 export const maxDuration = 300;
 
 export async function GET(request: Request, props: { params: Promise<{ streamId: string }> }) {
   const params = await props.params;
-  // get the payload from redis
-  const payload = await redisClient.get(`copilot-stream-${params.streamId}`);
-  if (!payload) {
-    return new Response("Stream not found", { status: 404 });
-  }
 
-  // parse the payload
-  const { projectId, context, messages, workflow, dataSources } = CopilotAPIRequest.parse(JSON.parse(payload));
+  // get user data
+  const user = await requireAuth();
 
-  // fetch billing customer id
-  let billingCustomerId: string | null = null;
-  if (USE_BILLING) {
-    billingCustomerId = await getCustomerIdForProject(projectId);
-  }
+  const runCopilotCachedTurnController = container.resolve<IRunCopilotCachedTurnController>("runCopilotCachedTurnController");
 
-  const usageTracker = new UsageTracker();
   const encoder = new TextEncoder();
-  let messageCount = 0;
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
         // Iterate over the copilot stream generator
-        for await (const event of streamMultiAgentResponse(
-          usageTracker,
-          projectId,
-          context,
-          messages,
-          workflow,
-          dataSources || [],
-        )) {
+        for await (const event of runCopilotCachedTurnController.execute({
+          caller: "user",
+          userId: user.id,
+          apiKey: request.headers.get("Authorization")?.split(" ")[1],
+          key: params.streamId,
+        })) {
           // Check if this is a content event
           if ('content' in event) {
-            messageCount++;
             controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(event)}\n\n`));
           } else if ('type' in event && event.type === 'tool-call') {
             controller.enqueue(encoder.encode(`event: tool-call\ndata: ${JSON.stringify(event)}\n\n`));
           } else if ('type' in event && event.type === 'tool-result') {
             controller.enqueue(encoder.encode(`event: tool-result\ndata: ${JSON.stringify(event)}\n\n`));
-          } else {
-            controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify(event)}\n\n`));
           }
         }
       } catch (error) {
         console.error('Error processing copilot stream:', error);
         controller.error(new Error("Something went wrong. Please try again."));
       } finally {
-        // log copilot usage
-        if (USE_BILLING && billingCustomerId) {
-          try {
-            await logUsage(billingCustomerId, {
-              items: usageTracker.flush(),
-            });
-          } catch (error) {
-            console.error("Error logging usage", error);
-          }
-        }
+        console.log("closing stream");
+        controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify({ type: 'done' })}\n\n`));
+        controller.enqueue(encoder.encode("event: end\n\n"));
         controller.close();
       }
     },

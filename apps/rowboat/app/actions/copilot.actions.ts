@@ -1,5 +1,5 @@
 'use server';
-import { 
+import {
     CopilotAPIRequest,
     CopilotChatContext, CopilotMessage,
     DataSourceSchemaForCopilot,
@@ -8,15 +8,18 @@ import {
     Workflow} from "../lib/types/workflow_types";
 import { z } from 'zod';
 import { projectAuthCheck } from "./project.actions";
-import { redisClient } from "../lib/redis";
 import { authorizeUserAction, logUsage } from "./billing.actions";
 import { USE_BILLING } from "../lib/feature_flags";
 import { getEditAgentInstructionsResponse } from "../../src/application/lib/copilot/copilot";
 import { container } from "@/di/container";
 import { IUsageQuotaPolicy } from "@/src/application/policies/usage-quota.policy.interface";
 import { UsageTracker } from "../lib/billing";
+import { authCheck } from "./auth.actions";
+import { ICreateCopilotCachedTurnController } from "@/src/interface-adapters/controllers/copilot/create-copilot-cached-turn.controller";
+import { BillingError } from "@/src/entities/errors/common";
 
 const usageQuotaPolicy = container.resolve<IUsageQuotaPolicy>('usageQuotaPolicy');
+const createCopilotCachedTurnController = container.resolve<ICreateCopilotCachedTurnController>('createCopilotCachedTurnController');
 
 export async function getCopilotResponseStream(
     projectId: string,
@@ -27,40 +30,29 @@ export async function getCopilotResponseStream(
 ): Promise<{
     streamId: string;
 } | { billingError: string }> {
-    await projectAuthCheck(projectId);
-    await usageQuotaPolicy.assertAndConsumeProjectAction(projectId);
+    const user = await authCheck();
 
-    // Check billing authorization
-    const authResponse = await authorizeUserAction({
-        type: 'use_credits',
-    });
-    if (!authResponse.success) {
-        return { billingError: authResponse.error || 'Billing error' };
+    try {
+        const { key } = await createCopilotCachedTurnController.execute({
+            caller: 'user',
+            userId: user.id,
+            data: {
+                projectId,
+                messages,
+                workflow: current_workflow_config,
+                context,
+                dataSources,
+            }
+        });
+        return {
+            streamId: key,
+        };
+    } catch (err) {
+        if (err instanceof BillingError) {
+            return { billingError: err.message };
+        }
+        throw err;
     }
-
-    await usageQuotaPolicy.assertAndConsumeProjectAction(projectId);
-    
-    // prepare request
-    const request: z.infer<typeof CopilotAPIRequest> = {
-        projectId,
-        messages,
-        workflow: current_workflow_config,
-        context,
-        dataSources: dataSources,
-    };
-
-    // serialize the request
-    const payload = JSON.stringify(request);
-
-    // create a uuid for the stream
-    const streamId = crypto.randomUUID();
-
-    // store payload in redis
-    await redisClient.set(`copilot-stream-${streamId}`, payload, 'EX', 60 * 10); // expire in 10 minutes
-
-    return {
-        streamId,
-    };
 }
 
 export async function getCopilotAgentInstructions(

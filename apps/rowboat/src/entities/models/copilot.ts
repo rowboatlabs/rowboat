@@ -69,3 +69,27 @@ export const CopilotAPIResponse = z.union([
         error: z.string(),
     }),
 ]);
+
+const CopilotStreamTextEvent = z.object({
+    content: z.string(),
+});
+
+const CopilotStreamToolCallEvent = z.object({
+    type: z.literal('tool-call'),
+    toolName: z.string(),
+    toolCallId: z.string(),
+    args: z.record(z.any()),
+    query: z.string().optional(),
+});
+
+const CopilotStreamToolResultEvent = z.object({
+    type: z.literal('tool-result'),
+    toolCallId: z.string(),
+    result: z.any(),
+});
+
+export const CopilotStreamEvent = z.union([
+    CopilotStreamTextEvent,
+    CopilotStreamToolCallEvent,
+    CopilotStreamToolResultEvent,
+]);
