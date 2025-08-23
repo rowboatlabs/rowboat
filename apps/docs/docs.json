@@ -28,6 +28,9 @@
             "docs/using-rowboat/agents",
             "docs/using-rowboat/tools",
             "docs/using-rowboat/rag",
+            "docs/using-rowboat/triggers",
+            "docs/using-rowboat/jobs",
+            "docs/using-rowboat/conversations",
             {
               "group": "Customise",
               "icon": "sliders",

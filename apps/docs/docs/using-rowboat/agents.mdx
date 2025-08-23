@@ -6,13 +6,87 @@ icon: "robot"
 
 ## Overview
 
-Agents are the core building blocks of Rowboat’s multi-agent system. Each agent carries out a specific part of a conversation, handles tasks via tools, and can collaborate with other agents to orchestrate complex workflows.
+Agents are the core building blocks of Rowboat's multi-agent system. Each agent carries out a specific part of a conversation, handles tasks via tools, and can collaborate with other agents to orchestrate complex workflows.
 
 They are powered by LLMs and can:
 - Respond to user input
 - Trigger tools or APIs
 - Pass control to other agents using @mentions
 - Fetch or process internal data
+- Execute RAG (Retrieval-Augmented Generation) queries
+- Participate in sequential pipeline workflows
+
+---
+
+## Agent Types
+
+Rowboat supports several types of agents, each designed for specific use cases:
+
+| Name | Purpose | Characteristics |
+|------|---------|-----------------|
+| **Conversational Agents** (`conversation`) | Primary user-facing agents that interact directly with users and orchestrate workflows. | • Can respond to users and orchestrate workflows<br />• Typically serve as the start agent (Hub Agent)|
+| **Task Agents** (`internal`) | Specialized agents that perform specific tasks without direct user interaction. | • Focused on specific functions<br />• Return results to parent agents|
+| **Pipeline Agents** (`pipeline`) | Sequential workflow execution agents that process data in a chain. | • Execute in sequence within a pipeline<br />• Cannot transfer to other agents directly|
+
+
+---
+
+## Agent Configuration
+
+Agents are configured through two main tabs in the Rowboat Studio interface:
+
+### **Instructions Tab**
+
+
+#### Description
+A clear description of the agent's role and responsibilities
+
+#### Instructions
+Instructions are the backbone of the agent's behavior. Use the Copilot's structured format for consistency:
+
+**Recommended Structure:**
+```
+## 🧑‍💼 Role:
+[Clear description of the agent's role]
+
+## ⚙️ Steps to Follow:
+1. [Step 1]
+2. [Step 2]
+3. [Step 3]
+
+## 🎯 Scope:
+✅ In Scope:
+- [What the agent should handle]
+
+❌ Out of Scope:
+- [What the agent should NOT handle]
+
+## 📋 Guidelines:
+✔️ Dos:
+- [Positive behaviors]
+
+🚫 Don'ts:
+- [Negative behaviors]
+```
+
+#### Examples
+These help agents behave correctly in specific situations. Each example can include:
+- A sample user message
+- The expected agent response
+- Any tool calls (if applicable)
+
+### **Configurations Tab**
+
+#### Name 
+Name of the agent
+
+
+#### Behaviour
+- **Agent Type**: Choose from `conversation`, `internal`, or `pipeline`
+- **Model**: Select the LLM model (GPT-4o, GPT-4o-mini, google/gemini-2.5-flash, etc.)
+
+#### RAG
+- **Add Source**: Connect data sources to enable RAG capabilities for the agent
 
 ---
 
@@ -28,11 +102,9 @@ Start by telling Copilot what your assistant is meant to do — it'll generate a
   <img src="/docs/img/create-agents-delivery.png" className="w-full max-w-[400px] rounded-xl" alt="Creating agents with Copilot" />
 </Frame>
 
-
-
 ### Inspect the Output
 
-After applying the suggested agents, take a close look at each one’s:
+After applying the suggested agents, take a close look at each one's:
 - **Instructions**: Define how the agent behaves
 - **Examples**: Guide agent responses and tool use
 
@@ -42,62 +114,28 @@ After applying the suggested agents, take a close look at each one’s:
 
 ---
 
-## Agent Configuration
-
-Agents are defined by several key components:
-
-### Description
-The description tells other agents what this agent is responsible for. A clear, well-written description helps with effective delegation between agents.
-
-### Instructions
-Instructions are the backbone of the agent's behavior. Use the Copilot's structure (Role, Steps, Scope, Guidelines) for consistency. Think of this as prompt engineering — the clearer you are, the better the agent performs.
-
-### Examples
-These help agents behave correctly in specific situations. Each example can include:
-- A sample user message
-- The expected agent response
-- Any tool calls (if applicable)
-
-There’s no fixed format — just be clear and contextual.
-
-### Prompts
-You can attach additional prompts to guide agent behavior further. These are added alongside the instructions.
-
-### Tools
-Tools allow agents to act — e.g., call APIs, search databases, send emails, etc. 
-- Attach tools directly to agents.
-- Use instructions or examples to specify when and how tools should be used.
-
-### Connected Agents
-You can connect agents using @mentions inside instructions. If an agent references another agent that doesn’t exist, it will show up with a `!` badge.
-
----
-
 ## Updating Agent Behavior
 
 There are three ways to update an agent:
 
 ### 1. With Copilot
 
-Copilot understands the current chat context and can help rewrite or improve an agent’s behavior based on how it performed.
-
+Copilot understands the current chat context and can help rewrite or improve an agent's behavior based on how it performed.
 
 <Frame>
   <img src="/docs/img/update-agent-copilot.png" className="w-full max-w-[400px] rounded-xl" alt="Update agent using Copilot" />
 </Frame>
 
-### 2. Using the Generate Button
 
-Use the **Generate** button to rework the instructions without manually rewriting them.
 
-<Frame>
-  <img src="/docs/img/update-agent-generate.png" alt="Update agent with Generate" />
-</Frame>
+### 2. Manual Edits
 
-### 3. Manual Edits
-
-You can always manually edit the agent’s instructions.
+You can always manually edit the agent's instructions.
 
 <Frame>
   <img src="/docs/img/update-agent-manual.png" alt="Manually edit agent" />
 </Frame>
+
+---
+
+
