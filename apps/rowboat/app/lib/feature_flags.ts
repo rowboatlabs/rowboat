@@ -17,4 +17,5 @@ export const USE_PRODUCT_TOUR = false;
 export const SHOW_COPILOT_MARQUEE = false;
 export const SHOW_PROMPTS_SECTION = true;
 export const SHOW_DARK_MODE_TOGGLE = false;
-export const SHOW_VISUALIZATION = false
+export const SHOW_VISUALIZATION = false;
+export const SHOW_PREBUILT_CARDS = false;
