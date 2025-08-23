@@ -1,0 +1,103 @@
+---
+title: "Agents"
+description: "Learn about creating and configuring individual agents within your multi-agent system"
+icon: "robot"
+---
+
+## Overview
+
+Agents are the core building blocks of Rowboat’s multi-agent system. Each agent carries out a specific part of a conversation, handles tasks via tools, and can collaborate with other agents to orchestrate complex workflows.
+
+They are powered by LLMs and can:
+- Respond to user input
+- Trigger tools or APIs
+- Pass control to other agents using @mentions
+- Fetch or process internal data
+
+---
+
+## Creating Your Initial Set of Agents
+
+Let Copilot bootstrap your agent graph.
+
+### Instruct Copilot
+
+Start by telling Copilot what your assistant is meant to do — it'll generate an initial set of agents with best-practice instructions, role definitions, and connected agents.
+
+<Frame>
+  <img src="/docs/img/create-agents-delivery.png" className="w-full max-w-[400px] rounded-xl" alt="Creating agents with Copilot" />
+</Frame>
+
+
+
+### Inspect the Output
+
+After applying the suggested agents, take a close look at each one’s:
+- **Instructions**: Define how the agent behaves
+- **Examples**: Guide agent responses and tool use
+
+<Frame>
+  <img src="/docs/img/agent-instruction.png" alt="Inspect agent instructions" />
+</Frame>
+
+---
+
+## Agent Configuration
+
+Agents are defined by several key components:
+
+### Description
+The description tells other agents what this agent is responsible for. A clear, well-written description helps with effective delegation between agents.
+
+### Instructions
+Instructions are the backbone of the agent's behavior. Use the Copilot's structure (Role, Steps, Scope, Guidelines) for consistency. Think of this as prompt engineering — the clearer you are, the better the agent performs.
+
+### Examples
+These help agents behave correctly in specific situations. Each example can include:
+- A sample user message
+- The expected agent response
+- Any tool calls (if applicable)
+
+There’s no fixed format — just be clear and contextual.
+
+### Prompts
+You can attach additional prompts to guide agent behavior further. These are added alongside the instructions.
+
+### Tools
+Tools allow agents to act — e.g., call APIs, search databases, send emails, etc. 
+- Attach tools directly to agents.
+- Use instructions or examples to specify when and how tools should be used.
+
+### Connected Agents
+You can connect agents using @mentions inside instructions. If an agent references another agent that doesn’t exist, it will show up with a `!` badge.
+
+---
+
+## Updating Agent Behavior
+
+There are three ways to update an agent:
+
+### 1. With Copilot
+
+Copilot understands the current chat context and can help rewrite or improve an agent’s behavior based on how it performed.
+
+
+<Frame>
+  <img src="/docs/img/update-agent-copilot.png" className="w-full max-w-[400px] rounded-xl" alt="Update agent using Copilot" />
+</Frame>
+
+### 2. Using the Generate Button
+
+Use the **Generate** button to rework the instructions without manually rewriting them.
+
+<Frame>
+  <img src="/docs/img/update-agent-generate.png" alt="Update agent with Generate" />
+</Frame>
+
+### 3. Manual Edits
+
+You can always manually edit the agent’s instructions.
+
+<Frame>
+  <img src="/docs/img/update-agent-manual.png" alt="Manually edit agent" />
+</Frame>
