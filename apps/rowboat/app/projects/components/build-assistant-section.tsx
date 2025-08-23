@@ -16,6 +16,7 @@ import { Tabs, Tab } from "@/components/ui/tabs";
 import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import Link from 'next/link';
+import { SHOW_PREBUILT_CARDS } from '@/app/lib/feature_flags';
 
 
 
@@ -398,7 +399,7 @@ export function BuildAssistantSection() {
                     </div>
 
                     {/* Pre-built Assistants Section - Only show for New Assistant tab */}
-                    {selectedTab === 'new' && (
+                    {selectedTab === 'new' && SHOW_PREBUILT_CARDS && (
                         <div className="max-w-5xl mx-auto mt-16">
                         <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700">
                             <div className="text-left mb-6">
