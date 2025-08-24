@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { getCopilotResponseStream } from "@/app/actions/copilot.actions";
-import { CopilotMessage } from "@/src/application/lib/copilot/types";
+import { CopilotMessage } from "@/src/entities/models/copilot";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { DataSource } from "@/src/entities/models/data-source";
 import { z } from "zod";

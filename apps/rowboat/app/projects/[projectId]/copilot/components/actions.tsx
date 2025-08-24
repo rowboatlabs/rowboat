@@ -2,7 +2,7 @@
 import { createContext, useContext, useRef, useState } from "react";
 import clsx from "clsx";
 import { z } from "zod";
-import { CopilotAssistantMessageActionPart } from "../../../../../src/application/lib/copilot/types";
+import { CopilotAssistantMessageActionPart } from "../../../../../src/entities/models/copilot";
 import { Workflow } from "../../../../lib/types/workflow_types";
 import { PreviewModalProvider, usePreviewModal } from '../../workflow/preview-modal';
 import { getAppliedChangeKey } from "../app";

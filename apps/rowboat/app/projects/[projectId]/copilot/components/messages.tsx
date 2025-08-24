@@ -5,7 +5,7 @@ import { z } from "zod";
 import { Workflow} from "@/app/lib/types/workflow_types";
 import MarkdownContent from "@/app/lib/components/markdown-content";
 import { MessageSquareIcon, EllipsisIcon, XIcon, CheckCheckIcon, ChevronDown, ChevronUp } from "lucide-react";
-import { CopilotMessage, CopilotAssistantMessage, CopilotAssistantMessageActionPart } from "@/src/application/lib/copilot/types";
+import { CopilotMessage, CopilotAssistantMessage, CopilotAssistantMessageActionPart } from "@/src/entities/models/copilot";
 import { Action, StreamingAction } from './actions';
 import { useParsedBlocks } from "../use-parsed-blocks";
 import { validateConfigChanges } from "@/app/lib/client_utils";

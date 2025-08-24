@@ -7,7 +7,7 @@ import { useState, useEffect, useRef } from "react";
 import { usePreviewModal } from "../workflow/preview-modal";
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Select, SelectItem, Chip, SelectSection, Input } from "@heroui/react";
 import { PreviewModalProvider } from "../workflow/preview-modal";
-import { CopilotMessage } from "@/src/application/lib/copilot/types";
+import { CopilotMessage } from "@/src/entities/models/copilot";
 import { getCopilotAgentInstructions } from "@/app/actions/copilot.actions";
 import { Dropdown as CustomDropdown } from "../../../lib/components/dropdown";
 import { createAtMentions } from "../../../lib/components/atmentions";

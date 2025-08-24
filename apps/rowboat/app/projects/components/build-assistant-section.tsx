@@ -16,10 +16,34 @@ import { Tabs, Tab } from "@/components/ui/tabs";
 import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import Link from 'next/link';
+import { SHOW_PREBUILT_CARDS } from '@/app/lib/feature_flags';
 
 
 
 const ITEMS_PER_PAGE = 6;
+
+const copilotPrompts = {
+    "Blog assistant": {
+        prompt: "Build an assistant to help with writing a blog post and updating it on google docs",
+        emoji: "📝"
+    },
+    "Meeting prep workflow": {
+        prompt: "Build a meeting prep pipeline which takes a google calendar invite as input and performs research on the guests using Duckduckgo search and send an email to me",
+        emoji: "📅"
+    },
+    "Scheduling assistant": {
+        prompt: "Build a scheduling assistant that helps users manage their calendar, book meetings, find available time slots, send reminders, and optimize their daily schedule based on priorities and preferences",
+        emoji: "✅"
+    },
+    "Reddit & HN assistant": {
+        prompt: "Build an assistant that helps me with browsing Reddit and Hacker News",
+        emoji: "🔍"
+    },
+    "CRM assistant": {
+        prompt: "Build an assistant that helps me with my CRM",
+        emoji: "📊"
+    }
+};
 
 export function BuildAssistantSection() {
     const [userPrompt, setUserPrompt] = useState('');
@@ -83,6 +107,12 @@ export function BuildAssistantSection() {
     // Handle template selection
     const handleTemplateSelect = async (templateId: string) => {
         await createProjectFromTemplate(templateId, router);
+    };
+
+    // Handle prompt card selection
+    const handlePromptSelect = (promptText: string) => {
+        setUserPrompt(promptText);
+        setPromptError(null);
     };
 
     const fetchProjects = async () => {
@@ -310,6 +340,24 @@ export function BuildAssistantSection() {
                                                 </div>
                                             </div>
                                         </div>
+                                        
+                                        {/* Predefined Prompt Cards */}
+                                        <div className="mt-8">
+                                            <div className="flex flex-wrap gap-3 justify-center">
+                                                {Object.entries(copilotPrompts).map(([name, config]) => (
+                                                    <button
+                                                        key={name}
+                                                        onClick={() => handlePromptSelect(config.prompt)}
+                                                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-all duration-200 hover:shadow-sm"
+                                                    >
+                                                        <span className="w-4 h-4 flex items-center justify-center">
+                                                            {config.emoji}
+                                                        </span>
+                                                        {name}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
                                     </div>
                                 </Tab>
                                 <Tab key="existing" title="My Assistants">
@@ -398,7 +446,7 @@ export function BuildAssistantSection() {
                     </div>
 
                     {/* Pre-built Assistants Section - Only show for New Assistant tab */}
-                    {selectedTab === 'new' && (
+                    {selectedTab === 'new' && SHOW_PREBUILT_CARDS && (
                         <div className="max-w-5xl mx-auto mt-16">
                         <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700">
                             <div className="text-left mb-6">

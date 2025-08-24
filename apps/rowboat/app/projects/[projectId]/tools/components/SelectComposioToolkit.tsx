@@ -132,10 +132,10 @@ export function SelectComposioToolkit({
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-800 dark:border-gray-200 mx-auto"></div>
         <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">
           {filterByTriggers 
-            ? 'Loading Composio toolkits with triggers...' 
+            ? 'Loading toolkits with triggers...' 
             : filterByTools 
-              ? 'Loading Composio toolkits with tools...'
-              : 'Loading Composio toolkits...'
+              ? 'Loading toolkits with tools...'
+              : 'Loading toolkits...'
           }
         </p>
       </div>

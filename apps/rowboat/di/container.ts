@@ -145,6 +145,12 @@ import { UpdateLiveWorkflowController } from "@/src/interface-adapters/controlle
 import { RevertToLiveWorkflowUseCase } from "@/src/application/use-cases/projects/revert-to-live-workflow.use-case";
 import { RevertToLiveWorkflowController } from "@/src/interface-adapters/controllers/projects/revert-to-live-workflow.controller";
 
+// copilot
+import { CreateCopilotCachedTurnUseCase } from "@/src/application/use-cases/copilot/create-copilot-cached-turn.use-case";
+import { CreateCopilotCachedTurnController } from "@/src/interface-adapters/controllers/copilot/create-copilot-cached-turn.controller";
+import { RunCopilotCachedTurnUseCase } from "@/src/application/use-cases/copilot/run-copilot-cached-turn.use-case";
+import { RunCopilotCachedTurnController } from "@/src/interface-adapters/controllers/copilot/run-copilot-cached-turn.controller";
+
 // users
 import { MongoDBUsersRepository } from "@/src/infrastructure/repositories/mongodb.users.repository";
 
@@ -327,6 +333,13 @@ container.register({
     runTurnController: asClass(RunTurnController).singleton(),
     listConversationsController: asClass(ListConversationsController).singleton(),
     fetchConversationController: asClass(FetchConversationController).singleton(),
+
+    // copilot
+    // ---
+    createCopilotCachedTurnUseCase: asClass(CreateCopilotCachedTurnUseCase).singleton(),
+    createCopilotCachedTurnController: asClass(CreateCopilotCachedTurnController).singleton(),
+    runCopilotCachedTurnUseCase: asClass(RunCopilotCachedTurnUseCase).singleton(),
+    runCopilotCachedTurnController: asClass(RunCopilotCachedTurnController).singleton(),
 
     // users
     // ---

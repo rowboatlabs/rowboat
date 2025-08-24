@@ -1,0 +1,83 @@
+{
+    "$schema": "https://mintlify.com/docs.json",
+    "theme": "maple",
+    "name": "Rowboat",
+    "description": "Rowboat is an open-source platform for building multi-agent systems. It helps you orchestrate tools, RAG, memory, and deployable agents with ease.",
+    "colors": {
+      "primary": "#6366F1",
+        "light": "#6366F1",
+        "dark": "#6366F1"
+    },
+    "icons": {
+      "library": "fontawesome"
+    },
+    "navigation": {
+      "groups": [
+        {
+          "group": "Getting Started",
+          "pages": [
+            "docs/getting-started/introduction",
+            "docs/getting-started/quickstart",
+            "docs/getting-started/license"
+          ]
+        },
+        {
+          "group": "Using Rowboat",
+          "pages": [
+            "docs/using-rowboat/rowboat-studio",
+            "docs/using-rowboat/agents",
+            "docs/using-rowboat/tools",
+            "docs/using-rowboat/rag",
+            "docs/using-rowboat/triggers",
+            "docs/using-rowboat/jobs",
+            "docs/using-rowboat/conversations",
+            {
+              "group": "Customise",
+              "icon": "sliders",
+              "pages": [
+                "docs/using-rowboat/customise/custom-llms"
+              ]
+            }
+          ]
+        },
+        {
+          "group": "API & SDK",
+          "pages": ["docs/api-sdk/using_the_api", "docs/api-sdk/using_the_sdk"]
+        },
+        {
+          "group": "Development",
+          "pages": ["docs/development/contribution-guide", "docs/development/roadmap"]
+        }
+      ]
+    },
+    "background": {
+      "decoration": "gradient",
+      "color": {
+        "light": "#FFFFFF",
+        "dark": "#0D0A09"
+      }
+    },
+    "navbar": {
+      "primary": {
+        "type": "button",
+        "label": "Try Rowboat",
+        "href": "https://app.rowboatlabs.com"
+      }
+    },
+    "footer": {
+      "socials": {
+        "github": "https://github.com/rowboatlabs/rowboat",
+        "linkedin": "https://www.linkedin.com/company/rowboat-labs",
+        "discord": "https://discord.gg/PCkH9TWC"
+      }
+    },
+    "contextual": {
+      "options": [
+        "copy",
+        "view",
+        "chatgpt",
+        "claude"
+      ]
+    } 
+  }
+  
