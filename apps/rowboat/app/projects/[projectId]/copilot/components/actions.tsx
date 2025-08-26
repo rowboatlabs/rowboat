@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useContext, useRef, useState } from "react";
+import { createContext, useContext, useRef, useState, useEffect } from "react";
 import clsx from "clsx";
 import { z } from "zod";
 import { CopilotAssistantMessageActionPart } from "../../../../../src/entities/models/copilot";
@@ -384,6 +384,17 @@ export function StreamingAction({
     };
     loading: boolean;
 }) {
+    const [loadingStage, setLoadingStage] = useState<'fetching' | 'configuring'>('fetching');
+    
+    // After 3 seconds, switch to "configuring" stage
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setLoadingStage('configuring');
+        }, 3000);
+        
+        return () => clearTimeout(timer);
+    }, []);
+
     // Use the same card container and header style as Action
     return (
         <div className={clsx(
@@ -416,7 +427,20 @@ export function StreamingAction({
             {/* Loading state body */}
             <div className="px-3 py-4 text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2 min-h-[32px]">
                 <Spinner size="sm" />
-                <span>Loading...</span>
+                <span className="animate-pulse">
+                    {loadingStage === 'fetching' 
+                        ? (action.config_type === 'agent' 
+                            ? `Creating agent...`
+                            : action.config_type === 'pipeline'
+                            ? `Creating pipeline...`
+                            : `Fetching ${action.config_type} definition...`)
+                        : (action.config_type === 'agent'
+                            ? `Configuring agent...`
+                            : action.config_type === 'pipeline'
+                            ? `Configuring pipeline...`
+                            : `Configuring ${action.config_type}...`)
+                    }
+                </span>
             </div>
         </div>
     );
