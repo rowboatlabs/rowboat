@@ -507,7 +507,9 @@ export function Messages({
     loadingResponse,
     workflow,
     dispatch,
-    onStatusBarChange
+    onStatusBarChange,
+    toolCalling,
+    toolQuery
 }: {
     messages: z.infer<typeof CopilotMessage>[];
     streamingResponse: string;
@@ -515,6 +517,8 @@ export function Messages({
     workflow: z.infer<typeof Workflow>;
     dispatch: (action: any) => void;
     onStatusBarChange?: (status: any) => void;
+    toolCalling?: boolean;
+    toolQuery?: string | null;
 }) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [displayMessages, setDisplayMessages] = useState(messages);
@@ -582,11 +586,15 @@ export function Messages({
                         {renderMessage(message, index)}
                     </div>
                 ))}
-                {loadingResponse && (
-                    <div className="text-xs text-gray-500">
-                        <Spinner size="sm" className="ml-2" />
+                {!streamingResponse && (toolCalling ? (
+                    <div className="text-sm text-gray-600 dark:text-gray-400 mb-2 px-4">
+                        <span className="animate-pulse [animation-duration:2s]">Searching for tools{toolQuery ? ` to ${toolQuery}` : ''}...</span>
                     </div>
-                )}
+                ) : loadingResponse ? (
+                    <div className="text-sm text-gray-600 dark:text-gray-400 mb-2 px-4">
+                        <span className="animate-pulse [animation-duration:2s]">Thinking...</span>
+                    </div>
+                ) : null)}
             </div>
             <div ref={messagesEndRef} />
         </div>
