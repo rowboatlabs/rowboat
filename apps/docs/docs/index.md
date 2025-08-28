@@ -5,7 +5,7 @@ Rowboat is a low-code AI IDE to build MCP tools connected multi-agent assistants
 **Note:** These docs are intended for developers who would like to use our [open-source code](https://github.com/rowboatlabs/rowboat/).
 
 - Our source code is on GitHub at [@rowboatlabs/rowboat](https://github.com/rowboatlabs/rowboat/)
-- Join us on [discord](https://discord.gg/jHhUKkKHn8)
+- Join us on [discord](https://discord.gg/rxB8pzHxaS)
 - Email us at [founders@rowboatlabs.com](mailto:founders@rowboatlabs.com)
 - Visit our [website](https://www.rowboatlabs.com/)
 
