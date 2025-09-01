@@ -91,6 +91,7 @@ export type Action = {
 } | {
     type: "add_pipeline";
     pipeline: Partial<z.infer<typeof WorkflowPipeline>>;
+    defaultModel?: string;
 } | {
     type: "select_agent";
     name: string;
@@ -465,7 +466,7 @@ function reducer(state: State, action: Action): State {
                                     description: `Default agent for ${pipelineName} pipeline`,
                                     disabled: false,
                                     instructions: `You are the first step in the ${pipelineName} pipeline. Focus on your specific role.`,
-                                    model: "gpt-4o",
+                                    model: action.defaultModel || "gpt-4.1",
                                     locked: false,
                                     toggleAble: true,
                                     ragReturnType: "chunks",
@@ -486,7 +487,7 @@ function reducer(state: State, action: Action): State {
                                             description: `Agent for ${pipelineName} pipeline`,
                                             disabled: false,
                                             instructions: `You are part of the ${pipelineName} pipeline. Focus on your specific role.`,
-                                            model: "gpt-4o",
+                                            model: action.defaultModel || "gpt-4.1",
                                             locked: false,
                                             toggleAble: true,
                                             ragReturnType: "chunks",
@@ -1090,7 +1091,7 @@ export function WorkflowEditor({
     function handleAddAgent(agent: Partial<z.infer<typeof WorkflowAgent>> = {}) {
         const agentWithModel = {
             ...agent,
-            model: agent.model || defaultModel || "gpt-4o"
+            model: agent.model || defaultModel || "gpt-4.1"
         };
         dispatch({ type: "add_agent", agent: agentWithModel });
     }
@@ -1108,7 +1109,7 @@ export function WorkflowEditor({
     }
 
     function handleAddPipeline(pipeline: Partial<z.infer<typeof WorkflowPipeline>> = {}) {
-        dispatch({ type: "add_pipeline", pipeline });
+        dispatch({ type: "add_pipeline", pipeline, defaultModel });
     }
 
     function handleDeletePipeline(name: string) {
@@ -1125,7 +1126,7 @@ export function WorkflowEditor({
             name: newAgentName,
             type: 'pipeline' as const,
             outputVisibility: 'internal' as const,
-            model: defaultModel || "gpt-4o"
+            model: defaultModel || "gpt-4.1"
         };
         
         // First add the agent
