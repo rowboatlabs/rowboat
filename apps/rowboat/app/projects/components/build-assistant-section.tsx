@@ -21,7 +21,7 @@ const SHOW_PREBUILT_CARDS = process.env.NEXT_PUBLIC_SHOW_PREBUILT_CARDS === 'tru
 
 
 
-const ITEMS_PER_PAGE = 6;
+const ITEMS_PER_PAGE = 10;
 
 const copilotPrompts = {
     "Blog assistant": {
@@ -363,7 +363,7 @@ export function BuildAssistantSection() {
                                 </Tab>
                                 <Tab key="existing" title="My Assistants">
                                     <div className="pt-4">
-                                        <div className="h-96 flex flex-col bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
+                                        <div className="flex flex-col bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
                                             {projectsLoading ? (
                                                 <div className="flex items-center justify-center h-full text-sm text-gray-500 dark:text-gray-400">
                                                     Loading assistants...
@@ -374,7 +374,7 @@ export function BuildAssistantSection() {
                                                 </div>
                                             ) : (
                                                 <>
-                                                    <div className="flex-1 overflow-y-auto">
+                                                    <div className="flex-1">
                                                         <div className="space-y-2">
                                                             {currentProjects.map((project) => (
                                                                 <Link
