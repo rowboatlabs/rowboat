@@ -16,7 +16,8 @@ import { Tabs, Tab } from "@/components/ui/tabs";
 import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import Link from 'next/link';
-import { SHOW_PREBUILT_CARDS } from '@/app/lib/feature_flags';
+
+const SHOW_PREBUILT_CARDS = process.env.NEXT_PUBLIC_SHOW_PREBUILT_CARDS === 'true';
 
 
 

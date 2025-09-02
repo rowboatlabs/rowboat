@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useContext, useRef, useState } from "react";
+import { createContext, useContext, useRef, useState, useEffect } from "react";
 import clsx from "clsx";
 import { z } from "zod";
 import { CopilotAssistantMessageActionPart } from "../../../../../src/entities/models/copilot";
@@ -8,6 +8,7 @@ import { PreviewModalProvider, usePreviewModal } from '../../workflow/preview-mo
 import { getAppliedChangeKey } from "../app";
 import { AlertTriangleIcon, CheckCheckIcon, CheckIcon, ChevronsDownIcon, ChevronsUpIcon, EyeIcon, PencilIcon, PlusIcon } from "lucide-react";
 import { Spinner } from "@heroui/react";
+import { PictureImg } from "@/components/ui/picture-img";
 
 const ActionContext = createContext<{
     msgIndex: number;
@@ -158,6 +159,33 @@ export function Action({
         );
     }
 
+    // Determine composio toolkit logo for tools
+    const toolkitLogo = (() => {
+        if (action.config_type !== 'tool') return undefined;
+        const getLogo = (o: any): string | undefined => {
+            return (
+                o?.composioData?.logo ||
+                o?.composioData?.logoUrl ||
+                o?.composio?.logo ||
+                o?.toolkit?.logo ||
+                o?.composio_tool?.toolkit?.logo ||
+                o?.logo ||
+                undefined
+            );
+        };
+        // Try various shapes the action might use
+        const a: any = action as any;
+        return (
+            getLogo(a.config_changes) ||
+            getLogo(a) ||
+            getLogo(a.config_changes?.tool) ||
+            getLogo(a.config_changes?.composio_tool) ||
+            getLogo(a.tool) ||
+            (workflow.tools.find(t => t.name === action.name) as any)?.composioData?.logo ||
+            undefined
+        );
+    })();
+
     return <div className={clsx(
         'flex flex-col rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xs',
         'transition-shadow duration-150',
@@ -170,9 +198,9 @@ export function Action({
     )}>
         <ActionContext.Provider value={{ msgIndex, actionIndex, action, workflow, appliedFields, stale }}>
             <div className="flex items-center gap-2 px-2 py-1 border-b border-zinc-100 dark:border-zinc-800">
-                {/* Small colored icon for type */}
+                {/* Small colored icon for type; show composio toolkit logo for tools when available */}
                 <span className={clsx(
-                    'inline-flex items-center justify-center rounded-full h-5 w-5 text-xs',
+                    'inline-flex items-center justify-center rounded-full h-5 w-5 text-xs overflow-hidden',
                     {
                         'bg-blue-100 text-blue-600': action.action == 'create_new',
                         'bg-yellow-100 text-yellow-600': action.action == 'edit',
@@ -180,7 +208,11 @@ export function Action({
                         'bg-gray-200 text-gray-600': stale || allApplied || action.error,
                     }
                 )}>
-                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : action.config_type === 'start_agent' ? '🏁' : action.config_type === 'prompt' ? '💬' : '💬'}
+                    {action.config_type === 'tool' && toolkitLogo ? (
+                        <PictureImg src={toolkitLogo} alt={"Toolkit logo"} className="h-5 w-5 object-contain" />
+                    ) : (
+                        action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : action.config_type === 'start_agent' ? '🏁' : action.config_type === 'prompt' ? '💬' : '💬'
+                    )}
                 </span>
                 <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 truncate flex-1">
                     {action.action === 'create_new' ? 'Add' : action.action === 'edit' ? 'Edit' : 'Delete'} {action.config_type}: {action.name}
@@ -352,6 +384,17 @@ export function StreamingAction({
     };
     loading: boolean;
 }) {
+    const [loadingStage, setLoadingStage] = useState<'fetching' | 'configuring'>('fetching');
+    
+    // After 3 seconds, switch to "configuring" stage
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setLoadingStage('configuring');
+        }, 3000);
+        
+        return () => clearTimeout(timer);
+    }, []);
+
     // Use the same card container and header style as Action
     return (
         <div className={clsx(
@@ -384,7 +427,20 @@ export function StreamingAction({
             {/* Loading state body */}
             <div className="px-3 py-4 text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2 min-h-[32px]">
                 <Spinner size="sm" />
-                <span>Loading...</span>
+                <span className="animate-pulse">
+                    {loadingStage === 'fetching' 
+                        ? (action.config_type === 'agent' 
+                            ? `Creating agent...`
+                            : action.config_type === 'pipeline'
+                            ? `Creating pipeline...`
+                            : `Fetching ${action.config_type} definition...`)
+                        : (action.config_type === 'agent'
+                            ? `Configuring agent...`
+                            : action.config_type === 'pipeline'
+                            ? `Configuring pipeline...`
+                            : `Configuring ${action.config_type}...`)
+                    }
+                </span>
             </div>
         </div>
     );
