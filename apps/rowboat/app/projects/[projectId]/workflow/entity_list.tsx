@@ -207,8 +207,8 @@ const ListItemWithMenu = ({
 };
 
 const StartLabel = () => (
-    <div className="text-xs text-indigo-500 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30 px-1.5 py-0.5 rounded">
-        Start
+    <div className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-0.5 rounded font-medium">
+        START
     </div>
 );
 
