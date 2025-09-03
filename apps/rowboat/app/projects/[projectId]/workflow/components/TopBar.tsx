@@ -64,6 +64,7 @@ export function TopBar({
     const projectId = typeof (params as any).projectId === 'string' ? (params as any).projectId : (params as any).projectId?.[0];
     
 <<<<<<< HEAD
+<<<<<<< HEAD
     // Progress bar steps with completion logic and detailed tooltips
     const progressSteps: ProgressStep[] = [
         { id: 1, label: "Build: Ask the copilot to build the assistant you want and apply the changes", completed: hasAgentInstructionChanges },
@@ -72,12 +73,19 @@ export function TopBar({
         { id: 4, label: "Use: Use the assistant by chatting with it, adding triggers like incoming emails, or integrating through the API", completed: hasClickedUse },
 =======
     // Progress bar steps - step 1: build, step 2: test, step 3: publish
+=======
+    // Progress bar steps - step 1: build, step 2: test, step 3: publish, step 4: use
+>>>>>>> e2ef4267 (step 4 turns green on use assistant)
     const progressSteps: ProgressStep[] = [
         { id: 1, label: "Build", completed: hasAgentInstructionChanges }, // Complete when agent instructions modified
         { id: 2, label: "Test", completed: hasPlaygroundTested && hasAgentInstructionChanges }, // Complete when playground tested AND step 1 complete
         { id: 3, label: "Publish", completed: hasPublished }, // Complete when user publishes workflow
+<<<<<<< HEAD
         { id: 4, label: "Use", completed: false },
 >>>>>>> 7dfbb324 (step 3 turns green on publish)
+=======
+        { id: 4, label: "Use", completed: hasClickedUse }, // Complete when user clicks "Use Assistant"
+>>>>>>> e2ef4267 (step 4 turns green on use assistant)
     ];
 
     return (
@@ -175,6 +183,7 @@ export function TopBar({
                     {/* Deploy CTA - always visible */}
                     <div className="flex items-center gap-3">
                         {isLive ? (
+<<<<<<< HEAD
                             <>
                                 <Dropdown>
                                     <DropdownTrigger>
@@ -183,6 +192,49 @@ export function TopBar({
                                             size="md"
                                             className="gap-2 px-4 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-semibold text-sm border border-blue-200 dark:border-blue-700 shadow-sm"
                                             startContent={<Plug size={16} />}
+=======
+                            <Dropdown>
+                                <DropdownTrigger>
+                                    <Button
+                                        variant="solid"
+                                        size="md"
+                                        className="gap-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm"
+                                        startContent={<Plug size={16} />}
+                                        onPress={onUseAssistantClick}
+                                    >
+                                        Use Assistant
+                                        <ChevronDownIcon size={14} />
+                                    </Button>
+                                </DropdownTrigger>
+                                <DropdownMenu aria-label="Assistant access options">
+                                    <DropdownItem
+                                        key="chat"
+                                        startContent={<MessageCircleIcon size={16} />}
+                                        onPress={() => { 
+                                            onUseAssistantClick(); // Mark step 4 as complete
+                                            // Chat is already in foreground in live mode, just mark as used
+                                        }}
+                                    >
+                                        Chat with Assistant
+                                    </DropdownItem>
+                                    <DropdownItem
+                                        key="api-sdk"
+                                        startContent={<SettingsIcon size={16} />}
+                                        onPress={() => { 
+                                            onUseAssistantClick(); // Mark step 4 as complete
+                                            if (projectId) { router.push(`/projects/${projectId}/config`); } 
+                                        }}
+                                    >
+                                        API & SDK Settings
+                                    </DropdownItem>
+                                    <DropdownItem
+                                        key="manage-triggers"
+                                        startContent={<ZapIcon size={16} />}
+                                        onPress={() => { 
+                                            onUseAssistantClick(); // Mark step 4 as complete
+                                            if (projectId) { router.push(`/projects/${projectId}/manage-triggers`); } 
+                                        }}
+>>>>>>> e2ef4267 (step 4 turns green on use assistant)
                                         >
                                             Use Assistant
                                             <ChevronDownIcon size={14} />
