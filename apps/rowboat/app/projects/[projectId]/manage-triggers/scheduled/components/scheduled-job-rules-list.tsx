@@ -9,6 +9,7 @@ import { z } from "zod";
 import { ListedRuleItem } from "@/src/application/repositories/scheduled-job-rules.repository.interface";
 import { isToday, isThisWeek, isThisMonth } from "@/lib/utils/date";
 import { PlusIcon, Trash2 } from "lucide-react";
+import { CreateScheduledJobRuleForm } from "./create-scheduled-job-rule-form";
 
 type ListedItem = z.infer<typeof ListedRuleItem>;
 
@@ -19,6 +20,7 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
     const [loadingMore, setLoadingMore] = useState<boolean>(false);
     const [hasMore, setHasMore] = useState<boolean>(false);
     const [deletingRule, setDeletingRule] = useState<string | null>(null);
+    const [showCreateFlow, setShowCreateFlow] = useState(false);
 
     const fetchPage = useCallback(async (cursorArg?: string | null) => {
         const res = await listScheduledJobRules({ projectId, cursor: cursorArg ?? undefined, limit: 20 });
@@ -38,6 +40,12 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
         })();
         return () => { ignore = true; };
     }, [fetchPage]);
+
+    useEffect(() => {
+        if (!loading && items.length === 0 && !showCreateFlow) {
+            setShowCreateFlow(true);
+        }
+    }, [loading, items.length, showCreateFlow]);
 
     const loadMore = useCallback(async () => {
         if (!cursor) return;
@@ -65,6 +73,29 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
         } finally {
             setDeletingRule(null);
         }
+    };
+
+    const handleCreateNew = () => {
+        setShowCreateFlow(true);
+    };
+
+    const handleBackToList = () => {
+        setShowCreateFlow(false);
+        // Reload the list to show any newly created triggers
+        const loadTriggers = async () => {
+            try {
+                setLoading(true);
+                const response = await fetchPage(null);
+                setItems(response.items);
+                setCursor(response.nextCursor);
+                setHasMore(Boolean(response.nextCursor));
+            } catch (err: any) {
+                console.error('Error loading triggers:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        loadTriggers();
     };
 
     const sections = useMemo(() => {
@@ -103,6 +134,10 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
         return date.toLocaleString();
     };
 
+    if (showCreateFlow) {
+        return <CreateScheduledJobRuleForm projectId={projectId} onBack={handleBackToList} />;
+    }
+
     return (
         <Panel
             title={
@@ -112,11 +147,9 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
             }
             rightActions={
                 <div className="flex items-center gap-3">
-                    <Link href={`/projects/${projectId}/manage-triggers/scheduled/new`}>
-                        <Button size="sm" className="whitespace-nowrap" startContent={<PlusIcon className="w-4 h-4" />}>
-                            New One-time Trigger
-                        </Button>
-                    </Link>
+                    <Button size="sm" className="whitespace-nowrap" startContent={<PlusIcon className="w-4 h-4" />} onClick={handleCreateNew}>
+                        New One-time Trigger
+                    </Button>
                 </div>
             }
         >
