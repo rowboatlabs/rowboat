@@ -269,7 +269,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         toolQuery={toolQuery}
                     />
                 </div>
-                <div className="shrink-0 px-1">
+                <div className="shrink-0 px-0 pb-0">
                     {responseError && (
                         <div className="mb-4 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex gap-2 justify-between items-center text-sm">
                             <p className="text-red-600 dark:text-red-400">{responseError}</p>
@@ -322,6 +322,8 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     dispatch: (action: WorkflowDispatch) => void;
     isInitialState?: boolean;
     dataSources?: z.infer<typeof DataSource>[];
+    activePanel: 'playground' | 'copilot';
+    onTogglePanel: () => void;
 }>(({
     projectId,
     workflow,
@@ -329,6 +331,8 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     dispatch,
     isInitialState = false,
     dataSources,
+    activePanel,
+    onTogglePanel,
 }, ref) => {
     const [copilotKey, setCopilotKey] = useState(0);
     const [showCopySuccess, setShowCopySuccess] = useState(false);
@@ -365,8 +369,34 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
             <Panel 
                 variant="copilot"
                 tourTarget="copilot"
-                icon={<Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />}
-                title="Skipper"
+                title={
+                    <div className="flex items-center">
+                        <div className="flex items-center gap-2 rounded-lg p-1 bg-blue-50/70 dark:bg-blue-900/30">
+                            <button
+                                onClick={onTogglePanel}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                                    activePanel === 'copilot'
+                                        ? 'bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-300 shadow-md border border-indigo-200 dark:border-indigo-700'
+                                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
+                                }`}
+                            >
+                                <span className="text-base">✨</span>
+                                Build
+                            </button>
+                            <button
+                                onClick={onTogglePanel}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                                    activePanel === 'playground'
+                                        ? 'bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-300 shadow-md border border-indigo-200 dark:border-indigo-700'
+                                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
+                                }`}
+                            >
+                                <span className="text-base">💬</span>
+                                Test
+                            </button>
+                        </div>
+                    </div>
+                }
                 subtitle="Build your assistant"
                 rightActions={
                     <div className="flex items-center gap-2">

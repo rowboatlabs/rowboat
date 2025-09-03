@@ -965,8 +965,7 @@ export function WorkflowEditor({
     const saveQueue = useRef<z.infer<typeof Workflow>[]>([]);
     const saving = useRef(false);
     const [showCopySuccess, setShowCopySuccess] = useState(false);
-    const [showCopilot, setShowCopilot] = useState(true);
-    const [copilotWidth, setCopilotWidth] = useState<number>(PANEL_RATIOS.copilot);
+    const [activePanel, setActivePanel] = useState<'playground' | 'copilot'>('copilot');
     const [isInitialState, setIsInitialState] = useState(true);
     const [showTour, setShowTour] = useState(true);
     const copilotRef = useRef<{ handleUserMessage: (message: string) => void }>(null);
@@ -1010,7 +1009,7 @@ export function WorkflowEditor({
 
     // Function to trigger copilot chat
     const triggerCopilotChat = useCallback((message: string) => {
-        setShowCopilot(true);
+        setActivePanel('copilot');
         // Small delay to ensure copilot is mounted
         setTimeout(() => {
             copilotRef.current?.handleUserMessage(message);
@@ -1028,14 +1027,14 @@ export function WorkflowEditor({
         const prompt = localStorage.getItem(`project_prompt_${projectId}`);
         console.log('init project prompt', prompt);
         if (prompt) {
-            setShowCopilot(true);
+            setActivePanel('copilot');
         }
     }, [projectId]);
 
-    // Hide copilot when switching to live mode
+    // Switch to playground when switching to live mode
     useEffect(() => {
         if (isLive) {
-            setShowCopilot(false);
+            setActivePanel('playground');
         }
     }, [isLive]);
 
@@ -1397,14 +1396,14 @@ export function WorkflowEditor({
                     showCopySuccess={showCopySuccess}
                     canUndo={state.currentIndex > 0}
                     canRedo={state.currentIndex < state.patches.length}
-                    showCopilot={showCopilot}
+                    activePanel={activePanel}
                     onUndo={() => dispatch({ type: "undo" })}
                     onRedo={() => dispatch({ type: "redo" })}
                     onDownloadJSON={handleDownloadJSON}
                     onPublishWorkflow={handlePublishWorkflow}
                     onChangeMode={onChangeMode}
                     onRevertToLive={handleRevertToLive}
-                    onToggleCopilot={() => setShowCopilot(!showCopilot)}
+                    onTogglePanel={() => setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground')}
                 />
                 
                 {/* Content Area */}
@@ -1465,19 +1464,48 @@ export function WorkflowEditor({
                     <ResizableHandle withHandle className="w-[3px] bg-transparent" />
                     <ResizablePanel
                         minSize={20}
-                        defaultSize={showCopilot ? PANEL_RATIOS.chatApp : PANEL_RATIOS.chatApp + PANEL_RATIOS.copilot}
+                        defaultSize={PANEL_RATIOS.chatApp + PANEL_RATIOS.copilot}
                         className="overflow-auto"
                     >
-                        <ChatApp
-                            key={'' + state.present.chatKey}
-                            hidden={state.present.selection !== null}
-                            projectId={projectId}
-                            workflow={state.present.workflow}
-                            messageSubscriber={updateChatMessages}
-                            onPanelClick={handlePlaygroundClick}
-                            triggerCopilotChat={triggerCopilotChat}
-                            isLiveWorkflow={isLive}
-                        />
+                        <div className={(activePanel === 'playground' && state.present.selection === null) ? 'block h-full' : 'hidden h-full'}>
+                            <ChatApp
+                                key={'' + state.present.chatKey}
+                                hidden={state.present.selection !== null}
+                                projectId={projectId}
+                                workflow={state.present.workflow}
+                                messageSubscriber={updateChatMessages}
+                                onPanelClick={handlePlaygroundClick}
+                                triggerCopilotChat={triggerCopilotChat}
+                                isLiveWorkflow={isLive}
+                                activePanel={activePanel}
+                                onTogglePanel={() => setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground')}
+                            />
+                        </div>
+                        <div className={(activePanel === 'copilot' && state.present.selection === null) ? 'block h-full' : 'hidden h-full'}>
+                            <Copilot
+                                ref={copilotRef}
+                                projectId={projectId}
+                                workflow={state.present.workflow}
+                                dispatch={dispatch}
+                                chatContext={
+                                    state.present.selection &&
+                                    (state.present.selection.type === "agent" ||
+                                     state.present.selection.type === "tool" ||
+                                     state.present.selection.type === "prompt")
+                                      ? {
+                                          type: state.present.selection.type,
+                                          name: state.present.selection.name
+                                        }
+                                      : chatMessages.length > 0
+                                        ? { type: 'chat', messages: chatMessages }
+                                        : undefined
+                                }
+                                isInitialState={isInitialState}
+                                dataSources={dataSources}
+                                activePanel={activePanel}
+                                onTogglePanel={() => setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground')}
+                            />
+                        </div>
                         {state.present.selection?.type === "agent" && <AgentConfig
                             key={`agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}`}
                             projectId={projectId}
@@ -1563,38 +1591,6 @@ export function WorkflowEditor({
                             </Panel>
                         )}
                     </ResizablePanel>
-                    {showCopilot && (
-                        <>
-                            <ResizableHandle withHandle className="w-[3px] bg-transparent" />
-                            <ResizablePanel
-                                minSize={10}
-                                defaultSize={PANEL_RATIOS.copilot}
-                                onResize={(size) => setCopilotWidth(size)}
-                            >
-                                <Copilot
-                                    ref={copilotRef}
-                                    projectId={projectId}
-                                    workflow={state.present.workflow}
-                                    dispatch={dispatch}
-                                    chatContext={
-                                        state.present.selection &&
-                                        (state.present.selection.type === "agent" ||
-                                         state.present.selection.type === "tool" ||
-                                         state.present.selection.type === "prompt")
-                                          ? {
-                                              type: state.present.selection.type,
-                                              name: state.present.selection.name
-                                            }
-                                          : chatMessages.length > 0
-                                            ? { type: 'chat', messages: chatMessages }
-                                            : undefined
-                                    }
-                                    isInitialState={isInitialState}
-                                    dataSources={dataSources}
-                                />
-                            </ResizablePanel>
-                        </>
-                    )}
                 </ResizablePanelGroup>
                 {USE_PRODUCT_TOUR && showTour && (
                     <ProductTour

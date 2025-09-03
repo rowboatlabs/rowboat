@@ -1175,7 +1175,7 @@ export const EntityList = forwardRef<
                             tourTarget="entity-prompts"
                             className={clsx(
                                 "h-full",
-                                !expandedPanels.prompts && "h-[53px]!"
+                                !expandedPanels.prompts && "h-[61px]!"
                             )}
                             title={
                                 <div className={`${headerClasses} rounded-md transition-colors h-full`}>
@@ -1208,7 +1208,7 @@ export const EntityList = forwardRef<
                             }
                         >
                             {expandedPanels.prompts && (
-                                <div className="h-[calc(100%-53px)] overflow-y-auto">
+                                <div className="h-[calc(100%-61px)] overflow-y-auto">
                                     <div className="p-2">
                                         {prompts.length > 0 ? (
                                             <div className="space-y-1">
@@ -2116,4 +2116,4 @@ function AddVariableModal({ isOpen, onClose, onConfirm, initialName, initialValu
             </ModalContent>
         </Modal>
     );
-} 
+}

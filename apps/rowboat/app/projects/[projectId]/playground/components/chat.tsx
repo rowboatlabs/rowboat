@@ -425,7 +425,7 @@ export function Chat({
                         <ChevronDownIcon className="w-5 h-5" strokeWidth={2.2} />
                     </button>
                 )}
-                <div className="bg-white dark:bg-zinc-900 pt-4 pb-2">
+                <div className="bg-white dark:bg-zinc-900 pt-4 pb-6">
                     {showSuccessMessage && (
                         <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 
                                       rounded-lg flex gap-2 justify-between items-center">
