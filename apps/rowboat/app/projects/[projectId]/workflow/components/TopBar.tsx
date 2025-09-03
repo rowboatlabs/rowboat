@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input } from "@heroui/react";
+import { Button as CustomButton } from "@/components/ui/button";
 import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 
@@ -103,22 +104,28 @@ export function TopBar({
                 <div className="flex items-center gap-2">
                     
                     {!isLive && <>
-                        <button
-                            className="p-1 text-gray-400 hover:text-black hover:cursor-pointer"
-                            title="Undo"
-                            disabled={!canUndo}
+                        <CustomButton
+                            variant="primary"
+                            size="sm"
                             onClick={onUndo}
+                            disabled={!canUndo}
+                            className="bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
+                            showHoverContent={true}
+                            hoverContent="Undo"
                         >
-                            <UndoIcon size={16} />
-                        </button>
-                        <button
-                            className="p-1 text-gray-400 hover:text-black hover:cursor-pointer"
-                            title="Redo"
-                            disabled={!canRedo}
+                            <UndoIcon className="w-4 h-4" />
+                        </CustomButton>
+                        <CustomButton
+                            variant="primary"
+                            size="sm"
                             onClick={onRedo}
+                            disabled={!canRedo}
+                            className="bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
+                            showHoverContent={true}
+                            hoverContent="Redo"
                         >
-                            <RedoIcon size={16} />
-                        </button>
+                            <RedoIcon className="w-4 h-4" />
+                        </CustomButton>
                     </>}
                     
                     {/* Deploy CTA - always visible */}
