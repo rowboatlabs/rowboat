@@ -392,7 +392,7 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
                                 }`}
                             >
                                 <span className="text-base">💬</span>
-                                Test
+                                Chat
                             </button>
                         </div>
                     </div>

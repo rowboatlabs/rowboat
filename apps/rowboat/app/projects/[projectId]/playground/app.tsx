@@ -83,7 +83,7 @@ export function App({
                                 }`}
                             >
                                 <span className="text-base">💬</span>
-                                Test
+                                Chat
                             </button>
                         </div>
                     </div>
