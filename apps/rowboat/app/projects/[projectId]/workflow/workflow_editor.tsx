@@ -61,7 +61,7 @@ interface StateItem {
     chatKey: number;
     lastUpdatedAt: string;
     isLive: boolean;
-    showWorkflowChangeBanner: boolean;
+
 }
 
 interface State {
@@ -260,12 +260,7 @@ function reducer(state: State, action: Action): State {
             });
             break;
         }
-        case "clear_workflow_change_banner": {
-            newState = produce(state, draft => {
-                draft.present.showWorkflowChangeBanner = false;
-            });
-            break;
-        }
+
         case "set_saving": {
             newState = produce(state, draft => {
                 draft.present.saving = action.saving;
@@ -335,7 +330,7 @@ function reducer(state: State, action: Action): State {
                     // If this is a workflow modification in live mode, switch to draft
                     if (isWorkflowModification && isLive) {
                         draft.isLive = false;
-                        draft.showWorkflowChangeBanner = true;
+
                     }
                     
                     switch (action.type) {
@@ -949,7 +944,7 @@ export function WorkflowEditor({
             chatKey: 0,
             lastUpdatedAt: workflow.lastUpdatedAt,
             isLive,
-            showWorkflowChangeBanner: false,
+
         }
     });
 
@@ -1033,27 +1028,6 @@ export function WorkflowEditor({
             setActivePanel('playground');
         }
     }, [isLive]);
-
-    // If reducer switched to draft (internal flag) while outer prop is still live,
-    // trigger external mode change and show banner. Guard against publish in-flight.
-    useEffect(() => {
-        if (isLive && state.present.isLive === false && !state.present.publishing) {
-            onChangeMode('draft');
-            setShowBuildModeBanner(true);
-            setTimeout(() => setShowBuildModeBanner(false), 5000);
-        }
-    }, [isLive, state.present.isLive, state.present.publishing, onChangeMode]);
-
-    // Show banner when switching from live to draft due to workflow changes
-    useEffect(() => {
-        if (state.present.showWorkflowChangeBanner) {
-            setShowBuildModeBanner(true);
-            // Auto-hide banner after 5 seconds
-            setTimeout(() => setShowBuildModeBanner(false), 5000);
-            // Clear the flag
-            dispatch({ type: "clear_workflow_change_banner" });
-        }
-    }, [state.present.showWorkflowChangeBanner]);
 
     // Reset initial state when user interacts with copilot or opens other menus
     useEffect(() => {
