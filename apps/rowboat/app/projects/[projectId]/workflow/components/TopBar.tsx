@@ -71,21 +71,6 @@ export function TopBar({
         { id: 2, label: "Test: Chat with the assistant in the playground. You can ask the copilot to make changes or use the handy 'Fix' and 'Explain' buttons in the chat", completed: hasPlaygroundTested && hasAgentInstructionChanges },
         { id: 3, label: "Publish: Make the assistant live by clicking the Publish button on the right", completed: hasPublished },
         { id: 4, label: "Use: Use the assistant by chatting with it, adding triggers like incoming emails, or integrating through the API", completed: hasClickedUse },
-=======
-    // Progress bar steps - step 1: build, step 2: test, step 3: publish
-=======
-    // Progress bar steps - step 1: build, step 2: test, step 3: publish, step 4: use
->>>>>>> e2ef4267 (step 4 turns green on use assistant)
-    const progressSteps: ProgressStep[] = [
-        { id: 1, label: "Build", completed: hasAgentInstructionChanges }, // Complete when agent instructions modified
-        { id: 2, label: "Test", completed: hasPlaygroundTested && hasAgentInstructionChanges }, // Complete when playground tested AND step 1 complete
-        { id: 3, label: "Publish", completed: hasPublished }, // Complete when user publishes workflow
-<<<<<<< HEAD
-        { id: 4, label: "Use", completed: false },
->>>>>>> 7dfbb324 (step 3 turns green on publish)
-=======
-        { id: 4, label: "Use", completed: hasClickedUse }, // Complete when user clicks "Use Assistant"
->>>>>>> e2ef4267 (step 4 turns green on use assistant)
     ];
 
     return (
