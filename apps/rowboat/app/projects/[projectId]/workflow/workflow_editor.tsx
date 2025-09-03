@@ -61,6 +61,7 @@ interface StateItem {
     chatKey: number;
     lastUpdatedAt: string;
     isLive: boolean;
+    showWorkflowChangeBanner: boolean;
 }
 
 interface State {
@@ -73,6 +74,15 @@ interface State {
 export type Action = {
     type: "update_workflow_name";
     name: string;
+} | {
+    type: "switch_to_draft_due_to_changes";
+} | {
+    type: "show_workflow_change_banner";
+} | {
+    type: "clear_workflow_change_banner";
+} | {
+    type: "set_is_live";
+    isLive: boolean;
 } | {
     type: "set_publishing";
     publishing: boolean;
@@ -238,6 +248,24 @@ function reducer(state: State, action: Action): State {
             });
             break;
         }
+        case "switch_to_draft_due_to_changes": {
+            newState = produce(state, draft => {
+                draft.present.isLive = false;
+            });
+            break;
+        }
+        case "set_is_live": {
+            newState = produce(state, draft => {
+                draft.present.isLive = action.isLive;
+            });
+            break;
+        }
+        case "clear_workflow_change_banner": {
+            newState = produce(state, draft => {
+                draft.present.showWorkflowChangeBanner = false;
+            });
+            break;
+        }
         case "set_saving": {
             newState = produce(state, draft => {
                 draft.present.saving = action.saving;
@@ -293,9 +321,23 @@ function reducer(state: State, action: Action): State {
             break;
         }
         default: {
+            // Check if this is a workflow modification action in live mode
+            const isWorkflowModification = [
+                "add_agent", "add_tool", "add_prompt", "add_prompt_no_select", "add_pipeline",
+                "update_agent", "update_tool", "update_prompt", "update_prompt_no_select", "update_pipeline",
+                "delete_agent", "delete_tool", "delete_prompt", "delete_pipeline",
+                "toggle_agent", "set_main_agent", "reorder_agents", "reorder_pipelines"
+            ].includes(action.type);
+
             const [nextState, patches, inversePatches] = produceWithPatches(
                 state.present,
                 (draft) => {
+                    // If this is a workflow modification in live mode, switch to draft
+                    if (isWorkflowModification && isLive) {
+                        draft.isLive = false;
+                        draft.showWorkflowChangeBanner = true;
+                    }
+                    
                     switch (action.type) {
                         case "select_agent":
                             draft.selection = {
@@ -335,9 +377,6 @@ function reducer(state: State, action: Action): State {
                             draft.selection = null;
                             break;
                         case "add_agent": {
-                            if (isLive) {
-                                break;
-                            }
                             let newAgentName = "New agent";
                             if (draft.workflow?.agents.some((agent) => agent.name === newAgentName)) {
                                 newAgentName = `New agent ${draft.workflow.agents.filter((agent) =>
@@ -368,9 +407,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "add_tool": {
-                            if (isLive) {
-                                break;
-                            }
                             let newToolName = "new_tool";
                             if (draft.workflow?.tools.some((tool) => tool.name === newToolName)) {
                                 newToolName = `new_tool_${draft.workflow.tools.filter((tool) =>
@@ -396,9 +432,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "add_prompt": {
-                            if (isLive) {
-                                break;
-                            }
                             let newPromptName = "New Variable";
                             if (draft.workflow?.prompts.some((prompt) => prompt.name === newPromptName)) {
                                 newPromptName = `New Variable ${draft.workflow?.prompts.filter((prompt) =>
@@ -419,9 +452,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "add_prompt_no_select": {
-                            if (isLive) {
-                                break;
-                            }
                             let newPromptName = "New Variable";
                             if (draft.workflow?.prompts.some((prompt) => prompt.name === newPromptName)) {
                                 newPromptName = `New Variable ${draft.workflow?.prompts.filter((prompt) =>
@@ -440,9 +470,6 @@ function reducer(state: State, action: Action): State {
                         }
                         // TODO: parameterize this instead of writing if else based on pipeline length (pipelineAgents.length)
                         case "add_pipeline": {
-                            if (isLive) {
-                                break;
-                            }
                             
                             if (!draft.workflow.pipelines) {
                                 draft.workflow.pipelines = [];
@@ -521,9 +548,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "delete_agent":
-                            if (isLive) {
-                                break;
-                            }
                             // Remove the agent
                             draft.workflow.agents = draft.workflow.agents.filter(
                                 (agent) => agent.name !== action.name
@@ -568,9 +592,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "delete_tool":
-                            if (isLive) {
-                                break;
-                            }
                             draft.workflow.tools = draft.workflow.tools.filter(
                                 (tool) => tool.name !== action.name
                             );
@@ -579,9 +600,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "delete_prompt":
-                            if (isLive) {
-                                break;
-                            }
                             draft.workflow.prompts = draft.workflow.prompts.filter(
                                 (prompt) => prompt.name !== action.name
                             );
@@ -590,9 +608,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "delete_pipeline":
-                            if (isLive) {
-                                break;
-                            }
                             if (draft.workflow.pipelines) {
                                 // Find the pipeline to get its associated agents
                                 const pipelineToDelete = draft.workflow.pipelines.find(
@@ -649,9 +664,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "update_pipeline": {
-                            if (isLive) {
-                                break;
-                            }
                             if (draft.workflow.pipelines) {
                                 draft.workflow.pipelines = draft.workflow.pipelines.map(pipeline =>
                                     pipeline.name === action.name ? { ...pipeline, ...action.pipeline } : pipeline
@@ -663,9 +675,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "update_agent": {
-                            if (isLive) {
-                                break;
-                            }
 
                             // update agent data
                             draft.workflow.agents = draft.workflow.agents.map((agent) =>
@@ -724,9 +733,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "update_tool":
-                            if (isLive) {
-                                break;
-                            }
 
                             // update tool data
                             draft.workflow.tools = draft.workflow.tools.map((tool) =>
@@ -769,9 +775,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "update_prompt":
-                            if (isLive) {
-                                break;
-                            }
 
                             // update prompt data
                             draft.workflow.prompts = draft.workflow.prompts.map((prompt) =>
@@ -814,9 +817,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "update_prompt_no_select":
-                            if (isLive) {
-                                break;
-                            }
 
                             // update prompt data
                             draft.workflow.prompts = draft.workflow.prompts.map((prompt) =>
@@ -855,18 +855,12 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "toggle_agent":
-                            if (isLive) {
-                                break;
-                            }
                             draft.workflow.agents = draft.workflow.agents.map(agent =>
                                 agent.name === action.name ? { ...agent, disabled: !agent.disabled } : agent
                             );
                             draft.chatKey++;
                             break;
                         case "set_main_agent":
-                            if (isLive) {
-                                break;
-                            }
                             draft.workflow.startAgent = action.name;
                             draft.pendingChanges = true;
                             draft.chatKey++;
@@ -955,6 +949,7 @@ export function WorkflowEditor({
             chatKey: 0,
             lastUpdatedAt: workflow.lastUpdatedAt,
             isLive,
+            showWorkflowChangeBanner: false,
         }
     });
 
@@ -967,6 +962,7 @@ export function WorkflowEditor({
     const [showCopySuccess, setShowCopySuccess] = useState(false);
     const [activePanel, setActivePanel] = useState<'playground' | 'copilot'>('copilot');
     const [isInitialState, setIsInitialState] = useState(true);
+    const [showBuildModeBanner, setShowBuildModeBanner] = useState(false);
     const [showTour, setShowTour] = useState(true);
     const copilotRef = useRef<{ handleUserMessage: (message: string) => void }>(null);
     const entityListRef = useRef<{ openDataSourcesModal: () => void } | null>(null);
@@ -1038,6 +1034,27 @@ export function WorkflowEditor({
         }
     }, [isLive]);
 
+    // If reducer switched to draft (internal flag) while outer prop is still live,
+    // trigger external mode change and show banner. Guard against publish in-flight.
+    useEffect(() => {
+        if (isLive && state.present.isLive === false && !state.present.publishing) {
+            onChangeMode('draft');
+            setShowBuildModeBanner(true);
+            setTimeout(() => setShowBuildModeBanner(false), 5000);
+        }
+    }, [isLive, state.present.isLive, state.present.publishing, onChangeMode]);
+
+    // Show banner when switching from live to draft due to workflow changes
+    useEffect(() => {
+        if (state.present.showWorkflowChangeBanner) {
+            setShowBuildModeBanner(true);
+            // Auto-hide banner after 5 seconds
+            setTimeout(() => setShowBuildModeBanner(false), 5000);
+            // Clear the flag
+            dispatch({ type: "clear_workflow_change_banner" });
+        }
+    }, [state.present.showWorkflowChangeBanner]);
+
     // Reset initial state when user interacts with copilot or opens other menus
     useEffect(() => {
         if (state.present.selection !== null) {
@@ -1092,15 +1109,15 @@ export function WorkflowEditor({
             ...agent,
             model: agent.model || defaultModel || "gpt-4.1"
         };
-        dispatch({ type: "add_agent", agent: agentWithModel });
+        dispatchGuarded({ type: "add_agent", agent: agentWithModel });
     }
 
     function handleAddTool(tool: Partial<z.infer<typeof WorkflowTool>> = {}) {
-        dispatch({ type: "add_tool", tool });
+        dispatchGuarded({ type: "add_tool", tool });
     }
 
     function handleAddPrompt(prompt: Partial<z.infer<typeof WorkflowPrompt>> = {}) {
-        dispatch({ type: "add_prompt", prompt });
+        dispatchGuarded({ type: "add_prompt", prompt });
     }
 
     function handleSelectPipeline(name: string) {
@@ -1108,7 +1125,7 @@ export function WorkflowEditor({
     }
 
     function handleAddPipeline(pipeline: Partial<z.infer<typeof WorkflowPipeline>> = {}) {
-        dispatch({ type: "add_pipeline", pipeline, defaultModel });
+        dispatchGuarded({ type: "add_pipeline", pipeline, defaultModel });
     }
 
     function handleDeletePipeline(name: string) {
@@ -1129,12 +1146,12 @@ export function WorkflowEditor({
         };
         
         // First add the agent
-        dispatch({ type: "add_agent", agent: agentWithModel });
+        dispatchGuarded({ type: "add_agent", agent: agentWithModel });
         
         // Then add it to the pipeline
         const pipeline = state.present.workflow.pipelines?.find(p => p.name === pipelineName);
         if (pipeline) {
-            dispatch({ 
+            dispatchGuarded({ 
                 type: "update_pipeline", 
                 name: pipelineName, 
                 pipeline: { 
@@ -1200,6 +1217,7 @@ export function WorkflowEditor({
     }
 
     function handleReorderAgents(agents: z.infer<typeof WorkflowAgent>[]) {
+        handleWorkflowChange();
         // Save order to localStorage
         const orderMap = agents.reduce((acc, agent, index) => {
             acc[agent.name] = index;
@@ -1212,6 +1230,7 @@ export function WorkflowEditor({
     }
 
     function handleReorderPipelines(pipelines: z.infer<typeof WorkflowPipeline>[]) {
+        handleWorkflowChange();
         // Save order to localStorage
         const orderMap = pipelines.reduce((acc, pipeline, index) => {
             acc[pipeline.name] = index;
@@ -1224,8 +1243,15 @@ export function WorkflowEditor({
     }
 
     async function handlePublishWorkflow() {
-        await publishWorkflow(projectId, state.present.workflow);
-        onChangeMode('live');
+        dispatch({ type: 'set_publishing', publishing: true });
+        try {
+            await publishWorkflow(projectId, state.present.workflow);
+            // reflect live mode both internally and externally in one go
+            dispatch({ type: 'set_is_live', isLive: true });
+            onChangeMode('live');
+        } finally {
+            dispatch({ type: 'set_publishing', publishing: false });
+        }
     }
 
     function handleRevertToLive() {
@@ -1325,6 +1351,54 @@ export function WorkflowEditor({
         setIsInitialState(false);
     }
 
+    // Centralized draft switch for any workflow modification while in live mode
+    const ensureDraftForModify = useCallback(() => {
+        if (isLive && !state.present.publishing) {
+            onChangeMode('draft');
+            setShowBuildModeBanner(true);
+            setTimeout(() => setShowBuildModeBanner(false), 5000);
+        }
+    }, [isLive, state.present.publishing, onChangeMode]);
+
+    const WORKFLOW_MOD_ACTIONS = useRef(new Set([
+        'add_agent','add_tool','add_prompt','add_prompt_no_select','add_pipeline',
+        'update_agent','update_tool','update_prompt','update_prompt_no_select','update_pipeline',
+        'delete_agent','delete_tool','delete_prompt','delete_pipeline',
+        'toggle_agent','set_main_agent','reorder_agents','reorder_pipelines'
+    ])).current;
+
+    const dispatchGuarded = useCallback((action: Action) => {
+        if (WORKFLOW_MOD_ACTIONS.has((action as any).type) && isLive && !state.present.publishing) {
+            onChangeMode('draft');
+            setShowBuildModeBanner(true);
+            setTimeout(() => setShowBuildModeBanner(false), 5000);
+        }
+        dispatch(action);
+    }, [WORKFLOW_MOD_ACTIONS, isLive, state.present.publishing, onChangeMode, dispatch]);
+
+    function handleTogglePanel() {
+        if (isLive && activePanel === 'playground') {
+            // User is trying to switch to Build mode in live mode
+            onChangeMode('draft');
+            setActivePanel('copilot'); // Switch to Build mode as intended
+            setShowBuildModeBanner(true);
+            // Auto-hide banner after 5 seconds
+            setTimeout(() => setShowBuildModeBanner(false), 5000);
+        } else {
+            setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground');
+        }
+    }
+
+    function handleWorkflowChange() {
+        if (isLive) {
+            // User is making changes in live mode - switch to draft
+            onChangeMode('draft');
+            setShowBuildModeBanner(true);
+            // Auto-hide banner after 5 seconds
+            setTimeout(() => setShowBuildModeBanner(false), 5000);
+        }
+    }
+
     const validateProjectName = (value: string) => {
         if (value.length === 0) {
             setProjectNameError("Project name cannot be empty");
@@ -1394,16 +1468,17 @@ export function WorkflowEditor({
                     publishing={state.present.publishing}
                     isLive={isLive}
                     showCopySuccess={showCopySuccess}
+                    showBuildModeBanner={showBuildModeBanner}
                     canUndo={state.currentIndex > 0}
                     canRedo={state.currentIndex < state.patches.length}
                     activePanel={activePanel}
-                    onUndo={() => dispatch({ type: "undo" })}
-                    onRedo={() => dispatch({ type: "redo" })}
+                    onUndo={() => dispatchGuarded({ type: "undo" })}
+                    onRedo={() => dispatchGuarded({ type: "redo" })}
                     onDownloadJSON={handleDownloadJSON}
                     onPublishWorkflow={handlePublishWorkflow}
                     onChangeMode={onChangeMode}
                     onRevertToLive={handleRevertToLive}
-                    onTogglePanel={() => setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground')}
+                    onTogglePanel={handleTogglePanel}
                 />
                 
                 {/* Content Area */}
@@ -1478,7 +1553,7 @@ export function WorkflowEditor({
                                 triggerCopilotChat={triggerCopilotChat}
                                 isLiveWorkflow={isLive}
                                 activePanel={activePanel}
-                                onTogglePanel={() => setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground')}
+                                onTogglePanel={handleTogglePanel}
                             />
                         </div>
                         <div className={(activePanel === 'copilot' && state.present.selection === null) ? 'block h-full' : 'hidden h-full'}>
@@ -1503,7 +1578,7 @@ export function WorkflowEditor({
                                 isInitialState={isInitialState}
                                 dataSources={dataSources}
                                 activePanel={activePanel}
-                                onTogglePanel={() => setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground')}
+                                onTogglePanel={handleTogglePanel}
                             />
                         </div>
                         {state.present.selection?.type === "agent" && <AgentConfig
@@ -1517,7 +1592,7 @@ export function WorkflowEditor({
                             tools={state.present.workflow.tools}
                             prompts={state.present.workflow.prompts}
                             dataSources={dataSources}
-                            handleUpdate={handleUpdateAgent.bind(null, state.present.selection.name)}
+                            handleUpdate={(update) => { dispatchGuarded({ type: "update_agent", name: state.present.selection!.name, agent: update }); }}
                             handleClose={handleUnselectAgent}
                             useRag={useRag}
                             triggerCopilotChat={triggerCopilotChat}
@@ -1534,7 +1609,7 @@ export function WorkflowEditor({
                                 usedToolNames={new Set([
                                     ...state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name),
                                 ])}
-                                handleUpdate={handleUpdateTool.bind(null, state.present.selection.name)}
+                                handleUpdate={(update) => { dispatchGuarded({ type: "update_tool", name: state.present.selection!.name, tool: update }); }}
                                 handleClose={handleUnselectTool}
                             />;
                         })()}
@@ -1545,7 +1620,7 @@ export function WorkflowEditor({
                             tools={state.present.workflow.tools}
                             prompts={state.present.workflow.prompts}
                             usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
-                            handleUpdate={handleUpdatePrompt.bind(null, state.present.selection.name)}
+                            handleUpdate={(update) => { dispatchGuarded({ type: "update_prompt", name: state.present.selection!.name, prompt: update }); }}
                             handleClose={handleUnselectPrompt}
                         />}
                         {state.present.selection?.type === "datasource" && <DataSourceConfig

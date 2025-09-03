@@ -12,6 +12,7 @@ interface TopBarProps {
     publishing: boolean;
     isLive: boolean;
     showCopySuccess: boolean;
+    showBuildModeBanner: boolean;
     canUndo: boolean;
     canRedo: boolean;
     activePanel: 'playground' | 'copilot';
@@ -32,6 +33,7 @@ export function TopBar({
     publishing,
     isLive,
     showCopySuccess,
+    showBuildModeBanner,
     canUndo,
     canRedo,
     activePanel,
@@ -91,6 +93,12 @@ export function TopBar({
                 </div>
                 {showCopySuccess && <div className="flex items-center gap-2">
                     <div className="text-green-500">Copied to clipboard</div>
+                </div>}
+                {showBuildModeBanner && <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <div className="text-blue-700 dark:text-blue-300 text-sm">
+                        Switched to draft mode to enable Build panel. You can now make changes to your workflow.
+                    </div>
                 </div>}
                 <div className="flex items-center gap-2">
                     
