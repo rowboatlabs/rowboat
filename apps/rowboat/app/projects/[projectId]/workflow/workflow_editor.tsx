@@ -661,6 +661,11 @@ function reducer(state: State, action: Action): State {
                                 draft.agentInstructionsChanged = true;
                             }
 
+                            // Check if instructions are being changed
+                            if (action.agent.instructions !== undefined) {
+                                draft.agentInstructionsChanged = true;
+                            }
+
                             // update agent data
                             draft.workflow.agents = draft.workflow.agents.map((agent) =>
                                 agent.name === action.name ? { ...agent, ...action.agent } : agent
