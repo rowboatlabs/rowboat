@@ -4,6 +4,7 @@ import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner,
 import { Button as CustomButton } from "@/components/ui/button";
 import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
+import { ProgressBar, ProgressStep } from "@/components/ui/progress-bar";
 
 interface TopBarProps {
     localProjectName: string;
@@ -49,6 +50,15 @@ export function TopBar({
     const router = useRouter();
     const params = useParams();
     const projectId = typeof (params as any).projectId === 'string' ? (params as any).projectId : (params as any).projectId?.[0];
+    
+    // Progress bar steps with completion logic and detailed tooltips
+    const progressSteps: ProgressStep[] = [
+        { id: 1, label: "Build: Ask the copilot to build the assistant you want and apply the changes", completed: false },
+        { id: 2, label: "Test: Chat with the assistant in the playground. You can ask the copilot to make changes or use the handy 'Fix' and 'Explain' buttons in the chat", completed: false },
+        { id: 3, label: "Publish: Make the assistant live by clicking the Publish button on the right", completed: false },
+        { id: 4, label: "Use: Use the assistant by chatting with it, adding triggers like incoming emails, or integrating through the API", completed: false },
+    ];
+
     return (
         <div className="rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm border border-zinc-200 dark:border-zinc-800 px-5 py-2">
             <div className="flex justify-between items-center">
@@ -92,16 +102,29 @@ export function TopBar({
                         </Button>
                     ) : null}
                 </div>
-                {showCopySuccess && <div className="flex items-center gap-2">
-                    <div className="text-green-500">Copied to clipboard</div>
-                </div>}
-                {showBuildModeBanner && <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                    <div className="text-blue-700 dark:text-blue-300 text-sm">
-                        Switched to draft mode. You can now make changes to your workflow.
-                    </div>
-                </div>}
+
+                {/* Progress Bar - Center */}
+                <div className="flex-1 flex justify-center">
+                    <ProgressBar steps={progressSteps} />
+                </div>
+
+                {/* Right side buttons */}
                 <div className="flex items-center gap-2">
+                    {showCopySuccess && <div className="flex items-center gap-2 mr-4">
+                        <div className="text-green-500">Copied to clipboard</div>
+                    </div>}
+                    
+                    {showBuildModeBanner && <div className="flex items-center gap-2 mr-4">
+                        <AlertTriangle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        <div className="text-blue-700 dark:text-blue-300 text-sm">
+                            Switched to draft mode. You can now make changes to your workflow.
+                        </div>
+                    </div>}
+                    
+                    {isLive && <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 mr-4">
+                        <AlertTriangle size={14} />
+                        <span>This version is locked.<br />Changes will not be saved.</span>
+                    </div>}
                     
                     {!isLive && <>
                         <CustomButton
