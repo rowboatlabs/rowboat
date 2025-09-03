@@ -98,7 +98,7 @@ export function TopBar({
                 {showBuildModeBanner && <div className="flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                     <div className="text-blue-700 dark:text-blue-300 text-sm">
-                        Switched to draft mode to enable Build panel. You can now make changes to your workflow.
+                        Switched to draft mode. You can now make changes to your workflow.
                     </div>
                 </div>}
                 <div className="flex items-center gap-2">

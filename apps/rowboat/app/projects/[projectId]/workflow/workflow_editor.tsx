@@ -316,23 +316,9 @@ function reducer(state: State, action: Action): State {
             break;
         }
         default: {
-            // Check if this is a workflow modification action in live mode
-            const isWorkflowModification = [
-                "add_agent", "add_tool", "add_prompt", "add_prompt_no_select", "add_pipeline",
-                "update_agent", "update_tool", "update_prompt", "update_prompt_no_select", "update_pipeline",
-                "delete_agent", "delete_tool", "delete_prompt", "delete_pipeline",
-                "toggle_agent", "set_main_agent", "reorder_agents", "reorder_pipelines"
-            ].includes(action.type);
-
             const [nextState, patches, inversePatches] = produceWithPatches(
                 state.present,
                 (draft) => {
-                    // If this is a workflow modification in live mode, switch to draft
-                    if (isWorkflowModification && isLive) {
-                        draft.isLive = false;
-
-                    }
-                    
                     switch (action.type) {
                         case "select_agent":
                             draft.selection = {
@@ -958,7 +944,39 @@ export function WorkflowEditor({
     const [activePanel, setActivePanel] = useState<'playground' | 'copilot'>('copilot');
     const [isInitialState, setIsInitialState] = useState(true);
     const [showBuildModeBanner, setShowBuildModeBanner] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [pendingAction, setPendingAction] = useState<Action | null>(null);
+    const [configKey, setConfigKey] = useState(0);
+    const [lastWorkflowId, setLastWorkflowId] = useState<string | null>(null);
     const [showTour, setShowTour] = useState(true);
+
+    // Centralized mode transition handler
+    const handleModeTransition = useCallback((newMode: 'draft' | 'live', reason: 'publish' | 'view_live' | 'switch_draft' | 'modal_switch') => {
+        // Clear any open entity configs
+        dispatch({ type: "unselect_agent" });
+        
+        // Set default panel based on mode
+        setActivePanel(newMode === 'live' ? 'playground' : 'copilot');
+        
+        // Force component re-render
+        setConfigKey(prev => prev + 1);
+        
+        // Handle mode-specific logic
+        if (reason === 'publish') {
+            // This will be handled by the publish function itself
+            return;
+        } else {
+            // Direct mode switch
+            onChangeMode(newMode);
+            
+            // If switching to draft mode, we need to ensure we have the correct draft data
+            // The parent component will update the workflow prop, but we need to wait for it
+            if (newMode === 'draft') {
+                // Force a workflow state reset when the workflow prop updates
+                setLastWorkflowId(null);
+            }
+        }
+    }, [onChangeMode]);
     const copilotRef = useRef<{ handleUserMessage: (message: string) => void }>(null);
     const entityListRef = useRef<{ openDataSourcesModal: () => void } | null>(null);
     
@@ -1191,7 +1209,6 @@ export function WorkflowEditor({
     }
 
     function handleReorderAgents(agents: z.infer<typeof WorkflowAgent>[]) {
-        handleWorkflowChange();
         // Save order to localStorage
         const orderMap = agents.reduce((acc, agent, index) => {
             acc[agent.name] = index;
@@ -1204,7 +1221,6 @@ export function WorkflowEditor({
     }
 
     function handleReorderPipelines(pipelines: z.infer<typeof WorkflowPipeline>[]) {
-        handleWorkflowChange();
         // Save order to localStorage
         const orderMap = pipelines.reduce((acc, pipeline, index) => {
             acc[pipeline.name] = index;
@@ -1220,6 +1236,8 @@ export function WorkflowEditor({
         dispatch({ type: 'set_publishing', publishing: true });
         try {
             await publishWorkflow(projectId, state.present.workflow);
+            // Use centralized mode transition for publish
+            handleModeTransition('live', 'publish');
             // reflect live mode both internally and externally in one go
             dispatch({ type: 'set_is_live', isLive: true });
             onChangeMode('live');
@@ -1342,34 +1360,81 @@ export function WorkflowEditor({
     ])).current;
 
     const dispatchGuarded = useCallback((action: Action) => {
+        // Intercept workflow modifications in live mode before they reach the reducer
         if (WORKFLOW_MOD_ACTIONS.has((action as any).type) && isLive && !state.present.publishing) {
-            onChangeMode('draft');
-            setShowBuildModeBanner(true);
-            setTimeout(() => setShowBuildModeBanner(false), 5000);
+            setPendingAction(action);
+            setShowEditModal(true);
+            return; // Block the action - it never reaches the reducer
         }
-        dispatch(action);
-    }, [WORKFLOW_MOD_ACTIONS, isLive, state.present.publishing, onChangeMode, dispatch]);
+        dispatch(action); // Allow the action to proceed
+    }, [WORKFLOW_MOD_ACTIONS, isLive, state.present.publishing, dispatch]);
+
+    // Simplified modal handlers
+    const handleSwitchToDraft = useCallback(() => {
+        setShowEditModal(false);
+        setPendingAction(null); // Don't apply the pending action
+        handleModeTransition('draft', 'modal_switch');
+        setShowBuildModeBanner(true);
+        setTimeout(() => setShowBuildModeBanner(false), 5000);
+    }, [handleModeTransition]);
+
+    const handleCancelEdit = useCallback(() => {
+        setShowEditModal(false);
+        setPendingAction(null);
+        // Force re-render of config components to reset form values
+        setConfigKey(prev => prev + 1);
+    }, []);
+
+    // Single useEffect for data synchronization
+    useEffect(() => {
+        // Only sync when workflow data actually changes
+        const currentWorkflowId = `${isLive ? 'live' : 'draft'}-${workflow.lastUpdatedAt}`;
+        
+        // Special case: if we're switching to draft mode and the workflow data looks like live data
+        // (same lastUpdatedAt as the previous live data), don't reset the state yet
+        if (!isLive && lastWorkflowId && lastWorkflowId.startsWith('live-') && 
+            currentWorkflowId === `draft-${workflow.lastUpdatedAt}`) {
+            // This is likely stale draft data that matches live data
+            // Don't reset the state, just update the ID
+            setLastWorkflowId(currentWorkflowId);
+            return;
+        }
+        
+        if (lastWorkflowId !== currentWorkflowId) {
+            dispatch({ type: "restore_state", state: { ...state.present, workflow } });
+            setLastWorkflowId(currentWorkflowId);
+        }
+    }, [workflow, isLive, lastWorkflowId, state.present]);
+
+    // Handle the case where we switch to draft mode but get stale data
+    useEffect(() => {
+        // If we're in draft mode but the workflow data looks like live data (same lastUpdatedAt as live)
+        // and we just switched from live mode, we need to wait for fresh draft data
+        if (!isLive && lastWorkflowId && lastWorkflowId.startsWith('live-')) {
+            // We just switched from live to draft, but we might have stale data
+            // Clear the selection to prevent showing wrong data
+            dispatch({ type: "unselect_agent" });
+        }
+    }, [isLive, lastWorkflowId]);
+
+    // Additional effect to handle mode changes that might not trigger workflow prop updates
+    useEffect(() => {
+        // If we're in draft mode but the workflow state contains live data, clear selection
+        // This prevents showing wrong data while waiting for the correct workflow prop
+        if (!isLive && state.present.isLive) {
+            dispatch({ type: "unselect_agent" });
+        }
+    }, [isLive, state.present.isLive]);
 
     function handleTogglePanel() {
         if (isLive && activePanel === 'playground') {
             // User is trying to switch to Build mode in live mode
-            onChangeMode('draft');
-            setActivePanel('copilot'); // Switch to Build mode as intended
+            handleModeTransition('draft', 'switch_draft');
             setShowBuildModeBanner(true);
             // Auto-hide banner after 5 seconds
             setTimeout(() => setShowBuildModeBanner(false), 5000);
         } else {
             setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground');
-        }
-    }
-
-    function handleWorkflowChange() {
-        if (isLive) {
-            // User is making changes in live mode - switch to draft
-            onChangeMode('draft');
-            setShowBuildModeBanner(true);
-            // Auto-hide banner after 5 seconds
-            setTimeout(() => setShowBuildModeBanner(false), 5000);
         }
     }
 
@@ -1433,6 +1498,39 @@ export function WorkflowEditor({
             onSelectPrompt: handleSelectPrompt,
         }}>
             <div className="h-full flex flex-col gap-5">
+                {/* Live Workflow Edit Modal */}
+                <Modal isOpen={showEditModal} onClose={handleCancelEdit} size="md">
+                    <ModalContent>
+                        <ModalHeader className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                                <span>Edit Live Workflow</span>
+                            </div>
+                        </ModalHeader>
+                        <ModalBody>
+                            <p className="text-gray-600 dark:text-gray-400">
+                                Seems like you&apos;re trying to edit the live workflow. Only the draft version can be modified. Changes will not be saved.
+                            </p>
+                        </ModalBody>
+                        <ModalFooter>
+                            <Button 
+                                variant="light" 
+                                onPress={handleCancelEdit}
+                                className="text-gray-600"
+                            >
+                                View the live version
+                            </Button>
+                            <Button 
+                                color="primary" 
+                                onPress={handleSwitchToDraft}
+                                className="bg-blue-600 text-white"
+                            >
+                                Switch to draft
+                            </Button>
+                        </ModalFooter>
+                    </ModalContent>
+                </Modal>
+
                 {/* Top Bar - Isolated like sidebar */}
                 <TopBar
                     localProjectName={localProjectName}
@@ -1523,7 +1621,7 @@ export function WorkflowEditor({
                         className={`overflow-auto ${!state.present.selection ? 'hidden' : ''}`}
                     >
                         {state.present.selection?.type === "agent" && <AgentConfig
-                            key={`agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}`}
+                            key={`agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}-${configKey}`}
                             projectId={projectId}
                             workflow={state.present.workflow}
                             agent={state.present.workflow.agents.find((agent) => agent.name === state.present.selection!.name)!}
@@ -1545,7 +1643,7 @@ export function WorkflowEditor({
                                 (tool) => tool.name === state.present.selection!.name
                             );
                             return <ToolConfig
-                                key={state.present.selection.name}
+                                key={`${state.present.selection.name}-${configKey}`}
                                 tool={selectedTool!}
                                 usedToolNames={new Set([
                                     ...state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name),
@@ -1555,7 +1653,7 @@ export function WorkflowEditor({
                             />;
                         })()}
                         {state.present.selection?.type === "prompt" && <PromptConfig
-                            key={state.present.selection.name}
+                            key={`${state.present.selection.name}-${configKey}`}
                             prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
                             agents={state.present.workflow.agents}
                             tools={state.present.workflow.tools}
@@ -1565,13 +1663,13 @@ export function WorkflowEditor({
                             handleClose={handleUnselectPrompt}
                         />}
                         {state.present.selection?.type === "datasource" && <DataSourceConfig
-                            key={state.present.selection.name}
+                            key={`${state.present.selection.name}-${configKey}`}
                             dataSourceId={state.present.selection.name}
                             handleClose={() => dispatch({ type: "unselect_datasource" })}
                             onDataSourceUpdate={onDataSourcesUpdated}
                         />}
                         {state.present.selection?.type === "pipeline" && <PipelineConfig
-                            key={state.present.selection.name}
+                            key={`${state.present.selection.name}-${configKey}`}
                             projectId={projectId}
                             workflow={state.present.workflow}
                             pipeline={state.present.workflow.pipelines?.find((pipeline) => pipeline.name === state.present.selection!.name)!}
