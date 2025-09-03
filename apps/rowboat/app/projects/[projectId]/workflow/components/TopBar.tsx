@@ -2,7 +2,7 @@
 import React from "react";
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input } from "@heroui/react";
 import { Button as CustomButton } from "@/components/ui/button";
-import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug } from "lucide-react";
+import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug, MessageCircleIcon } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { ProgressBar, ProgressStep } from "@/components/ui/progress-bar";
 
@@ -18,6 +18,10 @@ interface TopBarProps {
     canUndo: boolean;
     canRedo: boolean;
     activePanel: 'playground' | 'copilot';
+    hasAgentInstructionChanges: boolean;
+    hasPlaygroundTested: boolean;
+    hasPublished: boolean;
+    hasClickedUse: boolean;
     onUndo: () => void;
     onRedo: () => void;
     onDownloadJSON: () => void;
@@ -25,6 +29,8 @@ interface TopBarProps {
     onChangeMode: (mode: 'draft' | 'live') => void;
     onRevertToLive: () => void;
     onTogglePanel: () => void;
+    onUseAssistantClick: () => void;
+    onStartNewChatAndFocus: () => void;
 }
 
 export function TopBar({
@@ -39,6 +45,10 @@ export function TopBar({
     canUndo,
     canRedo,
     activePanel,
+    hasAgentInstructionChanges,
+    hasPlaygroundTested,
+    hasPublished,
+    hasClickedUse,
     onUndo,
     onRedo,
     onDownloadJSON,
@@ -46,6 +56,8 @@ export function TopBar({
     onChangeMode,
     onRevertToLive,
     onTogglePanel,
+    onUseAssistantClick,
+    onStartNewChatAndFocus,
 }: TopBarProps) {
     const router = useRouter();
     const params = useParams();
@@ -53,10 +65,10 @@ export function TopBar({
     
     // Progress bar steps with completion logic and detailed tooltips
     const progressSteps: ProgressStep[] = [
-        { id: 1, label: "Build: Ask the copilot to build the assistant you want and apply the changes", completed: false },
-        { id: 2, label: "Test: Chat with the assistant in the playground. You can ask the copilot to make changes or use the handy 'Fix' and 'Explain' buttons in the chat", completed: false },
-        { id: 3, label: "Publish: Make the assistant live by clicking the Publish button on the right", completed: false },
-        { id: 4, label: "Use: Use the assistant by chatting with it, adding triggers like incoming emails, or integrating through the API", completed: false },
+        { id: 1, label: "Build: Ask the copilot to build the assistant you want and apply the changes", completed: hasAgentInstructionChanges },
+        { id: 2, label: "Test: Chat with the assistant in the playground. You can ask the copilot to make changes or use the handy 'Fix' and 'Explain' buttons in the chat", completed: hasPlaygroundTested && hasAgentInstructionChanges },
+        { id: 3, label: "Publish: Make the assistant live by clicking the Publish button on the right", completed: hasPublished },
+        { id: 4, label: "Use: Use the assistant by chatting with it, adding triggers like incoming emails, or integrating through the API", completed: hasClickedUse },
     ];
 
     return (
@@ -169,16 +181,32 @@ export function TopBar({
                                     </DropdownTrigger>
                                     <DropdownMenu aria-label="Assistant access options">
                                         <DropdownItem
+                                            key="chat"
+                                            startContent={<MessageCircleIcon size={16} />}
+                                            onPress={() => { 
+                                                onUseAssistantClick();
+                                                onStartNewChatAndFocus();
+                                            }}
+                                        >
+                                            Chat with Assistant
+                                        </DropdownItem>
+                                        <DropdownItem
                                             key="api-sdk"
                                             startContent={<SettingsIcon size={16} />}
-                                            onPress={() => { if (projectId) { router.push(`/projects/${projectId}/config`); } }}
+                                            onPress={() => { 
+                                                onUseAssistantClick();
+                                                if (projectId) { router.push(`/projects/${projectId}/config`); } 
+                                            }}
                                         >
                                             API & SDK Settings
                                         </DropdownItem>
                                         <DropdownItem
                                             key="manage-triggers"
                                             startContent={<ZapIcon size={16} />}
-                                            onPress={() => { if (projectId) { router.push(`/projects/${projectId}/manage-triggers`); } }}
+                                            onPress={() => { 
+                                                onUseAssistantClick();
+                                                if (projectId) { router.push(`/projects/${projectId}/manage-triggers`); } 
+                                            }}
                                             >
                                             Manage Triggers
                                         </DropdownItem>

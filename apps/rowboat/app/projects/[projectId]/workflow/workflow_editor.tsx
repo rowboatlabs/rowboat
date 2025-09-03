@@ -61,7 +61,7 @@ interface StateItem {
     chatKey: number;
     lastUpdatedAt: string;
     isLive: boolean;
-
+    agentInstructionsChanged: boolean;
 }
 
 interface State {
@@ -656,6 +656,10 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "update_agent": {
+                            // Check if instructions are being changed
+                            if (action.agent.instructions !== undefined) {
+                                draft.agentInstructionsChanged = true;
+                            }
 
                             // update agent data
                             draft.workflow.agents = draft.workflow.agents.map((agent) =>
@@ -930,7 +934,7 @@ export function WorkflowEditor({
             chatKey: 0,
             lastUpdatedAt: workflow.lastUpdatedAt,
             isLive,
-
+            agentInstructionsChanged: false,
         }
     });
 
@@ -994,6 +998,68 @@ export function WorkflowEditor({
     const [projectNameError, setProjectNameError] = useState<string | null>(null);
     const [isEditingProjectName, setIsEditingProjectName] = useState<boolean>(false);
     const [pendingProjectName, setPendingProjectName] = useState<string | null>(null);
+    
+    // Build progress tracking - persists once set to true
+    const [hasAgentInstructionChanges, setHasAgentInstructionChanges] = useState<boolean>(() => {
+        return localStorage.getItem(`agent_instructions_changed_${projectId}`) === 'true';
+    });
+
+    // Test progress tracking - persists once set to true
+    const [hasPlaygroundTested, setHasPlaygroundTested] = useState<boolean>(() => {
+        return localStorage.getItem(`playground_tested_${projectId}`) === 'true';
+    });
+
+    // Publish progress tracking - persists once set to true
+    const [hasPublished, setHasPublished] = useState<boolean>(() => {
+        return localStorage.getItem(`has_published_${projectId}`) === 'true';
+    });
+
+    // Use progress tracking - persists once set to true
+    const [hasClickedUse, setHasClickedUse] = useState<boolean>(() => {
+        return localStorage.getItem(`has_clicked_use_${projectId}`) === 'true';
+    });
+
+    // Function to mark agent instructions as changed (persists in localStorage)
+    const markAgentInstructionsChanged = useCallback(() => {
+        if (!hasAgentInstructionChanges) {
+            setHasAgentInstructionChanges(true);
+            localStorage.setItem(`agent_instructions_changed_${projectId}`, 'true');
+        }
+    }, [hasAgentInstructionChanges, projectId]);
+
+    // Function to mark playground as tested (persists in localStorage)
+    const markPlaygroundTested = useCallback(() => {
+        if (!hasPlaygroundTested && hasAgentInstructionChanges) { // Only mark if step 1 is complete
+            setHasPlaygroundTested(true);
+            localStorage.setItem(`playground_tested_${projectId}`, 'true');
+        }
+    }, [hasPlaygroundTested, hasAgentInstructionChanges, projectId]);
+
+    // Function to mark as published (persists in localStorage)
+    const markAsPublished = useCallback(() => {
+        if (!hasPublished) {
+            setHasPublished(true);
+            localStorage.setItem(`has_published_${projectId}`, 'true');
+        }
+    }, [hasPublished, projectId]);
+
+    // Function to mark Use Assistant button as clicked (persists in localStorage)
+    const markUseAssistantClicked = useCallback(() => {
+        if (!hasClickedUse) {
+            setHasClickedUse(true);
+            localStorage.setItem(`has_clicked_use_${projectId}`, 'true');
+        }
+    }, [hasClickedUse, projectId]);
+
+    // Reference to start new chat function from playground
+    const startNewChatRef = useRef<(() => void) | null>(null);
+    
+    // Function to start new chat and focus
+    const handleStartNewChatAndFocus = useCallback(() => {
+        if (startNewChatRef.current) {
+            startNewChatRef.current();
+        }
+    }, []);
 
     // Load agent order from localStorage on mount
     // useEffect(() => {
@@ -1060,6 +1126,13 @@ export function WorkflowEditor({
             setIsInitialState(false);
         }
     }, [state.present.workflow, state.present.pendingChanges]);
+
+    // Track agent instruction changes from copilot
+    useEffect(() => {
+        if (state.present.agentInstructionsChanged) {
+            markAgentInstructionsChanged();
+        }
+    }, [state.present.agentInstructionsChanged, markAgentInstructionsChanged]);
 
     function handleSelectAgent(name: string) {
         dispatch({ type: "select_agent", name });
@@ -1158,6 +1231,10 @@ export function WorkflowEditor({
     }
 
     function handleUpdateAgent(name: string, agent: Partial<z.infer<typeof WorkflowAgent>>) {
+        // Check if instructions are being changed
+        if (agent.instructions !== undefined) {
+            markAgentInstructionsChanged();
+        }
         dispatch({ type: "update_agent", name, agent });
     }
 
@@ -1236,6 +1313,7 @@ export function WorkflowEditor({
         dispatch({ type: 'set_publishing', publishing: true });
         try {
             await publishWorkflow(projectId, state.present.workflow);
+            markAsPublished(); // Mark step 3 as completed when user publishes
             // Use centralized mode transition for publish
             handleModeTransition('live', 'publish');
             // reflect live mode both internally and externally in one go
@@ -1544,6 +1622,10 @@ export function WorkflowEditor({
                     canUndo={state.currentIndex > 0}
                     canRedo={state.currentIndex < state.patches.length}
                     activePanel={activePanel}
+                    hasAgentInstructionChanges={hasAgentInstructionChanges}
+                    hasPlaygroundTested={hasPlaygroundTested}
+                    hasPublished={hasPublished}
+                    hasClickedUse={hasClickedUse}
                     onUndo={() => dispatchGuarded({ type: "undo" })}
                     onRedo={() => dispatchGuarded({ type: "redo" })}
                     onDownloadJSON={handleDownloadJSON}
@@ -1551,6 +1633,8 @@ export function WorkflowEditor({
                     onChangeMode={onChangeMode}
                     onRevertToLive={handleRevertToLive}
                     onTogglePanel={handleTogglePanel}
+                    onUseAssistantClick={markUseAssistantClicked}
+                    onStartNewChatAndFocus={handleStartNewChatAndFocus}
                 />
                 
                 {/* Content Area */}
@@ -1726,6 +1810,7 @@ export function WorkflowEditor({
                                 isLiveWorkflow={isLive}
                                 activePanel={activePanel}
                                 onTogglePanel={handleTogglePanel}
+                                onMessageSent={markPlaygroundTested}
                             />
                         </div>
                         <div className={(activePanel === 'copilot') ? 'block h-full' : 'hidden h-full'}>
