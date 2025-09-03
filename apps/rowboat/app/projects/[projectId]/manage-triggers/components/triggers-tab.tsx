@@ -206,6 +206,12 @@ export function TriggersTab({ projectId }: { projectId: string }) {
   }, [showCreateFlow, loadTriggers]);
 
   useEffect(() => {
+    if (!loading && !error && triggers.length === 0 && !showCreateFlow) {
+      setShowCreateFlow(true);
+    }
+  }, [loading, error, triggers.length, showCreateFlow]);
+
+  useEffect(() => {
     // No-op: trigger names are now derived from slug locally
   }, [triggers]);
 
