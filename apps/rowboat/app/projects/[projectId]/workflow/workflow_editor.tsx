@@ -61,6 +61,7 @@ interface StateItem {
     chatKey: number;
     lastUpdatedAt: string;
     isLive: boolean;
+
 }
 
 interface State {
@@ -73,6 +74,15 @@ interface State {
 export type Action = {
     type: "update_workflow_name";
     name: string;
+} | {
+    type: "switch_to_draft_due_to_changes";
+} | {
+    type: "show_workflow_change_banner";
+} | {
+    type: "clear_workflow_change_banner";
+} | {
+    type: "set_is_live";
+    isLive: boolean;
 } | {
     type: "set_publishing";
     publishing: boolean;
@@ -238,6 +248,19 @@ function reducer(state: State, action: Action): State {
             });
             break;
         }
+        case "switch_to_draft_due_to_changes": {
+            newState = produce(state, draft => {
+                draft.present.isLive = false;
+            });
+            break;
+        }
+        case "set_is_live": {
+            newState = produce(state, draft => {
+                draft.present.isLive = action.isLive;
+            });
+            break;
+        }
+
         case "set_saving": {
             newState = produce(state, draft => {
                 draft.present.saving = action.saving;
@@ -335,9 +358,6 @@ function reducer(state: State, action: Action): State {
                             draft.selection = null;
                             break;
                         case "add_agent": {
-                            if (isLive) {
-                                break;
-                            }
                             let newAgentName = "New agent";
                             if (draft.workflow?.agents.some((agent) => agent.name === newAgentName)) {
                                 newAgentName = `New agent ${draft.workflow.agents.filter((agent) =>
@@ -368,9 +388,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "add_tool": {
-                            if (isLive) {
-                                break;
-                            }
                             let newToolName = "new_tool";
                             if (draft.workflow?.tools.some((tool) => tool.name === newToolName)) {
                                 newToolName = `new_tool_${draft.workflow.tools.filter((tool) =>
@@ -396,9 +413,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "add_prompt": {
-                            if (isLive) {
-                                break;
-                            }
                             let newPromptName = "New Variable";
                             if (draft.workflow?.prompts.some((prompt) => prompt.name === newPromptName)) {
                                 newPromptName = `New Variable ${draft.workflow?.prompts.filter((prompt) =>
@@ -419,9 +433,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "add_prompt_no_select": {
-                            if (isLive) {
-                                break;
-                            }
                             let newPromptName = "New Variable";
                             if (draft.workflow?.prompts.some((prompt) => prompt.name === newPromptName)) {
                                 newPromptName = `New Variable ${draft.workflow?.prompts.filter((prompt) =>
@@ -440,9 +451,6 @@ function reducer(state: State, action: Action): State {
                         }
                         // TODO: parameterize this instead of writing if else based on pipeline length (pipelineAgents.length)
                         case "add_pipeline": {
-                            if (isLive) {
-                                break;
-                            }
                             
                             if (!draft.workflow.pipelines) {
                                 draft.workflow.pipelines = [];
@@ -521,9 +529,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "delete_agent":
-                            if (isLive) {
-                                break;
-                            }
                             // Remove the agent
                             draft.workflow.agents = draft.workflow.agents.filter(
                                 (agent) => agent.name !== action.name
@@ -568,9 +573,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "delete_tool":
-                            if (isLive) {
-                                break;
-                            }
                             draft.workflow.tools = draft.workflow.tools.filter(
                                 (tool) => tool.name !== action.name
                             );
@@ -579,9 +581,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "delete_prompt":
-                            if (isLive) {
-                                break;
-                            }
                             draft.workflow.prompts = draft.workflow.prompts.filter(
                                 (prompt) => prompt.name !== action.name
                             );
@@ -590,9 +589,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "delete_pipeline":
-                            if (isLive) {
-                                break;
-                            }
                             if (draft.workflow.pipelines) {
                                 // Find the pipeline to get its associated agents
                                 const pipelineToDelete = draft.workflow.pipelines.find(
@@ -649,9 +645,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "update_pipeline": {
-                            if (isLive) {
-                                break;
-                            }
                             if (draft.workflow.pipelines) {
                                 draft.workflow.pipelines = draft.workflow.pipelines.map(pipeline =>
                                     pipeline.name === action.name ? { ...pipeline, ...action.pipeline } : pipeline
@@ -663,9 +656,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "update_agent": {
-                            if (isLive) {
-                                break;
-                            }
 
                             // update agent data
                             draft.workflow.agents = draft.workflow.agents.map((agent) =>
@@ -724,9 +714,6 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "update_tool":
-                            if (isLive) {
-                                break;
-                            }
 
                             // update tool data
                             draft.workflow.tools = draft.workflow.tools.map((tool) =>
@@ -769,9 +756,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "update_prompt":
-                            if (isLive) {
-                                break;
-                            }
 
                             // update prompt data
                             draft.workflow.prompts = draft.workflow.prompts.map((prompt) =>
@@ -814,9 +798,6 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "update_prompt_no_select":
-                            if (isLive) {
-                                break;
-                            }
 
                             // update prompt data
                             draft.workflow.prompts = draft.workflow.prompts.map((prompt) =>
@@ -855,18 +836,12 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         case "toggle_agent":
-                            if (isLive) {
-                                break;
-                            }
                             draft.workflow.agents = draft.workflow.agents.map(agent =>
                                 agent.name === action.name ? { ...agent, disabled: !agent.disabled } : agent
                             );
                             draft.chatKey++;
                             break;
                         case "set_main_agent":
-                            if (isLive) {
-                                break;
-                            }
                             draft.workflow.startAgent = action.name;
                             draft.pendingChanges = true;
                             draft.chatKey++;
@@ -955,6 +930,7 @@ export function WorkflowEditor({
             chatKey: 0,
             lastUpdatedAt: workflow.lastUpdatedAt,
             isLive,
+
         }
     });
 
@@ -965,10 +941,42 @@ export function WorkflowEditor({
     const saveQueue = useRef<z.infer<typeof Workflow>[]>([]);
     const saving = useRef(false);
     const [showCopySuccess, setShowCopySuccess] = useState(false);
-    const [showCopilot, setShowCopilot] = useState(true);
-    const [copilotWidth, setCopilotWidth] = useState<number>(PANEL_RATIOS.copilot);
+    const [activePanel, setActivePanel] = useState<'playground' | 'copilot'>('copilot');
     const [isInitialState, setIsInitialState] = useState(true);
+    const [showBuildModeBanner, setShowBuildModeBanner] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [pendingAction, setPendingAction] = useState<Action | null>(null);
+    const [configKey, setConfigKey] = useState(0);
+    const [lastWorkflowId, setLastWorkflowId] = useState<string | null>(null);
     const [showTour, setShowTour] = useState(true);
+
+    // Centralized mode transition handler
+    const handleModeTransition = useCallback((newMode: 'draft' | 'live', reason: 'publish' | 'view_live' | 'switch_draft' | 'modal_switch') => {
+        // Clear any open entity configs
+        dispatch({ type: "unselect_agent" });
+        
+        // Set default panel based on mode
+        setActivePanel(newMode === 'live' ? 'playground' : 'copilot');
+        
+        // Force component re-render
+        setConfigKey(prev => prev + 1);
+        
+        // Handle mode-specific logic
+        if (reason === 'publish') {
+            // This will be handled by the publish function itself
+            return;
+        } else {
+            // Direct mode switch
+            onChangeMode(newMode);
+            
+            // If switching to draft mode, we need to ensure we have the correct draft data
+            // The parent component will update the workflow prop, but we need to wait for it
+            if (newMode === 'draft') {
+                // Force a workflow state reset when the workflow prop updates
+                setLastWorkflowId(null);
+            }
+        }
+    }, [onChangeMode]);
     const copilotRef = useRef<{ handleUserMessage: (message: string) => void }>(null);
     const entityListRef = useRef<{ openDataSourcesModal: () => void } | null>(null);
     
@@ -1010,7 +1018,7 @@ export function WorkflowEditor({
 
     // Function to trigger copilot chat
     const triggerCopilotChat = useCallback((message: string) => {
-        setShowCopilot(true);
+        setActivePanel('copilot');
         // Small delay to ensure copilot is mounted
         setTimeout(() => {
             copilotRef.current?.handleUserMessage(message);
@@ -1028,14 +1036,14 @@ export function WorkflowEditor({
         const prompt = localStorage.getItem(`project_prompt_${projectId}`);
         console.log('init project prompt', prompt);
         if (prompt) {
-            setShowCopilot(true);
+            setActivePanel('copilot');
         }
     }, [projectId]);
 
-    // Hide copilot when switching to live mode
+    // Switch to playground when switching to live mode
     useEffect(() => {
         if (isLive) {
-            setShowCopilot(false);
+            setActivePanel('playground');
         }
     }, [isLive]);
 
@@ -1093,15 +1101,15 @@ export function WorkflowEditor({
             ...agent,
             model: agent.model || defaultModel || "gpt-4.1"
         };
-        dispatch({ type: "add_agent", agent: agentWithModel });
+        dispatchGuarded({ type: "add_agent", agent: agentWithModel });
     }
 
     function handleAddTool(tool: Partial<z.infer<typeof WorkflowTool>> = {}) {
-        dispatch({ type: "add_tool", tool });
+        dispatchGuarded({ type: "add_tool", tool });
     }
 
     function handleAddPrompt(prompt: Partial<z.infer<typeof WorkflowPrompt>> = {}) {
-        dispatch({ type: "add_prompt", prompt });
+        dispatchGuarded({ type: "add_prompt", prompt });
     }
 
     function handleSelectPipeline(name: string) {
@@ -1109,7 +1117,7 @@ export function WorkflowEditor({
     }
 
     function handleAddPipeline(pipeline: Partial<z.infer<typeof WorkflowPipeline>> = {}) {
-        dispatch({ type: "add_pipeline", pipeline, defaultModel });
+        dispatchGuarded({ type: "add_pipeline", pipeline, defaultModel });
     }
 
     function handleDeletePipeline(name: string) {
@@ -1130,12 +1138,12 @@ export function WorkflowEditor({
         };
         
         // First add the agent
-        dispatch({ type: "add_agent", agent: agentWithModel });
+        dispatchGuarded({ type: "add_agent", agent: agentWithModel });
         
         // Then add it to the pipeline
         const pipeline = state.present.workflow.pipelines?.find(p => p.name === pipelineName);
         if (pipeline) {
-            dispatch({ 
+            dispatchGuarded({ 
                 type: "update_pipeline", 
                 name: pipelineName, 
                 pipeline: { 
@@ -1225,8 +1233,17 @@ export function WorkflowEditor({
     }
 
     async function handlePublishWorkflow() {
-        await publishWorkflow(projectId, state.present.workflow);
-        onChangeMode('live');
+        dispatch({ type: 'set_publishing', publishing: true });
+        try {
+            await publishWorkflow(projectId, state.present.workflow);
+            // Use centralized mode transition for publish
+            handleModeTransition('live', 'publish');
+            // reflect live mode both internally and externally in one go
+            dispatch({ type: 'set_is_live', isLive: true });
+            onChangeMode('live');
+        } finally {
+            dispatch({ type: 'set_publishing', publishing: false });
+        }
     }
 
     function handleRevertToLive() {
@@ -1326,6 +1343,101 @@ export function WorkflowEditor({
         setIsInitialState(false);
     }
 
+    // Centralized draft switch for any workflow modification while in live mode
+    const ensureDraftForModify = useCallback(() => {
+        if (isLive && !state.present.publishing) {
+            onChangeMode('draft');
+            setShowBuildModeBanner(true);
+            setTimeout(() => setShowBuildModeBanner(false), 5000);
+        }
+    }, [isLive, state.present.publishing, onChangeMode]);
+
+    const WORKFLOW_MOD_ACTIONS = useRef(new Set([
+        'add_agent','add_tool','add_prompt','add_prompt_no_select','add_pipeline',
+        'update_agent','update_tool','update_prompt','update_prompt_no_select','update_pipeline',
+        'delete_agent','delete_tool','delete_prompt','delete_pipeline',
+        'toggle_agent','set_main_agent','reorder_agents','reorder_pipelines'
+    ])).current;
+
+    const dispatchGuarded = useCallback((action: Action) => {
+        // Intercept workflow modifications in live mode before they reach the reducer
+        if (WORKFLOW_MOD_ACTIONS.has((action as any).type) && isLive && !state.present.publishing) {
+            setPendingAction(action);
+            setShowEditModal(true);
+            return; // Block the action - it never reaches the reducer
+        }
+        dispatch(action); // Allow the action to proceed
+    }, [WORKFLOW_MOD_ACTIONS, isLive, state.present.publishing, dispatch]);
+
+    // Simplified modal handlers
+    const handleSwitchToDraft = useCallback(() => {
+        setShowEditModal(false);
+        setPendingAction(null); // Don't apply the pending action
+        handleModeTransition('draft', 'modal_switch');
+        setShowBuildModeBanner(true);
+        setTimeout(() => setShowBuildModeBanner(false), 5000);
+    }, [handleModeTransition]);
+
+    const handleCancelEdit = useCallback(() => {
+        setShowEditModal(false);
+        setPendingAction(null);
+        // Force re-render of config components to reset form values
+        setConfigKey(prev => prev + 1);
+    }, []);
+
+    // Single useEffect for data synchronization
+    useEffect(() => {
+        // Only sync when workflow data actually changes
+        const currentWorkflowId = `${isLive ? 'live' : 'draft'}-${workflow.lastUpdatedAt}`;
+        
+        // Special case: if we're switching to draft mode and the workflow data looks like live data
+        // (same lastUpdatedAt as the previous live data), don't reset the state yet
+        if (!isLive && lastWorkflowId && lastWorkflowId.startsWith('live-') && 
+            currentWorkflowId === `draft-${workflow.lastUpdatedAt}`) {
+            // This is likely stale draft data that matches live data
+            // Don't reset the state, just update the ID
+            setLastWorkflowId(currentWorkflowId);
+            return;
+        }
+        
+        if (lastWorkflowId !== currentWorkflowId) {
+            dispatch({ type: "restore_state", state: { ...state.present, workflow } });
+            setLastWorkflowId(currentWorkflowId);
+        }
+    }, [workflow, isLive, lastWorkflowId, state.present]);
+
+    // Handle the case where we switch to draft mode but get stale data
+    useEffect(() => {
+        // If we're in draft mode but the workflow data looks like live data (same lastUpdatedAt as live)
+        // and we just switched from live mode, we need to wait for fresh draft data
+        if (!isLive && lastWorkflowId && lastWorkflowId.startsWith('live-')) {
+            // We just switched from live to draft, but we might have stale data
+            // Clear the selection to prevent showing wrong data
+            dispatch({ type: "unselect_agent" });
+        }
+    }, [isLive, lastWorkflowId]);
+
+    // Additional effect to handle mode changes that might not trigger workflow prop updates
+    useEffect(() => {
+        // If we're in draft mode but the workflow state contains live data, clear selection
+        // This prevents showing wrong data while waiting for the correct workflow prop
+        if (!isLive && state.present.isLive) {
+            dispatch({ type: "unselect_agent" });
+        }
+    }, [isLive, state.present.isLive]);
+
+    function handleTogglePanel() {
+        if (isLive && activePanel === 'playground') {
+            // User is trying to switch to Build mode in live mode
+            handleModeTransition('draft', 'switch_draft');
+            setShowBuildModeBanner(true);
+            // Auto-hide banner after 5 seconds
+            setTimeout(() => setShowBuildModeBanner(false), 5000);
+        } else {
+            setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground');
+        }
+    }
+
     const validateProjectName = (value: string) => {
         if (value.length === 0) {
             setProjectNameError("Project name cannot be empty");
@@ -1386,6 +1498,39 @@ export function WorkflowEditor({
             onSelectPrompt: handleSelectPrompt,
         }}>
             <div className="h-full flex flex-col gap-5">
+                {/* Live Workflow Edit Modal */}
+                <Modal isOpen={showEditModal} onClose={handleCancelEdit} size="md">
+                    <ModalContent>
+                        <ModalHeader className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                                <span>Edit Live Workflow</span>
+                            </div>
+                        </ModalHeader>
+                        <ModalBody>
+                            <p className="text-gray-600 dark:text-gray-400">
+                                Seems like you&apos;re trying to edit the live workflow. Only the draft version can be modified. Changes will not be saved.
+                            </p>
+                        </ModalBody>
+                        <ModalFooter>
+                            <Button 
+                                variant="light" 
+                                onPress={handleCancelEdit}
+                                className="text-gray-600"
+                            >
+                                View the live version
+                            </Button>
+                            <Button 
+                                color="primary" 
+                                onPress={handleSwitchToDraft}
+                                className="bg-blue-600 text-white"
+                            >
+                                Switch to draft
+                            </Button>
+                        </ModalFooter>
+                    </ModalContent>
+                </Modal>
+
                 {/* Top Bar - Isolated like sidebar */}
                 <TopBar
                     localProjectName={localProjectName}
@@ -1395,21 +1540,26 @@ export function WorkflowEditor({
                     publishing={state.present.publishing}
                     isLive={isLive}
                     showCopySuccess={showCopySuccess}
+                    showBuildModeBanner={showBuildModeBanner}
                     canUndo={state.currentIndex > 0}
                     canRedo={state.currentIndex < state.patches.length}
-                    showCopilot={showCopilot}
-                    onUndo={() => dispatch({ type: "undo" })}
-                    onRedo={() => dispatch({ type: "redo" })}
+                    activePanel={activePanel}
+                    onUndo={() => dispatchGuarded({ type: "undo" })}
+                    onRedo={() => dispatchGuarded({ type: "redo" })}
                     onDownloadJSON={handleDownloadJSON}
                     onPublishWorkflow={handlePublishWorkflow}
                     onChangeMode={onChangeMode}
                     onRevertToLive={handleRevertToLive}
-                    onToggleCopilot={() => setShowCopilot(!showCopilot)}
+                    onTogglePanel={handleTogglePanel}
                 />
                 
                 {/* Content Area */}
                 <ResizablePanelGroup direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
-                    <ResizablePanel minSize={10} defaultSize={PANEL_RATIOS.entityList}>
+                    <ResizablePanel 
+                        key={`entity-list-${state.present.selection ? '3-pane' : '2-pane'}`}
+                        minSize={10} 
+                        defaultSize={PANEL_RATIOS.entityList}
+                    >
                         <div className="flex flex-col h-full">
                             <EntityList
                                 ref={entityListRef}
@@ -1462,24 +1612,16 @@ export function WorkflowEditor({
                             />
                         </div>
                     </ResizablePanel>
-                    <ResizableHandle withHandle className="w-[3px] bg-transparent" />
+                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${!state.present.selection ? 'hidden' : ''}`} />
+                    
+                    {/* Config Panel - always rendered, visibility controlled */}
                     <ResizablePanel
                         minSize={20}
-                        defaultSize={showCopilot ? PANEL_RATIOS.chatApp : PANEL_RATIOS.chatApp + PANEL_RATIOS.copilot}
-                        className="overflow-auto"
+                        defaultSize={45}
+                        className={`overflow-auto ${!state.present.selection ? 'hidden' : ''}`}
                     >
-                        <ChatApp
-                            key={'' + state.present.chatKey}
-                            hidden={state.present.selection !== null}
-                            projectId={projectId}
-                            workflow={state.present.workflow}
-                            messageSubscriber={updateChatMessages}
-                            onPanelClick={handlePlaygroundClick}
-                            triggerCopilotChat={triggerCopilotChat}
-                            isLiveWorkflow={isLive}
-                        />
                         {state.present.selection?.type === "agent" && <AgentConfig
-                            key={`agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}`}
+                            key={`agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}-${configKey}`}
                             projectId={projectId}
                             workflow={state.present.workflow}
                             agent={state.present.workflow.agents.find((agent) => agent.name === state.present.selection!.name)!}
@@ -1489,7 +1631,7 @@ export function WorkflowEditor({
                             tools={state.present.workflow.tools}
                             prompts={state.present.workflow.prompts}
                             dataSources={dataSources}
-                            handleUpdate={handleUpdateAgent.bind(null, state.present.selection.name)}
+                            handleUpdate={(update) => { dispatchGuarded({ type: "update_agent", name: state.present.selection!.name, agent: update }); }}
                             handleClose={handleUnselectAgent}
                             useRag={useRag}
                             triggerCopilotChat={triggerCopilotChat}
@@ -1501,33 +1643,33 @@ export function WorkflowEditor({
                                 (tool) => tool.name === state.present.selection!.name
                             );
                             return <ToolConfig
-                                key={state.present.selection.name}
+                                key={`${state.present.selection.name}-${configKey}`}
                                 tool={selectedTool!}
                                 usedToolNames={new Set([
                                     ...state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name),
                                 ])}
-                                handleUpdate={handleUpdateTool.bind(null, state.present.selection.name)}
+                                handleUpdate={(update) => { dispatchGuarded({ type: "update_tool", name: state.present.selection!.name, tool: update }); }}
                                 handleClose={handleUnselectTool}
                             />;
                         })()}
                         {state.present.selection?.type === "prompt" && <PromptConfig
-                            key={state.present.selection.name}
+                            key={`${state.present.selection.name}-${configKey}`}
                             prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
                             agents={state.present.workflow.agents}
                             tools={state.present.workflow.tools}
                             prompts={state.present.workflow.prompts}
                             usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
-                            handleUpdate={handleUpdatePrompt.bind(null, state.present.selection.name)}
+                            handleUpdate={(update) => { dispatchGuarded({ type: "update_prompt", name: state.present.selection!.name, prompt: update }); }}
                             handleClose={handleUnselectPrompt}
                         />}
                         {state.present.selection?.type === "datasource" && <DataSourceConfig
-                            key={state.present.selection.name}
+                            key={`${state.present.selection.name}-${configKey}`}
                             dataSourceId={state.present.selection.name}
                             handleClose={() => dispatch({ type: "unselect_datasource" })}
                             onDataSourceUpdate={onDataSourcesUpdated}
                         />}
                         {state.present.selection?.type === "pipeline" && <PipelineConfig
-                            key={state.present.selection.name}
+                            key={`${state.present.selection.name}-${configKey}`}
                             projectId={projectId}
                             workflow={state.present.workflow}
                             pipeline={state.present.workflow.pipelines?.find((pipeline) => pipeline.name === state.present.selection!.name)!}
@@ -1563,38 +1705,55 @@ export function WorkflowEditor({
                             </Panel>
                         )}
                     </ResizablePanel>
-                    {showCopilot && (
-                        <>
-                            <ResizableHandle withHandle className="w-[3px] bg-transparent" />
-                            <ResizablePanel
-                                minSize={10}
-                                defaultSize={PANEL_RATIOS.copilot}
-                                onResize={(size) => setCopilotWidth(size)}
-                            >
-                                <Copilot
-                                    ref={copilotRef}
-                                    projectId={projectId}
-                                    workflow={state.present.workflow}
-                                    dispatch={dispatch}
-                                    chatContext={
-                                        state.present.selection &&
-                                        (state.present.selection.type === "agent" ||
-                                         state.present.selection.type === "tool" ||
-                                         state.present.selection.type === "prompt")
-                                          ? {
-                                              type: state.present.selection.type,
-                                              name: state.present.selection.name
-                                            }
-                                          : chatMessages.length > 0
-                                            ? { type: 'chat', messages: chatMessages }
-                                            : undefined
-                                    }
-                                    isInitialState={isInitialState}
-                                    dataSources={dataSources}
-                                />
-                            </ResizablePanel>
-                        </>
-                    )}
+                    {/* Second handle - always show (between config and chat panels) */}
+                    <ResizableHandle withHandle className="w-[3px] bg-transparent" />
+                    
+                    {/* ChatApp/Copilot Panel - always visible */}
+                    <ResizablePanel
+                        key={`chat-panel-${state.present.selection ? '3-pane' : '2-pane'}`}
+                        minSize={20}
+                        defaultSize={state.present.selection ? 30 : PANEL_RATIOS.chatApp + PANEL_RATIOS.copilot}
+                        className="overflow-auto"
+                    >
+                        <div className={(activePanel === 'playground') ? 'block h-full' : 'hidden h-full'}>
+                            <ChatApp
+                                key={'' + state.present.chatKey}
+                                projectId={projectId}
+                                workflow={state.present.workflow}
+                                messageSubscriber={updateChatMessages}
+                                onPanelClick={handlePlaygroundClick}
+                                triggerCopilotChat={triggerCopilotChat}
+                                isLiveWorkflow={isLive}
+                                activePanel={activePanel}
+                                onTogglePanel={handleTogglePanel}
+                            />
+                        </div>
+                        <div className={(activePanel === 'copilot') ? 'block h-full' : 'hidden h-full'}>
+                            <Copilot
+                                ref={copilotRef}
+                                projectId={projectId}
+                                workflow={state.present.workflow}
+                                dispatch={dispatch}
+                                chatContext={
+                                    state.present.selection &&
+                                    (state.present.selection.type === "agent" ||
+                                     state.present.selection.type === "tool" ||
+                                     state.present.selection.type === "prompt")
+                                      ? {
+                                          type: state.present.selection.type,
+                                          name: state.present.selection.name
+                                        }
+                                      : chatMessages.length > 0
+                                        ? { type: 'chat', messages: chatMessages }
+                                        : undefined
+                                }
+                                isInitialState={isInitialState}
+                                dataSources={dataSources}
+                                activePanel={activePanel}
+                                onTogglePanel={handleTogglePanel}
+                            />
+                        </div>
+                    </ResizablePanel>
                 </ResizablePanelGroup>
                 {USE_PRODUCT_TOUR && showTour && (
                     <ProductTour

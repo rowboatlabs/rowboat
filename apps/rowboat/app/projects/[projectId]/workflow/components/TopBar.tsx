@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input } from "@heroui/react";
+import { Button as CustomButton } from "@/components/ui/button";
 import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 
@@ -12,16 +13,17 @@ interface TopBarProps {
     publishing: boolean;
     isLive: boolean;
     showCopySuccess: boolean;
+    showBuildModeBanner: boolean;
     canUndo: boolean;
     canRedo: boolean;
-    showCopilot: boolean;
+    activePanel: 'playground' | 'copilot';
     onUndo: () => void;
     onRedo: () => void;
     onDownloadJSON: () => void;
     onPublishWorkflow: () => void;
     onChangeMode: (mode: 'draft' | 'live') => void;
     onRevertToLive: () => void;
-    onToggleCopilot: () => void;
+    onTogglePanel: () => void;
 }
 
 export function TopBar({
@@ -32,16 +34,17 @@ export function TopBar({
     publishing,
     isLive,
     showCopySuccess,
+    showBuildModeBanner,
     canUndo,
     canRedo,
-    showCopilot,
+    activePanel,
     onUndo,
     onRedo,
     onDownloadJSON,
     onPublishWorkflow,
     onChangeMode,
     onRevertToLive,
-    onToggleCopilot,
+    onTogglePanel,
 }: TopBarProps) {
     const router = useRouter();
     const params = useParams();
@@ -70,106 +73,122 @@ export function TopBar({
                             classNames={{
                                 base: "max-w-xs",
                                 input: "text-base font-semibold px-2",
-                                inputWrapper: "min-h-[28px] h-[28px] border-gray-200 dark:border-gray-700 px-0"
+                                inputWrapper: "min-h-[36px] h-[36px] border-gray-200 dark:border-gray-700 px-0"
                             }}
                         />
                     </div>
-                    
-                    <div className="h-4 w-px bg-gray-300 dark:bg-gray-600"></div>
-                    
-                    <div className="flex items-center gap-2">
-                        {publishing && <Spinner size="sm" />}
-                        {isLive && <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
-                            <RadioIcon size={16} />
-                            Live workflow
-                        </div>}
-                        {!isLive && <div className="bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
-                            <PenLine size={16} />
-                            Draft workflow
-                        </div>}
 
-                        {/* Download JSON icon button, with tooltip, to the left of the menu */}
-                        <Tooltip content="Download Assistant JSON">
-                            <button
-                                onClick={onDownloadJSON}
-                                className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
-                                aria-label="Download JSON"
-                                type="button"
-                            >
-                                <DownloadIcon size={20} />
-                            </button>
-                        </Tooltip>
-                    </div>
+                    {/* Show divider and CTA only in live view */}
+                    {isLive && <div className="h-4 w-px bg-gray-300 dark:bg-gray-600"></div>}
+                    {isLive ? (
+                        <Button
+                            variant="solid"
+                            size="md"
+                            onPress={() => onChangeMode('draft')}
+                            className="gap-2 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300 font-medium text-sm border border-gray-200 dark:border-gray-600 shadow-sm"
+                            startContent={<PenLine size={16} />}
+                        >
+                            Switch to draft
+                        </Button>
+                    ) : null}
                 </div>
                 {showCopySuccess && <div className="flex items-center gap-2">
                     <div className="text-green-500">Copied to clipboard</div>
                 </div>}
+                {showBuildModeBanner && <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <div className="text-blue-700 dark:text-blue-300 text-sm">
+                        Switched to draft mode. You can now make changes to your workflow.
+                    </div>
+                </div>}
                 <div className="flex items-center gap-2">
-                    {isLive && <div className="flex items-center gap-2 absolute left-1/2 transform -translate-x-1/2">
-                        <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-2">
-                            <AlertTriangle size={16} />
-                            This version is locked. Changes applied will not be reflected.
-                        </div>
-                    </div>}
                     
                     {!isLive && <>
-                        <button
-                            className="p-1 text-gray-400 hover:text-black hover:cursor-pointer"
-                            title="Undo"
-                            disabled={!canUndo}
+                        <CustomButton
+                            variant="primary"
+                            size="sm"
                             onClick={onUndo}
+                            disabled={!canUndo}
+                            className="bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
+                            showHoverContent={true}
+                            hoverContent="Undo"
                         >
-                            <UndoIcon size={16} />
-                        </button>
-                        <button
-                            className="p-1 text-gray-400 hover:text-black hover:cursor-pointer"
-                            title="Redo"
-                            disabled={!canRedo}
+                            <UndoIcon className="w-4 h-4" />
+                        </CustomButton>
+                        <CustomButton
+                            variant="primary"
+                            size="sm"
                             onClick={onRedo}
+                            disabled={!canRedo}
+                            className="bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
+                            showHoverContent={true}
+                            hoverContent="Redo"
                         >
-                            <RedoIcon size={16} />
-                        </button>
+                            <RedoIcon className="w-4 h-4" />
+                        </CustomButton>
                     </>}
                     
                     {/* Deploy CTA - always visible */}
-                    <div className="flex">
+                    <div className="flex items-center gap-3">
                         {isLive ? (
-                            <Dropdown>
-                                <DropdownTrigger>
-                                    <Button
-                                        variant="solid"
-                                        size="md"
-                                        className="gap-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm"
-                                        startContent={<Plug size={16} />}
-                                    >
-                                        Use Assistant
-                                        <ChevronDownIcon size={14} />
-                                    </Button>
-                                </DropdownTrigger>
-                                <DropdownMenu aria-label="Assistant access options">
-                                    <DropdownItem
-                                        key="api-sdk"
-                                        startContent={<SettingsIcon size={16} />}
-                                        onPress={() => { if (projectId) { router.push(`/projects/${projectId}/config`); } }}
-                                    >
-                                        API & SDK Settings
-                                    </DropdownItem>
-                                    <DropdownItem
-                                        key="manage-triggers"
-                                        startContent={<ZapIcon size={16} />}
-                                        onPress={() => { if (projectId) { router.push(`/projects/${projectId}/manage-triggers`); } }}
+                            <>
+                                <Dropdown>
+                                    <DropdownTrigger>
+                                        <Button
+                                            variant="solid"
+                                            size="md"
+                                            className="gap-2 px-4 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-semibold text-sm border border-blue-200 dark:border-blue-700 shadow-sm"
+                                            startContent={<Plug size={16} />}
                                         >
-                                        Manage Triggers
-                                    </DropdownItem>
-                                </DropdownMenu>
-                            </Dropdown>
+                                            Use Assistant
+                                            <ChevronDownIcon size={14} />
+                                        </Button>
+                                    </DropdownTrigger>
+                                    <DropdownMenu aria-label="Assistant access options">
+                                        <DropdownItem
+                                            key="api-sdk"
+                                            startContent={<SettingsIcon size={16} />}
+                                            onPress={() => { if (projectId) { router.push(`/projects/${projectId}/config`); } }}
+                                        >
+                                            API & SDK Settings
+                                        </DropdownItem>
+                                        <DropdownItem
+                                            key="manage-triggers"
+                                            startContent={<ZapIcon size={16} />}
+                                            onPress={() => { if (projectId) { router.push(`/projects/${projectId}/manage-triggers`); } }}
+                                            >
+                                            Manage Triggers
+                                        </DropdownItem>
+                                    </DropdownMenu>
+                                </Dropdown>
+
+                                {/* Live workflow label moved here */}
+                                <div className="flex items-center gap-2 ml-2">
+                                    {publishing && <Spinner size="sm" />}
+                                    <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
+                                        <RadioIcon size={16} />
+                                        Live workflow
+                                    </div>
+                                    <Tooltip content="Download Assistant JSON">
+                                        <button
+                                            onClick={onDownloadJSON}
+                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
+                                            aria-label="Download JSON"
+                                            type="button"
+                                        >
+                                            <DownloadIcon size={20} />
+                                        </button>
+                                    </Tooltip>
+                                </div>
+                            </>
                         ) : (
                             <>
+                                <div className="flex">
                                 <Button
                                     variant="solid"
                                     size="md"
                                     onPress={onPublishWorkflow}
-                                    className="gap-2 px-4 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-r-none"
+                                    className="gap-2 px-4 bg-green-100 hover:bg-green-200 text-green-800 font-semibold text-sm rounded-r-none border border-green-300 shadow-sm"
                                     startContent={<RocketIcon size={16} />}
                                     data-tour-target="deploy"
                                 >
@@ -180,7 +199,7 @@ export function TopBar({
                                         <Button
                                             variant="solid"
                                             size="md"
-                                            className="min-w-0 px-2 bg-green-600 hover:bg-green-700 border-l-1 border-green-500 text-white font-semibold text-sm rounded-l-none"
+                                            className="min-w-0 px-2 bg-green-100 hover:bg-green-200 text-green-800 rounded-l-none border border-l-0 border-green-300 shadow-sm"
                                         >
                                             <ChevronDownIcon size={14} />
                                         </Button>
@@ -203,31 +222,34 @@ export function TopBar({
                                         </DropdownItem>
                                     </DropdownMenu>
                                 </Dropdown>
+                                </div>
+
+                                {/* Moved draft/live labels and download button here */}
+                                <div className="flex items-center gap-2 ml-2">
+                                    {publishing && <Spinner size="sm" />}
+                                    {isLive && <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
+                                        <RadioIcon size={16} />
+                                        Live workflow
+                                    </div>}
+                                    {!isLive && <div className="bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
+                                        <PenLine size={16} />
+                                        Draft workflow
+                                    </div>}
+                                    <Tooltip content="Download Assistant JSON">
+                                        <button
+                                            onClick={onDownloadJSON}
+                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
+                                            aria-label="Download JSON"
+                                            type="button"
+                                        >
+                                            <DownloadIcon size={20} />
+                                        </button>
+                                    </Tooltip>
+                                </div>
                             </>
                         )}
                     </div>
-                    
-                    {isLive && <div className="flex items-center gap-2">
-                        <Button
-                            variant="solid"
-                            size="md"
-                            onPress={() => onChangeMode('draft')}
-                            className="gap-2 px-4 bg-gray-600 hover:bg-gray-700 text-white font-semibold text-sm"
-                            startContent={<PenLine size={16} />}
-                        >
-                            Switch to draft
-                        </Button>
-                    </div>}
-                    
-                    {!isLive && <Button
-                        variant="solid"
-                        size="md"
-                        onPress={onToggleCopilot}
-                        className="gap-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm"
-                        startContent={showCopilot ? null : <span className="text-indigo-300">✨</span>}
-                    >
-                        {showCopilot ? "Hide Skipper" : "Skipper"}
-                    </Button>}
+
                 </div>
             </div>
         </div>

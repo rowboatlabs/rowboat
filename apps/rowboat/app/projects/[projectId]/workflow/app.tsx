@@ -102,6 +102,8 @@ export function App({
 
     function handleSetMode(mode: 'draft' | 'live') {
         setMode(mode);
+        // Reload data to ensure we have the latest workflow data for the current mode
+        reloadData();
     }
 
     async function handleRevertToLive() {

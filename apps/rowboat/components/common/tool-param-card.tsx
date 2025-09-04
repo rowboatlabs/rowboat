@@ -45,7 +45,7 @@ export function ToolParamCard({
         aria-expanded={expanded}
       >
         {expanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1 text-left truncate">{param.name}</span>
+        <span className="text-sm font-normal text-gray-900 dark:text-gray-100 flex-1 text-left truncate">{param.name}</span>
         {!readOnly && (
           <Button
             variant="tertiary"
