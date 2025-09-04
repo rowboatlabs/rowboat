@@ -5,6 +5,8 @@ export interface ProgressStep {
   id: number;
   label: string;
   completed: boolean;
+  icon?: string; // The icon/symbol to show instead of number
+  isCurrent?: boolean; // Whether this is the current step
 }
 
 interface ProgressBarProps {
@@ -33,11 +35,13 @@ export function ProgressBar({ steps, className }: ProgressBarProps) {
                   "w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-semibold transition-all duration-300 cursor-default",
                   step.completed
                     ? "bg-green-500 border-green-500 text-white"
-                    : "bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-700 text-red-600 dark:text-red-400"
+                    : step.isCurrent
+                      ? "bg-yellow-500 border-yellow-500 text-white"
+                      : "bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400"
                 )}
                 title={step.label}
               >
-                {step.id}
+                {step.completed ? "✓" : step.isCurrent ? "⚡" : "○"}
               </div>
               
               {/* Connecting Line */}

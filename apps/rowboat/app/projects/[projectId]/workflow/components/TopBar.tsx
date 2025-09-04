@@ -62,15 +62,20 @@ export function TopBar({
     const router = useRouter();
     const params = useParams();
     const projectId = typeof (params as any).projectId === 'string' ? (params as any).projectId : (params as any).projectId?.[0];
+    // Progress bar steps with completion logic and current step detection
+    const step1Complete = hasAgentInstructionChanges;
+    const step2Complete = hasPlaygroundTested && hasAgentInstructionChanges;
+    const step3Complete = hasPublished && hasPlaygroundTested && hasAgentInstructionChanges;
+    const step4Complete = hasClickedUse && hasPublished && hasPlaygroundTested && hasAgentInstructionChanges;
     
-<<<<<<< HEAD
-<<<<<<< HEAD
-    // Progress bar steps with completion logic and detailed tooltips
+    // Determine current step (first incomplete step)
+    const currentStep = !step1Complete ? 1 : !step2Complete ? 2 : !step3Complete ? 3 : !step4Complete ? 4 : null;
+    
     const progressSteps: ProgressStep[] = [
-        { id: 1, label: "Build: Ask the copilot to build the assistant you want and apply the changes", completed: hasAgentInstructionChanges },
-        { id: 2, label: "Test: Chat with the assistant in the playground. You can ask the copilot to make changes or use the handy 'Fix' and 'Explain' buttons in the chat", completed: hasPlaygroundTested && hasAgentInstructionChanges },
-        { id: 3, label: "Publish: Make the assistant live by clicking the Publish button on the right", completed: hasPublished },
-        { id: 4, label: "Use: Use the assistant by chatting with it, adding triggers like incoming emails, or integrating through the API", completed: hasClickedUse },
+        { id: 1, label: "Build: Ask the copilot to build the assistant you want and apply the changes", completed: step1Complete, isCurrent: currentStep === 1 },
+        { id: 2, label: "Test: Chat with the assistant in the playground. You can ask the copilot to make changes or use the handy 'Fix' and 'Explain' buttons in the chat", completed: step2Complete, isCurrent: currentStep === 2 },
+        { id: 3, label: "Publish: Make the assistant live by clicking the Publish button on the right", completed: step3Complete, isCurrent: currentStep === 3 },
+        { id: 4, label: "Use: Use the assistant by chatting with it, adding triggers like incoming emails, or integrating through the API", completed: step4Complete, isCurrent: currentStep === 4 },
     ];
 
     return (
@@ -135,10 +140,6 @@ export function TopBar({
                         </div>
                     </div>}
                     
-                    {isLive && <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 mr-4">
-                        <AlertTriangle size={14} />
-                        <span>This version is locked.<br />Changes will not be saved.</span>
-                    </div>}
                     
                     {!isLive && <>
                         <CustomButton
@@ -168,58 +169,15 @@ export function TopBar({
                     {/* Deploy CTA - always visible */}
                     <div className="flex items-center gap-3">
                         {isLive ? (
-<<<<<<< HEAD
                             <>
                                 <Dropdown>
                                     <DropdownTrigger>
                                         <Button
                                             variant="solid"
                                             size="md"
-                                            className="gap-2 px-4 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-semibold text-sm border border-blue-200 dark:border-blue-700 shadow-sm"
+                                            className="gap-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm"
                                             startContent={<Plug size={16} />}
-=======
-                            <Dropdown>
-                                <DropdownTrigger>
-                                    <Button
-                                        variant="solid"
-                                        size="md"
-                                        className="gap-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm"
-                                        startContent={<Plug size={16} />}
-                                        onPress={onUseAssistantClick}
-                                    >
-                                        Use Assistant
-                                        <ChevronDownIcon size={14} />
-                                    </Button>
-                                </DropdownTrigger>
-                                <DropdownMenu aria-label="Assistant access options">
-                                    <DropdownItem
-                                        key="chat"
-                                        startContent={<MessageCircleIcon size={16} />}
-                                        onPress={() => { 
-                                            onUseAssistantClick(); // Mark step 4 as complete
-                                            // Chat is already in foreground in live mode, just mark as used
-                                        }}
-                                    >
-                                        Chat with Assistant
-                                    </DropdownItem>
-                                    <DropdownItem
-                                        key="api-sdk"
-                                        startContent={<SettingsIcon size={16} />}
-                                        onPress={() => { 
-                                            onUseAssistantClick(); // Mark step 4 as complete
-                                            if (projectId) { router.push(`/projects/${projectId}/config`); } 
-                                        }}
-                                    >
-                                        API & SDK Settings
-                                    </DropdownItem>
-                                    <DropdownItem
-                                        key="manage-triggers"
-                                        startContent={<ZapIcon size={16} />}
-                                        onPress={() => { 
-                                            onUseAssistantClick(); // Mark step 4 as complete
-                                            if (projectId) { router.push(`/projects/${projectId}/manage-triggers`); } 
-                                        }}
->>>>>>> e2ef4267 (step 4 turns green on use assistant)
+                                            onPress={onUseAssistantClick}
                                         >
                                             Use Assistant
                                             <ChevronDownIcon size={14} />
@@ -253,7 +211,7 @@ export function TopBar({
                                                 onUseAssistantClick();
                                                 if (projectId) { router.push(`/projects/${projectId}/manage-triggers`); } 
                                             }}
-                                            >
+                                        >
                                             Manage Triggers
                                         </DropdownItem>
                                     </DropdownMenu>
