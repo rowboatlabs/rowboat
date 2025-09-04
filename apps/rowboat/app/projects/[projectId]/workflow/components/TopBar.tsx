@@ -72,10 +72,10 @@ export function TopBar({
     const currentStep = !step1Complete ? 1 : !step2Complete ? 2 : !step3Complete ? 3 : !step4Complete ? 4 : null;
     
     const progressSteps: ProgressStep[] = [
-        { id: 1, label: "Build: Ask the copilot to build the assistant you want and apply the changes", completed: step1Complete, isCurrent: currentStep === 1 },
-        { id: 2, label: "Test: Chat with the assistant in the playground. You can ask the copilot to make changes or use the handy 'Fix' and 'Explain' buttons in the chat", completed: step2Complete, isCurrent: currentStep === 2 },
-        { id: 3, label: "Publish: Make the assistant live by clicking the Publish button on the right", completed: step3Complete, isCurrent: currentStep === 3 },
-        { id: 4, label: "Use: Use the assistant by chatting with it, adding triggers like incoming emails, or integrating through the API", completed: step4Complete, isCurrent: currentStep === 4 },
+        { id: 1, label: "Build: Ask the copilot to create your assistant. Add tools and connect data sources.", completed: step1Complete, isCurrent: currentStep === 1 },
+        { id: 2, label: "Test: Test out your assistant by chatting with it. Use 'Fix' and 'Explain' to improve it.", completed: step2Complete, isCurrent: currentStep === 2 },
+        { id: 3, label: "Publish: Make it live with the Publish button. You can always switch back to draft.", completed: step3Complete, isCurrent: currentStep === 3 },
+        { id: 4, label: "Use: Click the 'Use Assistant' button to chat, set triggers (like emails), or connect via API.", completed: step4Complete, isCurrent: currentStep === 4 },
     ];
 
     return (
