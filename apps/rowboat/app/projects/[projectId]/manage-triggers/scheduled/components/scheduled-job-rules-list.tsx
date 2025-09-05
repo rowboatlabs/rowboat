@@ -135,7 +135,7 @@ export function ScheduledJobRulesList({ projectId }: { projectId: string }) {
     };
 
     if (showCreateFlow) {
-        return <CreateScheduledJobRuleForm projectId={projectId} onBack={handleBackToList} />;
+        return <CreateScheduledJobRuleForm projectId={projectId} onBack={handleBackToList} hasExistingTriggers={items.length > 0} />;
     }
 
     return (

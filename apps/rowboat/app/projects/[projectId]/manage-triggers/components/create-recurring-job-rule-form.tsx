@@ -27,10 +27,12 @@ const commonCronExamples = [
 
 export function CreateRecurringJobRuleForm({ 
     projectId, 
-    onBack 
+    onBack,
+    hasExistingTriggers = true
 }: { 
     projectId: string;
     onBack?: () => void;
+    hasExistingTriggers?: boolean;
 }) {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
@@ -112,7 +114,7 @@ export function CreateRecurringJobRuleForm({
         <Panel
             title={
                 <div className="flex items-center gap-3">
-                    {onBack ? (
+                    {hasExistingTriggers && onBack ? (
                         <Button 
                             variant="secondary" 
                             size="sm" 
@@ -122,13 +124,13 @@ export function CreateRecurringJobRuleForm({
                         >
                             Back
                         </Button>
-                    ) : (
+                    ) : hasExistingTriggers ? (
                         <Link href={`/projects/${projectId}/manage-triggers?tab=recurring`}>
                             <Button variant="secondary" size="sm" startContent={<ArrowLeftIcon className="w-4 h-4" />} className="whitespace-nowrap">
                                 Back
                             </Button>
                         </Link>
-                    )}
+                    ) : null}
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
                         CREATE RECURRING JOB RULE
                     </div>

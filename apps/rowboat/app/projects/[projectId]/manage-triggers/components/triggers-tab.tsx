@@ -463,14 +463,16 @@ export function TriggersTab({ projectId }: { projectId: string }) {
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               Select a Toolkit to Create Trigger
             </h3>
-            <Button
-              variant="secondary"
-              onClick={handleBackToList}
-              startContent={<ArrowLeftIcon className="w-4 h-4" />}
-              className="whitespace-nowrap"
-            >
-              Back to Triggers
-            </Button>
+            {triggers.length > 0 && (
+              <Button
+                variant="secondary"
+                onClick={handleBackToList}
+                startContent={<ArrowLeftIcon className="w-4 h-4" />}
+                className="whitespace-nowrap"
+              >
+                Back to Triggers
+              </Button>
+            )}
           </div>
 
           <SelectComposioToolkit

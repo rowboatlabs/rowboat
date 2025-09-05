@@ -152,7 +152,7 @@ export function RecurringJobRulesList({ projectId }: { projectId: string }) {
     };
 
     if (showCreateForm) {
-        return <CreateRecurringJobRuleForm projectId={projectId} onBack={handleBackToList} />;
+        return <CreateRecurringJobRuleForm projectId={projectId} onBack={handleBackToList} hasExistingTriggers={items.length > 0} />;
     }
 
     return (
