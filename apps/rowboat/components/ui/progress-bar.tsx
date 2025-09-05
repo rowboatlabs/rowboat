@@ -1,5 +1,7 @@
+"use client";
 import React from 'react';
 import { cn } from "../../lib/utils";
+import { Tooltip } from "@heroui/react";
 
 export interface ProgressStep {
   id: number;
@@ -30,19 +32,28 @@ export function ProgressBar({ steps, className }: ProgressBarProps) {
           return (
             <div key={step.id} className="flex items-center">
               {/* Step Circle with Tooltip */}
-              <div
-                className={cn(
-                  "w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-semibold transition-all duration-300 cursor-default",
-                  step.completed
-                    ? "bg-green-500 border-green-500 text-white"
-                    : step.isCurrent
-                      ? "bg-yellow-500 border-yellow-500 text-white"
-                      : "bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400"
-                )}
-                title={step.label}
+              <Tooltip 
+                content={step.label}
+                size="lg"
+                delay={100}
+                placement="bottom"
+                classNames={{
+                  content: "text-base",
+                }}
               >
-                {step.completed ? "✓" : step.isCurrent ? "⚡" : "○"}
-              </div>
+                <div
+                  className={cn(
+                    "w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-semibold transition-all duration-300 cursor-default",
+                    step.completed
+                      ? "bg-green-500 border-green-500 text-white"
+                      : step.isCurrent
+                        ? "bg-yellow-500 border-yellow-500 text-white"
+                        : "bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400"
+                  )}
+                >
+                  {step.completed ? "✓" : step.isCurrent ? "⚡" : "○"}
+                </div>
+              </Tooltip>
               
               {/* Connecting Line */}
               {!isLast && (
