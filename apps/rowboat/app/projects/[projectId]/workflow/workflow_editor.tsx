@@ -954,6 +954,7 @@ export function WorkflowEditor({
     const [configKey, setConfigKey] = useState(0);
     const [lastWorkflowId, setLastWorkflowId] = useState<string | null>(null);
     const [showTour, setShowTour] = useState(true);
+    const [showBuildTour, setShowBuildTour] = useState(false);
 
     // Centralized mode transition handler
     const handleModeTransition = useCallback((newMode: 'draft' | 'live', reason: 'publish' | 'view_live' | 'switch_draft' | 'modal_switch') => {
@@ -1643,6 +1644,7 @@ export function WorkflowEditor({
                     onTogglePanel={handleTogglePanel}
                     onUseAssistantClick={markUseAssistantClicked}
                     onStartNewChatAndFocus={handleStartNewChatAndFocus}
+                    onStartBuildTour={() => setShowBuildTour(true)}
                 />
                 
                 {/* Content Area */}
@@ -1853,6 +1855,20 @@ export function WorkflowEditor({
                     <ProductTour
                         projectId={projectId}
                         onComplete={() => setShowTour(false)}
+                    />
+                )}
+                {showBuildTour && (
+                    <ProductTour
+                        projectId={projectId}
+                        forceStart
+                        stepsOverride={[
+                            { target: 'copilot', title: 'Step 1/5', content: 'Copilot helps you create and refine agents. Ask it to scaffold your assistant and iterate on instructions.' },
+                            { target: 'entity-agents', title: 'Step 2/5', content: 'Manage Agents: configure main and helper agents, models, and behavior.' },
+                            { target: 'entity-tools', title: 'Step 3/5', content: 'Tools: add custom tools, MCP, or Composio integrations. Mock tools for quick testing.' },
+                            { target: 'entity-data', title: 'Step 4/5', content: 'Data Sources: add files, URLs, or S3 and connect them in your agent instructions.' },
+                            { target: 'entity-prompts', title: 'Step 5/5', content: 'Variables: define reusable prompts/variables used across your workflow.' },
+                        ]}
+                        onComplete={() => setShowBuildTour(false)}
                     />
                 )}
                 

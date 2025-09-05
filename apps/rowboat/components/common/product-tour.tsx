@@ -2,7 +2,7 @@ import { useFloating, offset, flip, shift, arrow, FloatingArrow, FloatingPortal,
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { XIcon } from 'lucide-react';
 
-interface TourStep {
+export interface TourStep {
     target: string;
     content: string;
     title: string;
@@ -136,28 +136,34 @@ function TourBackdrop({ targetElement }: { targetElement: Element | null }) {
 
 export function ProductTour({
     projectId,
-    onComplete
+    onComplete,
+    stepsOverride,
+    forceStart = false,
 }: {
     projectId: string;
     onComplete: () => void;
+    stepsOverride?: TourStep[];
+    forceStart?: boolean;
 }) {
+    const steps = stepsOverride && stepsOverride.length > 0 ? stepsOverride : TOUR_STEPS;
     const [currentStep, setCurrentStep] = useState(0);
     const [shouldShow, setShouldShow] = useState(true);
     const arrowRef = useRef(null);
 
-    // Check if tour has been completed by the user
+    // Check if tour has been completed by the user, unless forced
     useEffect(() => {
+        if (forceStart) return;
         const tourCompleted = localStorage.getItem('user_product_tour_completed');
         if (tourCompleted) {
             setShouldShow(false);
         }
-    }, []);
+    }, [forceStart]);
 
-    const currentTarget = TOUR_STEPS[currentStep].target;
+    const currentTarget = steps[currentStep].target;
     const targetElement = document.querySelector(`[data-tour-target="${currentTarget}"]`);
 
     // Determine if the target is a panel that should have the hint on the side
-    const isPanelTarget = ['entity-agents', 'entity-tools', 'entity-prompts', 'copilot', 'playground'].includes(currentTarget);
+    const isPanelTarget = ['entity-agents', 'entity-tools', 'entity-prompts', 'copilot', 'playground', 'entity-data'].includes(currentTarget);
 
     const { x, y, strategy, refs, context, middlewareData } = useFloating({
         placement: isPanelTarget ? 'right' : 'top',
@@ -185,7 +191,7 @@ export function ProductTour({
     }, [currentStep, targetElement, refs]);
 
     const handleNext = useCallback(() => {
-        if (currentStep < TOUR_STEPS.length - 1) {
+        if (currentStep < steps.length - 1) {
             setCurrentStep(prev => prev + 1);
         } else {
             // Mark tour as completed for the user
@@ -195,7 +201,7 @@ export function ProductTour({
             setShouldShow(false);
             onComplete();
         }
-    }, [currentStep, projectId, onComplete]);
+    }, [currentStep, projectId, onComplete, steps.length]);
 
     const handleSkip = useCallback(() => {
         // Mark tour as completed for the user
@@ -235,10 +241,10 @@ export function ProductTour({
                     <XIcon size={16} />
                 </button>
                 <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                    {TOUR_STEPS[currentStep].title}
+                    {steps[currentStep].title}
                 </div>
                 <div className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-3 whitespace-pre-line [&>a]:underline"
-                    dangerouslySetInnerHTML={{ __html: TOUR_STEPS[currentStep].content }}
+                    dangerouslySetInnerHTML={{ __html: steps[currentStep].content }}
                 />
                 <div className="flex justify-between items-center">
                     <button

@@ -31,6 +31,7 @@ interface TopBarProps {
     onTogglePanel: () => void;
     onUseAssistantClick: () => void;
     onStartNewChatAndFocus: () => void;
+    onStartBuildTour?: () => void;
 }
 
 export function TopBar({
@@ -58,6 +59,7 @@ export function TopBar({
     onTogglePanel,
     onUseAssistantClick,
     onStartNewChatAndFocus,
+    onStartBuildTour,
 }: TopBarProps) {
     const router = useRouter();
     const params = useParams();
@@ -124,7 +126,12 @@ export function TopBar({
 
                 {/* Progress Bar - Center */}
                 <div className="flex-1 flex justify-center">
-                    <ProgressBar steps={progressSteps} />
+                    <ProgressBar 
+                        steps={progressSteps}
+                        onStepClick={(step) => {
+                            if (step.id === 1 && onStartBuildTour) onStartBuildTour();
+                        }}
+                    />
                 </div>
 
                 {/* Right side buttons */}

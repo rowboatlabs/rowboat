@@ -15,9 +15,10 @@ export interface ProgressStep {
 interface ProgressBarProps {
   steps: ProgressStep[];
   className?: string;
+  onStepClick?: (step: ProgressStep, index: number) => void;
 }
 
-export function ProgressBar({ steps, className }: ProgressBarProps) {
+export function ProgressBar({ steps, className, onStepClick }: ProgressBarProps) {
   const getShortLabel = (label: string) => {
     if (!label) return "";
     const beforeColon = label.split(":")[0]?.trim();
@@ -53,14 +54,22 @@ export function ProgressBar({ steps, className }: ProgressBarProps) {
                     tabIndex={0}
                     aria-label={`${step.completed ? "Completed" : step.isCurrent ? "Current" : "Pending"} step ${step.id}: ${step.label}`}
                     aria-current={step.isCurrent ? "step" : undefined}
+                    role={onStepClick ? 'button' as const : undefined}
+                    onClick={onStepClick ? () => onStepClick(step, index) : undefined}
+                    onKeyDown={onStepClick ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onStepClick(step, index);
+                      }
+                    } : undefined}
                     className={cn(
-                      "w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-semibold transition-all duration-300 cursor-default focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-400",
+                      "w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-400",
                       step.completed
                         ? "bg-green-500 border-green-500 text-white"
                         : step.isCurrent
                           ? "bg-yellow-500 border-yellow-500 text-white ring-2 ring-yellow-300/60 shadow-sm"
                           : "bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400"
-                    )}
+                    , onStepClick ? "cursor-pointer hover:scale-105" : "cursor-default")}
                   >
                     {step.completed ? "✓" : step.isCurrent ? "⚡" : "○"}
                   </div>
