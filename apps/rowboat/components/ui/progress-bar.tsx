@@ -38,13 +38,27 @@ export function ProgressBar({ steps, className, onStepClick }: ProgressBarProps)
       <ol role="list" className="flex items-center gap-2">
         {steps.map((step, index) => {
           const isLast = index === steps.length - 1;
+          const tooltipText = (() => {
+            switch (step.id) {
+              case 1:
+                return 'Build your assistant - click for tour';
+              case 2:
+                return 'Test your assistant - click for tour';
+              case 3:
+                return 'Make assistant live - click for tour';
+              case 4:
+                return 'Interact with your assistant - click for tour';
+              default:
+                return 'Click for tour';
+            }
+          })();
 
           return (
             <li key={step.id} className="flex items-center">
               {/* Step Circle with Tooltip */}
               <div className="flex flex-col items-center">
                 <Tooltip
-                  content={step.label}
+                  content={tooltipText}
                   size="lg"
                   delay={100}
                   placement="bottom"
