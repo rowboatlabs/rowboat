@@ -1631,17 +1631,6 @@ const ComposioCard = ({
                                 </Tooltip>
                             </div>
                         ))}
-                        {/* More tools option */}
-                        <button
-                            className="flex items-center gap-2 px-3 py-2 mt-1 text-xs text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded transition-colors"
-                            onClick={() => {
-                                setSelectedToolkitSlug(card.slug);
-                                setShowToolsModal(true);
-                            }}
-                        >
-                            <PlusIcon className="w-4 h-4" />
-                            <span>More tools</span>
-                        </button>
                     </div>
                 )}
             </div>
