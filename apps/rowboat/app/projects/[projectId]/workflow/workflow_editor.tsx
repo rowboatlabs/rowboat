@@ -957,6 +957,7 @@ export function WorkflowEditor({
     const [showBuildTour, setShowBuildTour] = useState(false);
     const [showTestTour, setShowTestTour] = useState(false);
     const [showPublishTour, setShowPublishTour] = useState(false);
+    const [showUseTour, setShowUseTour] = useState(false);
 
     // Centralized mode transition handler
     const handleModeTransition = useCallback((newMode: 'draft' | 'live', reason: 'publish' | 'view_live' | 'switch_draft' | 'modal_switch') => {
@@ -1654,6 +1655,7 @@ export function WorkflowEditor({
                         }
                         setShowPublishTour(true);
                     }}
+                    onStartUseTour={() => setShowUseTour(true)}
                 />
                 
                 {/* Content Area */}
@@ -1896,6 +1898,21 @@ export function WorkflowEditor({
                             if (index === 1) setActivePanel('copilot');
                         }}
                         onComplete={() => setShowTestTour(false)}
+                    />
+                )}
+                {showUseTour && (
+                    <ProductTour
+                        projectId={projectId}
+                        forceStart
+                        stepsOverride={[
+                            { target: 'playground', title: 'Step 1/3', content: 'Chat: chat with your assistant to test and use it.' },
+                            { target: 'triggers', title: 'Step 2/3', content: 'Triggers: set up external (webhook/integration) or time-based runs.' },
+                            { target: 'settings', title: 'Step 3/3', content: 'Settings: find API keys to connect with the API and SDK.' },
+                        ]}
+                        onStepChange={(index) => {
+                            if (index === 0) setActivePanel('playground');
+                        }}
+                        onComplete={() => setShowUseTour(false)}
                     />
                 )}
                 {showPublishTour && (

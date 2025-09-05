@@ -34,6 +34,7 @@ interface TopBarProps {
     onStartBuildTour?: () => void;
     onStartTestTour?: () => void;
     onStartPublishTour?: () => void;
+    onStartUseTour?: () => void;
 }
 
 export function TopBar({
@@ -64,6 +65,7 @@ export function TopBar({
     onStartBuildTour,
     onStartTestTour,
     onStartPublishTour,
+    onStartUseTour,
 }: TopBarProps) {
     const router = useRouter();
     const params = useParams();
@@ -136,6 +138,7 @@ export function TopBar({
                             if (step.id === 1 && onStartBuildTour) onStartBuildTour();
                             if (step.id === 2 && onStartTestTour) onStartTestTour();
                             if (step.id === 3 && onStartPublishTour) onStartPublishTour();
+                            if (step.id === 4 && onStartUseTour) onStartUseTour();
                         }}
                     />
                 </div>
