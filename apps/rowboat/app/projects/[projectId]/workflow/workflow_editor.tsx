@@ -948,6 +948,7 @@ export function WorkflowEditor({
     const [activePanel, setActivePanel] = useState<'playground' | 'copilot'>('copilot');
     const [isInitialState, setIsInitialState] = useState(true);
     const [showBuildModeBanner, setShowBuildModeBanner] = useState(false);
+    const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(false);
     const [showEditModal, setShowEditModal] = useState(false);
     const [pendingAction, setPendingAction] = useState<Action | null>(null);
     const [configKey, setConfigKey] = useState(0);
@@ -1059,6 +1060,9 @@ export function WorkflowEditor({
         if (startNewChatRef.current) {
             startNewChatRef.current();
         }
+        // Switch to playground (chat) mode and collapse left panel
+        setActivePanel('playground');
+        setIsLeftPanelCollapsed(true);
     }, []);
 
     // Load agent order from localStorage on mount
@@ -1516,6 +1520,10 @@ export function WorkflowEditor({
         }
     }
 
+    function handleToggleLeftPanel() {
+        setIsLeftPanelCollapsed(!isLeftPanelCollapsed);
+    }
+
     const validateProjectName = (value: string) => {
         if (value.length === 0) {
             setProjectNameError("Project name cannot be empty");
@@ -1626,6 +1634,7 @@ export function WorkflowEditor({
                     hasPlaygroundTested={hasPlaygroundTested}
                     hasPublished={hasPublished}
                     hasClickedUse={hasClickedUse}
+                    isLeftPanelCollapsed={isLeftPanelCollapsed}
                     onUndo={() => dispatchGuarded({ type: "undo" })}
                     onRedo={() => dispatchGuarded({ type: "redo" })}
                     onDownloadJSON={handleDownloadJSON}
@@ -1635,6 +1644,7 @@ export function WorkflowEditor({
                     onTogglePanel={handleTogglePanel}
                     onUseAssistantClick={markUseAssistantClicked}
                     onStartNewChatAndFocus={handleStartNewChatAndFocus}
+                    onToggleLeftPanel={handleToggleLeftPanel}
                 />
                 
                 {/* Content Area */}
@@ -1643,6 +1653,7 @@ export function WorkflowEditor({
                         key={`entity-list-${state.present.selection ? '3-pane' : '2-pane'}`}
                         minSize={10} 
                         defaultSize={PANEL_RATIOS.entityList}
+                        className={isLeftPanelCollapsed ? 'hidden' : ''}
                     >
                         <div className="flex flex-col h-full">
                             <EntityList
@@ -1696,7 +1707,7 @@ export function WorkflowEditor({
                             />
                         </div>
                     </ResizablePanel>
-                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${!state.present.selection ? 'hidden' : ''}`} />
+                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed || !state.present.selection) ? 'hidden' : ''}`} />
                     
                     {/* Config Panel - always rendered, visibility controlled */}
                     <ResizablePanel
@@ -1789,8 +1800,8 @@ export function WorkflowEditor({
                             </Panel>
                         )}
                     </ResizablePanel>
-                    {/* Second handle - always show (between config and chat panels) */}
-                    <ResizableHandle withHandle className="w-[3px] bg-transparent" />
+                    {/* Second handle - between config and chat panels */}
+                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed && !state.present.selection) ? 'hidden' : ''}`} />
                     
                     {/* ChatApp/Copilot Panel - always visible */}
                     <ResizablePanel
