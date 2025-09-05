@@ -2,7 +2,7 @@
 import React from "react";
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input } from "@heroui/react";
 import { Button as CustomButton } from "@/components/ui/button";
-import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug, MessageCircleIcon, PanelLeftIcon, PanelLeftCloseIcon } from "lucide-react";
+import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug, MessageCircleIcon } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { ProgressBar, ProgressStep } from "@/components/ui/progress-bar";
 
@@ -22,7 +22,6 @@ interface TopBarProps {
     hasPlaygroundTested: boolean;
     hasPublished: boolean;
     hasClickedUse: boolean;
-    isLeftPanelCollapsed: boolean;
     onUndo: () => void;
     onRedo: () => void;
     onDownloadJSON: () => void;
@@ -32,7 +31,6 @@ interface TopBarProps {
     onTogglePanel: () => void;
     onUseAssistantClick: () => void;
     onStartNewChatAndFocus: () => void;
-    onToggleLeftPanel: () => void;
 }
 
 export function TopBar({
@@ -51,7 +49,6 @@ export function TopBar({
     hasPlaygroundTested,
     hasPublished,
     hasClickedUse,
-    isLeftPanelCollapsed,
     onUndo,
     onRedo,
     onDownloadJSON,
@@ -61,7 +58,6 @@ export function TopBar({
     onTogglePanel,
     onUseAssistantClick,
     onStartNewChatAndFocus,
-    onToggleLeftPanel,
 }: TopBarProps) {
     const router = useRouter();
     const params = useParams();
@@ -146,16 +142,6 @@ export function TopBar({
                     
                     
                     {!isLive && <>
-                        <CustomButton
-                            variant="primary"
-                            size="sm"
-                            onClick={onToggleLeftPanel}
-                            className="bg-gray-50 text-gray-700 hover:bg-gray-100"
-                            showHoverContent={true}
-                            hoverContent={isLeftPanelCollapsed ? "Show left panel" : "Hide left panel"}
-                        >
-                            {isLeftPanelCollapsed ? <PanelLeftIcon className="w-4 h-4" /> : <PanelLeftCloseIcon className="w-4 h-4" />}
-                        </CustomButton>
                         <CustomButton
                             variant="primary"
                             size="sm"

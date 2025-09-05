@@ -1634,7 +1634,6 @@ export function WorkflowEditor({
                     hasPlaygroundTested={hasPlaygroundTested}
                     hasPublished={hasPublished}
                     hasClickedUse={hasClickedUse}
-                    isLeftPanelCollapsed={isLeftPanelCollapsed}
                     onUndo={() => dispatchGuarded({ type: "undo" })}
                     onRedo={() => dispatchGuarded({ type: "redo" })}
                     onDownloadJSON={handleDownloadJSON}
@@ -1644,7 +1643,6 @@ export function WorkflowEditor({
                     onTogglePanel={handleTogglePanel}
                     onUseAssistantClick={markUseAssistantClicked}
                     onStartNewChatAndFocus={handleStartNewChatAndFocus}
-                    onToggleLeftPanel={handleToggleLeftPanel}
                 />
                 
                 {/* Content Area */}
