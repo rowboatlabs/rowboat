@@ -364,56 +364,6 @@ export function ToolConfig({
                         <span className="text-sm font-medium">Changes saved ✓</span>
                     </div>
                 )}
-                {/* Tool Type Section */}
-                {!tool.isLibrary && <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                    <div className="flex items-start gap-3">
-                        <div className="flex-shrink-0 mt-1">
-                            {tool.isMcp ? (
-                                <ImportIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                            ) : tool.isComposio ? (
-                                <Zap className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                            ) : (
-                                <Globe className="w-5 h-5 text-green-600 dark:text-green-400" />
-                            )}
-                        </div>
-                        <div className="flex-1">
-                            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2">
-                                How this tool runs
-                            </h3>
-                            {tool.isMcp && <div className="text-sm text-gray-700 dark:text-gray-300">
-                                <p>This tool is powered by the <span className="font-medium text-blue-700 dark:text-blue-300">{tool.mcpServerName}</span> MCP server.</p>
-                                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                    MCP (Model Context Protocol) tools are external services that provide additional capabilities to your agent.
-                                </p>
-                            </div>}
-                            { tool.isComposio && <div className="text-sm text-gray-700 dark:text-gray-300">
-                                <div className="flex items-center gap-2 mb-1">
-                                    <p>This tool is powered by <span className="font-medium text-purple-700 dark:text-purple-300">Composio</span></p>
-                                    {tool.composioData?.toolkitName && (
-                                        <span className="text-xs bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 px-2 py-1 rounded-full">
-                                            {tool.composioData.toolkitName}
-                                        </span>
-                                    )}
-                                </div>
-                                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                    Composio provides pre-built integrations with popular services and APIs.
-                                </p>
-                            </div>}
-                            { tool.isWebhook && <div className="text-sm text-gray-700 dark:text-gray-300">
-                                <div className="flex items-center gap-1 mb-1">
-                                    <p>This tool is invoked using the webhook configured in <Link href={`/projects/${projectId}/config`} className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 font-medium underline decoration-green-300 hover:decoration-green-500 transition-colors">project settings</Link></p>
-                                </div>
-                                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                    Webhook tools make HTTP requests to your configured endpoint when called by the agent.
-                                </p>
-                            </div>}
-                            { !tool.isMcp && !tool.isComposio && !tool.isWebhook && <div className="text-sm text-gray-700 dark:text-gray-300">
-                                <p>This is a placeholder tool that should be mocked.</p>
-                            </div>}
-                        </div>
-                    </div>
-                </div>}
-
                 {/* Identity Section */}
                 <SectionCard
                     icon={<UserIcon className="w-5 h-5 text-indigo-500" />}
@@ -570,6 +520,47 @@ export function ToolConfig({
                         )}
                     </div>
                 </SectionCard>
+                
+                {/* Tool Type Section */}
+                {!tool.isLibrary && <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 mt-1">
+                            {tool.isMcp ? (
+                                <ImportIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                            ) : tool.isComposio ? (
+                                <Zap className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                            ) : (
+                                <Globe className="w-5 h-5 text-green-600 dark:text-green-400" />
+                            )}
+                        </div>
+                        <div className="flex-1">
+                            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2">
+                                How this tool runs
+                            </h3>
+                            {tool.isMcp && <div className="text-sm text-gray-700 dark:text-gray-300">
+                                <p>This tool is powered by the <span className="font-medium text-blue-700 dark:text-blue-300">{tool.mcpServerName}</span> MCP server.</p>
+                            </div>}
+                            { tool.isComposio && <div className="text-sm text-gray-700 dark:text-gray-300">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <p>This tool is powered by <span className="font-medium text-purple-700 dark:text-purple-300">Composio</span></p>
+                                    {tool.composioData?.toolkitName && (
+                                        <span className="text-xs bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 px-2 py-1 rounded-full">
+                                            {tool.composioData.toolkitName}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>}
+                            { tool.isWebhook && <div className="text-sm text-gray-700 dark:text-gray-300">
+                                <div className="flex items-center gap-1 mb-1">
+                                    <p>This tool is invoked using the webhook configured in <Link href={`/projects/${projectId}/config`} className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 font-medium underline decoration-green-300 hover:decoration-green-500 transition-colors">project settings</Link></p>
+                                </div>
+                            </div>}
+                            { !tool.isMcp && !tool.isComposio && !tool.isWebhook && <div className="text-sm text-gray-700 dark:text-gray-300">
+                                <p>This is a placeholder tool that should be mocked.</p>
+                            </div>}
+                        </div>
+                    </div>
+                </div>}
             </div>
         </Panel>
     );
