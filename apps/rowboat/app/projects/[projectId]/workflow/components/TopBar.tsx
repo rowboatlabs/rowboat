@@ -32,6 +32,7 @@ interface TopBarProps {
     onUseAssistantClick: () => void;
     onStartNewChatAndFocus: () => void;
     onStartBuildTour?: () => void;
+    onStartTestTour?: () => void;
 }
 
 export function TopBar({
@@ -60,6 +61,7 @@ export function TopBar({
     onUseAssistantClick,
     onStartNewChatAndFocus,
     onStartBuildTour,
+    onStartTestTour,
 }: TopBarProps) {
     const router = useRouter();
     const params = useParams();
@@ -130,6 +132,7 @@ export function TopBar({
                         steps={progressSteps}
                         onStepClick={(step) => {
                             if (step.id === 1 && onStartBuildTour) onStartBuildTour();
+                            if (step.id === 2 && onStartTestTour) onStartTestTour();
                         }}
                     />
                 </div>

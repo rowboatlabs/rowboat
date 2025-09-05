@@ -139,11 +139,13 @@ export function ProductTour({
     onComplete,
     stepsOverride,
     forceStart = false,
+    onStepChange,
 }: {
     projectId: string;
     onComplete: () => void;
     stepsOverride?: TourStep[];
     forceStart?: boolean;
+    onStepChange?: (index: number, step: TourStep) => void;
 }) {
     const steps = stepsOverride && stepsOverride.length > 0 ? stepsOverride : TOUR_STEPS;
     const [currentStep, setCurrentStep] = useState(0);
@@ -160,7 +162,7 @@ export function ProductTour({
     }, [forceStart]);
 
     const currentTarget = steps[currentStep].target;
-    const targetElement = document.querySelector(`[data-tour-target="${currentTarget}"]`);
+    const [targetElement, setTargetElement] = useState<Element | null>(null);
 
     // Determine if the target is a panel that should have the hint on the side
     const isPanelTarget = ['entity-agents', 'entity-tools', 'entity-prompts', 'copilot', 'playground', 'entity-data'].includes(currentTarget);
@@ -183,12 +185,30 @@ export function ProductTour({
         whileElementsMounted: autoUpdate
     });
 
-    // Update reference element when step changes
+    // Update reference element when step changes and notify parent first, then resolve target element
     useEffect(() => {
-        if (targetElement) {
-            refs.setReference(targetElement);
+        let raf1: number | undefined;
+        let raf2: number | undefined;
+
+        if (onStepChange) {
+            onStepChange(currentStep, steps[currentStep]);
         }
-    }, [currentStep, targetElement, refs]);
+
+        // Give the parent a frame to update DOM (e.g., switching panels), then query element
+        raf1 = requestAnimationFrame(() => {
+            raf2 = requestAnimationFrame(() => {
+                const el = document.querySelector(`[data-tour-target="${currentTarget}"]`);
+                setTargetElement(el);
+                if (el) refs.setReference(el as any);
+            });
+        });
+
+        return () => {
+            if (raf1) cancelAnimationFrame(raf1);
+            if (raf2) cancelAnimationFrame(raf2);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentStep, currentTarget]);
 
     const handleNext = useCallback(() => {
         if (currentStep < steps.length - 1) {

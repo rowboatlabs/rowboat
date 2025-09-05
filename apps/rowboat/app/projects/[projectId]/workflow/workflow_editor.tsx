@@ -955,6 +955,7 @@ export function WorkflowEditor({
     const [lastWorkflowId, setLastWorkflowId] = useState<string | null>(null);
     const [showTour, setShowTour] = useState(true);
     const [showBuildTour, setShowBuildTour] = useState(false);
+    const [showTestTour, setShowTestTour] = useState(false);
 
     // Centralized mode transition handler
     const handleModeTransition = useCallback((newMode: 'draft' | 'live', reason: 'publish' | 'view_live' | 'switch_draft' | 'modal_switch') => {
@@ -1645,6 +1646,7 @@ export function WorkflowEditor({
                     onUseAssistantClick={markUseAssistantClicked}
                     onStartNewChatAndFocus={handleStartNewChatAndFocus}
                     onStartBuildTour={() => setShowBuildTour(true)}
+                    onStartTestTour={() => setShowTestTour(true)}
                 />
                 
                 {/* Content Area */}
@@ -1868,7 +1870,25 @@ export function WorkflowEditor({
                             { target: 'entity-data', title: 'Step 4/5', content: 'Data Sources: add files, URLs, or S3 and connect them in your agent instructions.' },
                             { target: 'entity-prompts', title: 'Step 5/5', content: 'Variables: define reusable prompts/variables used across your workflow.' },
                         ]}
+                        onStepChange={(_, step) => {
+                            if (step.target === 'copilot') setActivePanel('copilot');
+                        }}
                         onComplete={() => setShowBuildTour(false)}
+                    />
+                )}
+                {showTestTour && (
+                    <ProductTour
+                        projectId={projectId}
+                        forceStart
+                        stepsOverride={[
+                            { target: 'playground', title: 'Step 1/2', content: 'You can chat with the assistant to test it out. Send messages, observe tool calls, and iterate quickly.' },
+                            { target: 'copilot', title: 'Step 2/2', content: 'Ask the Copilot to improve your agents based on the test chat. Use Fix and Explain to iterate.' },
+                        ]}
+                        onStepChange={(index) => {
+                            if (index === 0) setActivePanel('playground');
+                            if (index === 1) setActivePanel('copilot');
+                        }}
+                        onComplete={() => setShowTestTour(false)}
                     />
                 )}
                 
