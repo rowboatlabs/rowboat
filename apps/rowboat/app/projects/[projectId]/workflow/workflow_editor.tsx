@@ -956,6 +956,7 @@ export function WorkflowEditor({
     const [showTour, setShowTour] = useState(true);
     const [showBuildTour, setShowBuildTour] = useState(false);
     const [showTestTour, setShowTestTour] = useState(false);
+    const [showPublishTour, setShowPublishTour] = useState(false);
 
     // Centralized mode transition handler
     const handleModeTransition = useCallback((newMode: 'draft' | 'live', reason: 'publish' | 'view_live' | 'switch_draft' | 'modal_switch') => {
@@ -1647,6 +1648,12 @@ export function WorkflowEditor({
                     onStartNewChatAndFocus={handleStartNewChatAndFocus}
                     onStartBuildTour={() => setShowBuildTour(true)}
                     onStartTestTour={() => setShowTestTour(true)}
+                    onStartPublishTour={() => {
+                        if (isLive) {
+                            handleModeTransition('draft', 'switch_draft');
+                        }
+                        setShowPublishTour(true);
+                    }}
                 />
                 
                 {/* Content Area */}
@@ -1889,6 +1896,16 @@ export function WorkflowEditor({
                             if (index === 1) setActivePanel('copilot');
                         }}
                         onComplete={() => setShowTestTour(false)}
+                    />
+                )}
+                {showPublishTour && (
+                    <ProductTour
+                        projectId={projectId}
+                        forceStart
+                        stepsOverride={[
+                            { target: 'deploy', title: 'Publish', content: 'Click Publish to make your workflow live. This enables API and SDK access.' },
+                        ]}
+                        onComplete={() => setShowPublishTour(false)}
                     />
                 )}
                 
