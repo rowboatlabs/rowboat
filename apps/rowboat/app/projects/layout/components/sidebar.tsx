@@ -200,7 +200,11 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
                             ? 'entity-data-sources'
                             : item.href === 'manage-triggers'
                               ? 'triggers'
-                              : undefined
+                              : item.href === 'jobs'
+                                ? 'jobs'
+                                : item.href === 'conversations'
+                                  ? 'conversations'
+                                  : undefined
                       }
                     >
                       <Icon
@@ -233,7 +237,11 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
                           ? 'entity-data-sources'
                           : item.href === 'manage-triggers'
                             ? 'triggers'
-                            : undefined
+                            : item.href === 'jobs'
+                              ? 'jobs'
+                              : item.href === 'conversations'
+                                ? 'conversations'
+                                : undefined
                     }
                   >
                     <Icon

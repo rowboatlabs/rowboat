@@ -1905,9 +1905,11 @@ export function WorkflowEditor({
                         projectId={projectId}
                         forceStart
                         stepsOverride={[
-                            { target: 'playground', title: 'Step 1/3', content: 'Chat with your assistant.' },
-                            { target: 'triggers', title: 'Step 2/3', content: 'Triggers: choose from 100+ external events or schedule recurring runs.' },
-                            { target: 'settings', title: 'Step 3/3', content: 'Grab your API keys in Settings and connect through the API or SDK.' },
+                            { target: 'playground', title: 'Step 1/5', content: 'Chat: you can chat with your assistant here.' },
+                            { target: 'triggers', title: 'Step 2/5', content: 'Triggers: set up external (webhook/integration) or time-based schedules.' },
+                            { target: 'jobs', title: 'Step 3/5', content: 'Jobs: monitor your trigger runs and scheduled tasks here.' },
+                            { target: 'settings', title: 'Step 4/5', content: 'Settings: find API keys to connect with the API and SDK.' },
+                            { target: 'conversations', title: 'Step 5/5', content: 'Conversations: see all past interactions in one place, including manual chats, trigger activity, and API calls.' },
                         ]}
                         onStepChange={(index) => {
                             if (index === 0) setActivePanel('playground');

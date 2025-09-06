@@ -59,7 +59,7 @@ const TOUR_STEPS: TourStep[] = [
 function TourBackdrop({ targetElement }: { targetElement: Element | null }) {
     const [rect, setRect] = useState<DOMRect | null>(null);
     const isPanelTarget = targetElement?.getAttribute('data-tour-target') && 
-        ['entity-agents', 'entity-tools', 'entity-prompts', 'copilot', 'playground', 'settings', 'triggers'].includes(
+        ['entity-agents', 'entity-tools', 'entity-prompts', 'copilot', 'playground', 'settings', 'triggers', 'jobs', 'conversations'].includes(
             targetElement.getAttribute('data-tour-target')!
         );
     
@@ -165,7 +165,7 @@ export function ProductTour({
     const [targetElement, setTargetElement] = useState<Element | null>(null);
 
     // Determine if the target is a panel that should have the hint on the side
-    const isPanelTarget = ['entity-agents', 'entity-tools', 'entity-prompts', 'copilot', 'playground', 'entity-data', 'settings', 'triggers'].includes(currentTarget);
+    const isPanelTarget = ['entity-agents', 'entity-tools', 'entity-prompts', 'copilot', 'playground', 'entity-data', 'settings', 'triggers', 'jobs', 'conversations'].includes(currentTarget);
 
     const { x, y, strategy, refs, context, middlewareData } = useFloating({
         placement: isPanelTarget ? 'right' : 'top',
