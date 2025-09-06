@@ -1873,11 +1873,11 @@ export function WorkflowEditor({
                         projectId={projectId}
                         forceStart
                         stepsOverride={[
-                            { target: 'copilot', title: 'Step 1/5', content: 'Copilot helps you create and refine agents. Ask it to scaffold your assistant and iterate on instructions.' },
-                            { target: 'entity-agents', title: 'Step 2/5', content: 'Manage Agents: configure main and helper agents, models, and behavior.' },
-                            { target: 'entity-tools', title: 'Step 3/5', content: 'Tools: add custom tools, MCP, or Composio integrations. Mock tools for quick testing.' },
-                            { target: 'entity-data', title: 'Step 4/5', content: 'Data Sources: add files, URLs, or S3 and connect them in your agent instructions.' },
-                            { target: 'entity-prompts', title: 'Step 5/5', content: 'Variables: define reusable prompts/variables used across your workflow.' },
+                            { target: 'copilot', title: 'Step 1/5', content: 'Use Copilot to create and refine agents. Describe what you need, then iterate with its suggestions.' },
+                            { target: 'entity-agents', title: 'Step 2/5', content: 'All your agents appear here. Adjust instructions, switch models, and fine-tune their behavior.' },
+                            { target: 'entity-tools', title: 'Step 3/5', content: 'Pick from thousands of ready-made tools or connect your own MCP servers.' },
+                            { target: 'entity-data', title: 'Step 4/5', content: 'Upload files, scrape websites, or add free-text knowledge to guide your agents.' },
+                            { target: 'entity-prompts', title: 'Step 5/5', content: 'Define reusable context variables automatically shared across all agents.' },
                         ]}
                         onStepChange={(_, step) => {
                             if (step.target === 'copilot') setActivePanel('copilot');
@@ -1890,8 +1890,8 @@ export function WorkflowEditor({
                         projectId={projectId}
                         forceStart
                         stepsOverride={[
-                            { target: 'playground', title: 'Step 1/2', content: 'You can chat with the assistant to test it out. Send messages, observe tool calls, and iterate quickly.' },
-                            { target: 'copilot', title: 'Step 2/2', content: 'Ask the Copilot to improve your agents based on the test chat. Use Fix and Explain to iterate.' },
+                            { target: 'playground', title: 'Step 1/2', content: 'Chat with your assistant to test it. Send messages, watch tool calls in action, and debug agent flows.' },
+                            { target: 'copilot', title: 'Step 2/2', content: 'Ask Copilot to improve your agents based on test results. Use “Fix” and “Explain” to iterate quickly.' },
                         ]}
                         onStepChange={(index) => {
                             if (index === 0) setActivePanel('playground');
@@ -1905,9 +1905,9 @@ export function WorkflowEditor({
                         projectId={projectId}
                         forceStart
                         stepsOverride={[
-                            { target: 'playground', title: 'Step 1/3', content: 'Chat: chat with your assistant to test and use it.' },
-                            { target: 'triggers', title: 'Step 2/3', content: 'Triggers: set up external (webhook/integration) or time-based runs.' },
-                            { target: 'settings', title: 'Step 3/3', content: 'Settings: find API keys to connect with the API and SDK.' },
+                            { target: 'playground', title: 'Step 1/3', content: 'Chat with your assistant.' },
+                            { target: 'triggers', title: 'Step 2/3', content: 'Triggers: choose from 100+ external events or schedule recurring runs.' },
+                            { target: 'settings', title: 'Step 3/3', content: 'Grab your API keys in Settings and connect through the API or SDK.' },
                         ]}
                         onStepChange={(index) => {
                             if (index === 0) setActivePanel('playground');
@@ -1920,7 +1920,7 @@ export function WorkflowEditor({
                         projectId={projectId}
                         forceStart
                         stepsOverride={[
-                            { target: 'deploy', title: 'Publish', content: 'Click Publish to make your workflow live. This enables API and SDK access.' },
+                            { target: 'deploy', title: 'Publish', content: 'Click Publish to make your workflow live, enabling triggers and API/SDK access. You can revert to a draft at any time.' },
                         ]}
                         onComplete={() => setShowPublishTour(false)}
                     />
