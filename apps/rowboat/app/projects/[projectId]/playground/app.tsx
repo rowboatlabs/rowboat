@@ -19,6 +19,7 @@ export function App({
     isLiveWorkflow,
     activePanel,
     onTogglePanel,
+    onMessageSent,
 }: {
     hidden?: boolean;
     projectId: string;
@@ -29,6 +30,7 @@ export function App({
     isLiveWorkflow: boolean;
     activePanel: 'playground' | 'copilot';
     onTogglePanel: () => void;
+    onMessageSent?: () => void;
 }) {
     const [counter, setCounter] = useState<number>(0);
     const [showDebugMessages, setShowDebugMessages] = useState<boolean>(true);
@@ -142,6 +144,7 @@ export function App({
                         showDebugMessages={showDebugMessages}
                         triggerCopilotChat={triggerCopilotChat}
                         isLiveWorkflow={isLiveWorkflow}
+                        onMessageSent={onMessageSent}
                     />
                 </div>
             </Panel>

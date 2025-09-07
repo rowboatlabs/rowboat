@@ -61,7 +61,7 @@ interface StateItem {
     chatKey: number;
     lastUpdatedAt: string;
     isLive: boolean;
-
+    agentInstructionsChanged: boolean;
 }
 
 interface State {
@@ -656,6 +656,10 @@ function reducer(state: State, action: Action): State {
                             break;
                         }
                         case "update_agent": {
+                            // Check if instructions are being changed
+                            if (action.agent.instructions !== undefined) {
+                                draft.agentInstructionsChanged = true;
+                            }
 
                             // update agent data
                             draft.workflow.agents = draft.workflow.agents.map((agent) =>
@@ -930,7 +934,7 @@ export function WorkflowEditor({
             chatKey: 0,
             lastUpdatedAt: workflow.lastUpdatedAt,
             isLive,
-
+            agentInstructionsChanged: false,
         }
     });
 
@@ -944,11 +948,16 @@ export function WorkflowEditor({
     const [activePanel, setActivePanel] = useState<'playground' | 'copilot'>('copilot');
     const [isInitialState, setIsInitialState] = useState(true);
     const [showBuildModeBanner, setShowBuildModeBanner] = useState(false);
+    const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(false);
     const [showEditModal, setShowEditModal] = useState(false);
     const [pendingAction, setPendingAction] = useState<Action | null>(null);
     const [configKey, setConfigKey] = useState(0);
     const [lastWorkflowId, setLastWorkflowId] = useState<string | null>(null);
     const [showTour, setShowTour] = useState(true);
+    const [showBuildTour, setShowBuildTour] = useState(false);
+    const [showTestTour, setShowTestTour] = useState(false);
+    const [showPublishTour, setShowPublishTour] = useState(false);
+    const [showUseTour, setShowUseTour] = useState(false);
 
     // Centralized mode transition handler
     const handleModeTransition = useCallback((newMode: 'draft' | 'live', reason: 'publish' | 'view_live' | 'switch_draft' | 'modal_switch') => {
@@ -994,6 +1003,71 @@ export function WorkflowEditor({
     const [projectNameError, setProjectNameError] = useState<string | null>(null);
     const [isEditingProjectName, setIsEditingProjectName] = useState<boolean>(false);
     const [pendingProjectName, setPendingProjectName] = useState<string | null>(null);
+    
+    // Build progress tracking - persists once set to true
+    const [hasAgentInstructionChanges, setHasAgentInstructionChanges] = useState<boolean>(() => {
+        return localStorage.getItem(`agent_instructions_changed_${projectId}`) === 'true';
+    });
+
+    // Test progress tracking - persists once set to true
+    const [hasPlaygroundTested, setHasPlaygroundTested] = useState<boolean>(() => {
+        return localStorage.getItem(`playground_tested_${projectId}`) === 'true';
+    });
+
+    // Publish progress tracking - persists once set to true
+    const [hasPublished, setHasPublished] = useState<boolean>(() => {
+        return localStorage.getItem(`has_published_${projectId}`) === 'true';
+    });
+
+    // Use progress tracking - persists once set to true
+    const [hasClickedUse, setHasClickedUse] = useState<boolean>(() => {
+        return localStorage.getItem(`has_clicked_use_${projectId}`) === 'true';
+    });
+
+    // Function to mark agent instructions as changed (persists in localStorage)
+    const markAgentInstructionsChanged = useCallback(() => {
+        if (!hasAgentInstructionChanges) {
+            setHasAgentInstructionChanges(true);
+            localStorage.setItem(`agent_instructions_changed_${projectId}`, 'true');
+        }
+    }, [hasAgentInstructionChanges, projectId]);
+
+    // Function to mark playground as tested (persists in localStorage)
+    const markPlaygroundTested = useCallback(() => {
+        if (!hasPlaygroundTested && hasAgentInstructionChanges) { // Only mark if step 1 is complete
+            setHasPlaygroundTested(true);
+            localStorage.setItem(`playground_tested_${projectId}`, 'true');
+        }
+    }, [hasPlaygroundTested, hasAgentInstructionChanges, projectId]);
+
+    // Function to mark as published (persists in localStorage)
+    const markAsPublished = useCallback(() => {
+        if (!hasPublished) {
+            setHasPublished(true);
+            localStorage.setItem(`has_published_${projectId}`, 'true');
+        }
+    }, [hasPublished, projectId]);
+
+    // Function to mark Use Assistant button as clicked (persists in localStorage)
+    const markUseAssistantClicked = useCallback(() => {
+        if (!hasClickedUse) {
+            setHasClickedUse(true);
+            localStorage.setItem(`has_clicked_use_${projectId}`, 'true');
+        }
+    }, [hasClickedUse, projectId]);
+
+    // Reference to start new chat function from playground
+    const startNewChatRef = useRef<(() => void) | null>(null);
+    
+    // Function to start new chat and focus
+    const handleStartNewChatAndFocus = useCallback(() => {
+        if (startNewChatRef.current) {
+            startNewChatRef.current();
+        }
+        // Switch to playground (chat) mode and collapse left panel
+        setActivePanel('playground');
+        setIsLeftPanelCollapsed(true);
+    }, []);
 
     // Load agent order from localStorage on mount
     // useEffect(() => {
@@ -1060,6 +1134,13 @@ export function WorkflowEditor({
             setIsInitialState(false);
         }
     }, [state.present.workflow, state.present.pendingChanges]);
+
+    // Track agent instruction changes from copilot
+    useEffect(() => {
+        if (state.present.agentInstructionsChanged) {
+            markAgentInstructionsChanged();
+        }
+    }, [state.present.agentInstructionsChanged, markAgentInstructionsChanged]);
 
     function handleSelectAgent(name: string) {
         dispatch({ type: "select_agent", name });
@@ -1158,6 +1239,10 @@ export function WorkflowEditor({
     }
 
     function handleUpdateAgent(name: string, agent: Partial<z.infer<typeof WorkflowAgent>>) {
+        // Check if instructions are being changed
+        if (agent.instructions !== undefined) {
+            markAgentInstructionsChanged();
+        }
         dispatch({ type: "update_agent", name, agent });
     }
 
@@ -1236,6 +1321,7 @@ export function WorkflowEditor({
         dispatch({ type: 'set_publishing', publishing: true });
         try {
             await publishWorkflow(projectId, state.present.workflow);
+            markAsPublished(); // Mark step 3 as completed when user publishes
             // Use centralized mode transition for publish
             handleModeTransition('live', 'publish');
             // reflect live mode both internally and externally in one go
@@ -1438,6 +1524,10 @@ export function WorkflowEditor({
         }
     }
 
+    function handleToggleLeftPanel() {
+        setIsLeftPanelCollapsed(!isLeftPanelCollapsed);
+    }
+
     const validateProjectName = (value: string) => {
         if (value.length === 0) {
             setProjectNameError("Project name cannot be empty");
@@ -1544,6 +1634,10 @@ export function WorkflowEditor({
                     canUndo={state.currentIndex > 0}
                     canRedo={state.currentIndex < state.patches.length}
                     activePanel={activePanel}
+                    hasAgentInstructionChanges={hasAgentInstructionChanges}
+                    hasPlaygroundTested={hasPlaygroundTested}
+                    hasPublished={hasPublished}
+                    hasClickedUse={hasClickedUse}
                     onUndo={() => dispatchGuarded({ type: "undo" })}
                     onRedo={() => dispatchGuarded({ type: "redo" })}
                     onDownloadJSON={handleDownloadJSON}
@@ -1551,6 +1645,17 @@ export function WorkflowEditor({
                     onChangeMode={onChangeMode}
                     onRevertToLive={handleRevertToLive}
                     onTogglePanel={handleTogglePanel}
+                    onUseAssistantClick={markUseAssistantClicked}
+                    onStartNewChatAndFocus={handleStartNewChatAndFocus}
+                    onStartBuildTour={() => setShowBuildTour(true)}
+                    onStartTestTour={() => setShowTestTour(true)}
+                    onStartPublishTour={() => {
+                        if (isLive) {
+                            handleModeTransition('draft', 'switch_draft');
+                        }
+                        setShowPublishTour(true);
+                    }}
+                    onStartUseTour={() => setShowUseTour(true)}
                 />
                 
                 {/* Content Area */}
@@ -1559,6 +1664,7 @@ export function WorkflowEditor({
                         key={`entity-list-${state.present.selection ? '3-pane' : '2-pane'}`}
                         minSize={10} 
                         defaultSize={PANEL_RATIOS.entityList}
+                        className={isLeftPanelCollapsed ? 'hidden' : ''}
                     >
                         <div className="flex flex-col h-full">
                             <EntityList
@@ -1612,7 +1718,7 @@ export function WorkflowEditor({
                             />
                         </div>
                     </ResizablePanel>
-                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${!state.present.selection ? 'hidden' : ''}`} />
+                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed || !state.present.selection) ? 'hidden' : ''}`} />
                     
                     {/* Config Panel - always rendered, visibility controlled */}
                     <ResizablePanel
@@ -1705,8 +1811,8 @@ export function WorkflowEditor({
                             </Panel>
                         )}
                     </ResizablePanel>
-                    {/* Second handle - always show (between config and chat panels) */}
-                    <ResizableHandle withHandle className="w-[3px] bg-transparent" />
+                    {/* Second handle - between config and chat panels */}
+                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed && !state.present.selection) ? 'hidden' : ''}`} />
                     
                     {/* ChatApp/Copilot Panel - always visible */}
                     <ResizablePanel
@@ -1726,6 +1832,7 @@ export function WorkflowEditor({
                                 isLiveWorkflow={isLive}
                                 activePanel={activePanel}
                                 onTogglePanel={handleTogglePanel}
+                                onMessageSent={markPlaygroundTested}
                             />
                         </div>
                         <div className={(activePanel === 'copilot') ? 'block h-full' : 'hidden h-full'}>
@@ -1759,6 +1866,65 @@ export function WorkflowEditor({
                     <ProductTour
                         projectId={projectId}
                         onComplete={() => setShowTour(false)}
+                    />
+                )}
+                {showBuildTour && (
+                    <ProductTour
+                        projectId={projectId}
+                        forceStart
+                        stepsOverride={[
+                            { target: 'copilot', title: 'Step 1/5', content: 'Use Copilot to create and refine agents. Describe what you need, then iterate with its suggestions.' },
+                            { target: 'entity-agents', title: 'Step 2/5', content: 'All your agents appear here. Adjust instructions, switch models, and fine-tune their behavior.' },
+                            { target: 'entity-tools', title: 'Step 3/5', content: 'Pick from thousands of ready-made tools or connect your own MCP servers.' },
+                            { target: 'entity-data', title: 'Step 4/5', content: 'Upload files, scrape websites, or add free-text knowledge to guide your agents.' },
+                            { target: 'entity-prompts', title: 'Step 5/5', content: 'Define reusable context variables automatically shared across all agents.' },
+                        ]}
+                        onStepChange={(_, step) => {
+                            if (step.target === 'copilot') setActivePanel('copilot');
+                        }}
+                        onComplete={() => setShowBuildTour(false)}
+                    />
+                )}
+                {showTestTour && (
+                    <ProductTour
+                        projectId={projectId}
+                        forceStart
+                        stepsOverride={[
+                            { target: 'playground', title: 'Step 1/2', content: 'Chat with your assistant to test it. Send messages, watch tool calls in action, and debug agent flows.' },
+                            { target: 'copilot', title: 'Step 2/2', content: 'Ask Copilot to improve your agents based on test results. Use “Fix” and “Explain” to iterate quickly.' },
+                        ]}
+                        onStepChange={(index) => {
+                            if (index === 0) setActivePanel('playground');
+                            if (index === 1) setActivePanel('copilot');
+                        }}
+                        onComplete={() => setShowTestTour(false)}
+                    />
+                )}
+                {showUseTour && (
+                    <ProductTour
+                        projectId={projectId}
+                        forceStart
+                        stepsOverride={[
+                            { target: 'playground', title: 'Step 1/5', content: 'Chat: you can chat with your assistant here.' },
+                            { target: 'triggers', title: 'Step 2/5', content: 'Triggers: set up external (webhook/integration) or time-based schedules.' },
+                            { target: 'jobs', title: 'Step 3/5', content: 'Jobs: monitor your trigger runs and scheduled tasks here.' },
+                            { target: 'settings', title: 'Step 4/5', content: 'Settings: find API keys to connect with the API and SDK.' },
+                            { target: 'conversations', title: 'Step 5/5', content: 'Conversations: see all past interactions in one place, including manual chats, trigger activity, and API calls.' },
+                        ]}
+                        onStepChange={(index) => {
+                            if (index === 0) setActivePanel('playground');
+                        }}
+                        onComplete={() => setShowUseTour(false)}
+                    />
+                )}
+                {showPublishTour && (
+                    <ProductTour
+                        projectId={projectId}
+                        forceStart
+                        stepsOverride={[
+                            { target: 'deploy', title: 'Publish', content: 'Click Publish to make your workflow live, enabling triggers and API/SDK access. You can revert to a draft at any time.' },
+                        ]}
+                        onComplete={() => setShowPublishTour(false)}
                     />
                 )}
                 

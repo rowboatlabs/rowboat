@@ -2,8 +2,9 @@
 import React from "react";
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input } from "@heroui/react";
 import { Button as CustomButton } from "@/components/ui/button";
-import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug } from "lucide-react";
+import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug, MessageCircleIcon } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
+import { ProgressBar, ProgressStep } from "@/components/ui/progress-bar";
 
 interface TopBarProps {
     localProjectName: string;
@@ -17,6 +18,10 @@ interface TopBarProps {
     canUndo: boolean;
     canRedo: boolean;
     activePanel: 'playground' | 'copilot';
+    hasAgentInstructionChanges: boolean;
+    hasPlaygroundTested: boolean;
+    hasPublished: boolean;
+    hasClickedUse: boolean;
     onUndo: () => void;
     onRedo: () => void;
     onDownloadJSON: () => void;
@@ -24,6 +29,12 @@ interface TopBarProps {
     onChangeMode: (mode: 'draft' | 'live') => void;
     onRevertToLive: () => void;
     onTogglePanel: () => void;
+    onUseAssistantClick: () => void;
+    onStartNewChatAndFocus: () => void;
+    onStartBuildTour?: () => void;
+    onStartTestTour?: () => void;
+    onStartPublishTour?: () => void;
+    onStartUseTour?: () => void;
 }
 
 export function TopBar({
@@ -38,6 +49,10 @@ export function TopBar({
     canUndo,
     canRedo,
     activePanel,
+    hasAgentInstructionChanges,
+    hasPlaygroundTested,
+    hasPublished,
+    hasClickedUse,
     onUndo,
     onRedo,
     onDownloadJSON,
@@ -45,10 +60,32 @@ export function TopBar({
     onChangeMode,
     onRevertToLive,
     onTogglePanel,
+    onUseAssistantClick,
+    onStartNewChatAndFocus,
+    onStartBuildTour,
+    onStartTestTour,
+    onStartPublishTour,
+    onStartUseTour,
 }: TopBarProps) {
     const router = useRouter();
     const params = useParams();
     const projectId = typeof (params as any).projectId === 'string' ? (params as any).projectId : (params as any).projectId?.[0];
+    // Progress bar steps with completion logic and current step detection
+    const step1Complete = hasAgentInstructionChanges;
+    const step2Complete = hasPlaygroundTested && hasAgentInstructionChanges;
+    const step3Complete = hasPublished && hasPlaygroundTested && hasAgentInstructionChanges;
+    const step4Complete = hasClickedUse && hasPublished && hasPlaygroundTested && hasAgentInstructionChanges;
+    
+    // Determine current step (first incomplete step)
+    const currentStep = !step1Complete ? 1 : !step2Complete ? 2 : !step3Complete ? 3 : !step4Complete ? 4 : null;
+    
+    const progressSteps: ProgressStep[] = [
+        { id: 1, label: "Build: Ask the copilot to create your assistant. Add tools and connect data sources.", completed: step1Complete, isCurrent: currentStep === 1 },
+        { id: 2, label: "Test: Test out your assistant by chatting with it. Use 'Fix' and 'Explain' to improve it.", completed: step2Complete, isCurrent: currentStep === 2 },
+        { id: 3, label: "Publish: Make it live with the Publish button. You can always switch back to draft.", completed: step3Complete, isCurrent: currentStep === 3 },
+        { id: 4, label: "Use: Click the 'Use Assistant' button to chat, set triggers (like emails), or connect via API.", completed: step4Complete, isCurrent: currentStep === 4 },
+    ];
+
     return (
         <div className="rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm border border-zinc-200 dark:border-zinc-800 px-5 py-2">
             <div className="flex justify-between items-center">
@@ -92,16 +129,33 @@ export function TopBar({
                         </Button>
                     ) : null}
                 </div>
-                {showCopySuccess && <div className="flex items-center gap-2">
-                    <div className="text-green-500">Copied to clipboard</div>
-                </div>}
-                {showBuildModeBanner && <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                    <div className="text-blue-700 dark:text-blue-300 text-sm">
-                        Switched to draft mode. You can now make changes to your workflow.
-                    </div>
-                </div>}
+
+                {/* Progress Bar - Center */}
+                <div className="flex-1 flex justify-center">
+                    <ProgressBar 
+                        steps={progressSteps}
+                        onStepClick={(step) => {
+                            if (step.id === 1 && onStartBuildTour) onStartBuildTour();
+                            if (step.id === 2 && onStartTestTour) onStartTestTour();
+                            if (step.id === 3 && onStartPublishTour) onStartPublishTour();
+                            if (step.id === 4 && onStartUseTour) onStartUseTour();
+                        }}
+                    />
+                </div>
+
+                {/* Right side buttons */}
                 <div className="flex items-center gap-2">
+                    {showCopySuccess && <div className="flex items-center gap-2 mr-4">
+                        <div className="text-green-500">Copied to clipboard</div>
+                    </div>}
+                    
+                    {showBuildModeBanner && <div className="flex items-center gap-2 mr-4">
+                        <AlertTriangle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        <div className="text-blue-700 dark:text-blue-300 text-sm">
+                            Switched to draft mode. You can now make changes to your workflow.
+                        </div>
+                    </div>}
+                    
                     
                     {!isLive && <>
                         <CustomButton
@@ -139,6 +193,7 @@ export function TopBar({
                                             size="md"
                                             className="gap-2 px-4 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-semibold text-sm border border-blue-200 dark:border-blue-700 shadow-sm"
                                             startContent={<Plug size={16} />}
+                                            onPress={onUseAssistantClick}
                                         >
                                             Use Assistant
                                             <ChevronDownIcon size={14} />
@@ -146,17 +201,33 @@ export function TopBar({
                                     </DropdownTrigger>
                                     <DropdownMenu aria-label="Assistant access options">
                                         <DropdownItem
+                                            key="chat"
+                                            startContent={<MessageCircleIcon size={16} />}
+                                            onPress={() => { 
+                                                onUseAssistantClick();
+                                                onStartNewChatAndFocus();
+                                            }}
+                                        >
+                                            Chat with Assistant
+                                        </DropdownItem>
+                                        <DropdownItem
                                             key="api-sdk"
                                             startContent={<SettingsIcon size={16} />}
-                                            onPress={() => { if (projectId) { router.push(`/projects/${projectId}/config`); } }}
+                                            onPress={() => { 
+                                                onUseAssistantClick();
+                                                if (projectId) { router.push(`/projects/${projectId}/config`); } 
+                                            }}
                                         >
                                             API & SDK Settings
                                         </DropdownItem>
                                         <DropdownItem
                                             key="manage-triggers"
                                             startContent={<ZapIcon size={16} />}
-                                            onPress={() => { if (projectId) { router.push(`/projects/${projectId}/manage-triggers`); } }}
-                                            >
+                                            onPress={() => { 
+                                                onUseAssistantClick();
+                                                if (projectId) { router.push(`/projects/${projectId}/manage-triggers`); } 
+                                            }}
+                                        >
                                             Manage Triggers
                                         </DropdownItem>
                                     </DropdownMenu>

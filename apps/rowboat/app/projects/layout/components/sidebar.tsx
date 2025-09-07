@@ -193,7 +193,19 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
                           : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300'
                         }
                       `}
-                      data-tour-target={item.href === 'config' ? 'settings' : item.href === 'sources' ? 'entity-data-sources' : undefined}
+                      data-tour-target={
+                        item.href === 'config'
+                          ? 'settings'
+                          : item.href === 'sources'
+                            ? 'entity-data-sources'
+                            : item.href === 'manage-triggers'
+                              ? 'triggers'
+                              : item.href === 'jobs'
+                                ? 'jobs'
+                                : item.href === 'conversations'
+                                  ? 'conversations'
+                                  : undefined
+                      }
                     >
                       <Icon
                         size={COLLAPSED_ICON_SIZE}
@@ -218,7 +230,19 @@ export default function Sidebar({ projectId, useAuth, collapsed = false, onToggl
                         : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300'
                       }
                       `}
-                    data-tour-target={item.href === 'config' ? 'settings' : item.href === 'sources' ? 'entity-data-sources' : undefined}
+                    data-tour-target={
+                      item.href === 'config'
+                        ? 'settings'
+                        : item.href === 'sources'
+                          ? 'entity-data-sources'
+                          : item.href === 'manage-triggers'
+                            ? 'triggers'
+                            : item.href === 'jobs'
+                              ? 'jobs'
+                              : item.href === 'conversations'
+                                ? 'conversations'
+                                : undefined
+                    }
                   >
                     <Icon
                       size={EXPANDED_ICON_SIZE}
