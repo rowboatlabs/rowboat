@@ -8,7 +8,7 @@ import clsx from 'clsx';
 import Image from 'next/image';
 import mascotImage from '@/public/mascot.png';
 import { Button } from "@/components/ui/button";
-import { Upload, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { TextareaWithSend } from "@/app/components/ui/textarea-with-send";
 import { Workflow } from '../../lib/types/workflow_types';
 import { PictureImg } from '@/components/ui/picture-img';
@@ -276,6 +276,9 @@ export function BuildAssistantSection() {
                                                             setPromptError(null);
                                                         }}
                                                         onSubmit={handleCreateAssistant}
+                                                        onImportJson={handleImportJsonClick}
+                                                        isImporting={importLoading}
+                                                        importDisabled={importLoading}
                                                         isSubmitting={isCreating}
                                                         placeholder="Example: Build me an assistant to manage my email and calendar..."
                                                         className={clsx(
@@ -287,7 +290,7 @@ export function BuildAssistantSection() {
                                                             promptError && "border-red-500 focus:ring-red-500/20",
                                                             !userPrompt && "animate-pulse border-2 border-indigo-500/40 dark:border-indigo-400/40 shadow-lg shadow-indigo-500/20 dark:shadow-indigo-400/20"
                                                         )}
-                                                        rows={3}
+                                                        rows={4}
                                                         autoFocus
                                                         autoResize
                                                     />
@@ -298,40 +301,7 @@ export function BuildAssistantSection() {
                                                     )}
                                                 </div>
 
-                                                {/* Separation line with OR */}
-                                                <div className="relative my-3">
-                                                    <div className="absolute inset-0 flex items-center">
-                                                        <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
-                                                    </div>
-                                                    <div className="relative flex justify-center text-sm">
-                                                        <span className="bg-white dark:bg-gray-800 px-3 text-gray-500 dark:text-gray-400">OR</span>
-                                                    </div>
-                                                </div>
-
-                                                {/* Action buttons */}
-                                                <div className="flex gap-3 justify-start">
-                                                    <Button
-                                                        variant="primary"
-                                                        size="sm"
-                                                        onClick={handleImportJsonClick}
-                                                        type="button"
-                                                        startContent={<Upload size={14} />}
-                                                        className="bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600"
-                                                        disabled={importLoading}
-                                                    >
-                                                        {importLoading ? 'Importing...' : 'Import JSON'}
-                                                    </Button>
-                                                    <Button
-                                                        variant="primary"
-                                                        size="sm"
-                                                        onClick={handleCreateAssistant}
-                                                        isLoading={isCreating}
-                                                        type="button"
-                                                        className="bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600"
-                                                    >
-                                                        Go to Builder
-                                                    </Button>
-                                                </div>
+                                                {/* Removed separation line and secondary action per request */}
 
                                                 {importError && (
                                                     <p className="text-sm text-red-500 mt-2">
