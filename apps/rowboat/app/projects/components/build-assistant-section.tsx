@@ -17,8 +17,7 @@ import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import Link from 'next/link';
 
-const SHOW_PREBUILT_CARDS = true; // Temporarily hardcoded for testing
-// const SHOW_PREBUILT_CARDS = process.env.NEXT_PUBLIC_SHOW_PREBUILT_CARDS === 'true';
+const SHOW_PREBUILT_CARDS = process.env.NEXT_PUBLIC_SHOW_PREBUILT_CARDS !== 'false';
 
 
 
