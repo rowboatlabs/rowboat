@@ -219,7 +219,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                                     👋 Hi there!
                                 </h3>
                                 <p className="text-base text-zinc-600 dark:text-zinc-400 mb-4 text-center">
-                                    I&apos;m your copilot for building agents and adding tools to them.
+                                    I’m Skipper, your copilot for building agents and adding tools to them.
                                 </p>
                                 <p className="text-base text-zinc-600 dark:text-zinc-400 mb-3 text-center">
                                     Here&apos;s what you can do in Rowboat:
@@ -446,4 +446,3 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
 });
 
 Copilot.displayName = 'Copilot';
-
