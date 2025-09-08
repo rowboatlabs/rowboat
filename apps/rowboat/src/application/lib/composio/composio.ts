@@ -9,6 +9,12 @@ export const composio = new Composio({
     apiKey: COMPOSIO_API_KEY,
 });
 
+// Warn if API key is missing, helps diagnose HTML error pages from auth proxies
+if (!process.env.COMPOSIO_API_KEY || COMPOSIO_API_KEY === 'test') {
+    const warnLogger = new PrefixLogger('composioApiCall');
+    warnLogger.log('WARNING: COMPOSIO_API_KEY is not set or using default placeholder. Requests may fail with non-JSON HTML error pages.');
+}
+
 export async function composioApiCall<T extends z.ZodTypeAny>(
     schema: T,
     url: string,
@@ -32,11 +38,36 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
         });
         const duration = Date.now() - then;
         logger.log(`Took: ${duration}ms`);
-        const data = await response.json();
-        if ('error' in data) {
-            const response = ZErrorResponse.parse(data);
-            throw new Error(`(code: ${response.error.error_code}): ${response.error.message}: ${response.error.suggested_fix}: ${response.error.errors?.join(', ')}`);
+
+        const contentType = response.headers.get('content-type') || '';
+        const rawText = await response.text();
+
+        // Helpful logging when non-OK or non-JSON
+        if (!response.ok || !contentType.includes('application/json')) {
+            logger.log(`Non-JSON or non-OK response`, {
+                status: response.status,
+                statusText: response.statusText,
+                contentType,
+                preview: rawText.slice(0, 200),
+            });
         }
+
+        if (!response.ok) {
+            throw new Error(`Composio API error: ${response.status} ${response.statusText} (url: ${url}) body: ${rawText.slice(0, 500)}`);
+        }
+
+        let data: unknown;
+        try {
+            data = contentType.includes('application/json') ? JSON.parse(rawText) : (() => { throw new Error('Expected JSON but received non-JSON response'); })();
+        } catch (e: any) {
+            throw new Error(`Failed to parse Composio JSON response (url: ${url}): ${e?.message || e}. Body preview: ${rawText.slice(0, 500)}`);
+        }
+
+        if (typeof data === 'object' && data !== null && 'error' in (data as any)) {
+            const parsedError = ZErrorResponse.parse(data);
+            throw new Error(`(code: ${parsedError.error.error_code}): ${parsedError.error.message}: ${parsedError.error.suggested_fix}: ${parsedError.error.errors?.join(', ')}`);
+        }
+
         return schema.parse(data);
     } catch (error) {
         logger.log(`Error:`, error);

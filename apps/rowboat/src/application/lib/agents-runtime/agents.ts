@@ -903,7 +903,7 @@ async function* handleNativeHandoffEvent(
     }
 
     // Regular handoff handling (non-pipeline)
-    const maxCalls = targetAgentConfig?.maxCallsPerParentAgent || 3;
+    const maxCalls = targetAgentConfig?.maxCallsPerParentAgent || 1;
     const currentCalls = transferCounter.get(agentName, targetAgentName);
     
     if (targetAgentConfig?.outputVisibility === 'internal' && currentCalls >= maxCalls) {
@@ -955,7 +955,7 @@ async function* handleHandoffEvent(
     // Only apply max calls limit to internal agents (task agents)
     const targetAgentConfig = agentConfig[event.item.targetAgent.name];
     if (targetAgentConfig?.outputVisibility === 'internal') {
-        const maxCalls = targetAgentConfig?.maxCallsPerParentAgent || 3;
+        const maxCalls = targetAgentConfig?.maxCallsPerParentAgent || 1;
         const currentCalls = transferCounter.get(agentName, event.item.targetAgent.name);
         if (currentCalls >= maxCalls) {
             eventLogger.log(`⚠️ SKIPPING: handoff to ${event.item.targetAgent.name} - max calls ${maxCalls} exceeded from ${agentName}`);
