@@ -3,7 +3,7 @@
     "theme": "maple",
     "name": "Rowboat",
     "description": "Rowboat is an open-source platform for building multi-agent systems. It helps you orchestrate tools, RAG, memory, and deployable agents with ease.",
-    "favicon": "/docs/img/favicon.ico",
+    "favicon": "/favicon.ico",
     "colors": {
       "primary": "#6366F1",
         "light": "#6366F1",
