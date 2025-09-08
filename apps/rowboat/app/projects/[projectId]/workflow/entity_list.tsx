@@ -207,8 +207,8 @@ const ListItemWithMenu = ({
 };
 
 const StartLabel = () => (
-    <div className="text-xs text-indigo-500 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30 px-1.5 py-0.5 rounded">
-        Start
+    <div className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-0.5 rounded font-medium">
+        START
     </div>
 );
 
@@ -1175,7 +1175,7 @@ export const EntityList = forwardRef<
                             tourTarget="entity-prompts"
                             className={clsx(
                                 "h-full",
-                                !expandedPanels.prompts && "h-[53px]!"
+                                !expandedPanels.prompts && "h-[61px]!"
                             )}
                             title={
                                 <div className={`${headerClasses} rounded-md transition-colors h-full`}>
@@ -1208,7 +1208,7 @@ export const EntityList = forwardRef<
                             }
                         >
                             {expandedPanels.prompts && (
-                                <div className="h-[calc(100%-53px)] overflow-y-auto">
+                                <div className="h-[calc(100%-61px)] overflow-y-auto">
                                     <div className="p-2">
                                         {prompts.length > 0 ? (
                                             <div className="space-y-1">
@@ -1631,17 +1631,6 @@ const ComposioCard = ({
                                 </Tooltip>
                             </div>
                         ))}
-                        {/* More tools option */}
-                        <button
-                            className="flex items-center gap-2 px-3 py-2 mt-1 text-xs text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded transition-colors"
-                            onClick={() => {
-                                setSelectedToolkitSlug(card.slug);
-                                setShowToolsModal(true);
-                            }}
-                        >
-                            <PlusIcon className="w-4 h-4" />
-                            <span>More tools</span>
-                        </button>
                     </div>
                 )}
             </div>
@@ -2116,4 +2105,4 @@ function AddVariableModal({ isOpen, onClose, onConfirm, initialName, initialValu
             </ModalContent>
         </Modal>
     );
-} 
+}

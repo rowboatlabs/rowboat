@@ -17,6 +17,9 @@ export function App({
     onPanelClick,
     triggerCopilotChat,
     isLiveWorkflow,
+    activePanel,
+    onTogglePanel,
+    onMessageSent,
 }: {
     hidden?: boolean;
     projectId: string;
@@ -25,6 +28,9 @@ export function App({
     onPanelClick?: () => void;
     triggerCopilotChat?: (message: string) => void;
     isLiveWorkflow: boolean;
+    activePanel: 'playground' | 'copilot';
+    onTogglePanel: () => void;
+    onMessageSent?: () => void;
 }) {
     const [counter, setCounter] = useState<number>(0);
     const [showDebugMessages, setShowDebugMessages] = useState<boolean>(true);
@@ -56,8 +62,34 @@ export function App({
                 className={`${hidden ? 'hidden' : 'block'}`}
                 variant="playground"
                 tourTarget="playground"
-                icon={<MessageCircle className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
-                title="Chat"
+                title={
+                    <div className="flex items-center">
+                        <div className="flex items-center gap-2 rounded-lg p-1 bg-blue-50/70 dark:bg-blue-900/30">
+                            <button
+                                onClick={onTogglePanel}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                                    activePanel === 'copilot'
+                                        ? 'bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-300 shadow-md border border-indigo-200 dark:border-indigo-700'
+                                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
+                                }`}
+                            >
+                                <span className="text-base">✨</span>
+                                Build
+                            </button>
+                            <button
+                                onClick={onTogglePanel}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                                    activePanel === 'playground'
+                                        ? 'bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-300 shadow-md border border-indigo-200 dark:border-indigo-700'
+                                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
+                                }`}
+                            >
+                                <span className="text-base">💬</span>
+                                Chat
+                            </button>
+                        </div>
+                    </div>
+                }
                 subtitle="Chat with your assistant"
                 rightActions={
                     <div className="flex items-center gap-2">
@@ -112,6 +144,7 @@ export function App({
                         showDebugMessages={showDebugMessages}
                         triggerCopilotChat={triggerCopilotChat}
                         isLiveWorkflow={isLiveWorkflow}
+                        onMessageSent={onMessageSent}
                     />
                 </div>
             </Panel>

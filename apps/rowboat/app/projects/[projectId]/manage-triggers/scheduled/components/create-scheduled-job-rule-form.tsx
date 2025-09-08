@@ -16,7 +16,7 @@ type FormMessage = {
     content: string;
 };
 
-export function CreateScheduledJobRuleForm({ projectId }: { projectId: string }) {
+export function CreateScheduledJobRuleForm({ projectId, onBack, hasExistingTriggers = true }: { projectId: string; onBack?: () => void; hasExistingTriggers?: boolean }) {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [messages, setMessages] = useState<FormMessage[]>([
@@ -90,7 +90,11 @@ export function CreateScheduledJobRuleForm({ projectId }: { projectId: string })
                 input: { messages: convertedMessages },
                 scheduledTime: scheduledTimeString,
             });
-            router.push(`/projects/${projectId}/manage-triggers?tab=scheduled`);
+            if (onBack) {
+                onBack();
+            } else {
+                router.push(`/projects/${projectId}/manage-triggers?tab=scheduled`);
+            }
         } catch (error) {
             console.error("Failed to create scheduled job rule:", error);
             alert("Failed to create scheduled job rule");
@@ -105,11 +109,17 @@ export function CreateScheduledJobRuleForm({ projectId }: { projectId: string })
         <Panel
             title={
                 <div className="flex items-center gap-3">
-                    <Link href={`/projects/${projectId}/manage-triggers?tab=scheduled`}>
-                        <Button variant="secondary" size="sm" startContent={<ArrowLeftIcon className="w-4 h-4" />} className="whitespace-nowrap">
+                    {hasExistingTriggers && onBack ? (
+                        <Button variant="secondary" size="sm" startContent={<ArrowLeftIcon className="w-4 h-4" />} className="whitespace-nowrap" onClick={onBack}>
                             Back
                         </Button>
-                    </Link>
+                    ) : hasExistingTriggers ? (
+                        <Link href={`/projects/${projectId}/manage-triggers?tab=scheduled`}>
+                            <Button variant="secondary" size="sm" startContent={<ArrowLeftIcon className="w-4 h-4" />} className="whitespace-nowrap">
+                                Back
+                            </Button>
+                        </Link>
+                    ) : null}
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
                         CREATE SCHEDULED JOB RULE
                     </div>

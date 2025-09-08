@@ -22,6 +22,7 @@ export function Chat({
     showJsonMode = false,
     triggerCopilotChat,
     isLiveWorkflow,
+    onMessageSent,
 }: {
     projectId: string;
     workflow: z.infer<typeof Workflow>;
@@ -31,6 +32,7 @@ export function Chat({
     showJsonMode?: boolean;
     triggerCopilotChat?: (message: string) => void;
     isLiveWorkflow: boolean;
+    onMessageSent?: () => void;
 }) {
     const conversationId = useRef<string | null>(null);
     const [messages, setMessages] = useState<z.infer<typeof Message>[]>([]);
@@ -158,6 +160,11 @@ export function Chat({
         setMessages(updatedMessages);
         setError(null);
         setIsLastInteracted(true);
+        
+        // Mark playground as tested when user sends a message
+        if (onMessageSent) {
+            onMessageSent();
+        }
     }
 
     // clean up event source on component unmount
@@ -425,7 +432,7 @@ export function Chat({
                         <ChevronDownIcon className="w-5 h-5" strokeWidth={2.2} />
                     </button>
                 )}
-                <div className="bg-white dark:bg-zinc-900 pt-4 pb-2">
+                <div className="bg-white dark:bg-zinc-900 pt-4 pb-6">
                     {showSuccessMessage && (
                         <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 
                                       rounded-lg flex gap-2 justify-between items-center">
