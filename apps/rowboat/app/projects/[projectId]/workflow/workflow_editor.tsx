@@ -1004,23 +1004,27 @@ export function WorkflowEditor({
     const [isEditingProjectName, setIsEditingProjectName] = useState<boolean>(false);
     const [pendingProjectName, setPendingProjectName] = useState<string | null>(null);
     
-    // Build progress tracking - persists once set to true
+    // Build progress tracking - persists once set to true (guard SSR)
     const [hasAgentInstructionChanges, setHasAgentInstructionChanges] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
         return localStorage.getItem(`agent_instructions_changed_${projectId}`) === 'true';
     });
 
-    // Test progress tracking - persists once set to true
+    // Test progress tracking - persists once set to true (guard SSR)
     const [hasPlaygroundTested, setHasPlaygroundTested] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
         return localStorage.getItem(`playground_tested_${projectId}`) === 'true';
     });
 
-    // Publish progress tracking - persists once set to true
+    // Publish progress tracking - persists once set to true (guard SSR)
     const [hasPublished, setHasPublished] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
         return localStorage.getItem(`has_published_${projectId}`) === 'true';
     });
 
-    // Use progress tracking - persists once set to true
+    // Use progress tracking - persists once set to true (guard SSR)
     const [hasClickedUse, setHasClickedUse] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
         return localStorage.getItem(`has_clicked_use_${projectId}`) === 'true';
     });
 

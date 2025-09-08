@@ -1,3 +1,4 @@
+"use client";
 import { useFloating, offset, flip, shift, arrow, FloatingArrow, FloatingPortal, autoUpdate } from '@floating-ui/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { XIcon } from 'lucide-react';
