@@ -1,0 +1,237 @@
+{
+  "agents": [
+    {
+      "name": "Research Agent",
+      "type": "pipeline",
+      "description": "Internal agent that researches meeting attendees and returns a compiled summary.",
+      "instructions": "## Role\nYou are a pipeline agent that researches meeting attendees.\n\n---\n## Task\n1. You will receive attendee details from a previous step.\n2. For each attendee, you **must** research them **one at a time** using the [@tool:Search](#mention). Do NOT research the user `{{Exclude user}}`!\n3. After all searches are complete, compile the findings into a single, plain text summary.\n4. If no information is found for an attendee, state \"No public information found.\" for that person.\n5. Return **only** the final compiled summary.\n\n---\n## Constraint\nDo **NOT** interact with users or send messages. Your only output is the final summary text.",
+      "model": "google/gemini-2.5-flash",
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "controlType": "relinquish_to_parent",
+      "outputVisibility": "internal",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Slack Send Agent",
+      "type": "pipeline",
+      "description": "Internal agent that sends the compiled research summary to a channel via Slack direct message and returns confirmation.",
+      "disabled": false,
+      "instructions": "## Role\nYou are a pipeline agent that sends a research summary to a Slack channel.\n\n---\n## Task\n1. You will receive a compiled text summary from the previous step.\n2. Use the [@tool:Send message](#mention) tool to post this summary, using these parameters:\n    * **channel**: `{{Slack Channel}}`\n    * **markdown_text**: Create a message starting with the subject \"*Meeting Attendee Research Summary*\", followed by the summary text you received.\n3. Your job is complete after sending the message.\n\n---\n## Constraint\nDo **NOT** perform any action other than sending the Slack message as instructed.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "controlType": "relinquish_to_parent",
+      "outputVisibility": "internal",
+      "maxCallsPerParentAgent": 3,
+      "examples": "- **Parent agent** : <provides attendee research>\n - **Agent actions**: Call [@tool:Send message](#mention)\n - **Agent response**: Message sent to Slack channel.\n"
+    },
+    {
+      "name": "Attendee Research & Slack Pipeline Step 1",
+      "type": "pipeline",
+      "description": "",
+      "disabled": false,
+      "instructions": "",
+      "model": "gpt-4o",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "controlType": "relinquish_to_parent",
+      "outputVisibility": "internal",
+      "maxCallsPerParentAgent": 3
+    }
+  ],
+  "prompts": [
+    {
+      "name": "Slack Channel",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "Exclude user",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    }
+  ],
+  "tools": [
+    {
+      "name": "Search",
+      "description": "Performs a web search and scrapes content from the top results.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "mockTool": true,
+      "isComposio": true,
+      "composioData": {
+        "slug": "FIRECRWAL_SEARCH",
+        "noAuth": false,
+        "toolkitName": "firecrawl",
+        "toolkitSlug": "firecrawl",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/firecrawl.svg"
+      }
+    },
+    {
+      "name": "Send message",
+      "description": "Posts a message to a slack channel, direct message, or private group; requires content via `text`, `blocks`, or `attachments`.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "as_user": {
+            "description": "Post as the authenticated user instead of as a bot. Defaults to `false`. If `true`, `username`, `icon_emoji`, and `icon_url` are ignored. If `false`, the message is posted as a bot, allowing appearance customization.",
+            "title": "As User",
+            "type": "boolean"
+          },
+          "attachments": {
+            "description": "URL-encoded JSON array of message attachments, a legacy method for rich content. See Slack API documentation for structure.",
+            "examples": [
+              "%5B%7B%22fallback%22%3A%20%22Required%20plain-text%20summary%20of%20the%20attachment.%22%2C%20%22color%22%3A%20%22%2336a64f%22%2C%20%22pretext%22%3A%20%22Optional%20text%20that%20appears%20above%20the%20attachment%20block%22%2C%20%22author_name%22%3A%20%22Bobby%20Tables%22%2C%20%22title%22%3A%20%22Slack%20API%20Documentation%22%2C%20%22title_link%22%3A%20%22https%3A%2F%2Fapi.slack.com%2F%22%2C%20%22text%22%3A%20%22Optional%20text%20that%20appears%20within%20the%20attachment%22%7D%5D"
+            ],
+            "title": "Attachments",
+            "type": "string"
+          },
+          "blocks": {
+            "description": "DEPRECATED: Use `markdown_text` field instead. URL-encoded JSON array of layout blocks for rich/interactive messages. See Slack API Block Kit docs for structure.",
+            "examples": [
+              "%5B%7B%22type%22%3A%20%22section%22%2C%20%22text%22%3A%20%7B%22type%22%3A%20%22mrkdwn%22%2C%20%22text%22%3A%20%22Hello%2C%20world%21%22%7D%7D%5D"
+            ],
+            "title": "Blocks",
+            "type": "string"
+          },
+          "channel": {
+            "description": "ID or name of the channel, private group, or IM channel to send the message to.",
+            "examples": [
+              "C1234567890",
+              "general"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "icon_emoji": {
+            "description": "Emoji for bot's icon (e.g., ':robot_face:'). Overrides `icon_url`. Applies if `as_user` is `false`.",
+            "examples": [
+              ":tada:",
+              ":slack:"
+            ],
+            "title": "Icon Emoji",
+            "type": "string"
+          },
+          "icon_url": {
+            "description": "Image URL for bot's icon (must be HTTPS). Applies if `as_user` is `false`.",
+            "examples": [
+              "https://slack.com/img/icons/appDir_2019_01/Tonito64.png"
+            ],
+            "title": "Icon Url",
+            "type": "string"
+          },
+          "link_names": {
+            "description": "Automatically hyperlink channel names (e.g., #channel) and usernames (e.g., @user) in message text. Defaults to `false` for bot messages.",
+            "title": "Link Names",
+            "type": "boolean"
+          },
+          "markdown_text": {
+            "description": "PREFERRED: Write your message in markdown for nicely formatted display. Supports: headers (# ## ###), bold (**text** or __text__), italic (*text* or _text_), strikethrough (~~text~~), inline code (`code`), code blocks (```), links ([text](url)), block quotes (>), lists (- item, 1. item), dividers (--- or ***), context blocks (:::context with images), and section buttons (:::section-button). IMPORTANT: Use \\n for line breaks (e.g., 'Line 1\\nLine 2'), not actual newlines. USER MENTIONS: To tag users, use their user ID with <@USER_ID> format (e.g., <@U1234567890>), not username. ",
+            "examples": [
+              "# Status Update\\n\\nSystem is **running smoothly** with *excellent* performance.\\n\\n```bash\\nkubectl get pods\\n```\\n\\n> All services operational ✅",
+              "## Daily Report\\n\\n- **Deployments**: 5 successful\\n- *Issues*: 0 critical\\n- ~~Maintenance~~: **Completed**\\n\\n---\\n\\n**Next**: Monitor for 24h"
+            ],
+            "title": "Markdown Text",
+            "type": "string"
+          },
+          "mrkdwn": {
+            "description": "Disable Slack's markdown for `text` field if `false`. Default `true` (allows *bold*, _italic_, etc.).",
+            "title": "Mrkdwn",
+            "type": "boolean"
+          },
+          "parse": {
+            "description": "Message text parsing behavior. Default `none` (no special parsing). `full` parses as user-typed (links @mentions, #channels). See Slack API docs for details.",
+            "examples": [
+              "none",
+              "full"
+            ],
+            "title": "Parse",
+            "type": "string"
+          },
+          "reply_broadcast": {
+            "description": "If `true` for a threaded reply, also posts to main channel. Defaults to `false`.",
+            "title": "Reply Broadcast",
+            "type": "boolean"
+          },
+          "text": {
+            "description": "DEPRECATED: This sends raw text only, use markdown_text field. Primary textual content. Recommended fallback if using `blocks` or `attachments`. Supports mrkdwn unless `mrkdwn` is `false`.",
+            "examples": [
+              "Hello from your friendly bot!",
+              "Reminder: Team meeting at 3 PM today."
+            ],
+            "title": "Text",
+            "type": "string"
+          },
+          "thread_ts": {
+            "description": "Timestamp (`ts`) of an existing message to make this a threaded reply. Use `ts` of the parent message, not another reply. Example: '1476746824.000004'.",
+            "examples": [
+              "1618033790.001500"
+            ],
+            "title": "Thread Ts",
+            "type": "string"
+          },
+          "unfurl_links": {
+            "description": "Enable unfurling of text-based URLs. Defaults `false` for bots, `true` if `as_user` is `true`.",
+            "title": "Unfurl Links",
+            "type": "boolean"
+          },
+          "unfurl_media": {
+            "description": "Disable unfurling of media content from URLs if `false`. Defaults to `true`.",
+            "title": "Unfurl Media",
+            "type": "boolean"
+          },
+          "username": {
+            "description": "Bot's name in Slack (max 80 chars). Applies if `as_user` is `false`.",
+            "examples": [
+              "MyBot",
+              "AlertBot"
+            ],
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel"
+        ]
+      },
+      "mockTool": true,
+      "isComposio": true,
+      "composioData": {
+        "slug": "SLACK_SEND_MESSAGE",
+        "noAuth": false,
+        "toolkitName": "slack",
+        "toolkitSlug": "slack",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/slack.svg"
+      }
+    }
+  ],
+  "startAgent": "Attendee Research & Slack Pipeline",
+  "pipelines": [
+    {
+      "name": "Attendee Research & Slack Pipeline",
+      "description": "Pipeline that researches meeting attendees and sends the compiled summary to a specified Slack channel.",
+      "agents": [
+        "Research Agent",
+        "Slack Send Agent"
+      ]
+    }
+  ],
+  "name": "Meeting Prep",
+  "description": "Research meeting attendees and send summary to Slack"
+}

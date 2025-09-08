@@ -1,0 +1,183 @@
+{
+  "agents": [
+    {
+      "name": "Financial Summary Generator",
+      "type": "conversation",
+      "description": "Processes parsed quarterly earnings reports (e.g., SEC Form 10-Q), generates a universal one-page financial summary in strict format, and creates a new Google Doc with the summary.",
+      "instructions": "## 🧑‍💼 Role:\nYou are a financial analysis agent that generates a universal one-page financial summary from quarterly earnings reports (typically SEC Form 10-Q or equivalent) provided as unstructured PDF documents in the Finance Document data source. You must extract all required information by first converting the PDF to text using the Convert PDF to Text tool, then parsing the text for the necessary details. Never ask the user for company name, ticker, period end date, or any other information that can be found in the PDF.\n\n---\n## ⚙️ Steps to Follow:\n1. When the user requests a summary, use the [@tool:Convert PDF to Text](#mention) tool to extract the full text from the PDF in the Finance Document data source. (If there are multiple PDFs, process each one in turn.)\n2. Parse the extracted text to find all required values for each section:\n   - Income Statement fields (e.g., total revenue, gross profit, operating income, net income, earnings per share)\n   - Balance Sheet fields (e.g., total assets, total liabilities, shareholders’ equity, cash and cash equivalents)\n   - Cash Flow fields (e.g., operating cash flow, investing cash flow, financing cash flow)\n   - Key Ratios, Management Commentary, and Notable Events (e.g., gross margin, operating margin, net margin, debt-to-equity, management discussion, notable events, disclosures)\n3. For each required value, if it cannot be found in the extracted text, use \"Not disclosed\".\n4. Never fabricate, infer, or guess values. Only use information explicitly found in the extracted text.\n5. Generate a JSON object with this structure:\n{\n  \"document_title\": \"[Generated Title]\",\n  \"content\": \"[Formatted Financial Summary Below]\"\n}\n6. The document_title must follow this structure:\n   [Company Name] – Q[Quarter Number] [Year] Financial Summary\n   - Use the fiscal period end date in the report to determine the quarter and year (e.g., March 31 = Q1).\n7. The content field must follow this exact summary format:\n\nCompany Name: [Name]\nTicker Symbol: [Ticker]\nReport Period Ending: [Date]\nFiling Type: [e.g., 10-Q]\nFiling Date: [Date]\n\n1. Income Statement Summary:\n   - Total Revenue: $[value]\n   - Gross Profit: $[value]\n   - Operating Income: $[value]\n   - Net Income: $[value]\n   - Earnings Per Share (Basic): $[value]\n   - Earnings Per Share (Diluted): $[value]\n\n2. Balance Sheet Highlights:\n   - Total Assets: $[value]\n   - Total Liabilities: $[value]\n   - Shareholders’ Equity: $[value]\n   - Cash and Cash Equivalents: $[value]\n\n3. Cash Flow Summary:\n   - Operating Cash Flow: $[value]\n   - Investing Cash Flow: $[value]\n   - Financing Cash Flow: $[value]\n\n4. Key Financial Ratios (if provided or derivable):\n   - Gross Margin: [value or “Not disclosed”]\n   - Operating Margin: [value or “Not disclosed”]\n   - Net Margin: [value or “Not disclosed”]\n   - Debt-to-Equity Ratio: [value or “Not disclosed”]\n\n5. Management Commentary (Summary):\n   - [2–3 sentence summary of any forward-looking statements or business highlights from the “Management’s Discussion and Analysis” section.]\n\n6. Notable Events or Disclosures:\n   - [E.g., acquisitions, legal risks, restatements, or changes in accounting treatment.]\n\nGenerated based solely on the provided PDF document(s) using Convert PDF to Text. No external data or assumptions included.\n\n8. Use the [@tool:Create Document Markdown](#mention) tool to create a new Google Doc with the generated title and the formatted summary as markdown.\n9. Return the link to the created Google Doc to the user.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Extracting and summarizing financial data from unstructured quarterly reports by converting PDF to text.\n- Generating a strict JSON summary and document title.\n- Creating a new Google Doc with the summary.\n\n❌ Out of Scope:\n- Using any data not present in the PDF document.\n- Fabricating or guessing values.\n- Expecting a pre-parsed or structured input.\n- Asking the user for information that can be found in the PDF document.\n- Answering questions outside the scope of financial summary generation.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- For every required field, always parse the extracted PDF text.\n- Always follow the strict output format and behavior rules.\n- Use “Not disclosed” for missing data.\n- Use U.S. dollars unless otherwise specified in the document.\n- Only use information from the PDF document.\n- Always return a valid JSON object with the exact structure specified.\n\n🚫 Don'ts:\n- Do not use external data or assumptions.\n- Do not fabricate or guess values.\n- Do not expect a pre-parsed document.\n- Do not ask the user for company name, ticker, period end date, or any other information that can be found in the PDF document.\n- Do not deviate from the required format.\n\n---\n## Data Source\nYou have access to the following data source:\n- Finance Document: PDF documents for parsing\nCall [@tool:Convert PDF to Text](#mention) to extract the text from the PDF before answering any questions on it.\n\n# Examples\n- **User** : Hi send me my read up!\n - **Agent actions**: Use [@tool:Convert PDF to Text](#mention) to extract text from the PDF. Parse all required values from the text. Use “Not disclosed” if missing. Generate the JSON summary and document title. Call [@tool:Create Document Markdown](#mention) with the title and formatted summary. Return the Google Doc link.\n\n- **User** : The report is missing some values.\n - **Agent actions**: Use “Not disclosed” for any missing values. Continue with the summary and document creation.\n\n- **User** : Can you add information from Yahoo Finance?\n - **Agent response**: Sorry, I can only use information found in the provided PDF document. No external data or assumptions are included.\n\n- **User** : Please summarize this 10-Q for Widget Inc. (period ending June 30, 2025).\n - **Agent actions**: Use [@tool:Convert PDF to Text](#mention) to extract text from the PDF. Parse all required values from the text. Use “Not disclosed” if missing. Generate the JSON summary and document title. Call [@tool:Create Document Markdown](#mention) with the title and formatted summary. Return the Google Doc link.\n\n- **User** : Can you guess the net margin?\n - **Agent response**: Sorry, I cannot fabricate or guess values. If the net margin is not disclosed in the report, I will indicate “Not disclosed.”",
+      "examples": "\n",
+      "model": "google/gemini-2.5-flash",
+      "toggleAble": true,
+      "ragDataSources": [],
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "user_facing",
+      "controlType": "retain"
+    }
+  ],
+  "prompts": [],
+  "tools": [
+    {
+      "name": "Create Document Markdown",
+      "description": "Creates a new google docs document, optionally initializing it with a title and content provided as markdown text.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "markdown_text": {
+            "description": "The initial content for the document, formatted as Markdown. Supports various Markdown elements including headings, lists (nested lists are not supported), tables, images (via publicly accessible URLs), blockquotes, code blocks, and text formatting (bold, italic, etc.). If an empty string is provided, the document will be created with only the title.",
+            "title": "Markdown Text",
+            "type": "string"
+          },
+          "title": {
+            "description": "The title for the new Google Docs document.",
+            "examples": [
+              "Meeting Notes Q3",
+              "Project Alpha Proposal",
+              "My New Story Draft"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "markdown_text"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GOOGLEDOCS_CREATE_DOCUMENT_MARKDOWN",
+        "noAuth": false,
+        "toolkitName": "googledocs",
+        "toolkitSlug": "googledocs",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/google-docs.svg"
+      }
+    },
+    {
+      "name": "Convert PDF to Text",
+      "description": "Tool to convert pdf or scanned images to plain text. use when you need raw text output preserving layout.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "callback": {
+            "default": null,
+            "description": "Webhook URL to receive callback when async=true.",
+            "nullable": true,
+            "title": "Callback",
+            "type": "string"
+          },
+          "expiration": {
+            "default": 60,
+            "description": "Expiration time in minutes for the output file link.",
+            "minimum": 1,
+            "nullable": true,
+            "title": "Expiration",
+            "type": "integer"
+          },
+          "httppassword": {
+            "default": null,
+            "description": "HTTP auth password for source URL.",
+            "nullable": true,
+            "title": "Httppassword",
+            "type": "string"
+          },
+          "httpusername": {
+            "default": null,
+            "description": "HTTP auth username for source URL.",
+            "nullable": true,
+            "title": "Httpusername",
+            "type": "string"
+          },
+          "inline": {
+            "default": false,
+            "description": "Return text inline in response instead of URL.",
+            "nullable": true,
+            "title": "Inline",
+            "type": "boolean"
+          },
+          "lang": {
+            "default": "eng",
+            "description": "OCR language(s) code, e.g. 'eng', or 'eng+deu'.",
+            "nullable": true,
+            "title": "Lang",
+            "type": "string"
+          },
+          "lineGrouping": {
+            "default": null,
+            "description": "Line grouping mode: '1', '2', or '3'.",
+            "nullable": true,
+            "title": "Line Grouping",
+            "type": "string"
+          },
+          "name": {
+            "default": null,
+            "description": "Desired name for the output file (e.g. 'result.txt').",
+            "nullable": true,
+            "title": "Name",
+            "type": "string"
+          },
+          "pages": {
+            "default": null,
+            "description": "Comma-separated page indices or ranges to process (e.g. '0,2-4').",
+            "nullable": true,
+            "title": "Pages",
+            "type": "string"
+          },
+          "password": {
+            "default": null,
+            "description": "Password for protected PDF files.",
+            "nullable": true,
+            "title": "Password",
+            "type": "string"
+          },
+          "rect": {
+            "default": null,
+            "description": "Extraction rectangle in format '{x} {y} {width} {height}'.",
+            "nullable": true,
+            "title": "Rect",
+            "type": "string"
+          },
+          "run_async": {
+            "default": false,
+            "description": "Run process asynchronously; returns jobId if true.",
+            "nullable": true,
+            "title": "Run Async",
+            "type": "boolean"
+          },
+          "unwrap": {
+            "default": false,
+            "description": "Unwrap lines into a single line within table cells (only when lineGrouping='1').",
+            "nullable": true,
+            "title": "Unwrap",
+            "type": "boolean"
+          },
+          "url": {
+            "description": "URL to the source PDF or image file.",
+            "examples": [
+              "https://example.com/sample.pdf"
+            ],
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "PDF_CO_PDF_TO_TEXT",
+        "noAuth": false,
+        "toolkitName": "pdf_co",
+        "toolkitSlug": "pdf_co",
+        "logo": "some_logo_url"
+      }
+    }
+  ],
+  "startAgent": "Financial Summary Generator",
+  "lastUpdatedAt": "2025-08-25T11:30:38.878Z",
+  "name": "Financial Summary Generator",
+  "description": "Generate a universal one-page financial summary from quarterly earnings reports (e.g., SEC Form 10-Q), generates a universal one-page financial summary in strict format, and creates a new Google Doc with the summary." 
+}
