@@ -128,7 +128,7 @@ ${config.outputVisibility === 'user_facing'
 
 ${config.instructions}
 
-${config.examples ? ('# Examples\n' + config.examples) : ''}
+${(config as any).examples ? ('# Examples\n' + (config as any).examples) : ''}
 
 ${VARIABLES_CONTEXT_INSTRUCTIONS(variables)}
 

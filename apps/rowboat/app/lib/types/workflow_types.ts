@@ -11,7 +11,6 @@ export const WorkflowAgent = z.object({
     description: z.string(),
     disabled: z.boolean().default(false).optional(),
     instructions: z.string(),
-    examples: z.string().optional(),
     model: z.string(),
     locked: z.boolean().default(false).describe('Whether this agent is locked and cannot be deleted').optional(),
     toggleAble: z.boolean().default(true).describe('Whether this agent can be enabled or disabled').optional(),
