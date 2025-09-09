@@ -322,8 +322,8 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     dispatch: (action: WorkflowDispatch) => void;
     isInitialState?: boolean;
     dataSources?: z.infer<typeof DataSource>[];
-    activePanel: 'playground' | 'copilot';
-    onTogglePanel: () => void;
+    activePanel?: 'playground' | 'copilot';
+    onTogglePanel?: () => void;
 }>(({
     projectId,
     workflow,
@@ -369,34 +369,7 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
             <Panel 
                 variant="copilot"
                 tourTarget="copilot"
-                title={
-                    <div className="flex items-center">
-                        <div className="flex items-center gap-2 rounded-lg p-1 bg-blue-50/70 dark:bg-blue-900/30">
-                            <button
-                                onClick={onTogglePanel}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                                    activePanel === 'copilot'
-                                        ? 'bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-300 shadow-md border border-indigo-200 dark:border-indigo-700'
-                                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
-                                }`}
-                            >
-                                <span className="text-base">✨</span>
-                                Build
-                            </button>
-                            <button
-                                onClick={onTogglePanel}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                                    activePanel === 'playground'
-                                        ? 'bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-300 shadow-md border border-indigo-200 dark:border-indigo-700'
-                                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
-                                }`}
-                            >
-                                <span className="text-base">💬</span>
-                                Chat
-                            </button>
-                        </div>
-                    </div>
-                }
+                title={<div className="flex items-center text-zinc-800 dark:text-zinc-200 font-semibold">Skipper</div>}
                 subtitle="Build your assistant"
                 rightActions={
                     <div className="flex items-center gap-2">
