@@ -127,19 +127,24 @@ export function TopBar({
                         />
                     </div>
 
-                    {/* Show divider and CTA only in live view */}
+                    {/* Show divider and mode indicator */}
                     {isLive && <div className="h-4 w-px bg-gray-300 dark:bg-gray-600"></div>}
                     {isLive ? (
                         <Button
                             variant="solid"
-                            size="md"
+                            size="sm"
                             onPress={() => onChangeMode('draft')}
-                            className="gap-2 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300 font-medium text-sm border border-gray-200 dark:border-gray-600 shadow-sm"
-                            startContent={<PenLine size={16} />}
+                            className="gap-2 px-3 h-8 bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300 font-medium text-sm border border-gray-200 dark:border-gray-600 shadow-sm"
+                            startContent={<PenLine size={14} />}
                         >
                             Switch to draft
                         </Button>
-                    ) : null}
+                    ) : (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 font-medium text-xs rounded-full">
+                            <PenLine size={12} />
+                            <span>Draft</span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Progress Bar - Center */}
@@ -169,30 +174,30 @@ export function TopBar({
                     </div>}
                     
                     
-                    {!isLive && <>
+                    {!isLive && <div className="flex items-center gap-0.5">
                         <CustomButton
                             variant="primary"
                             size="sm"
                             onClick={onUndo}
                             disabled={!canUndo}
-                            className="bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
+                            className="min-w-8 h-8 px-2 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
                             showHoverContent={true}
                             hoverContent="Undo"
                         >
-                            <UndoIcon className="w-4 h-4" />
+                            <UndoIcon className="w-3.5 h-3.5" />
                         </CustomButton>
                         <CustomButton
                             variant="primary"
                             size="sm"
                             onClick={onRedo}
                             disabled={!canRedo}
-                            className="bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
+                            className="min-w-8 h-8 px-2 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
                             showHoverContent={true}
                             hoverContent="Redo"
                         >
-                            <RedoIcon className="w-4 h-4" />
+                            <RedoIcon className="w-3.5 h-3.5" />
                         </CustomButton>
-                    </>}
+                    </div>}
                     
                     {/* View controls (hidden in live mode) */}
                     {!isLive && (<div className="flex items-center gap-2 mr-2">
@@ -272,13 +277,13 @@ export function TopBar({
                                     <DropdownTrigger>
                                         <Button
                                             variant="solid"
-                                            size="md"
-                                            className="gap-2 px-4 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-semibold text-sm border border-blue-200 dark:border-blue-700 shadow-sm"
-                                            startContent={<Plug size={16} />}
+                                            size="sm"
+                                            className="gap-2 px-3 h-8 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-semibold text-sm border border-blue-200 dark:border-blue-700 shadow-sm"
+                                            startContent={<Plug size={14} />}
                                             onPress={onUseAssistantClick}
                                         >
                                             Use Assistant
-                                            <ChevronDownIcon size={14} />
+                                            <ChevronDownIcon size={12} />
                                         </Button>
                                     </DropdownTrigger>
                                     <DropdownMenu aria-label="Assistant access options">
@@ -345,7 +350,7 @@ export function TopBar({
                                     <Tooltip content="Download Assistant JSON">
                                         <button
                                             onClick={onDownloadJSON}
-                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
+                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors cursor-pointer"
                                             aria-label="Download JSON"
                                             type="button"
                                         >
@@ -359,10 +364,10 @@ export function TopBar({
                                 <div className="flex">
                                 <Button
                                     variant="solid"
-                                    size="md"
+                                    size="sm"
                                     onPress={onPublishWorkflow}
-                                    className="gap-2 px-4 bg-green-100 hover:bg-green-200 text-green-800 font-semibold text-sm rounded-r-none border border-green-300 shadow-sm"
-                                    startContent={<RocketIcon size={16} />}
+                                    className="gap-2 px-3 h-8 bg-green-100 hover:bg-green-200 text-green-800 font-semibold text-sm rounded-r-none border border-green-300 shadow-sm"
+                                    startContent={<RocketIcon size={14} />}
                                     data-tour-target="deploy"
                                 >
                                     Publish
@@ -371,10 +376,10 @@ export function TopBar({
                                     <DropdownTrigger>
                                         <Button
                                             variant="solid"
-                                            size="md"
-                                            className="min-w-0 px-2 bg-green-100 hover:bg-green-200 text-green-800 rounded-l-none border border-l-0 border-green-300 shadow-sm"
+                                            size="sm"
+                                            className="min-w-0 px-2 h-8 bg-green-100 hover:bg-green-200 text-green-800 rounded-l-none border border-l-0 border-green-300 shadow-sm"
                                         >
-                                            <ChevronDownIcon size={14} />
+                                            <ChevronDownIcon size={12} />
                                         </Button>
                                     </DropdownTrigger>
                                     <DropdownMenu aria-label="Deploy actions">
@@ -431,7 +436,7 @@ export function TopBar({
                                     <Tooltip content="Download Assistant JSON">
                                         <button
                                             onClick={onDownloadJSON}
-                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
+                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors cursor-pointer"
                                             aria-label="Download JSON"
                                             type="button"
                                         >

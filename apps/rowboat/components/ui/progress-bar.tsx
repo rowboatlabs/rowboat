@@ -28,28 +28,23 @@ export function ProgressBar({ steps, className, onStepClick }: ProgressBarProps)
   };
 
   return (
-    <nav aria-label="Workflow progress" className={cn("flex items-center gap-4", className)}>
-      {/* Progress Label */}
-      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mr-2">
-        Progress:
-      </span>
-
+    <nav aria-label="Workflow progress" className={cn("flex items-center", className)}>
       {/* Steps */}
-      <ol role="list" className="flex items-center gap-2">
+      <ol role="list" className="flex items-center gap-1.5">
         {steps.map((step, index) => {
           const isLast = index === steps.length - 1;
           const tooltipText = (() => {
             switch (step.id) {
               case 1:
-                return 'Build your assistant - click for tour';
+                return 'Let skipper build your assistant for you';
               case 2:
-                return 'Test your assistant - click for tour';
+                return 'Chat with your assistant to test it';
               case 3:
-                return 'Make assistant live - click for tour';
+                return 'Make your assistant live';
               case 4:
-                return 'Interact with your assistant - click for tour';
+                return 'Interact with your assistant';
               default:
-                return 'Click for tour';
+                return '';
             }
           })();
 
@@ -77,7 +72,7 @@ export function ProgressBar({ steps, className, onStepClick }: ProgressBarProps)
                       }
                     } : undefined}
                     className={cn(
-                      "w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-400",
+                      "w-5 h-5 rounded-full border-2 flex items-center justify-center text-xs font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-400",
                       step.completed
                         ? "bg-green-500 border-green-500 text-white"
                         : step.isCurrent
@@ -88,7 +83,7 @@ export function ProgressBar({ steps, className, onStepClick }: ProgressBarProps)
                     {step.completed ? "✓" : step.isCurrent ? "⚡" : "○"}
                   </div>
                 </Tooltip>
-                <span className="hidden md:block mt-1 text-[11px] leading-none text-gray-700 dark:text-gray-300 font-medium">
+                <span className="hidden md:block mt-0.5 text-[10px] leading-none text-gray-700 dark:text-gray-300 font-medium">
                   {step.shortLabel ?? getShortLabel(step.label)}
                 </span>
               </div>
