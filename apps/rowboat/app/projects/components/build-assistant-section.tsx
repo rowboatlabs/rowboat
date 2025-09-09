@@ -63,6 +63,7 @@ export function BuildAssistantSection() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [autoCreateLoading, setAutoCreateLoading] = useState(false);
+    const [loadingTemplateId, setLoadingTemplateId] = useState<string | null>(null);
 
     const totalPages = Math.ceil(projects.length / ITEMS_PER_PAGE);
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -107,12 +108,22 @@ export function BuildAssistantSection() {
 
     // Handle template selection
     const handleTemplateSelect = async (templateId: string) => {
-        // When selecting a pre-built template, kick off Copilot with an explain prompt
-        await createProjectWithOptions({
-            template: templateId,
-            prompt: 'Explain this workflow',
-            router,
-        });
+        // Show a small non-blocking spinner on the clicked card
+        setLoadingTemplateId(templateId);
+        try {
+            await createProjectWithOptions({
+                template: templateId,
+                prompt: 'Explain this workflow',
+                router,
+                onError: () => {
+                    // Clear loading state if creation fails
+                    setLoadingTemplateId(null);
+                },
+            });
+        } catch (_err) {
+            // In case of unexpected error, clear loading state
+            setLoadingTemplateId(null);
+        }
     };
 
     // Handle prompt card selection
@@ -448,7 +459,12 @@ export function BuildAssistantSection() {
                                         <button
                                             key={template.id}
                                             onClick={() => handleTemplateSelect(template.id)}
-                                            className="block p-4 border border-gray-200 dark:border-gray-700 rounded-xl hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all group hover:shadow-md text-left"
+                                            disabled={loadingTemplateId === template.id}
+                                            className={clsx(
+                                                "relative block p-4 border border-gray-200 dark:border-gray-700 rounded-xl transition-all group text-left",
+                                                "hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:shadow-md",
+                                                loadingTemplateId === template.id && "opacity-90 cursor-not-allowed"
+                                            )}
                                         >
                                             <div className="space-y-2">
                                                 <div className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1">
@@ -489,9 +505,14 @@ export function BuildAssistantSection() {
                                                 })()}
 
                                                 <div className="flex items-center justify-between mt-2">
-                                                    <div className="text-xs text-gray-400 dark:text-gray-500">
-                                                    </div>
-                                                    <div className="w-2 h-2 rounded-full bg-blue-500 opacity-75"></div>
+                                                    <div className="text-xs text-gray-400 dark:text-gray-500"></div>
+                                                    {loadingTemplateId === template.id ? (
+                                                        <div className="text-blue-600 dark:text-blue-400">
+                                                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="w-2 h-2 rounded-full bg-blue-500 opacity-75"></div>
+                                                    )}
                                                 </div>
                                             </div>
                                         </button>
