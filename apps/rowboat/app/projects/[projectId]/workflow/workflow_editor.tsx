@@ -89,22 +89,20 @@ export type Action = {
 } | {
     type: "add_agent";
     agent: Partial<z.infer<typeof WorkflowAgent>>;
-} | {
-    type: "add_agent_no_select";
-    agent: Partial<z.infer<typeof WorkflowAgent>>;
+    fromCopilot?: boolean;
 } | {
     type: "add_tool";
     tool: Partial<z.infer<typeof WorkflowTool>>;
+    fromCopilot?: boolean;
 } | {
     type: "add_prompt";
     prompt: Partial<z.infer<typeof WorkflowPrompt>>;
-} | {
-    type: "add_prompt_no_select";
-    prompt: Partial<z.infer<typeof WorkflowPrompt>>;
+    fromCopilot?: boolean;
 } | {
     type: "add_pipeline";
     pipeline: Partial<z.infer<typeof WorkflowPipeline>>;
     defaultModel?: string;
+    fromCopilot?: boolean;
 } | {
     type: "select_agent";
     name: string;
@@ -390,36 +388,13 @@ function reducer(state: State, action: Action): State {
                                 maxCallsPerParentAgent: 3,
                                 ...action.agent
                             });
-                            draft.selection = {
-                                type: "agent",
-                                name: action.agent.name || newAgentName
-                            };
-                            draft.pendingChanges = true;
-                            draft.chatKey++;
-                            break;
-                        }
-                        case "add_agent_no_select": {
-                            let newAgentName = action.agent.name || "New agent";
-                            if (draft.workflow?.agents.some((agent) => agent.name === newAgentName)) {
-                                newAgentName = `New agent ${draft.workflow.agents.filter((agent) =>
-                                    agent.name.startsWith("New agent")).length + 1}`;
+                            // Only set selection if not from Copilot
+                            if (!action.fromCopilot) {
+                                draft.selection = {
+                                    type: "agent",
+                                    name: action.agent.name || newAgentName
+                                };
                             }
-                            draft.workflow?.agents.push({
-                                name: newAgentName,
-                                type: "conversation",
-                                description: "",
-                                disabled: false,
-                                instructions: "",
-                                model: "",
-                                locked: false,
-                                toggleAble: true,
-                                ragReturnType: "chunks",
-                                ragK: 3,
-                                controlType: "retain",
-                                outputVisibility: "user_facing",
-                                maxCallsPerParentAgent: 3,
-                                ...action.agent
-                            });
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
@@ -441,10 +416,13 @@ function reducer(state: State, action: Action): State {
                                 mockTool: false,
                                 ...action.tool
                             });
-                            draft.selection = {
-                                type: "tool",
-                                name: action.tool.name || newToolName
-                            };
+                            // Only set selection if not from Copilot
+                            if (!action.fromCopilot) {
+                                draft.selection = {
+                                    type: "tool",
+                                    name: action.tool.name || newToolName
+                                };
+                            }
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
@@ -461,27 +439,13 @@ function reducer(state: State, action: Action): State {
                                 prompt: "",
                                 ...action.prompt
                             });
-                            draft.selection = {
-                                type: "prompt",
-                                name: action.prompt.name || newPromptName
-                            };
-                            draft.pendingChanges = true;
-                            draft.chatKey++;
-                            break;
-                        }
-                        case "add_prompt_no_select": {
-                            let newPromptName = "New Variable";
-                            if (draft.workflow?.prompts.some((prompt) => prompt.name === newPromptName)) {
-                                newPromptName = `New Variable ${draft.workflow?.prompts.filter((prompt) =>
-                                    prompt.name.startsWith("New Variable")).length + 1}`;
+                            // Only set selection if not from Copilot
+                            if (!action.fromCopilot) {
+                                draft.selection = {
+                                    type: "prompt",
+                                    name: action.prompt.name || newPromptName
+                                };
                             }
-                            draft.workflow?.prompts.push({
-                                name: newPromptName,
-                                type: "base_prompt",
-                                prompt: "",
-                                ...action.prompt
-                            });
-                            // Don't set selection - this is the key difference
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
@@ -553,8 +517,8 @@ function reducer(state: State, action: Action): State {
                                 ...action.pipeline
                             });
                             
-                            // 4. ✅ Select the first agent for configuration
-                            if (pipelineAgents.length > 0) {
+                            // 4. ✅ Select the first agent for configuration (only if not from Copilot)
+                            if (pipelineAgents.length > 0 && !action.fromCopilot) {
                                 draft.selection = {
                                     type: "agent",
                                     name: pipelineAgents[0]
@@ -1211,7 +1175,6 @@ export function WorkflowEditor({
         entityListRef.current?.openDataSourcesModal();
     }, []);
 
-    console.log(`workflow editor chat key: ${state.present.chatKey}`);
 
     // Auto-show copilot and increment key when prompt is present
     useEffect(() => {
@@ -1414,7 +1377,7 @@ export function WorkflowEditor({
 
     // Modal-specific handlers that don't auto-select
     function handleAddPromptFromModal(prompt: Partial<z.infer<typeof WorkflowPrompt>>) {
-        dispatch({ type: "add_prompt_no_select", prompt });
+        dispatch({ type: "add_prompt", prompt, fromCopilot: true });
     }
 
     function handleUpdatePromptFromModal(name: string, prompt: Partial<z.infer<typeof WorkflowPrompt>>) {
@@ -1628,7 +1591,7 @@ export function WorkflowEditor({
     }, [isLive, state.present.publishing, onChangeMode]);
 
     const WORKFLOW_MOD_ACTIONS = useRef(new Set([
-        'add_agent','add_tool','add_prompt','add_prompt_no_select','add_pipeline',
+        'add_agent','add_tool','add_prompt','add_pipeline',
         'update_agent','update_tool','update_prompt','update_prompt_no_select','update_pipeline',
         'delete_agent','delete_tool','delete_prompt','delete_pipeline',
         'toggle_agent','set_main_agent','reorder_agents','reorder_pipelines'

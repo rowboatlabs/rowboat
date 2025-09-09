@@ -218,11 +218,12 @@ function AssistantMessage({
                         return;
                     }
                     dispatch({
-                        type: 'add_agent_no_select',
+                        type: 'add_agent',
                         agent: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
                 }
@@ -236,7 +237,8 @@ function AssistantMessage({
                         tool: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
                 }
@@ -246,7 +248,8 @@ function AssistantMessage({
                         prompt: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
                 case 'pipeline':
@@ -255,7 +258,8 @@ function AssistantMessage({
                         pipeline: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
             }
