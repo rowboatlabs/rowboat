@@ -107,7 +107,12 @@ export function BuildAssistantSection() {
 
     // Handle template selection
     const handleTemplateSelect = async (templateId: string) => {
-        await createProjectFromTemplate(templateId, router);
+        // When selecting a pre-built template, kick off Copilot with an explain prompt
+        await createProjectWithOptions({
+            template: templateId,
+            prompt: 'Explain this workflow',
+            router,
+        });
     };
 
     // Handle prompt card selection
