@@ -2,7 +2,7 @@
 
 import { forwardRef, TextareaHTMLAttributes } from 'react';
 import { Textarea } from '@/components/ui/textarea';
-import { Send, MoreVertical } from 'lucide-react';
+import { Send, Plus } from 'lucide-react';
 import { Dropdown, DropdownItem, DropdownMenu, DropdownTrigger } from '@heroui/react';
 import clsx from 'clsx';
 
@@ -72,10 +72,10 @@ export const TextareaWithSend = forwardRef<HTMLTextAreaElement, TextareaWithSend
                     "rounded-full p-2 transition-all duration-200",
                     "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:scale-105 active:scale-95 hover:bg-gray-200 dark:hover:bg-gray-700"
                   )}
-                  aria-label="More actions"
-                  title="More actions"
+                  aria-label="Add"
+                  title="Add"
                 >
-                  <MoreVertical size={18} />
+                  <Plus size={18} />
                 </button>
               </DropdownTrigger>
               <DropdownMenu
