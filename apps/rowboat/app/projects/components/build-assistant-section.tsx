@@ -529,19 +529,31 @@ export function BuildAssistantSection() {
                                         <div className="space-y-8">
                                             {workTemplates.length > 0 && (
                                                 <div>
-                                                    <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Work Productivity</div>
+                                                    <div className="mb-3">
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-400/10 dark:text-amber-300 dark:ring-amber-400/30">
+                                                            Work Productivity
+                                                        </span>
+                                                    </div>
                                                     {renderGrid(workTemplates)}
                                                 </div>
                                             )}
                                             {devTemplates.length > 0 && (
                                                 <div>
-                                                    <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Developer Productivity</div>
+                                                    <div className="mb-3">
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 dark:bg-indigo-400/10 dark:text-indigo-300 dark:ring-indigo-400/30">
+                                                            Developer Productivity
+                                                        </span>
+                                                    </div>
                                                     {renderGrid(devTemplates)}
                                                 </div>
                                             )}
                                             {otherTemplates.length > 0 && (
                                                 <div>
-                                                    <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Other</div>
+                                                    <div className="mb-3">
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-50 text-gray-700 ring-1 ring-gray-200 dark:bg-gray-400/10 dark:text-gray-300 dark:ring-gray-400/30">
+                                                            Other
+                                                        </span>
+                                                    </div>
                                                     {renderGrid(otherTemplates)}
                                                 </div>
                                             )}
