@@ -438,7 +438,7 @@ export function BuildAssistantSection() {
                         <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700">
                             <div className="text-left mb-6">
                                 <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                                    Pre-built Assistants
+                                    Prebuilt Assistants
                                 </h2>
                             </div>
                             {templatesLoading ? (
@@ -454,70 +454,100 @@ export function BuildAssistantSection() {
                                     No pre-built assistants available
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {templates.map((template) => (
-                                        <button
-                                            key={template.id}
-                                            onClick={() => handleTemplateSelect(template.id)}
-                                            disabled={loadingTemplateId === template.id}
-                                            className={clsx(
-                                                "relative block p-4 border border-gray-200 dark:border-gray-700 rounded-xl transition-all group text-left",
-                                                "hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:shadow-md",
-                                                loadingTemplateId === template.id && "opacity-90 cursor-not-allowed"
-                                            )}
-                                        >
-                                            <div className="space-y-2">
-                                                <div className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1">
-                                                    {template.name}
-                                                </div>
-                                                <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-                                                    {template.description}
-                                                </div>
+                                (() => {
+                                    const workTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'work productivity');
+                                    const devTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'developer productivity');
+                                    const otherTemplates = templates.filter((t) => ![...workTemplates, ...devTemplates].some(sel => sel.id === t.id));
 
-                                                {/* Tool logos */}
-                                                {(() => {
-                                                    const tools = getUniqueTools(template);
-                                                    return tools.length > 0 && (
-                                                        <div className="flex items-center gap-2 mt-2">
-                                                            <div className="text-xs text-gray-400 dark:text-gray-500">
-                                                                Tools:
-                                                            </div>
-                                                            <div className="flex items-center gap-1">
-                                                                {tools.slice(0, 4).map((tool) => (
-                                                                    tool.logo && (
-                                                                        <PictureImg
-                                                                            key={tool.name}
-                                                                            src={tool.logo}
-                                                                            alt={`${tool.name} logo`}
-                                                                            className="w-4 h-4 rounded-sm object-cover flex-shrink-0"
-                                                                            title={tool.name}
-                                                                        />
-                                                                    )
-                                                                ))}
-                                                                {tools.length > 4 && (
-                                                                    <span className="text-xs text-gray-400 dark:text-gray-500">
-                                                                        +{tools.length - 4}
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })()}
-
-                                                <div className="flex items-center justify-between mt-2">
-                                                    <div className="text-xs text-gray-400 dark:text-gray-500"></div>
-                                                    {loadingTemplateId === template.id ? (
-                                                        <div className="text-blue-600 dark:text-blue-400">
-                                                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="w-2 h-2 rounded-full bg-blue-500 opacity-75"></div>
+                                    const renderGrid = (items: any[]) => (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                            {items.map((template) => (
+                                                <button
+                                                    key={template.id}
+                                                    onClick={() => handleTemplateSelect(template.id)}
+                                                    disabled={loadingTemplateId === template.id}
+                                                    className={clsx(
+                                                        "relative block p-4 border border-gray-200 dark:border-gray-700 rounded-xl transition-all group text-left",
+                                                        "hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:shadow-md",
+                                                        loadingTemplateId === template.id && "opacity-90 cursor-not-allowed"
                                                     )}
+                                                >
+                                                    <div className="space-y-2">
+                                                        <div className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1">
+                                                            {template.name}
+                                                        </div>
+                                                        <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                                                            {template.description}
+                                                        </div>
+
+                                                        {(() => {
+                                                            const tools = getUniqueTools(template);
+                                                            return tools.length > 0 && (
+                                                                <div className="flex items-center gap-2 mt-2">
+                                                                    <div className="text-xs text-gray-400 dark:text-gray-500">
+                                                                        Tools:
+                                                                    </div>
+                                                                    <div className="flex items-center gap-1">
+                                                                        {tools.slice(0, 4).map((tool) => (
+                                                                            tool.logo && (
+                                                                                <PictureImg
+                                                                                    key={tool.name}
+                                                                                    src={tool.logo}
+                                                                                    alt={`${tool.name} logo`}
+                                                                                    className="w-4 h-4 rounded-sm object-cover flex-shrink-0"
+                                                                                    title={tool.name}
+                                                                                />
+                                                                            )
+                                                                        ))}
+                                                                        {tools.length > 4 && (
+                                                                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                                                                                +{tools.length - 4}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
+
+                                                        <div className="flex items-center justify-between mt-2">
+                                                            <div className="text-xs text-gray-400 dark:text-gray-500"></div>
+                                                            {loadingTemplateId === template.id ? (
+                                                                <div className="text-blue-600 dark:text-blue-400">
+                                                                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="w-2 h-2 rounded-full bg-blue-500 opacity-75"></div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    );
+
+                                    return (
+                                        <div className="space-y-8">
+                                            {workTemplates.length > 0 && (
+                                                <div>
+                                                    <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Work Productivity</div>
+                                                    {renderGrid(workTemplates)}
                                                 </div>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
+                                            )}
+                                            {devTemplates.length > 0 && (
+                                                <div>
+                                                    <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Developer Productivity</div>
+                                                    {renderGrid(devTemplates)}
+                                                </div>
+                                            )}
+                                            {otherTemplates.length > 0 && (
+                                                <div>
+                                                    <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Other</div>
+                                                    {renderGrid(otherTemplates)}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()
                             )}
                         </div>
                     </div>
