@@ -18,12 +18,13 @@ Each prebuilt card JSON file must have:
 - `tools`: Array of tool configurations (optional)
 - `prompts`: Array of prompt configurations (optional)
 - `pipelines`: Array of pipeline configurations (optional)
+ - `category`: Logical grouping for UI subsections (e.g., `Work Productivity`, `Developer Productivity`)
 
 ## Example Prebuilt Cards
 
 See the existing files in this directory:
 - `github-data-to-spreadsheet.json` - Fetches GitHub stats and logs to Google Sheets
-- `meeting-prep.json` - Research meeting attendees and send to Slack
+- `Meeting Prep Assistant.json` - Research meeting attendees and send to Slack
 - `interview-scheduler.json` - Automate interview scheduling with Google Sheets/Calendar
 
 ## Template Loading
