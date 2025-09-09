@@ -372,6 +372,9 @@ function reducer(state: State, action: Action): State {
                                 newAgentName = `New agent ${draft.workflow.agents.filter((agent) =>
                                     agent.name.startsWith("New agent")).length + 1}`;
                             }
+                            
+                            const finalAgentName = action.agent.name || newAgentName;
+                            
                             draft.workflow?.agents.push({
                                 name: newAgentName,
                                 type: "conversation",
@@ -388,6 +391,12 @@ function reducer(state: State, action: Action): State {
                                 maxCallsPerParentAgent: 3,
                                 ...action.agent
                             });
+                            
+                            // If this is the first agent or there's no start agent, set it as start agent
+                            if (!draft.workflow?.startAgent || draft.workflow.agents.length === 1) {
+                                draft.workflow.startAgent = finalAgentName;
+                            }
+                            
                             // Only set selection if not from Copilot
                             if (!action.fromCopilot) {
                                 draft.selection = {
