@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input } from "@heroui/react";
+import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input, ButtonGroup } from "@heroui/react";
 import { Button as CustomButton } from "@/components/ui/button";
 import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug, MessageCircleIcon, ShareIcon } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
@@ -18,6 +18,7 @@ interface TopBarProps {
     canUndo: boolean;
     canRedo: boolean;
     activePanel: 'playground' | 'copilot';
+    viewMode: "two_agents_chat" | "two_agents_skipper" | "two_chat_skipper" | "three_all";
     hasAgentInstructionChanges: boolean;
     hasPlaygroundTested: boolean;
     hasPublished: boolean;
@@ -29,6 +30,7 @@ interface TopBarProps {
     onChangeMode: (mode: 'draft' | 'live') => void;
     onRevertToLive: () => void;
     onTogglePanel: () => void;
+    onSetViewMode: (mode: "two_agents_chat" | "two_agents_skipper" | "two_chat_skipper" | "three_all") => void;
     onUseAssistantClick: () => void;
     onStartNewChatAndFocus: () => void;
     onStartBuildTour?: () => void;
@@ -52,6 +54,7 @@ export function TopBar({
     canUndo,
     canRedo,
     activePanel,
+    viewMode,
     hasAgentInstructionChanges,
     hasPlaygroundTested,
     hasPublished,
@@ -63,6 +66,7 @@ export function TopBar({
     onChangeMode,
     onRevertToLive,
     onTogglePanel,
+    onSetViewMode,
     onUseAssistantClick,
     onStartNewChatAndFocus,
     onStartBuildTour,
@@ -188,6 +192,59 @@ export function TopBar({
                         </CustomButton>
                     </>}
                     
+                    {/* View controls (hidden in live mode) */}
+                    {!isLive && (<div className="flex items-center gap-2 mr-2">
+                        <Dropdown>
+                            <DropdownTrigger>
+                                <Button isIconOnly variant="light" size="sm" aria-label="Two panes" className="w-9 h-8 min-w-0 bg-transparent text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/50 border border-transparent">
+                                    {/* Two pane icon */}
+                                    <svg width="20" height="14" viewBox="0 0 22 16" aria-hidden="true">
+                                        <rect x="1" y="1" width="20" height="14" rx="2" fill="none" stroke="currentColor" opacity=".55" />
+                                        <rect x="2.5" y="2.5" width="8.5" height="11" rx="1.2" fill="currentColor" opacity=".8" />
+                                        <rect x="12" y="2.5" width="7.5" height="11" rx="1.2" fill="currentColor" opacity=".35" />
+                                    </svg>
+                                </Button>
+                            </DropdownTrigger>
+                            <DropdownMenu aria-label="Choose 2-pane layout" selectionMode="single" closeOnSelect={false}>
+                                <DropdownItem key="two_agents_chat" onPress={() => onSetViewMode("two_agents_chat")}>
+                                    Agents + Chat
+                                </DropdownItem>
+                                <DropdownItem 
+                                    key="two_agents_skipper" 
+                                    isDisabled={isLive}
+                                    title={isLive ? "Skipper available in draft mode only" : undefined}
+                                    className={isLive ? "text-gray-400 cursor-not-allowed" : ""}
+                                    onPress={() => { if (!isLive) onSetViewMode("two_agents_skipper"); }}
+                                >
+                                    Agents + Skipper
+                                </DropdownItem>
+                                <DropdownItem 
+                                    key="two_chat_skipper" 
+                                    isDisabled={isLive}
+                                    title={isLive ? "Skipper available in draft mode only" : undefined}
+                                    className={isLive ? "text-gray-400 cursor-not-allowed" : ""}
+                                    onPress={() => { if (!isLive) onSetViewMode("two_chat_skipper"); }}
+                                >
+                                    Chat + Skipper
+                                </DropdownItem>
+                            </DropdownMenu>
+                        </Dropdown>
+                        <ChevronDownIcon size={14} className="text-zinc-500 dark:text-zinc-400 -ml-2 mr-1" />
+                        <Tooltip content={isLive ? "Skipper available in draft mode only" : "Agents + Chat + Skipper"}>
+                            <span className="inline-flex">
+                                <Button isIconOnly variant="light" size="sm" aria-label="Three panes" onPress={() => !isLive && onSetViewMode("three_all")} isDisabled={isLive} className={`w-9 h-8 min-w-0 bg-transparent ${isLive ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/50'} border ${viewMode === "three_all" ? 'border-zinc-300 dark:border-zinc-600' : 'border-transparent'}`}>
+                                    {/* Three pane icon */}
+                                    <svg width="20" height="14" viewBox="0 0 22 16" aria-hidden="true">
+                                        <rect x="1" y="1" width="20" height="14" rx="2" fill="none" stroke="currentColor" opacity=".55" />
+                                        <rect x="2.3" y="2.5" width="5.5" height="11" rx="1.2" fill="currentColor" opacity=".8" />
+                                        <rect x="8.5" y="2.5" width="6" height="11" rx="1.2" fill="currentColor" opacity=".5" />
+                                        <rect x="15.5" y="2.5" width="5.5" height="11" rx="1.2" fill="currentColor" opacity=".4" />
+                                    </svg>
+                                </Button>
+                            </span>
+                        </Tooltip>
+                    </div>)}
+
                     {/* Deploy CTA - always visible */}
                     <div className="flex items-center gap-3">
                         {isLive ? (
@@ -239,7 +296,6 @@ export function TopBar({
                                     </DropdownMenu>
                                 </Dropdown>
 
-                                {/* Live workflow label moved here */}
                                 <div className="flex items-center gap-2 ml-2">
                                     {publishing && <Spinner size="sm" />}
                                     <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
@@ -322,7 +378,6 @@ export function TopBar({
                                 </Dropdown>
                                 </div>
 
-                                {/* Moved draft/live labels and download button here */}
                                 <div className="flex items-center gap-2 ml-2">
                                     {publishing && <Spinner size="sm" />}
                                     {isLive && <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
