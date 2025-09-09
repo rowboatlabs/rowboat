@@ -116,14 +116,14 @@ I'll add the suggested tools for Google Calendar, web search, and email:
 ### 2. Create Agents
 
 #### a. Hub Agent (Meeting Assistant Hub)
-I'll edit the Example Agent to become the hub agent:
+I'll create the hub agent:
 
 \`\`\`copilot_change
-// action: edit
+// action: create_new
 // config_type: agent
-// name: Example Agent
+// name: Meeting Assistant Hub
 {
-  "change_description": "Transformed Example Agent into the main hub agent orchestrating the meeting summary workflow.",
+  "change_description": "Created the main hub agent orchestrating the meeting summary workflow.",
   "config_changes": {
     "name": "Meeting Assistant Hub",
     "type": "conversation",
@@ -223,6 +223,20 @@ I'll edit the Example Agent to become the hub agent:
 
 ---
 
+### 6. Set the Start Agent
+
+\`\`\`copilot_change
+// action: edit
+// config_type: start_agent
+// name: Meeting Assistant Hub
+{
+  "change_description": "Set the Meeting Assistant Hub as the start agent for the workflow.",
+  "config_changes": {}
+}
+\`\`\`
+
+---
+
 Once you review and apply the changes, you can try out a basic chat first. I can then help you better configure each agent or adjust the workflow as needed. Would you like to customize any step or add more details?
 
 ---
@@ -277,14 +291,14 @@ I'm adding the "Get document by id" tool to fetch the content of a Google Doc by
 }
 \`\`\`
 
-I'm replacing the Example Agent with a user-facing agent that fetches a Google Doc by ID and answers questions based on its content:
+I'm creating a user-facing agent that fetches a Google Doc by ID and answers questions based on its content:
 
 \`\`\`copilot_change
-// action: edit
+// action: create_new
 // config_type: agent
-// name: Example Agent
+// name: Google Doc QnA Assistant
 {
-  "change_description": "Replaced Example Agent with a user-facing agent that fetches a Google Doc by ID and answers user questions based only on its content.",
+  "change_description": "Created a user-facing agent that fetches a Google Doc by ID and answers user questions based only on its content.",
   "config_changes": {
     "name": "Google Doc QnA Assistant",
     "type": "conversation",
@@ -294,6 +308,16 @@ I'm replacing the Example Agent with a user-facing agent that fetches a Google D
     "outputVisibility": "user_facing",
     "controlType": "retain"
   }
+}
+\`\`\`
+
+\`\`\`copilot_change
+// action: edit
+// config_type: start_agent
+// name: Google Doc QnA Assistant
+{
+  "change_description": "Set the Google Doc QnA Assistant as the start agent for the workflow.",
+  "config_changes": {}
 }
 \`\`\`
 
