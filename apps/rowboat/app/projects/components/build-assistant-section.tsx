@@ -457,7 +457,7 @@ export function BuildAssistantSection() {
                                 (() => {
                                     const workTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'work productivity');
                                     const devTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'developer productivity');
-                                    const otherTemplates = templates.filter((t) => ![...workTemplates, ...devTemplates].some(sel => sel.id === t.id));
+                                    const newsTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'news');
 
                                     const renderGrid = (items: any[]) => (
                                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -547,14 +547,14 @@ export function BuildAssistantSection() {
                                                     {renderGrid(devTemplates)}
                                                 </div>
                                             )}
-                                            {otherTemplates.length > 0 && (
+                                            {newsTemplates.length > 0 && (
                                                 <div>
                                                     <div className="mb-3">
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-50 text-gray-700 ring-1 ring-gray-200 dark:bg-gray-400/10 dark:text-gray-300 dark:ring-gray-400/30">
-                                                            Other
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-50 text-green-700 ring-1 ring-green-200 dark:bg-green-400/10 dark:text-green-300 dark:ring-green-400/30">
+                                                            News
                                                         </span>
                                                     </div>
-                                                    {renderGrid(otherTemplates)}
+                                                    {renderGrid(newsTemplates)} 
                                                 </div>
                                             )}
                                         </div>
