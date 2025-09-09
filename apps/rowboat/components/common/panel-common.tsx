@@ -83,14 +83,13 @@ export function Panel({
     >
         <div 
             className={clsx(
-                // For copilot and playground, mimic TopBar appearance
-                (variant === 'copilot' || variant === 'playground')
-                    ? "shrink-0 relative rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm border border-zinc-200 dark:border-zinc-800 px-0 pt-0 pb-2 mx-0 mt-0 mb-2 flex items-center justify-between"
-                    : "shrink-0 border-b relative",
-                (variant !== 'copilot' && variant !== 'playground') && "border-zinc-100 dark:border-zinc-800",
+                "shrink-0 border-b relative",
+                // Use the same header treatment as entity list/default for playground/copilot
+                "border-zinc-100 dark:border-zinc-800",
                 {
                     "flex flex-col gap-3 px-4 py-3": variant === 'projects',
                     "flex items-center justify-between h-[53px] p-3": isEntityList,
+                    "flex items-center justify-between px-3 py-2": variant === 'copilot' || variant === 'playground',
                     "flex items-center justify-between px-6 py-3": !isEntityList && variant !== 'projects' && variant !== 'copilot' && variant !== 'playground'
                 }
             )}

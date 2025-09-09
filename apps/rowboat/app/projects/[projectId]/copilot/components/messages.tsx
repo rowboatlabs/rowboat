@@ -218,7 +218,7 @@ function AssistantMessage({
                         return;
                     }
                     dispatch({
-                        type: 'add_agent',
+                        type: 'add_agent_no_select',
                         agent: {
                             name: action.name,
                             ...action.config_changes
@@ -263,14 +263,14 @@ function AssistantMessage({
             switch (action.config_type) {
                 case 'agent':
                     dispatch({
-                        type: 'update_agent',
+                        type: 'update_agent_no_select',
                         name: action.name,
                         agent: action.config_changes
                     });
                     break;
                 case 'tool':
                     dispatch({
-                        type: 'update_tool',
+                        type: 'update_tool_no_select',
                         name: action.name,
                         tool: action.config_changes
                     });

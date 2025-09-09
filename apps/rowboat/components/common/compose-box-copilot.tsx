@@ -132,7 +132,7 @@ export function ComposeBoxCopilot({
                         scale-100 hover:scale-105 active:scale-95
                         disabled:opacity-50 disabled:scale-95
                         hover:shadow-md dark:hover:shadow-indigo-950/10
-                        mb-0.5
+                        mb-1.5 mr-2
                     `}
                 >
                     {loading ? (

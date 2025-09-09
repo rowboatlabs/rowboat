@@ -31,6 +31,7 @@ interface TopBarProps {
     onRevertToLive: () => void;
     onTogglePanel: () => void;
     onSetViewMode: (mode: "two_agents_chat" | "two_agents_skipper" | "two_chat_skipper" | "three_all") => void;
+    hasAgents?: boolean;
     onUseAssistantClick: () => void;
     onStartNewChatAndFocus: () => void;
     onStartBuildTour?: () => void;
@@ -67,6 +68,7 @@ export function TopBar({
     onRevertToLive,
     onTogglePanel,
     onSetViewMode,
+    hasAgents = true,
     onUseAssistantClick,
     onStartNewChatAndFocus,
     onStartBuildTour,
@@ -194,55 +196,72 @@ export function TopBar({
                     
                     {/* View controls (hidden in live mode) */}
                     {!isLive && (<div className="flex items-center gap-2 mr-2">
+                        {(() => {
+                            // Current visibility booleans
+                            const showAgents = viewMode !== "two_chat_skipper";
+                            const showChat = viewMode !== "two_agents_skipper";
+                            const showSkipper = viewMode !== "two_agents_chat";
+
+                            // Determine selected radio option
+                            type RadioKey = 'show-all' | 'hide-agents' | 'hide-chat' | 'hide-skipper';
+                            let selectedKey: RadioKey = 'show-all';
+                            if (!(showAgents && showChat && showSkipper)) {
+                                if (!showAgents) selectedKey = 'hide-agents';
+                                else if (!showChat) selectedKey = 'hide-chat';
+                                else if (!showSkipper) selectedKey = 'hide-skipper';
+                            }
+
+                            // Map radio selection to viewMode
+                            const setByKey = (key: RadioKey) => {
+                                switch (key) {
+                                    case 'show-all':
+                                        onSetViewMode('three_all');
+                                        break;
+                                    case 'hide-agents':
+                                        onSetViewMode('two_chat_skipper');
+                                        break;
+                                    case 'hide-chat':
+                                        onSetViewMode('two_agents_skipper');
+                                        break;
+                                    case 'hide-skipper':
+                                        onSetViewMode('two_agents_chat');
+                                        break;
+                                }
+                            };
+
+                            // Disable rules
+                            const disableShowAll = false; // always valid in draft
+                            const disableHideAgents = false;
+                            const disableHideChat = !hasAgents; // when no agents, chat must be hidden
+                            const disableHideSkipper = false;
+
+                            return (
                         <Dropdown>
                             <DropdownTrigger>
-                                <Button isIconOnly variant="light" size="sm" aria-label="Two panes" className="w-9 h-8 min-w-0 bg-transparent text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/50 border border-transparent">
-                                    {/* Two pane icon */}
-                                    <svg width="20" height="14" viewBox="0 0 22 16" aria-hidden="true">
-                                        <rect x="1" y="1" width="20" height="14" rx="2" fill="none" stroke="currentColor" opacity=".55" />
-                                        <rect x="2.5" y="2.5" width="8.5" height="11" rx="1.2" fill="currentColor" opacity=".8" />
-                                        <rect x="12" y="2.5" width="7.5" height="11" rx="1.2" fill="currentColor" opacity=".35" />
-                                    </svg>
-                                </Button>
-                            </DropdownTrigger>
-                            <DropdownMenu aria-label="Choose 2-pane layout" selectionMode="single" closeOnSelect={false}>
-                                <DropdownItem key="two_agents_chat" onPress={() => onSetViewMode("two_agents_chat")}>
-                                    Agents + Chat
-                                </DropdownItem>
-                                <DropdownItem 
-                                    key="two_agents_skipper" 
-                                    isDisabled={isLive}
-                                    title={isLive ? "Skipper available in draft mode only" : undefined}
-                                    className={isLive ? "text-gray-400 cursor-not-allowed" : ""}
-                                    onPress={() => { if (!isLive) onSetViewMode("two_agents_skipper"); }}
-                                >
-                                    Agents + Skipper
-                                </DropdownItem>
-                                <DropdownItem 
-                                    key="two_chat_skipper" 
-                                    isDisabled={isLive}
-                                    title={isLive ? "Skipper available in draft mode only" : undefined}
-                                    className={isLive ? "text-gray-400 cursor-not-allowed" : ""}
-                                    onPress={() => { if (!isLive) onSetViewMode("two_chat_skipper"); }}
-                                >
-                                    Chat + Skipper
-                                </DropdownItem>
-                            </DropdownMenu>
-                        </Dropdown>
-                        <ChevronDownIcon size={14} className="text-zinc-500 dark:text-zinc-400 -ml-2 mr-1" />
-                        <Tooltip content={isLive ? "Skipper available in draft mode only" : "Agents + Chat + Skipper"}>
-                            <span className="inline-flex">
-                                <Button isIconOnly variant="light" size="sm" aria-label="Three panes" onPress={() => !isLive && onSetViewMode("three_all")} isDisabled={isLive} className={`w-9 h-8 min-w-0 bg-transparent ${isLive ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/50'} border ${viewMode === "three_all" ? 'border-zinc-300 dark:border-zinc-600' : 'border-transparent'}`}>
-                                    {/* Three pane icon */}
+                                <Button variant="light" size="sm" aria-label="Layout options" className="h-8 min-w-0 bg-transparent text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/50 border border-transparent gap-1 px-2">
+                                    {/* Unified icon: 3-pane visual */}
                                     <svg width="20" height="14" viewBox="0 0 22 16" aria-hidden="true">
                                         <rect x="1" y="1" width="20" height="14" rx="2" fill="none" stroke="currentColor" opacity=".55" />
                                         <rect x="2.3" y="2.5" width="5.5" height="11" rx="1.2" fill="currentColor" opacity=".8" />
                                         <rect x="8.5" y="2.5" width="6" height="11" rx="1.2" fill="currentColor" opacity=".5" />
                                         <rect x="15.5" y="2.5" width="5.5" height="11" rx="1.2" fill="currentColor" opacity=".4" />
                                     </svg>
+                                    <ChevronDownIcon size={14} />
                                 </Button>
-                            </span>
-                        </Tooltip>
+                            </DropdownTrigger>
+                            <DropdownMenu aria-label="Choose layout" selectionMode="single" selectedKeys={[selectedKey]} closeOnSelect={true} onSelectionChange={(keys) => {
+                                const key = Array.from(keys as Set<string>)[0] as RadioKey;
+                                if (key === 'hide-chat' && disableHideChat) return;
+                                setByKey(key);
+                            }}>
+                                <DropdownItem key="show-all" isDisabled={disableShowAll} startContent={<input type="radio" readOnly checked={selectedKey==='show-all'} className="accent-zinc-600 dark:accent-zinc-300" />}>Show All</DropdownItem>
+                                <DropdownItem key="hide-agents" isDisabled={disableHideAgents} startContent={<input type="radio" readOnly checked={selectedKey==='hide-agents'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Agents</DropdownItem>
+                                <DropdownItem key="hide-chat" isDisabled={disableHideChat} startContent={<input type="radio" readOnly checked={selectedKey==='hide-chat'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Chat</DropdownItem>
+                                <DropdownItem key="hide-skipper" isDisabled={disableHideSkipper} startContent={<input type="radio" readOnly checked={selectedKey==='hide-skipper'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Skipper</DropdownItem>
+                            </DropdownMenu>
+                        </Dropdown>
+                            );
+                        })()}
                     </div>)}
 
                     {/* Deploy CTA - always visible */}
