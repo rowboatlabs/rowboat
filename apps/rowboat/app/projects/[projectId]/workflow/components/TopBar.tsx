@@ -235,11 +235,12 @@ export function TopBar({
                             };
 
                             // Disable rules
-                            const allDisabled = !hasAgents;
-                            const disableShowAll = allDisabled;
-                            const disableHideAgents = allDisabled;
-                            const disableHideChat = allDisabled || !hasAgents;
-                            const disableHideSkipper = allDisabled;
+                            // When there are zero agents, allow only Show All and Hide Chat
+                            const zeroAgents = !hasAgents;
+                            const disableShowAll = false; // always allow switching to 3-pane view
+                            const disableHideAgents = zeroAgents; // cannot hide agents if none exist
+                            const disableHideChat = false; // allow hide chat even with zero agents (default)
+                            const disableHideSkipper = zeroAgents; // keep skipper visible when no agents
 
                             return (
                         <Dropdown>
@@ -256,10 +257,10 @@ export function TopBar({
                                 </Button>
                             </DropdownTrigger>
                             <DropdownMenu aria-label="Choose layout" selectionMode="single" selectedKeys={[selectedKey]} closeOnSelect={true} onSelectionChange={(keys) => {
-                                // When there are no agents, treat the menu as read-only
-                                const allDisabled = !hasAgents;
-                                if (allDisabled) return;
                                 const key = Array.from(keys as Set<string>)[0] as RadioKey;
+                                const zeroAgents = !hasAgents;
+                                // Allow only permitted options when zero agents
+                                if (zeroAgents && key !== 'show-all' && key !== 'hide-chat') return;
                                 if (key === 'hide-chat' && disableHideChat) return;
                                 setByKey(key);
                             }}>
@@ -366,44 +367,77 @@ export function TopBar({
                         ) : (
                             <>
                                 <div className="flex">
-                                <Button
-                                    variant="solid"
-                                    size="sm"
-                                    onPress={onPublishWorkflow}
-                                    className="gap-2 px-3 h-8 bg-green-100 hover:bg-green-200 text-green-800 font-semibold text-sm rounded-r-none border border-green-300 shadow-sm"
-                                    startContent={<RocketIcon size={14} />}
-                                    data-tour-target="deploy"
-                                >
-                                    Publish
-                                </Button>
-                                <Dropdown>
-                                    <DropdownTrigger>
-                                        <Button
-                                            variant="solid"
-                                            size="sm"
-                                            className="min-w-0 px-2 h-8 bg-green-100 hover:bg-green-200 text-green-800 rounded-l-none border border-l-0 border-green-300 shadow-sm"
-                                        >
-                                            <ChevronDownIcon size={12} />
-                                        </Button>
-                                    </DropdownTrigger>
-                                    <DropdownMenu aria-label="Deploy actions">
-                                        <DropdownItem
-                                            key="view-live"
-                                            startContent={<RadioIcon size={16} />}
-                                            onPress={() => onChangeMode('live')}
-                                        >
-                                            View live version
-                                        </DropdownItem>
-                                        <DropdownItem
-                                            key="reset-to-live"
-                                            startContent={<AlertTriangle size={16} />}
-                                            onPress={onRevertToLive}
-                                            className="text-red-600 dark:text-red-400"
-                                        >
-                                            Reset to live version
-                                        </DropdownItem>
-                                    </DropdownMenu>
-                                </Dropdown>
+                                {(!hasAgents) ? (
+                                    <Tooltip content="Create agents to publish your assistant">
+                                        <span className="inline-flex">
+                                            <Button
+                                                variant="solid"
+                                                size="sm"
+                                                onPress={onPublishWorkflow}
+                                                isDisabled
+                                                className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed`}
+                                                startContent={<RocketIcon size={14} />}
+                                                data-tour-target="deploy"
+                                            >
+                                                Publish
+                                            </Button>
+                                        </span>
+                                    </Tooltip>
+                                ) : (
+                                    <Button
+                                        variant="solid"
+                                        size="sm"
+                                        onPress={onPublishWorkflow}
+                                        className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-green-100 hover:bg-green-200 text-green-800 border-green-300`}
+                                        startContent={<RocketIcon size={14} />}
+                                        data-tour-target="deploy"
+                                    >
+                                        Publish
+                                    </Button>
+                                )}
+                                {hasAgents ? (
+                                    <Dropdown>
+                                        <DropdownTrigger>
+                                            <Button
+                                                variant="solid"
+                                                size="sm"
+                                                className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-green-100 hover:bg-green-200 text-green-800 border-green-300`}
+                                            >
+                                                <ChevronDownIcon size={12} />
+                                            </Button>
+                                        </DropdownTrigger>
+                                        <DropdownMenu aria-label="Deploy actions">
+                                            <DropdownItem
+                                                key="view-live"
+                                                startContent={<RadioIcon size={16} />}
+                                                onPress={() => onChangeMode('live')}
+                                            >
+                                                View live version
+                                            </DropdownItem>
+                                            <DropdownItem
+                                                key="reset-to-live"
+                                                startContent={<AlertTriangle size={16} />}
+                                                onPress={onRevertToLive}
+                                                className="text-red-600 dark:text-red-400"
+                                            >
+                                                Reset to live version
+                                            </DropdownItem>
+                                        </DropdownMenu>
+                                    </Dropdown>
+                                ) : (
+                                    <Tooltip content="Create agents to publish your assistant">
+                                        <span className="inline-flex">
+                                            <Button
+                                                variant="solid"
+                                                size="sm"
+                                                isDisabled
+                                                className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed`}
+                                            >
+                                                <ChevronDownIcon size={12} />
+                                            </Button>
+                                        </span>
+                                    </Tooltip>
+                                )}
                                 </div>
 
                                 <div className="flex items-center gap-2 ml-2">

@@ -997,7 +997,10 @@ export function WorkflowEditor({
         // If live mode, another effect will pin Agents + Chat; skip here
         if (!isLive) {
             if (count === 0) {
-                if (viewMode !== 'two_agents_skipper') updateViewMode('two_agents_skipper');
+                // Only auto-pin to Agents+Skipper if user hasn't explicitly chosen 3-pane
+                if (viewMode !== 'two_agents_skipper' && viewMode !== 'three_all') {
+                    updateViewMode('two_agents_skipper');
+                }
             } else if (prevAgentCountRef.current === 0 && count > 0) {
                 // 2) As soon as first agent is created from zero, switch to default (three panes)
                 updateViewMode('three_all');
@@ -1838,15 +1841,43 @@ export function WorkflowEditor({
                     onSetViewMode={updateViewMode}
                     onUseAssistantClick={markUseAssistantClicked}
                     onStartNewChatAndFocus={handleStartNewChatAndFocus}
-                    onStartBuildTour={() => setShowBuildTour(true)}
-                    onStartTestTour={() => setShowTestTour(true)}
+                    onStartBuildTour={() => {
+                        // Ensure 3-pane layout first, then start tour after layout renders
+                        updateViewMode('three_all');
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                setShowBuildTour(true);
+                            });
+                        });
+                    }}
+                    onStartTestTour={() => {
+                        updateViewMode('three_all');
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                setShowTestTour(true);
+                            });
+                        });
+                    }}
                     onStartPublishTour={() => {
+                        // Switch to 3-pane first to ensure elements are visible
+                        updateViewMode('three_all');
                         if (isLive) {
                             handleModeTransition('draft', 'switch_draft');
                         }
-                        setShowPublishTour(true);
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                setShowPublishTour(true);
+                            });
+                        });
                     }}
-                    onStartUseTour={() => setShowUseTour(true)}
+                    onStartUseTour={() => {
+                        updateViewMode('three_all');
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                setShowUseTour(true);
+                            });
+                        });
+                    }}
                 />
                 
                 {/* Content Area - hydration-safe layout */}

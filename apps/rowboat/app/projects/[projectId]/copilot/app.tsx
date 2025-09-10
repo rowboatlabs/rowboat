@@ -372,7 +372,7 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
             <Panel 
                 variant="copilot"
                 tourTarget="copilot"
-                title={<div className="flex items-center text-zinc-800 dark:text-zinc-200 font-semibold">Skipper</div>}
+                title={<div className="flex items-center gap-2 text-zinc-800 dark:text-zinc-200 font-semibold"><Sparkles className="w-4 h-4" /> Skipper</div>}
                 subtitle="Build your assistant"
                 rightActions={
                     <div className="flex items-center gap-2">
