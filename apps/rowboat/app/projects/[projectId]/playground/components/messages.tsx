@@ -261,6 +261,7 @@ function ToolCalls({
                 result={results[toolCall.id]}
                 sender={sender}
                 workflow={workflow}
+                messages={messages}
                 delta={delta}
                 onFix={onFix}
                 onExplain={onExplain}
@@ -278,6 +279,7 @@ function ToolCall({
     result,
     sender,
     workflow,
+    messages,
     delta,
     onFix,
     onExplain,
@@ -290,6 +292,7 @@ function ToolCall({
     result: z.infer<typeof ToolMessage> | undefined;
     sender: string | null | undefined;
     workflow: z.infer<typeof Workflow>;
+    messages: z.infer<typeof Message>[];
     delta: number;
     onFix?: (message: string, index: number) => void;
     onExplain?: (type: 'tool' | 'transition', message: string, index: number) => void;
@@ -317,9 +320,17 @@ function ToolCall({
             toolCallIndex={toolCallIndex}
         />;
     }
+    // Prefer the ToolMessage that actually follows this tool call in the stream
+    let nearestResult: z.infer<typeof ToolMessage> | undefined = result;
+    for (let i = parentIndex; i < messages.length; i++) {
+        const m = messages[i] as any;
+        if (i > parentIndex && m.role === 'assistant') break; // stop at next assistant
+        if (m.role === 'tool' && m.toolCallId === toolCall.id) { nearestResult = m as any; break; }
+    }
+
     return <ClientToolCall
         toolCall={toolCall}
-        result={result}
+        result={nearestResult}
         sender={sender ?? ''}
         workflow={workflow}
         delta={delta}
@@ -833,16 +844,22 @@ export function Messages({
             }
 
             // Finally, regular assistant messages
-            // Try to attach images from the most recent tool call results preceding this message
+            // Attach images from the nearest preceding tool call and its corresponding tool result message
             const previews: { mimeType: string; url?: string; dataBase64?: string; truncated?: boolean }[] = [];
             for (let i = index - 1; i >= 0; i--) {
                 const prev = messages[i] as any;
                 if (prev && prev.role === 'assistant' && Array.isArray(prev.toolCalls)) {
                     for (const tc of prev.toolCalls) {
-                        const res = toolCallResults[tc.id];
-                        if (!res || typeof res.content !== 'string') continue;
+                        // Find the nearest tool result message after 'i' and before next assistant
+                        let resMsg: any = null;
+                        for (let j = i + 1; j < messages.length; j++) {
+                            const m = messages[j] as any;
+                            if (m.role === 'assistant') break; // stop at next assistant
+                            if (m.role === 'tool' && m.toolCallId === tc.id) { resMsg = m; break; }
+                        }
+                        if (!resMsg || typeof resMsg.content !== 'string') continue;
                         try {
-                            const parsed = JSON.parse(res.content);
+                            const parsed = JSON.parse(resMsg.content);
                             const imgs = Array.isArray(parsed?.images) ? parsed.images : [];
                             for (const img of imgs) {
                                 if (typeof img?.url === 'string') {
