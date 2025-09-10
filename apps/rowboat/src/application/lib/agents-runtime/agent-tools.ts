@@ -102,7 +102,6 @@ export async function invokeGenerateImageTool(
         const dataB64 = part?.inlineData?.data as string | undefined;
         if (dataB64) {
             const mime = part?.inlineData?.mimeType || "image/png";
-            const ext = mime === "image/jpeg" ? ".jpg" : mime === "image/webp" ? ".webp" : ".png";
             const buf = Buffer.from(dataB64, "base64");
 
             images.push({ mimeType: mime, bytes: buf.length, dataBase64: dataB64 });
