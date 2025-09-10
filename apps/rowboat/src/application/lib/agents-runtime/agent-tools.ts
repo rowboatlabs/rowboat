@@ -8,6 +8,7 @@ import { SignJWT } from "jose";
 import crypto from "crypto";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { tempBinaryCache } from "@/src/application/services/temp-binary-cache";
+import { redisBinaryCache } from "@/src/application/services/redis-binary-cache";
 
 // Internal dependencies
 import { embeddingModel } from "@/app/lib/embedding";
@@ -643,26 +644,46 @@ export function createGenerateImageTool(
                     prompt,
                     { modelName }
                 );
-                // Store images in temporary in-memory cache and return URLs to avoid large payloads
-                const ttlMs = 10 * 60 * 1000; // 10 minutes
-                const images = result.images.map(img => {
-                    try {
+                // Prefer Redis-backed URLs (multi-instance safe), fallback to in-memory cache
+                const ttlSec = 10 * 60; // 10 minutes
+                let storage: 'redis' | 'temp' = 'redis';
+                try {
+                    const images = await Promise.all(result.images.map(async (img) => {
                         const buf = Buffer.from(img.dataBase64, 'base64');
-                        const id = tempBinaryCache.put(buf, img.mimeType, ttlMs);
+                        const id = await redisBinaryCache.put(buf, img.mimeType, ttlSec);
                         const url = `/api/tmp-images/${id}`;
                         return { mimeType: img.mimeType, bytes: buf.length, url };
-                    } catch {
-                        return { mimeType: img.mimeType, bytes: img.bytes, url: null };
-                    }
-                });
-                const payload = {
-                    model: result.model,
-                    texts: result.texts,
-                    images,
-                    storage: 'temp',
-                    expiresInSec: Math.floor(ttlMs / 1000),
-                } as any;
-                return JSON.stringify(payload);
+                    }));
+                    const payload = {
+                        model: result.model,
+                        texts: result.texts,
+                        images,
+                        storage,
+                        expiresInSec: ttlSec,
+                    } as any;
+                    return JSON.stringify(payload);
+                } catch (e) {
+                    storage = 'temp';
+                    const ttlMs = ttlSec * 1000;
+                    const images = result.images.map(img => {
+                        try {
+                            const buf = Buffer.from(img.dataBase64, 'base64');
+                            const id = tempBinaryCache.put(buf, img.mimeType, ttlMs);
+                            const url = `/api/tmp-images/${id}`;
+                            return { mimeType: img.mimeType, bytes: buf.length, url };
+                        } catch {
+                            return { mimeType: img.mimeType, bytes: img.bytes, url: null };
+                        }
+                    });
+                    const payload = {
+                        model: result.model,
+                        texts: result.texts,
+                        images,
+                        storage,
+                        expiresInSec: ttlSec,
+                    } as any;
+                    return JSON.stringify(payload);
+                }
             } catch (error) {
                 logger.log(`Error executing generate image tool ${name}:`, error);
                 return JSON.stringify({
