@@ -5,7 +5,7 @@ import z from "zod";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { WorkflowTool } from "@/app/lib/types/workflow_types";
 import MarkdownContent from "@/app/lib/components/markdown-content";
-import { ChevronRightIcon, ChevronDownIcon, ChevronUpIcon, CodeIcon, CheckCircleIcon, FileTextIcon, EyeIcon, EyeOffIcon, WrapTextIcon, ArrowRightFromLineIcon, BracesIcon, TextIcon, FlagIcon, HelpCircleIcon, MoreHorizontal } from "lucide-react";
+import { ChevronRightIcon, ChevronDownIcon, ChevronUpIcon, CodeIcon, CheckCircleIcon, FileTextIcon, EyeIcon, EyeOffIcon, WrapTextIcon, ArrowRightFromLineIcon, BracesIcon, TextIcon, FlagIcon, HelpCircleIcon, MoreHorizontal, Download as DownloadIcon } from "lucide-react";
 import { Dropdown, DropdownMenu, DropdownTrigger, DropdownItem } from "@heroui/react";
 import { ProfileContextBox } from "./profile-context-box";
 import { Message, ToolMessage, AssistantMessageWithToolCalls } from "@/app/lib/types/types";
@@ -183,20 +183,33 @@ function AssistantMessage({
                         </div>
                         {Array.isArray(imagePreviews) && imagePreviews.length > 0 && (
                             <div className="flex flex-wrap gap-3">
-                                {imagePreviews.map((img, i) => (
-                                    <div key={i} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
-                                        <img
-                                            src={img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`}
-                                            alt={`Image ${i+1}`}
-                                            className="max-h-64 max-w-full object-contain rounded"
-                                        />
-                                        {img.truncated && (
-                                            <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
-                                                Preview truncated to meet size limits.
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
+                                {imagePreviews.map((img, i) => {
+                                    const src = img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`;
+                                    const ext = img.mimeType === 'image/jpeg' ? 'jpg' : (img.mimeType === 'image/webp' ? 'webp' : 'png');
+                                    const filename = `generated_image_${i + 1}.${ext}`;
+                                    return (
+                                        <div key={i} className="group relative rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
+                                            <a
+                                                href={src}
+                                                download={filename}
+                                                className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 dark:bg-zinc-900/80 rounded-md p-1 shadow hover:bg-white dark:hover:bg-zinc-800"
+                                                aria-label="Download image"
+                                            >
+                                                <DownloadIcon size={16} className="text-gray-700 dark:text-gray-200" />
+                                            </a>
+                                            <img
+                                                src={src}
+                                                alt={`Image ${i+1}`}
+                                                className="max-h-64 max-w-full object-contain rounded"
+                                            />
+                                            {img.truncated && (
+                                                <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                                    Preview truncated to meet size limits.
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
                         {latency > 0 && <div className="text-right text-xs text-gray-400 dark:text-gray-500 mt-1">
@@ -496,22 +509,35 @@ function ClientToolCall({
                                 <div className={(paramsExpanded ? 'mt-4 ' : '') + 'flex flex-col gap-3 min-w-0'}>
                                     {imagePreviews.length > 0 && (
                                         <div className="flex flex-wrap gap-3">
-                                            {imagePreviews.map((img, i) => (
-                                                <div key={i} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
-                                                    <img
-                                                        src={img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`}
-                                                        alt={`Tool image ${i+1}`}
-                                                        className="max-h-64 max-w-full object-contain rounded"
-                                                    />
-                                                    {img.truncated && (
-                                                        <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
-                                                            Preview truncated to meet size limits.
-                                                        </div>
-                                                    )}
+                                {imagePreviews.map((img, i) => {
+                                    const src = img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`;
+                                    const ext = img.mimeType === 'image/jpeg' ? 'jpg' : (img.mimeType === 'image/webp' ? 'webp' : 'png');
+                                    const filename = `generated_image_${i + 1}.${ext}`;
+                                    return (
+                                        <div key={i} className="group relative rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
+                                            <a
+                                                href={src}
+                                                download={filename}
+                                                className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 dark:bg-zinc-900/80 rounded-md p-1 shadow hover:bg-white dark:hover:bg-zinc-800"
+                                                aria-label="Download image"
+                                            >
+                                                <DownloadIcon size={16} className="text-gray-700 dark:text-gray-200" />
+                                            </a>
+                                            <img
+                                                src={src}
+                                                alt={`Tool image ${i+1}`}
+                                                className="max-h-64 max-w-full object-contain rounded"
+                                            />
+                                            {img.truncated && (
+                                                <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                                    Preview truncated to meet size limits.
                                                 </div>
-                                            ))}
+                                            )}
                                         </div>
-                                    )}
+                                    );
+                                })}
+                            </div>
+                        )}
                                     <ExpandableContent 
                                         label="Result" 
                                         content={availableResult.content} 
