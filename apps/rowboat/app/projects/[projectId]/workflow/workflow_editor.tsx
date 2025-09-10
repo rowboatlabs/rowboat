@@ -1176,14 +1176,28 @@ export function WorkflowEditor({
     }, []);
 
 
-    // Auto-show copilot and increment key when prompt is present
+    // Auto-show copilot and send initial prompt exactly once when present
+    const hasSentInitPromptRef = useRef<boolean>(false);
     useEffect(() => {
+        if (hasSentInitPromptRef.current) return;
         const prompt = localStorage.getItem(`project_prompt_${projectId}`);
         console.log('init project prompt', prompt);
-        if (prompt) {
-            setActivePanel('copilot');
-            updateViewMode(viewMode === 'three_all' ? 'three_all' : (viewMode.includes('agents') ? 'two_agents_skipper' : 'two_chat_skipper'));
-        }
+        if (!prompt) return;
+
+        // Mark as handled and remove immediately to avoid any other readers
+        hasSentInitPromptRef.current = true;
+        localStorage.removeItem(`project_prompt_${projectId}`);
+
+        // Switch UI to show Copilot
+        setActivePanel('copilot');
+        updateViewMode(viewMode === 'three_all' ? 'three_all' : (viewMode.includes('agents') ? 'two_agents_skipper' : 'two_chat_skipper'));
+
+        // Allow layout to render Copilot, then send the prompt via ref
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                copilotRef.current?.handleUserMessage(prompt);
+            });
+        });
     }, [projectId, updateViewMode, viewMode]);
 
     // Switch to playground when switching to live mode

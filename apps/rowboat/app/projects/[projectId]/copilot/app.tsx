@@ -48,6 +48,8 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     isInitialState = false,
     dataSources,
 }, ref) {
+    
+
     const [messages, setMessages] = useState<z.infer<typeof CopilotMessage>[]>([]);
     const [discardContext, setDiscardContext] = useState(false);
     const [isLastInteracted, setIsLastInteracted] = useState(isInitialState);
@@ -95,17 +97,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         onMessagesChange?.(messages);
     }, [messages, onMessagesChange]);
 
-    // Check for initial prompt in local storage and send it
-    useEffect(() => {
-        const prompt = localStorage.getItem(`project_prompt_${projectId}`);
-        if (prompt && messages.length === 0) {
-            localStorage.removeItem(`project_prompt_${projectId}`);
-            setMessages([{
-                role: 'user',
-                content: prompt
-            }]);
-        }
-    }, [projectId, messages.length]);
+    // Removed localStorage auto-start. Initial prompts are sent by parent via ref.
 
     // Reset discardContext when chatContext changes
     useEffect(() => {
@@ -134,15 +126,19 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         const currentStart = startRef.current;
         const currentCancel = cancelRef.current;
 
-        currentStart(messages, (finalResponse: string) => {
-            setMessages(prev => [
-                ...prev,
-                {
-                    role: 'assistant',
-                    content: finalResponse
-                }
-            ]);
-        });
+        if (currentStart) {
+            currentStart(messages, (finalResponse: string) => {
+                setMessages(prev => [
+                    ...prev,
+                    {
+                        role: 'assistant',
+                        content: finalResponse
+                    }
+                ]);
+            });
+        } else {
+            // startRef not yet ready; no-op
+        }
 
         return () => currentCancel();
     }, [messages, responseError]);
@@ -334,6 +330,13 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     activePanel,
     onTogglePanel,
 }, ref) => {
+    console.log('🎪 Copilot wrapper component mounted:', {
+        projectId,
+        isInitialState,
+        activePanel,
+        chatContextType: chatContext?.type
+    });
+
     const [copilotKey, setCopilotKey] = useState(0);
     const [showCopySuccess, setShowCopySuccess] = useState(false);
     const [messages, setMessages] = useState<z.infer<typeof CopilotMessage>[]>([]);
