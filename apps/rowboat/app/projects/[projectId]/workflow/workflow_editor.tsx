@@ -1848,6 +1848,8 @@ export function WorkflowEditor({
                         key={`entity-list-hydration`}
                         minSize={10} 
                         defaultSize={PANEL_RATIOS.entityList}
+                        id="entities"
+                        order={1}
                         className={`${isLeftPanelCollapsed ? 'hidden' : ''}`}
                     >
                         <div className="flex flex-col h-full">
@@ -1898,22 +1900,22 @@ export function WorkflowEditor({
                     <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed) ? 'hidden' : ''}`} />
                     )}
                     {(viewMode === 'two_agents_chat' || viewMode === 'three_all') && (
-                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.chatApp} className="overflow-hidden">
+                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.chatApp} id="chat" order={2} className="overflow-hidden">
                         {/* Minimal mount of Chat during SSR hydration */}
                         <div className="h-full" />
                     </ResizablePanel>
                     )}
                     {(viewMode === 'three_all') && (<ResizableHandle withHandle className="w-[3px] bg-transparent" />)}
                     {(viewMode === 'two_agents_skipper' || viewMode === 'three_all') && (
-                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.copilot} className="overflow-hidden">
+                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.copilot} id="copilot" order={3} className="overflow-hidden">
                         <div className="h-full" />
                     </ResizablePanel>
                     )}
                     {(viewMode === 'two_chat_skipper') && (
                         <>
-                            <ResizablePanel minSize={20} defaultSize={50} className="overflow-hidden"><div className="h-full" /></ResizablePanel>
+                            <ResizablePanel minSize={20} defaultSize={50} id="chat" order={1} className="overflow-hidden"><div className="h-full" /></ResizablePanel>
                             <ResizableHandle withHandle className="w-[3px] bg-transparent" />
-                            <ResizablePanel minSize={20} defaultSize={50} className="overflow-hidden"><div className="h-full" /></ResizablePanel>
+                            <ResizablePanel minSize={20} defaultSize={50} id="copilot" order={2} className="overflow-hidden"><div className="h-full" /></ResizablePanel>
                         </>
                     )}
                 </ResizablePanelGroup>
@@ -1925,6 +1927,8 @@ export function WorkflowEditor({
                         key={`entity-list-${state.present.selection ? '3-pane' : '2-pane'}`}
                         minSize={10} 
                         defaultSize={PANEL_RATIOS.entityList}
+                        id="entities"
+                        order={1}
                         className={`${isLeftPanelCollapsed ? 'hidden' : ''}`}
                     >
                         <div className="flex flex-col h-full">
@@ -1986,7 +1990,7 @@ export function WorkflowEditor({
                     
                     {/* Playground column - render only when layout includes Chat */}
                     {(viewMode === 'two_agents_chat' || viewMode === 'three_all' || viewMode === 'two_chat_skipper') && (
-                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.chatApp} className={`overflow-hidden relative`}>
+                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.chatApp} id="chat" order={2} className={`overflow-hidden relative`}>
                         <ChatApp
                             key={'' + state.present.chatKey}
                             projectId={projectId}
@@ -2083,7 +2087,7 @@ export function WorkflowEditor({
 
                     {/* Copilot column - render only when layout includes Skipper */}
                     {(viewMode === 'two_agents_skipper' || viewMode === 'three_all' || viewMode === 'two_chat_skipper') && (
-                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.copilot} className={`overflow-hidden relative`}>
+                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.copilot} id="copilot" order={viewMode === 'three_all' ? 3 : 2} className={`overflow-hidden relative`}>
                         <Copilot
                             ref={copilotRef}
                             projectId={projectId}
