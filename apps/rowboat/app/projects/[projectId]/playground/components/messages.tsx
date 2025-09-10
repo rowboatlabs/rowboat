@@ -101,7 +101,7 @@ function InternalAssistantMessage({ content, sender, latency, delta, showJsonMod
                         />
                     )}
                 </div>
-                <div className="bg-gray-50 dark:bg-zinc-800 px-4 py-2.5 rounded-2xl rounded-bl-lg text-sm leading-relaxed text-gray-700 dark:text-gray-200 border-none shadow-sm animate-slideUpAndFade flex flex-col items-stretch">
+                <div className="text-sm leading-relaxed text-gray-800 dark:text-gray-100 animate-slideUpAndFade">
                     <div className="text-left mb-2">
                         {isJsonContent && jsonMode && (
                             <div className="mb-2 flex gap-4">
@@ -176,10 +176,7 @@ function AssistantMessage({
                         />
                     )}
                 </div>
-                <div className="bg-purple-50 dark:bg-purple-900/30 px-4 py-2.5 
-                    rounded-2xl rounded-bl-lg text-sm leading-relaxed
-                    text-gray-800 dark:text-purple-100 
-                    border-none shadow-sm animate-slideUpAndFade">
+                <div className="text-sm leading-relaxed text-gray-800 dark:text-gray-100 animate-slideUpAndFade">
                     <div className="flex flex-col gap-2">
                         <div className="text-left">
                             <MarkdownContent content={content} />
@@ -187,7 +184,7 @@ function AssistantMessage({
                         {Array.isArray(imagePreviews) && imagePreviews.length > 0 && (
                             <div className="flex flex-wrap gap-3">
                                 {imagePreviews.map((img, i) => (
-                                    <div key={i} className="rounded-lg border border-purple-200 dark:border-purple-800 p-2 bg-white dark:bg-zinc-900">
+                                    <div key={i} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
                                         <img
                                             src={img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`}
                                             alt={`Image ${i+1}`}
