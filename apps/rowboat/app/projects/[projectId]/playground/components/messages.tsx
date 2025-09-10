@@ -216,10 +216,11 @@ function AssistantMessageLoading() {
     return (
         <div className="self-start flex flex-col gap-1 my-5">
             <div className="max-w-[85%] inline-block">
-                <div className="bg-purple-50 dark:bg-purple-900/30 px-4 py-2.5 
-                    rounded-2xl rounded-bl-lg
-                    border-none shadow-sm animate-slideUpAndFade min-h-[2.5rem] flex items-center">
-                    <Spinner size="sm" className="ml-2" />
+                <div className="bg-gray-50 dark:bg-gray-800 px-4 py-2.5 
+                    rounded-lg border border-gray-200 dark:border-gray-700
+                    shadow-sm animate-slideUpAndFade min-h-[2.5rem] flex items-center gap-2">
+                    <Spinner size="sm" />
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Generating...</span>
                 </div>
             </div>
         </div>

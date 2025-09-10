@@ -8,7 +8,7 @@ import { SignJWT } from "jose";
 import crypto from "crypto";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { tempBinaryCache } from "@/src/application/services/temp-binary-cache";
-import { redisBinaryCache } from "@/src/application/services/redis-binary-cache";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 // Internal dependencies
 import { embeddingModel } from "@/app/lib/embedding";
@@ -618,6 +618,7 @@ export function createGenerateImageTool(
     logger: PrefixLogger,
     usageTracker: UsageTracker,
     config: z.infer<typeof WorkflowTool>,
+    projectId: string,
 ): Tool {
     const { name, description, parameters } = config;
 
@@ -644,46 +645,66 @@ export function createGenerateImageTool(
                     prompt,
                     { modelName }
                 );
-                // Prefer Redis-backed URLs (multi-instance safe), fallback to in-memory cache
-                const ttlSec = 10 * 60; // 10 minutes
-                let storage: 'redis' | 'temp' = 'redis';
-                try {
+                // If S3 bucket configured, store in S3 under generated_images/<c>/<d>/<filename>
+                const s3Bucket = process.env.UPLOADS_S3_BUCKET || '';
+                if (s3Bucket) {
+                    const s3Region = process.env.UPLOADS_AWS_REGION || 'us-east-1';
+                    const s3 = new S3Client({
+                        region: s3Region,
+                        credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? {
+                            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+                            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+                        } as any : undefined,
+                    });
+
                     const images = await Promise.all(result.images.map(async (img) => {
                         const buf = Buffer.from(img.dataBase64, 'base64');
-                        const id = await redisBinaryCache.put(buf, img.mimeType, ttlSec);
-                        const url = `/api/tmp-images/${id}`;
+                        const ext = img.mimeType === 'image/jpeg' ? '.jpg' : img.mimeType === 'image/webp' ? '.webp' : '.png';
+                        const base = `${projectId}-${Math.floor(Math.random() * 1e12).toString(36)}`;
+                        const last2 = base.slice(-2).padStart(2, '0');
+                        const dirA = last2.charAt(0);
+                        const dirB = last2.charAt(1);
+                        const filename = `${base}${ext}`;
+                        const key = `generated_images/${dirA}/${dirB}/${filename}`;
+                        await s3.send(new PutObjectCommand({
+                            Bucket: s3Bucket,
+                            Key: key,
+                            Body: buf,
+                            ContentType: img.mimeType,
+                        }));
+                        const url = `/api/generated-images/${dirA}/${dirB}/${filename}`;
                         return { mimeType: img.mimeType, bytes: buf.length, url };
                     }));
                     const payload = {
                         model: result.model,
                         texts: result.texts,
                         images,
-                        storage,
-                        expiresInSec: ttlSec,
-                    } as any;
-                    return JSON.stringify(payload);
-                } catch (e) {
-                    storage = 'temp';
-                    const ttlMs = ttlSec * 1000;
-                    const images = result.images.map(img => {
-                        try {
-                            const buf = Buffer.from(img.dataBase64, 'base64');
-                            const id = tempBinaryCache.put(buf, img.mimeType, ttlMs);
-                            const url = `/api/tmp-images/${id}`;
-                            return { mimeType: img.mimeType, bytes: buf.length, url };
-                        } catch {
-                            return { mimeType: img.mimeType, bytes: img.bytes, url: null };
-                        }
-                    });
-                    const payload = {
-                        model: result.model,
-                        texts: result.texts,
-                        images,
-                        storage,
-                        expiresInSec: ttlSec,
+                        storage: 's3',
                     } as any;
                     return JSON.stringify(payload);
                 }
+
+                // Otherwise, use in-memory temp cache URLs
+                const ttlSec = 10 * 60; // 10 minutes
+                const ttlMs = ttlSec * 1000;
+                const images = result.images.map(img => {
+                    try {
+                        const buf = Buffer.from(img.dataBase64, 'base64');
+                        const id = tempBinaryCache.put(buf, img.mimeType, ttlMs);
+                        const url = `/api/tmp-images/${id}`;
+                        return { mimeType: img.mimeType, bytes: buf.length, url };
+                    } catch {
+                        return { mimeType: img.mimeType, bytes: img.bytes, url: null };
+                    }
+                });
+                const payload = {
+                    model: result.model,
+                    texts: result.texts,
+                    images,
+                    storage: 'temp',
+                    expiresInSec: ttlSec,
+                } as any;
+                return JSON.stringify(payload);
             } catch (error) {
                 logger.log(`Error executing generate image tool ${name}:`, error);
                 return JSON.stringify({
@@ -719,7 +740,7 @@ export function createTools(
             tools[toolName] = createComposioTool(logger, usageTracker, config, projectId);
             toolLogger.log(`✓ created composio tool: ${toolName}`);
         } else if (config.isGeminiImage) {
-            tools[toolName] = createGenerateImageTool(logger, usageTracker, config);
+            tools[toolName] = createGenerateImageTool(logger, usageTracker, config, projectId);
             toolLogger.log(`✓ created gemini image tool: ${toolName}`);
         } else if (config.isWebhook) {
             tools[toolName] = createWebhookTool(logger, usageTracker, config, projectId);
