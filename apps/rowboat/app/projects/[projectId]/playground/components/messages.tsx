@@ -188,7 +188,7 @@ function AssistantMessage({
                                     const ext = img.mimeType === 'image/jpeg' ? 'jpg' : (img.mimeType === 'image/webp' ? 'webp' : 'png');
                                     const filename = `generated_image_${i + 1}.${ext}`;
                                     return (
-                                        <div key={i} className="group relative rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
+                                        <div key={i} className="group relative rounded-lg p-2 bg-white dark:bg-zinc-900">
                                             <a
                                                 href={src}
                                                 download={filename}
@@ -200,7 +200,7 @@ function AssistantMessage({
                                             <img
                                                 src={src}
                                                 alt={`Image ${i+1}`}
-                                                className="max-h-64 max-w-full object-contain rounded"
+                                                className="max-h-80 max-w-full object-contain rounded"
                                             />
                                             {img.truncated && (
                                                 <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
@@ -514,7 +514,7 @@ function ClientToolCall({
                                     const ext = img.mimeType === 'image/jpeg' ? 'jpg' : (img.mimeType === 'image/webp' ? 'webp' : 'png');
                                     const filename = `generated_image_${i + 1}.${ext}`;
                                     return (
-                                        <div key={i} className="group relative rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
+                                        <div key={i} className="group relative rounded-lg p-2 bg-white dark:bg-zinc-900">
                                             <a
                                                 href={src}
                                                 download={filename}
