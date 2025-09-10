@@ -1988,9 +1988,8 @@ export function WorkflowEditor({
                     <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed && !state.present.selection) ? 'hidden' : ''}`} />
                     )}
                     
-                    {/* Playground column - render only when layout includes Chat */}
-                    {(viewMode === 'two_agents_chat' || viewMode === 'three_all' || viewMode === 'two_chat_skipper') && (
-                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.chatApp} id="chat" order={2} className={`overflow-hidden relative`}>
+                    {/* Playground column - always mounted; hide via viewMode */}
+                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.chatApp} id="chat" order={2} className={`overflow-hidden relative ${viewMode === 'two_agents_skipper' ? 'hidden' : ''}`}>
                         <ChatApp
                             key={'' + state.present.chatKey}
                             projectId={projectId}
@@ -2078,16 +2077,14 @@ export function WorkflowEditor({
                             </div>
                         )}
                     </ResizablePanel>
-                    )}
 
                     {/* Divider between playground and copilot when both visible */}
                     {(viewMode === 'three_all' || viewMode === 'two_chat_skipper') && (
                         <ResizableHandle withHandle className="w-[3px] bg-transparent" />
                     )}
 
-                    {/* Copilot column - render only when layout includes Skipper */}
-                    {(viewMode === 'two_agents_skipper' || viewMode === 'three_all' || viewMode === 'two_chat_skipper') && (
-                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.copilot} id="copilot" order={viewMode === 'three_all' ? 3 : 2} className={`overflow-hidden relative`}>
+                    {/* Copilot column - always mounted; hide via viewMode */}
+                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.copilot} id="copilot" order={viewMode === 'three_all' ? 3 : 2} className={`overflow-hidden relative ${viewMode === 'two_agents_chat' ? 'hidden' : ''}`}>
                         <Copilot
                             ref={copilotRef}
                             projectId={projectId}
@@ -2186,7 +2183,6 @@ export function WorkflowEditor({
                             </div>
                         )}
                     </ResizablePanel>
-                    )}
 
                 </ResizablePanelGroup>
                 )}
