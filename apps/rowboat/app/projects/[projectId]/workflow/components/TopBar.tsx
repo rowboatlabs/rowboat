@@ -235,10 +235,11 @@ export function TopBar({
                             };
 
                             // Disable rules
-                            const disableShowAll = false; // always valid in draft
-                            const disableHideAgents = false;
-                            const disableHideChat = !hasAgents; // when no agents, chat must be hidden
-                            const disableHideSkipper = false;
+                            const allDisabled = !hasAgents;
+                            const disableShowAll = allDisabled;
+                            const disableHideAgents = allDisabled;
+                            const disableHideChat = allDisabled || !hasAgents;
+                            const disableHideSkipper = allDisabled;
 
                             return (
                         <Dropdown>
@@ -255,14 +256,17 @@ export function TopBar({
                                 </Button>
                             </DropdownTrigger>
                             <DropdownMenu aria-label="Choose layout" selectionMode="single" selectedKeys={[selectedKey]} closeOnSelect={true} onSelectionChange={(keys) => {
+                                // When there are no agents, treat the menu as read-only
+                                const allDisabled = !hasAgents;
+                                if (allDisabled) return;
                                 const key = Array.from(keys as Set<string>)[0] as RadioKey;
                                 if (key === 'hide-chat' && disableHideChat) return;
                                 setByKey(key);
                             }}>
-                                <DropdownItem key="show-all" isDisabled={disableShowAll} startContent={<input type="radio" readOnly checked={selectedKey==='show-all'} className="accent-zinc-600 dark:accent-zinc-300" />}>Show All</DropdownItem>
-                                <DropdownItem key="hide-agents" isDisabled={disableHideAgents} startContent={<input type="radio" readOnly checked={selectedKey==='hide-agents'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Agents</DropdownItem>
-                                <DropdownItem key="hide-chat" isDisabled={disableHideChat} startContent={<input type="radio" readOnly checked={selectedKey==='hide-chat'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Chat</DropdownItem>
-                                <DropdownItem key="hide-skipper" isDisabled={disableHideSkipper} startContent={<input type="radio" readOnly checked={selectedKey==='hide-skipper'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Skipper</DropdownItem>
+                                <DropdownItem key="show-all" isDisabled={disableShowAll} className={selectedKey==='show-all' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='show-all'} className="accent-zinc-600 dark:accent-zinc-300" />}>Show All</DropdownItem>
+                                <DropdownItem key="hide-agents" isDisabled={disableHideAgents} className={selectedKey==='hide-agents' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='hide-agents'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Agents</DropdownItem>
+                                <DropdownItem key="hide-chat" isDisabled={disableHideChat} className={selectedKey==='hide-chat' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='hide-chat'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Chat</DropdownItem>
+                                <DropdownItem key="hide-skipper" isDisabled={disableHideSkipper} className={selectedKey==='hide-skipper' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='hide-skipper'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Skipper</DropdownItem>
                             </DropdownMenu>
                         </Dropdown>
                             );
