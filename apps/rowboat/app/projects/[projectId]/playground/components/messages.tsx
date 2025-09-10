@@ -388,6 +388,26 @@ function ClientToolCall({
     const hasExpandedContent = paramsExpanded || resultsExpanded;
     const isCompressed = !paramsExpanded && !resultsExpanded;
 
+    // Try to parse tool result as JSON and extract images
+    let parsedResult: any = undefined;
+    let imagePreviews: { mimeType: string; dataBase64?: string; url?: string; truncated?: boolean }[] = [];
+    if (availableResult && typeof availableResult.content === 'string') {
+        try {
+            parsedResult = JSON.parse(availableResult.content);
+            const imgs = Array.isArray(parsedResult?.images) ? parsedResult.images : [];
+            imagePreviews = imgs
+                .filter((img: any) => (typeof img?.dataBase64 === 'string' && img.dataBase64.length > 0) || typeof img?.url === 'string')
+                .map((img: any) => ({
+                    mimeType: img?.mimeType || 'image/png',
+                    dataBase64: typeof img?.dataBase64 === 'string' ? img.dataBase64 : undefined,
+                    url: typeof img?.url === 'string' ? img.url : undefined,
+                    truncated: Boolean(img?.truncated),
+                }));
+        } catch (_) {
+            // ignore parse errors; treat as non-JSON result
+        }
+    }
+
     // Compressed state: stretch header, no wrapping
     if (isCompressed) {
         return (
@@ -444,7 +464,25 @@ function ClientToolCall({
                                 onExpandedChange={setParamsExpanded}
                             />
                             {availableResult && (
-                                <div className={(paramsExpanded ? 'mt-4 ' : '') + 'flex flex-col gap-2 min-w-0'}>
+                                <div className={(paramsExpanded ? 'mt-4 ' : '') + 'flex flex-col gap-3 min-w-0'}>
+                                    {imagePreviews.length > 0 && (
+                                        <div className="flex flex-wrap gap-3">
+                                            {imagePreviews.map((img, i) => (
+                                                <div key={i} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
+                                                    <img
+                                                        src={img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`}
+                                                        alt={`Tool image ${i+1}`}
+                                                        className="max-h-64 max-w-full object-contain rounded"
+                                                    />
+                                                    {img.truncated && (
+                                                        <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                                            Preview truncated to meet size limits.
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                     <ExpandableContent 
                                         label="Result" 
                                         content={availableResult.content} 
@@ -517,7 +555,25 @@ function ClientToolCall({
                             onExpandedChange={setParamsExpanded}
                         />
                         {availableResult && (
-                            <div className={(paramsExpanded ? 'mt-4 ' : '') + 'flex flex-col gap-2 w-full'}>
+                            <div className={(paramsExpanded ? 'mt-4 ' : '') + 'flex flex-col gap-3 w-full'}>
+                                {imagePreviews.length > 0 && (
+                                    <div className="flex flex-wrap gap-3">
+                                        {imagePreviews.map((img, i) => (
+                                            <div key={i} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
+                                                <img
+                                                    src={img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`}
+                                                    alt={`Tool image ${i+1}`}
+                                                    className="max-h-64 max-w-full object-contain rounded"
+                                                />
+                                                {img.truncated && (
+                                                    <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                                        Preview truncated to meet size limits.
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                                 <ExpandableContent 
                                     label="Result" 
                                     content={availableResult.content} 
