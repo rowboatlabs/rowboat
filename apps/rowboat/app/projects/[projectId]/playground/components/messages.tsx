@@ -146,7 +146,8 @@ function AssistantMessage({
     onExplain,
     showDebugMessages,
     isFirstAssistant,
-    index
+    index,
+    imagePreviews,
 }: { 
     content: string, 
     sender: string | null | undefined, 
@@ -155,7 +156,8 @@ function AssistantMessage({
     onExplain?: (type: 'assistant', message: string, index: number) => void,
     showDebugMessages?: boolean,
     isFirstAssistant?: boolean,
-    index: number
+    index: number,
+    imagePreviews?: { mimeType: string; url?: string; dataBase64?: string; truncated?: boolean }[],
 }) {
     return (
         <div className="self-start flex flex-col gap-1 my-5">
@@ -178,10 +180,28 @@ function AssistantMessage({
                     rounded-2xl rounded-bl-lg text-sm leading-relaxed
                     text-gray-800 dark:text-purple-100 
                     border-none shadow-sm animate-slideUpAndFade">
-                    <div className="flex flex-col gap-1">
+                    <div className="flex flex-col gap-2">
                         <div className="text-left">
                             <MarkdownContent content={content} />
                         </div>
+                        {Array.isArray(imagePreviews) && imagePreviews.length > 0 && (
+                            <div className="flex flex-wrap gap-3">
+                                {imagePreviews.map((img, i) => (
+                                    <div key={i} className="rounded-lg border border-purple-200 dark:border-purple-800 p-2 bg-white dark:bg-zinc-900">
+                                        <img
+                                            src={img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`}
+                                            alt={`Image ${i+1}`}
+                                            className="max-h-64 max-w-full object-contain rounded"
+                                        />
+                                        {img.truncated && (
+                                            <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                                Preview truncated to meet size limits.
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                         {latency > 0 && <div className="text-right text-xs text-gray-400 dark:text-gray-500 mt-1">
                             {Math.round(latency / 1000)}s
                         </div>}
@@ -813,6 +833,30 @@ export function Messages({
             }
 
             // Finally, regular assistant messages
+            // Try to attach images from the most recent tool call results preceding this message
+            const previews: { mimeType: string; url?: string; dataBase64?: string; truncated?: boolean }[] = [];
+            for (let i = index - 1; i >= 0; i--) {
+                const prev = messages[i] as any;
+                if (prev && prev.role === 'assistant' && Array.isArray(prev.toolCalls)) {
+                    for (const tc of prev.toolCalls) {
+                        const res = toolCallResults[tc.id];
+                        if (!res || typeof res.content !== 'string') continue;
+                        try {
+                            const parsed = JSON.parse(res.content);
+                            const imgs = Array.isArray(parsed?.images) ? parsed.images : [];
+                            for (const img of imgs) {
+                                if (typeof img?.url === 'string') {
+                                    previews.push({ mimeType: img?.mimeType || 'image/png', url: img.url, truncated: Boolean(img?.truncated) });
+                                } else if (typeof img?.dataBase64 === 'string' && img.dataBase64.length > 0) {
+                                    previews.push({ mimeType: img?.mimeType || 'image/png', dataBase64: img.dataBase64, truncated: Boolean(img?.truncated) });
+                                }
+                            }
+                        } catch { /* ignore */ }
+                    }
+                    if (previews.length > 0) break; // attach only the latest batch
+                }
+            }
+
             return (
                 <AssistantMessage
                     content={message.content ?? ''}
@@ -823,6 +867,7 @@ export function Messages({
                     showDebugMessages={showDebugMessages}
                     isFirstAssistant={isFirstAssistant}
                     index={index}
+                    imagePreviews={previews}
                 />
             );
         }
