@@ -101,7 +101,10 @@ function InternalAssistantMessage({ content, sender, latency, delta, showJsonMod
                         />
                     )}
                 </div>
-                <div className="text-sm leading-relaxed text-gray-800 dark:text-gray-100 animate-slideUpAndFade">
+                <div className="bg-purple-50 dark:bg-purple-900/30 px-4 py-2.5 
+                    rounded-2xl rounded-bl-lg text-sm leading-relaxed
+                    text-gray-800 dark:text-purple-100 
+                    border-none shadow-sm animate-slideUpAndFade">
                     <div className="text-left mb-2">
                         {isJsonContent && jsonMode && (
                             <div className="mb-2 flex gap-4">
