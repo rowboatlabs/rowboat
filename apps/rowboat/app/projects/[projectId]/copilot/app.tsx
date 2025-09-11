@@ -48,6 +48,8 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     isInitialState = false,
     dataSources,
 }, ref) {
+    
+
     const [messages, setMessages] = useState<z.infer<typeof CopilotMessage>[]>([]);
     const [discardContext, setDiscardContext] = useState(false);
     const [isLastInteracted, setIsLastInteracted] = useState(isInitialState);
@@ -95,17 +97,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         onMessagesChange?.(messages);
     }, [messages, onMessagesChange]);
 
-    // Check for initial prompt in local storage and send it
-    useEffect(() => {
-        const prompt = localStorage.getItem(`project_prompt_${projectId}`);
-        if (prompt && messages.length === 0) {
-            localStorage.removeItem(`project_prompt_${projectId}`);
-            setMessages([{
-                role: 'user',
-                content: prompt
-            }]);
-        }
-    }, [projectId, messages.length]);
+    // Removed localStorage auto-start. Initial prompts are sent by parent via ref.
 
     // Reset discardContext when chatContext changes
     useEffect(() => {
@@ -134,15 +126,19 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         const currentStart = startRef.current;
         const currentCancel = cancelRef.current;
 
-        currentStart(messages, (finalResponse: string) => {
-            setMessages(prev => [
-                ...prev,
-                {
-                    role: 'assistant',
-                    content: finalResponse
-                }
-            ]);
-        });
+        if (currentStart) {
+            currentStart(messages, (finalResponse: string) => {
+                setMessages(prev => [
+                    ...prev,
+                    {
+                        role: 'assistant',
+                        content: finalResponse
+                    }
+                ]);
+            });
+        } else {
+            // startRef not yet ready; no-op
+        }
 
         return () => currentCancel();
     }, [messages, responseError]);
@@ -269,7 +265,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         toolQuery={toolQuery}
                     />
                 </div>
-                <div className="shrink-0 px-0 pb-0">
+                <div className="shrink-0 px-0 pb-10">
                     {responseError && (
                         <div className="mb-4 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex gap-2 justify-between items-center text-sm">
                             <p className="text-red-600 dark:text-red-400">{responseError}</p>
@@ -322,8 +318,8 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     dispatch: (action: WorkflowDispatch) => void;
     isInitialState?: boolean;
     dataSources?: z.infer<typeof DataSource>[];
-    activePanel: 'playground' | 'copilot';
-    onTogglePanel: () => void;
+    activePanel?: 'playground' | 'copilot';
+    onTogglePanel?: () => void;
 }>(({
     projectId,
     workflow,
@@ -334,6 +330,13 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     activePanel,
     onTogglePanel,
 }, ref) => {
+    console.log('🎪 Copilot wrapper component mounted:', {
+        projectId,
+        isInitialState,
+        activePanel,
+        chatContextType: chatContext?.type
+    });
+
     const [copilotKey, setCopilotKey] = useState(0);
     const [showCopySuccess, setShowCopySuccess] = useState(false);
     const [messages, setMessages] = useState<z.infer<typeof CopilotMessage>[]>([]);
@@ -369,34 +372,7 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
             <Panel 
                 variant="copilot"
                 tourTarget="copilot"
-                title={
-                    <div className="flex items-center">
-                        <div className="flex items-center gap-2 rounded-lg p-1 bg-blue-50/70 dark:bg-blue-900/30">
-                            <button
-                                onClick={onTogglePanel}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                                    activePanel === 'copilot'
-                                        ? 'bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-300 shadow-md border border-indigo-200 dark:border-indigo-700'
-                                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
-                                }`}
-                            >
-                                <span className="text-base">✨</span>
-                                Build
-                            </button>
-                            <button
-                                onClick={onTogglePanel}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                                    activePanel === 'playground'
-                                        ? 'bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-300 shadow-md border border-indigo-200 dark:border-indigo-700'
-                                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
-                                }`}
-                            >
-                                <span className="text-base">💬</span>
-                                Chat
-                            </button>
-                        </div>
-                    </div>
-                }
+                title={<div className="flex items-center gap-2 text-zinc-800 dark:text-zinc-200 font-semibold"><Sparkles className="w-4 h-4" /> Skipper</div>}
                 subtitle="Build your assistant"
                 rightActions={
                     <div className="flex items-center gap-2">

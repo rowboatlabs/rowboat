@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input } from "@heroui/react";
+import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input, ButtonGroup } from "@heroui/react";
 import { Button as CustomButton } from "@/components/ui/button";
 import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug, MessageCircleIcon, ShareIcon } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
@@ -18,6 +18,7 @@ interface TopBarProps {
     canUndo: boolean;
     canRedo: boolean;
     activePanel: 'playground' | 'copilot';
+    viewMode: "two_agents_chat" | "two_agents_skipper" | "two_chat_skipper" | "three_all";
     hasAgentInstructionChanges: boolean;
     hasPlaygroundTested: boolean;
     hasPublished: boolean;
@@ -29,6 +30,8 @@ interface TopBarProps {
     onChangeMode: (mode: 'draft' | 'live') => void;
     onRevertToLive: () => void;
     onTogglePanel: () => void;
+    onSetViewMode: (mode: "two_agents_chat" | "two_agents_skipper" | "two_chat_skipper" | "three_all") => void;
+    hasAgents?: boolean;
     onUseAssistantClick: () => void;
     onStartNewChatAndFocus: () => void;
     onStartBuildTour?: () => void;
@@ -52,6 +55,7 @@ export function TopBar({
     canUndo,
     canRedo,
     activePanel,
+    viewMode,
     hasAgentInstructionChanges,
     hasPlaygroundTested,
     hasPublished,
@@ -63,6 +67,8 @@ export function TopBar({
     onChangeMode,
     onRevertToLive,
     onTogglePanel,
+    onSetViewMode,
+    hasAgents = true,
     onUseAssistantClick,
     onStartNewChatAndFocus,
     onStartBuildTour,
@@ -121,19 +127,24 @@ export function TopBar({
                         />
                     </div>
 
-                    {/* Show divider and CTA only in live view */}
+                    {/* Show divider and mode indicator */}
                     {isLive && <div className="h-4 w-px bg-gray-300 dark:bg-gray-600"></div>}
                     {isLive ? (
                         <Button
                             variant="solid"
-                            size="md"
+                            size="sm"
                             onPress={() => onChangeMode('draft')}
-                            className="gap-2 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300 font-medium text-sm border border-gray-200 dark:border-gray-600 shadow-sm"
-                            startContent={<PenLine size={16} />}
+                            className="gap-2 px-3 h-8 bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300 font-medium text-sm border border-gray-200 dark:border-gray-600 shadow-sm"
+                            startContent={<PenLine size={14} />}
                         >
                             Switch to draft
                         </Button>
-                    ) : null}
+                    ) : (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 font-medium text-xs rounded-full">
+                            <PenLine size={12} />
+                            <span>Draft</span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Progress Bar - Center */}
@@ -163,31 +174,106 @@ export function TopBar({
                     </div>}
                     
                     
-                    {!isLive && <>
+                    {!isLive && <div className="flex items-center gap-0.5">
                         <CustomButton
                             variant="primary"
                             size="sm"
                             onClick={onUndo}
                             disabled={!canUndo}
-                            className="bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
+                            className="min-w-8 h-8 px-2 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
                             showHoverContent={true}
                             hoverContent="Undo"
                         >
-                            <UndoIcon className="w-4 h-4" />
+                            <UndoIcon className="w-3.5 h-3.5" />
                         </CustomButton>
                         <CustomButton
                             variant="primary"
                             size="sm"
                             onClick={onRedo}
                             disabled={!canRedo}
-                            className="bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
+                            className="min-w-8 h-8 px-2 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:bg-gray-25 disabled:text-gray-400"
                             showHoverContent={true}
                             hoverContent="Redo"
                         >
-                            <RedoIcon className="w-4 h-4" />
+                            <RedoIcon className="w-3.5 h-3.5" />
                         </CustomButton>
-                    </>}
+                    </div>}
                     
+                    {/* View controls (hidden in live mode) */}
+                    {!isLive && (<div className="flex items-center gap-2 mr-2">
+                        {(() => {
+                            // Current visibility booleans
+                            const showAgents = viewMode !== "two_chat_skipper";
+                            const showChat = viewMode !== "two_agents_skipper";
+                            const showSkipper = viewMode !== "two_agents_chat";
+
+                            // Determine selected radio option
+                            type RadioKey = 'show-all' | 'hide-agents' | 'hide-chat' | 'hide-skipper';
+                            let selectedKey: RadioKey = 'show-all';
+                            if (!(showAgents && showChat && showSkipper)) {
+                                if (!showAgents) selectedKey = 'hide-agents';
+                                else if (!showChat) selectedKey = 'hide-chat';
+                                else if (!showSkipper) selectedKey = 'hide-skipper';
+                            }
+
+                            // Map radio selection to viewMode
+                            const setByKey = (key: RadioKey) => {
+                                switch (key) {
+                                    case 'show-all':
+                                        onSetViewMode('three_all');
+                                        break;
+                                    case 'hide-agents':
+                                        onSetViewMode('two_chat_skipper');
+                                        break;
+                                    case 'hide-chat':
+                                        onSetViewMode('two_agents_skipper');
+                                        break;
+                                    case 'hide-skipper':
+                                        onSetViewMode('two_agents_chat');
+                                        break;
+                                }
+                            };
+
+                            // Disable rules
+                            // When there are zero agents, allow only Show All and Hide Chat
+                            const zeroAgents = !hasAgents;
+                            const disableShowAll = false; // always allow switching to 3-pane view
+                            const disableHideAgents = zeroAgents; // cannot hide agents if none exist
+                            const disableHideChat = false; // allow hide chat even with zero agents (default)
+                            const disableHideSkipper = zeroAgents; // keep skipper visible when no agents
+
+                            return (
+                        <Dropdown>
+                            <DropdownTrigger>
+                                <Button variant="light" size="sm" aria-label="Layout options" className="h-8 min-w-0 bg-transparent text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/50 border border-transparent gap-1 px-2">
+                                    {/* Unified icon: 3-pane visual */}
+                                    <svg width="20" height="14" viewBox="0 0 22 16" aria-hidden="true">
+                                        <rect x="1" y="1" width="20" height="14" rx="2" fill="none" stroke="currentColor" opacity=".55" />
+                                        <rect x="2.3" y="2.5" width="5.5" height="11" rx="1.2" fill="currentColor" opacity=".8" />
+                                        <rect x="8.5" y="2.5" width="6" height="11" rx="1.2" fill="currentColor" opacity=".5" />
+                                        <rect x="15.5" y="2.5" width="5.5" height="11" rx="1.2" fill="currentColor" opacity=".4" />
+                                    </svg>
+                                    <ChevronDownIcon size={14} />
+                                </Button>
+                            </DropdownTrigger>
+                            <DropdownMenu aria-label="Choose layout" selectionMode="single" selectedKeys={[selectedKey]} closeOnSelect={true} onSelectionChange={(keys) => {
+                                const key = Array.from(keys as Set<string>)[0] as RadioKey;
+                                const zeroAgents = !hasAgents;
+                                // Allow only permitted options when zero agents
+                                if (zeroAgents && key !== 'show-all' && key !== 'hide-chat') return;
+                                if (key === 'hide-chat' && disableHideChat) return;
+                                setByKey(key);
+                            }}>
+                                <DropdownItem key="show-all" isDisabled={disableShowAll} className={selectedKey==='show-all' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='show-all'} className="accent-zinc-600 dark:accent-zinc-300" />}>Show All</DropdownItem>
+                                <DropdownItem key="hide-agents" isDisabled={disableHideAgents} className={selectedKey==='hide-agents' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='hide-agents'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Agents</DropdownItem>
+                                <DropdownItem key="hide-chat" isDisabled={disableHideChat} className={selectedKey==='hide-chat' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='hide-chat'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Chat</DropdownItem>
+                                <DropdownItem key="hide-skipper" isDisabled={disableHideSkipper} className={selectedKey==='hide-skipper' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='hide-skipper'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Skipper</DropdownItem>
+                            </DropdownMenu>
+                        </Dropdown>
+                            );
+                        })()}
+                    </div>)}
+
                     {/* Deploy CTA - always visible */}
                     <div className="flex items-center gap-3">
                         {isLive ? (
@@ -196,13 +282,13 @@ export function TopBar({
                                     <DropdownTrigger>
                                         <Button
                                             variant="solid"
-                                            size="md"
-                                            className="gap-2 px-4 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-semibold text-sm border border-blue-200 dark:border-blue-700 shadow-sm"
-                                            startContent={<Plug size={16} />}
+                                            size="sm"
+                                            className="gap-2 px-3 h-8 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-semibold text-sm border border-blue-200 dark:border-blue-700 shadow-sm"
+                                            startContent={<Plug size={14} />}
                                             onPress={onUseAssistantClick}
                                         >
                                             Use Assistant
-                                            <ChevronDownIcon size={14} />
+                                            <ChevronDownIcon size={12} />
                                         </Button>
                                     </DropdownTrigger>
                                     <DropdownMenu aria-label="Assistant access options">
@@ -239,7 +325,6 @@ export function TopBar({
                                     </DropdownMenu>
                                 </Dropdown>
 
-                                {/* Live workflow label moved here */}
                                 <div className="flex items-center gap-2 ml-2">
                                     {publishing && <Spinner size="sm" />}
                                     <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
@@ -270,7 +355,7 @@ export function TopBar({
                                     <Tooltip content="Download Assistant JSON">
                                         <button
                                             onClick={onDownloadJSON}
-                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
+                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors cursor-pointer"
                                             aria-label="Download JSON"
                                             type="button"
                                         >
@@ -282,47 +367,79 @@ export function TopBar({
                         ) : (
                             <>
                                 <div className="flex">
-                                <Button
-                                    variant="solid"
-                                    size="md"
-                                    onPress={onPublishWorkflow}
-                                    className="gap-2 px-4 bg-green-100 hover:bg-green-200 text-green-800 font-semibold text-sm rounded-r-none border border-green-300 shadow-sm"
-                                    startContent={<RocketIcon size={16} />}
-                                    data-tour-target="deploy"
-                                >
-                                    Publish
-                                </Button>
-                                <Dropdown>
-                                    <DropdownTrigger>
-                                        <Button
-                                            variant="solid"
-                                            size="md"
-                                            className="min-w-0 px-2 bg-green-100 hover:bg-green-200 text-green-800 rounded-l-none border border-l-0 border-green-300 shadow-sm"
-                                        >
-                                            <ChevronDownIcon size={14} />
-                                        </Button>
-                                    </DropdownTrigger>
-                                    <DropdownMenu aria-label="Deploy actions">
-                                        <DropdownItem
-                                            key="view-live"
-                                            startContent={<RadioIcon size={16} />}
-                                            onPress={() => onChangeMode('live')}
-                                        >
-                                            View live version
-                                        </DropdownItem>
-                                        <DropdownItem
-                                            key="reset-to-live"
-                                            startContent={<AlertTriangle size={16} />}
-                                            onPress={onRevertToLive}
-                                            className="text-red-600 dark:text-red-400"
-                                        >
-                                            Reset to live version
-                                        </DropdownItem>
-                                    </DropdownMenu>
-                                </Dropdown>
+                                {(!hasAgents) ? (
+                                    <Tooltip content="Create agents to publish your assistant">
+                                        <span className="inline-flex">
+                                            <Button
+                                                variant="solid"
+                                                size="sm"
+                                                onPress={onPublishWorkflow}
+                                                isDisabled
+                                                className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed`}
+                                                startContent={<RocketIcon size={14} />}
+                                                data-tour-target="deploy"
+                                            >
+                                                Publish
+                                            </Button>
+                                        </span>
+                                    </Tooltip>
+                                ) : (
+                                    <Button
+                                        variant="solid"
+                                        size="sm"
+                                        onPress={onPublishWorkflow}
+                                        className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-green-100 hover:bg-green-200 text-green-800 border-green-300`}
+                                        startContent={<RocketIcon size={14} />}
+                                        data-tour-target="deploy"
+                                    >
+                                        Publish
+                                    </Button>
+                                )}
+                                {hasAgents ? (
+                                    <Dropdown>
+                                        <DropdownTrigger>
+                                            <Button
+                                                variant="solid"
+                                                size="sm"
+                                                className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-green-100 hover:bg-green-200 text-green-800 border-green-300`}
+                                            >
+                                                <ChevronDownIcon size={12} />
+                                            </Button>
+                                        </DropdownTrigger>
+                                        <DropdownMenu aria-label="Deploy actions">
+                                            <DropdownItem
+                                                key="view-live"
+                                                startContent={<RadioIcon size={16} />}
+                                                onPress={() => onChangeMode('live')}
+                                            >
+                                                View live version
+                                            </DropdownItem>
+                                            <DropdownItem
+                                                key="reset-to-live"
+                                                startContent={<AlertTriangle size={16} />}
+                                                onPress={onRevertToLive}
+                                                className="text-red-600 dark:text-red-400"
+                                            >
+                                                Reset to live version
+                                            </DropdownItem>
+                                        </DropdownMenu>
+                                    </Dropdown>
+                                ) : (
+                                    <Tooltip content="Create agents to publish your assistant">
+                                        <span className="inline-flex">
+                                            <Button
+                                                variant="solid"
+                                                size="sm"
+                                                isDisabled
+                                                className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed`}
+                                            >
+                                                <ChevronDownIcon size={12} />
+                                            </Button>
+                                        </span>
+                                    </Tooltip>
+                                )}
                                 </div>
 
-                                {/* Moved draft/live labels and download button here */}
                                 <div className="flex items-center gap-2 ml-2">
                                     {publishing && <Spinner size="sm" />}
                                     {isLive && <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
@@ -357,7 +474,7 @@ export function TopBar({
                                     <Tooltip content="Download Assistant JSON">
                                         <button
                                             onClick={onDownloadJSON}
-                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
+                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors cursor-pointer"
                                             aria-label="Download JSON"
                                             type="button"
                                         >

@@ -22,18 +22,17 @@ export function SectionCard({ icon, title, children, labelWidth = 'md:w-32', cla
   React.useEffect(() => {
     const btn = document.getElementById(`section-card-header-${title && typeof title === 'string' ? title : ''}`);
     if (btn) {
-      console.log('SectionCard header button:', btn, btn.getBoundingClientRect(), window.getComputedStyle(btn));
       const chevron = btn.querySelector('svg');
       if (chevron) {
-        console.log('Chevron:', chevron, chevron.getBoundingClientRect(), window.getComputedStyle(chevron));
+        // Chevron positioning logic can go here if needed
       }
       const iconEl = btn.querySelector('.section-card-icon');
       if (iconEl) {
-        console.log('Icon:', iconEl, iconEl.getBoundingClientRect(), window.getComputedStyle(iconEl));
+        // Icon positioning logic can go here if needed
       }
       const label = btn.querySelector('span');
       if (label) {
-        console.log('Label:', label, label.getBoundingClientRect(), window.getComputedStyle(label));
+        // Label positioning logic can go here if needed
       }
     }
   }, [title]);
