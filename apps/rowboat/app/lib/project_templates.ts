@@ -34,7 +34,22 @@ function loadTemplatesFromFiles(): { [key: string]: z.infer<typeof WorkflowTempl
             },
         ],
         prompts: [],
-        tools: [],
+        tools: [
+            {
+                name: "Generate Image",
+                description: "Generate an image using Google Gemini given a text prompt. Returns base64-encoded image data and any text parts.",
+                isGeminiImage: true,
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        prompt: { type: 'string', description: 'Text prompt describing the image to generate' },
+                        modelName: { type: 'string', description: 'Optional Gemini model override' },
+                    },
+                    required: ['prompt'],
+                    additionalProperties: true,
+                },
+            },
+        ],
     };
     
     try {
