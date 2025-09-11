@@ -5,7 +5,7 @@ import z from "zod";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { WorkflowTool } from "@/app/lib/types/workflow_types";
 import MarkdownContent from "@/app/lib/components/markdown-content";
-import { ChevronRightIcon, ChevronDownIcon, ChevronUpIcon, CodeIcon, CheckCircleIcon, FileTextIcon, EyeIcon, EyeOffIcon, WrapTextIcon, ArrowRightFromLineIcon, BracesIcon, TextIcon, FlagIcon, HelpCircleIcon, MoreHorizontal } from "lucide-react";
+import { ChevronRightIcon, ChevronDownIcon, ChevronUpIcon, CodeIcon, CheckCircleIcon, FileTextIcon, EyeIcon, EyeOffIcon, WrapTextIcon, ArrowRightFromLineIcon, BracesIcon, TextIcon, FlagIcon, HelpCircleIcon, MoreHorizontal, Download as DownloadIcon } from "lucide-react";
 import { Dropdown, DropdownMenu, DropdownTrigger, DropdownItem } from "@heroui/react";
 import { ProfileContextBox } from "./profile-context-box";
 import { Message, ToolMessage, AssistantMessageWithToolCalls } from "@/app/lib/types/types";
@@ -101,7 +101,10 @@ function InternalAssistantMessage({ content, sender, latency, delta, showJsonMod
                         />
                     )}
                 </div>
-                <div className="bg-gray-50 dark:bg-zinc-800 px-4 py-2.5 rounded-2xl rounded-bl-lg text-sm leading-relaxed text-gray-700 dark:text-gray-200 border-none shadow-sm animate-slideUpAndFade flex flex-col items-stretch">
+                <div className="bg-purple-50 dark:bg-purple-900/30 px-4 py-2.5 
+                    rounded-2xl rounded-bl-lg text-sm leading-relaxed
+                    text-gray-800 dark:text-purple-100 
+                    border-none shadow-sm animate-slideUpAndFade">
                     <div className="text-left mb-2">
                         {isJsonContent && jsonMode && (
                             <div className="mb-2 flex gap-4">
@@ -146,7 +149,8 @@ function AssistantMessage({
     onExplain,
     showDebugMessages,
     isFirstAssistant,
-    index
+    index,
+    imagePreviews,
 }: { 
     content: string, 
     sender: string | null | undefined, 
@@ -155,7 +159,8 @@ function AssistantMessage({
     onExplain?: (type: 'assistant', message: string, index: number) => void,
     showDebugMessages?: boolean,
     isFirstAssistant?: boolean,
-    index: number
+    index: number,
+    imagePreviews?: { mimeType: string; url?: string; dataBase64?: string; truncated?: boolean }[],
 }) {
     return (
         <div className="self-start flex flex-col gap-1 my-5">
@@ -174,14 +179,42 @@ function AssistantMessage({
                         />
                     )}
                 </div>
-                <div className="bg-purple-50 dark:bg-purple-900/30 px-4 py-2.5 
-                    rounded-2xl rounded-bl-lg text-sm leading-relaxed
-                    text-gray-800 dark:text-purple-100 
-                    border-none shadow-sm animate-slideUpAndFade">
-                    <div className="flex flex-col gap-1">
+                <div className="text-sm leading-relaxed text-gray-800 dark:text-gray-100 animate-slideUpAndFade">
+                    <div className="flex flex-col gap-2">
                         <div className="text-left">
                             <MarkdownContent content={content} />
                         </div>
+                        {Array.isArray(imagePreviews) && imagePreviews.length > 0 && (
+                            <div className="flex flex-wrap gap-3">
+                                {imagePreviews.map((img, i) => {
+                                    const src = img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`;
+                                    const ext = img.mimeType === 'image/jpeg' ? 'jpg' : (img.mimeType === 'image/webp' ? 'webp' : 'png');
+                                    const filename = `generated_image_${i + 1}.${ext}`;
+                                    return (
+                                        <div key={i} className="group relative rounded-lg p-2 bg-white dark:bg-zinc-900">
+                                            <a
+                                                href={src}
+                                                download={filename}
+                                                className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 dark:bg-zinc-900/80 rounded-md p-1 shadow hover:bg-white dark:hover:bg-zinc-800"
+                                                aria-label="Download image"
+                                            >
+                                                <DownloadIcon size={16} className="text-gray-700 dark:text-gray-200" />
+                                            </a>
+                                            <img
+                                                src={src}
+                                                alt={`Image ${i+1}`}
+                                                className="max-h-80 max-w-full object-contain rounded"
+                                            />
+                                            {img.truncated && (
+                                                <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                                    Preview truncated to meet size limits.
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                         {latency > 0 && <div className="text-right text-xs text-gray-400 dark:text-gray-500 mt-1">
                             {Math.round(latency / 1000)}s
                         </div>}
@@ -196,10 +229,11 @@ function AssistantMessageLoading() {
     return (
         <div className="self-start flex flex-col gap-1 my-5">
             <div className="max-w-[85%] inline-block">
-                <div className="bg-purple-50 dark:bg-purple-900/30 px-4 py-2.5 
-                    rounded-2xl rounded-bl-lg
-                    border-none shadow-sm animate-slideUpAndFade min-h-[2.5rem] flex items-center">
-                    <Spinner size="sm" className="ml-2" />
+                <div className="bg-gray-50 dark:bg-gray-800 px-4 py-2.5 
+                    rounded-lg border border-gray-200 dark:border-gray-700
+                    shadow-sm animate-slideUpAndFade min-h-[2.5rem] flex items-center gap-2">
+                    <Spinner size="sm" />
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Generating...</span>
                 </div>
             </div>
         </div>
@@ -241,6 +275,7 @@ function ToolCalls({
                 result={results[toolCall.id]}
                 sender={sender}
                 workflow={workflow}
+                messages={messages}
                 delta={delta}
                 onFix={onFix}
                 onExplain={onExplain}
@@ -258,6 +293,7 @@ function ToolCall({
     result,
     sender,
     workflow,
+    messages,
     delta,
     onFix,
     onExplain,
@@ -270,6 +306,7 @@ function ToolCall({
     result: z.infer<typeof ToolMessage> | undefined;
     sender: string | null | undefined;
     workflow: z.infer<typeof Workflow>;
+    messages: z.infer<typeof Message>[];
     delta: number;
     onFix?: (message: string, index: number) => void;
     onExplain?: (type: 'tool' | 'transition', message: string, index: number) => void;
@@ -297,9 +334,17 @@ function ToolCall({
             toolCallIndex={toolCallIndex}
         />;
     }
+    // Prefer the ToolMessage that actually follows this tool call in the stream
+    let nearestResult: z.infer<typeof ToolMessage> | undefined = result;
+    for (let i = parentIndex; i < messages.length; i++) {
+        const m = messages[i] as any;
+        if (i > parentIndex && m.role === 'assistant') break; // stop at next assistant
+        if (m.role === 'tool' && m.toolCallId === toolCall.id) { nearestResult = m as any; break; }
+    }
+
     return <ClientToolCall
         toolCall={toolCall}
-        result={result}
+        result={nearestResult}
         sender={sender ?? ''}
         workflow={workflow}
         delta={delta}
@@ -388,6 +433,26 @@ function ClientToolCall({
     const hasExpandedContent = paramsExpanded || resultsExpanded;
     const isCompressed = !paramsExpanded && !resultsExpanded;
 
+    // Try to parse tool result as JSON and extract images
+    let parsedResult: any = undefined;
+    let imagePreviews: { mimeType: string; dataBase64?: string; url?: string; truncated?: boolean }[] = [];
+    if (availableResult && typeof availableResult.content === 'string') {
+        try {
+            parsedResult = JSON.parse(availableResult.content);
+            const imgs = Array.isArray(parsedResult?.images) ? parsedResult.images : [];
+            imagePreviews = imgs
+                .filter((img: any) => (typeof img?.dataBase64 === 'string' && img.dataBase64.length > 0) || typeof img?.url === 'string')
+                .map((img: any) => ({
+                    mimeType: img?.mimeType || 'image/png',
+                    dataBase64: typeof img?.dataBase64 === 'string' ? img.dataBase64 : undefined,
+                    url: typeof img?.url === 'string' ? img.url : undefined,
+                    truncated: Boolean(img?.truncated),
+                }));
+        } catch (_) {
+            // ignore parse errors; treat as non-JSON result
+        }
+    }
+
     // Compressed state: stretch header, no wrapping
     if (isCompressed) {
         return (
@@ -444,7 +509,38 @@ function ClientToolCall({
                                 onExpandedChange={setParamsExpanded}
                             />
                             {availableResult && (
-                                <div className={(paramsExpanded ? 'mt-4 ' : '') + 'flex flex-col gap-2 min-w-0'}>
+                                <div className={(paramsExpanded ? 'mt-4 ' : '') + 'flex flex-col gap-3 min-w-0'}>
+                                    {imagePreviews.length > 0 && (
+                                        <div className="flex flex-wrap gap-3">
+                                {imagePreviews.map((img, i) => {
+                                    const src = img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`;
+                                    const ext = img.mimeType === 'image/jpeg' ? 'jpg' : (img.mimeType === 'image/webp' ? 'webp' : 'png');
+                                    const filename = `generated_image_${i + 1}.${ext}`;
+                                    return (
+                                        <div key={i} className="group relative rounded-lg p-2 bg-white dark:bg-zinc-900">
+                                            <a
+                                                href={src}
+                                                download={filename}
+                                                className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 dark:bg-zinc-900/80 rounded-md p-1 shadow hover:bg-white dark:hover:bg-zinc-800"
+                                                aria-label="Download image"
+                                            >
+                                                <DownloadIcon size={16} className="text-gray-700 dark:text-gray-200" />
+                                            </a>
+                                            <img
+                                                src={src}
+                                                alt={`Tool image ${i+1}`}
+                                                className="max-h-64 max-w-full object-contain rounded"
+                                            />
+                                            {img.truncated && (
+                                                <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                                    Preview truncated to meet size limits.
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                                     <ExpandableContent 
                                         label="Result" 
                                         content={availableResult.content} 
@@ -517,7 +613,25 @@ function ClientToolCall({
                             onExpandedChange={setParamsExpanded}
                         />
                         {availableResult && (
-                            <div className={(paramsExpanded ? 'mt-4 ' : '') + 'flex flex-col gap-2 w-full'}>
+                            <div className={(paramsExpanded ? 'mt-4 ' : '') + 'flex flex-col gap-3 w-full'}>
+                                {imagePreviews.length > 0 && (
+                                    <div className="flex flex-wrap gap-3">
+                                        {imagePreviews.map((img, i) => (
+                                            <div key={i} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
+                                                <img
+                                                    src={img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`}
+                                                    alt={`Tool image ${i+1}`}
+                                                    className="max-h-64 max-w-full object-contain rounded"
+                                                />
+                                                {img.truncated && (
+                                                    <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                                        Preview truncated to meet size limits.
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                                 <ExpandableContent 
                                     label="Result" 
                                     content={availableResult.content} 
@@ -757,6 +871,36 @@ export function Messages({
             }
 
             // Finally, regular assistant messages
+            // Attach images from the nearest preceding tool call and its corresponding tool result message
+            const previews: { mimeType: string; url?: string; dataBase64?: string; truncated?: boolean }[] = [];
+            for (let i = index - 1; i >= 0; i--) {
+                const prev = messages[i] as any;
+                if (prev && prev.role === 'assistant' && Array.isArray(prev.toolCalls)) {
+                    for (const tc of prev.toolCalls) {
+                        // Find the nearest tool result message after 'i' and before next assistant
+                        let resMsg: any = null;
+                        for (let j = i + 1; j < messages.length; j++) {
+                            const m = messages[j] as any;
+                            if (m.role === 'assistant') break; // stop at next assistant
+                            if (m.role === 'tool' && m.toolCallId === tc.id) { resMsg = m; break; }
+                        }
+                        if (!resMsg || typeof resMsg.content !== 'string') continue;
+                        try {
+                            const parsed = JSON.parse(resMsg.content);
+                            const imgs = Array.isArray(parsed?.images) ? parsed.images : [];
+                            for (const img of imgs) {
+                                if (typeof img?.url === 'string') {
+                                    previews.push({ mimeType: img?.mimeType || 'image/png', url: img.url, truncated: Boolean(img?.truncated) });
+                                } else if (typeof img?.dataBase64 === 'string' && img.dataBase64.length > 0) {
+                                    previews.push({ mimeType: img?.mimeType || 'image/png', dataBase64: img.dataBase64, truncated: Boolean(img?.truncated) });
+                                }
+                            }
+                        } catch { /* ignore */ }
+                    }
+                    if (previews.length > 0) break; // attach only the latest batch
+                }
+            }
+
             return (
                 <AssistantMessage
                     content={message.content ?? ''}
@@ -767,6 +911,7 @@ export function Messages({
                     showDebugMessages={showDebugMessages}
                     isFirstAssistant={isFirstAssistant}
                     index={index}
+                    imagePreviews={previews}
                 />
             );
         }

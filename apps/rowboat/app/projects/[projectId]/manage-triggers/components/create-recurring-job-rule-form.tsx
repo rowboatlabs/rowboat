@@ -131,8 +131,13 @@ export function CreateRecurringJobRuleForm({
                             </Button>
                         </Link>
                     ) : null}
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        CREATE RECURRING JOB RULE
+                    <div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            CREATE RECURRING JOB RULE
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Note: Triggers run only on the published version of your workflow. Publish any changes to make them active.
+                        </p>
                     </div>
                 </div>
             }

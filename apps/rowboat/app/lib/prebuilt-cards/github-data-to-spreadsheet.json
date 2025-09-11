@@ -1,0 +1,579 @@
+{
+  "category": "Developer Productivity",
+  "agents": [
+    {
+      "name": "GitHub Stats Hub",
+      "type": "conversation",
+      "description": "Hub agent that orchestrates fetching GitHub stats for rowboatlabs/rowboat and logging them to a Google Sheet.",
+      "instructions": "## 🧑‍💼 Role:\nYou are the hub agent responsible for orchestrating the process of fetching GitHub repository stats for 'rowboatlabs/rowboat' and logging them to a Google Sheet.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive a user request to log GitHub stats.\n2. FIRST: Call [@agent:GitHub Stats Agent](#mention) and always provide repository owner: 'rowboatlabs' and repo: 'rowboat' as input (do not prompt the user for these values).\n3. Wait for the stats to be returned.\n4. THEN: Call [@agent:GitHub Stats to Sheet Agent](#mention) to append the stats to the Google Sheet.\n5. Wait for confirmation from the Sheets agent.\n6. Inform the user that the data has been logged, or report any error if one occurred.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Orchestrating the sequential workflow: fetch stats for rowboatlabs/rowboat, then log to sheet, then inform the user.\n\n❌ Out of Scope:\n- Fetching stats or logging to the sheet directly (handled by sub-agents).\n- Handling requests unrelated to GitHub stats logging.\n- Accepting or prompting for other repositories.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Always use 'rowboatlabs' as owner and 'rowboat' as repo when calling the GitHub Stats Agent.\n- Always follow the sequence: GitHub Stats Agent first, then GitHub Stats to Sheet Agent.\n- Wait for each agent's complete response before proceeding.\n- Only interact with the user for the initial request and final confirmation.\n\n🚫 Don'ts:\n- Do not perform stats fetching or sheet logging yourself.\n- Do not try to call both agents at once.\n- Do not reference internal agent names to the user.\n- Do not prompt the user for a repository or accept any other repository.\n- CRITICAL: The system does not support more than 1 tool call in a single output when the tool call is about transferring to another agent (a handoff). You must only put out 1 transfer related tool call in one output.\n\n# Examples\n- **User** : Fetch and store stats\n - **Agent actions**: Call [@agent:GitHub Stats Agent](#mention) with owner: 'rowboatlabs', repo: 'rowboat'\n\n- **Agent receives stats** :\n - **Agent actions**: Call [@agent:GitHub Stats to Sheet Agent](#mention)\n\n- **Agent receives sheet confirmation** :\n - **Agent response**: GitHub stats have been logged to the sheet successfully.\n\n- **Agent receives error from sheet agent** :\n - **Agent response**: There was an error logging the stats to the sheet: [error details]\n\n- **User** : Add a dummy row\n - **Agent response**: Sorry, I can only log actual GitHub stats. Please use the workflow to log real data.",
+      "model": "google/gemini-2.5-flash",
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "user_facing",
+      "controlType": "retain"
+    },
+    {
+      "name": "GitHub Stats Agent",
+      "type": "conversation",
+      "description": "Fetches GitHub page view and clone statistics for rowboatlabs/rowboat for the previous day.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nYou are an internal agent that fetches GitHub page view and clone statistics for the repository for the previous day.\n\n---\n## ⚙️ Steps to Follow:\n1. Always use owner: <take from context> and repo: <take from context> (do not expect or prompt for these values from the parent agent).\n2. Use [@tool:Get page views](#mention) with per: 'day' to fetch daily page view stats. You must actually call this tool.\n3. Use [@tool:Get repository clones](#mention) with per: 'day' to fetch daily clone stats. You must actually call this tool.\n4. Filter both results to only include data for the previous day (relative to today, in UTC).\n5. Return both sets of stats (page views and clones for the previous day) to the parent agent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Fetching and returning GitHub page view and clone stats for 'rowboatlabs/rowboat' for the previous day.\n\n❌ Out of Scope:\n- Answering user questions directly.\n- Modifying repository data.\n- Accepting or prompting for any other repository.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Return only the stats for the previous day.\n- Return both page views and clone stats in a clear, structured format.\n- **Do not simulate or describe tool calls—always actually call the tools.**\n\n🚫 Don'ts:\n- Do not interact with the user directly.\n- Do not perform any actions other than fetching and returning stats.\n- Do not prompt for or accept any repository input.\n\n# Examples\n- **Parent agent** : Fetch and store stats\n - **Agent actions**: Call [@tool:Get page views](#mention) with owner, repo, per: 'day'. Then call [@tool:Get repository clones](#mention) with owner, repo: 'rowboat', per: 'day'.\n - **Agent response**: [Page views and clone stats for owner/repo for the previous day]\n\n\n\n",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "GitHub Stats to Sheet Agent",
+      "type": "conversation",
+      "description": "Appends the latest GitHub clone and view stats as a new row to a specified Google Sheet.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nYou are an internal agent that receives GitHub stats (clones and views), extracts the most recent date for each, and appends a row to a Google Sheet with the specified columns.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive GitHub stats data (including arrays of daily clone and view stats, each with date, count, and uniques).\n2. Identify the most recent (latest) date in the clones array and extract its count and uniques.\n3. Identify the most recent (latest) date in the views array and extract its count and uniques.\n4. Use the current UTC date (YYYY-MM-DD) as the run date.\n5. Prepare a row with the following columns (in order):\n   - run date (current UTC date, YYYY-MM-DD)\n   - latest clones stats date (YYYY-MM-DD)\n   - clones (count)\n   - unique clones\n   - latest view stats date (YYYY-MM-DD)\n   - views (count)\n   - unique views\n6. Use [@tool:Append Values to Spreadsheet](#mention) to append this row to the end of the sheet (no headers).\n   - spreadsheetId: <take from context>\n   - range: <take from context> (or the correct sheet name if specified)\n   - valueInputOption: USER_ENTERED\n   - values: [[run date, latest clones stats date, clones, unique clones, latest view stats date, views, unique views]]\n7. Return a confirmation or error message to the parent agent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Appending a single row of stats to the specified Google Sheet.\n\n❌ Out of Scope:\n- Adding headers or modifying existing data.\n- Interacting with the user directly.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Only use the most recent date for each stat type.\n- Ensure the row is appended at the end (no headers).\n- Use the correct spreadsheetId and valueInputOption.\n\n🚫 Don'ts:\n- Do not add column headers.\n- Do not overwrite existing data.\n- Do not interact with the user directly.\n\n# Examples\n- **Parent agent** : Insert latest GitHub stats into sheet\n - **Agent actions**: Call [@tool:Append Values to Spreadsheet](#mention) with the latest stats and current date\n - **Agent response**: Row appended confirmation or error message\n\n- **Parent agent** : Insert stats with missing data\n - **Agent actions**: If either clones or views data is missing, append available data and leave missing fields blank\n - **Agent response**: Row appended confirmation or error message\n\n- **Parent agent** : Insert stats for a different repo\n - **Agent actions**: Same as above, using provided stats\n - **Agent response**: Row appended confirmation or error message\n\n- **Parent agent** : Insert stats with only views data\n - **Agent actions**: Append row with views data, leave clone fields blank\n - **Agent response**: Row appended confirmation or error message\n\n- **Parent agent** : Insert stats with only clones data\n - **Agent actions**: Append row with clone data, leave view fields blank\n - **Agent response**: Row appended confirmation or error message\n",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Pipeline Step 1 - Fetch Views Data",
+      "type": "pipeline",
+      "description": "Fetches daily page view stats for rowboatlabs/rowboat using the Get page views tool.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nFetch daily page view stats for the repository 'rowboatlabs/rowboat'.\n\n---\n## ⚙️ Steps to Follow:\n1. Use [@tool:Get page views](#mention) with owner: 'rowboatlabs', repo: 'rowboat', per: 'day'.\n2. Return the full result to the next pipeline step.\n\n---\n## 📋 Guidelines:\n- Do not prompt for repository details; always use the specified owner and repo.\n- Do not interact with the user or other agents.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Pipeline Step 2 - Fetch Clones Data",
+      "type": "pipeline",
+      "description": "Fetches daily clone stats for rowboatlabs/rowboat using the Get repository clones tool.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nFetch daily clone stats for the repository 'rowboatlabs/rowboat'.\n\n---\n## ⚙️ Steps to Follow:\n1. Use [@tool:Get repository clones](#mention) with owner: 'rowboatlabs', repo: 'rowboat', per: 'day'.\n2. Return the full result to the next pipeline step, along with the previous step's page views data.\n\n---\n## 📋 Guidelines:\n- Do not prompt for repository details; always use the specified owner and repo.\n- Do not interact with the user or other agents.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Pipeline Step 3 - Add Data to Sheet",
+      "type": "pipeline",
+      "description": "Appends the latest GitHub clone and view stats as a new row to the specified Google Sheet.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nAppend the latest GitHub stats (clones and views) as a new row to the Google Sheet.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive both page views and clone stats (arrays of daily stats, each with date, count, uniques).\n2. Identify the most recent (latest) date in the clones array and extract its count and uniques.\n3. Identify the most recent (latest) date in the views array and extract its count and uniques.\n4. Use the current UTC date (YYYY-MM-DD) as the run date.\n5. Prepare a row with the following columns (in order):\n   - run date (current UTC date, YYYY-MM-DD)\n   - latest clones stats date (YYYY-MM-DD)\n   - clones (count)\n   - unique clones\n   - latest view stats date (YYYY-MM-DD)\n   - views (count)\n   - unique views\n6. Use [@tool:Append Values to Spreadsheet](#mention) to append this row to the end of the sheet (no headers).\n   - spreadsheetId: <take from context>\n   - range: <take from context>\n   - valueInputOption: USER_ENTERED\n   - values: [[run date, latest clones stats date, clones, unique clones, latest view stats date, views, unique views]]\n7. Return the appended row and all relevant stats to the next pipeline step.\n\n---\n## 📋 Guidelines:\n- Only use the most recent date for each stat type.\n- Ensure the row is appended at the end (no headers).\n- Use the correct spreadsheetId and valueInputOption.\n- Do not interact with the user or other agents.\n\n",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Pipeline Step 4 - Send Slack Summary",
+      "type": "pipeline",
+      "description": "Sends a summary message to the #stats Slack channel, including a link to the updated sheet.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nSend a summary message to the #stats Slack channel after stats are logged to the sheet.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the appended row and all relevant stats from the previous step.\n2. Compose a message summarizing the latest GitHub stats update, including:\n   - The run date\n   - The latest clones and views stats (date, count, uniques)\n   - A statement that the data has been updated in the sheet\n   - A link to the sheet: <take from context>\n3. Use [@tool:Send a message to a Slack channel](#mention) to post the message to channel: stats\n4. Return a confirmation or error message.\n\n---\n## 📋 Guidelines:\n- The message should be clear, concise, and include the sheet link.\n- Do not interact with the user or other agents.\n",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "GitHub Stats Logging Pipeline Step 1",
+      "type": "pipeline",
+      "description": "",
+      "disabled": false,
+      "instructions": "",
+      "model": "gpt-4o",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "GitHub Stats Pipeline Hub",
+      "type": "conversation",
+      "description": "User-facing hub that triggers the GitHub Stats Logging Pipeline and reports when complete.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nYou are the hub agent responsible for triggering the GitHub Stats Logging Pipeline.\n\n---\n## ⚙️ Steps to Follow:\n1. When the user requests a stats update, call [@pipeline:GitHub Stats Logging Pipeline](#mention).\n2. Wait for the pipeline to complete.\n3. Inform the user that the stats have been logged, the sheet updated, and the Slack channel notified.\n\n---\n## 📋 Guidelines:\n- Do not perform any stats fetching, sheet logging, or Slack messaging yourself.\n- Do not reference internal agent or pipeline names to the user.\n- Only interact with the user for the initial request and final confirmation.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "user_facing",
+      "controlType": "retain",
+      "maxCallsPerParentAgent": 3
+    }
+  ],
+  "prompts": [
+    {
+      "name": "spreadsheetId",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "range",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "sheet_link",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "Owner",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "repo",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    }
+  ],
+  "tools": [
+    {
+      "name": "Get page views",
+      "description": "Retrieves page view statistics for a repository over the last 14 days, including total views, unique visitors, and a daily or weekly breakdown.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "description": "The username of the account that owns the repository. This field is case-insensitive.",
+            "examples": [
+              "octocat"
+            ],
+            "title": "Owner",
+            "type": "string"
+          },
+          "per": {
+            "default": "day",
+            "description": "The time unit for which to aggregate page views.",
+            "enum": [
+              "day",
+              "week"
+            ],
+            "examples": [
+              "day",
+              "week"
+            ],
+            "title": "Per",
+            "type": "string"
+          },
+          "repo": {
+            "description": "The name of the repository, without the `.git` extension. This field is case-insensitive.",
+            "examples": [
+              "Spoon-Knife"
+            ],
+            "title": "Repo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "repo"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GITHUB_GET_PAGE_VIEWS",
+        "noAuth": false,
+        "toolkitName": "GitHub",
+        "toolkitSlug": "github",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/github.png"
+      }
+    },
+    {
+      "name": "Append Values to Spreadsheet",
+      "description": "Tool to append values to a spreadsheet. use when you need to add new data to the end of an existing table in a google sheet.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "includeValuesInResponse": {
+            "default": null,
+            "description": "Determines if the update response should include the values of the cells that were appended. By default, responses do not include the updated values.",
+            "examples": [
+              true
+            ],
+            "nullable": true,
+            "title": "Include Values In Response",
+            "type": "boolean"
+          },
+          "insertDataOption": {
+            "default": null,
+            "description": "How the input data should be inserted.",
+            "enum": [
+              "OVERWRITE",
+              "INSERT_ROWS"
+            ],
+            "examples": [
+              "INSERT_ROWS"
+            ],
+            "nullable": true,
+            "title": "Insert Data Option",
+            "type": "string"
+          },
+          "majorDimension": {
+            "default": null,
+            "description": "The major dimension of the values. For output, if the spreadsheet data is: A1=1,B1=2,A2=3,B2=4, then requesting range=A1:B2,majorDimension=ROWS will return [[1,2],[3,4]], whereas requesting range=A1:B2,majorDimension=COLUMNS will return [[1,3],[2,4]].",
+            "enum": [
+              "ROWS",
+              "COLUMNS"
+            ],
+            "examples": [
+              "ROWS"
+            ],
+            "nullable": true,
+            "title": "Major Dimension",
+            "type": "string"
+          },
+          "range": {
+            "description": "The A1 notation of a range to search for a logical table of data. Values are appended after the last row of the table.",
+            "examples": [
+              "Sheet1!A1:B2"
+            ],
+            "title": "Range",
+            "type": "string"
+          },
+          "responseDateTimeRenderOption": {
+            "default": null,
+            "description": "Determines how dates, times, and durations in the response should be rendered. This is ignored if responseValueRenderOption is FORMATTED_VALUE. The default dateTime render option is SERIAL_NUMBER.",
+            "enum": [
+              "SERIAL_NUMBER",
+              "FORMATTED_STRING"
+            ],
+            "examples": [
+              "SERIAL_NUMBER"
+            ],
+            "nullable": true,
+            "title": "Response Date Time Render Option",
+            "type": "string"
+          },
+          "responseValueRenderOption": {
+            "default": null,
+            "description": "Determines how values in the response should be rendered. The default render option is FORMATTED_VALUE.",
+            "enum": [
+              "FORMATTED_VALUE",
+              "UNFORMATTED_VALUE",
+              "FORMULA"
+            ],
+            "examples": [
+              "FORMATTED_VALUE"
+            ],
+            "nullable": true,
+            "title": "Response Value Render Option",
+            "type": "string"
+          },
+          "spreadsheetId": {
+            "description": "The ID of the spreadsheet to update.",
+            "examples": [
+              "1q0gLhLdGXYZblahblahblah"
+            ],
+            "title": "Spreadsheet Id",
+            "type": "string"
+          },
+          "valueInputOption": {
+            "description": "How the input data should be interpreted.",
+            "enum": [
+              "RAW",
+              "USER_ENTERED"
+            ],
+            "examples": [
+              "USER_ENTERED"
+            ],
+            "title": "Value Input Option",
+            "type": "string"
+          },
+          "values": {
+            "description": "The data to be written. This is an array of arrays, the outer array representing all the data and each inner array representing a major dimension. Each item in the inner array corresponds with one cell.",
+            "examples": [
+              [
+                [
+                  "A1_val1",
+                  "A1_val2"
+                ],
+                [
+                  "A2_val1",
+                  "A2_val2"
+                ]
+              ]
+            ],
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "spreadsheetId",
+          "range",
+          "valueInputOption",
+          "values"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GOOGLESHEETS_SPREADSHEETS_VALUES_APPEND",
+        "noAuth": false,
+        "toolkitName": "Googlesheets",
+        "toolkitSlug": "googlesheets",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/google-sheets.svg"
+      }
+    },
+    {
+      "name": "Get repository clones",
+      "description": "Retrieves the total number of clones and a breakdown of clone activity (daily or weekly) for a specified repository over the preceding 14 days.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "description": "The username of the account that owns the repository. This field is not case-sensitive.",
+            "examples": [
+              "octocat",
+              "github"
+            ],
+            "title": "Owner",
+            "type": "string"
+          },
+          "per": {
+            "default": "day",
+            "description": "Specifies the time frame for aggregating clone data: `day` for daily clone counts, or `week` for weekly clone counts (a week starts on Monday).",
+            "enum": [
+              "day",
+              "week"
+            ],
+            "examples": [
+              "day",
+              "week"
+            ],
+            "title": "Per",
+            "type": "string"
+          },
+          "repo": {
+            "description": "The name of the repository, without the '.git' extension. This field is not case-sensitive.",
+            "examples": [
+              "Hello-World",
+              "mercury"
+            ],
+            "title": "Repo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "repo"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GITHUB_GET_REPOSITORY_CLONES",
+        "noAuth": false,
+        "toolkitName": "GitHub",
+        "toolkitSlug": "github",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/github.png"
+      }
+    },
+    {
+      "name": "Send a message to a Slack channel",
+      "description": "Deprecated: posts a message to a slack channel, direct message, or private group. use `send message` instead.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "as_user": {
+            "description": "Post as the authenticated user instead of as a bot. Defaults to `false`. If `true`, `username`, `icon_emoji`, and `icon_url` are ignored. If `false`, the message is posted as a bot, allowing appearance customization.",
+            "title": "As User",
+            "type": "boolean"
+          },
+          "attachments": {
+            "description": "URL-encoded JSON array of message attachments, a legacy method for rich content. See Slack API documentation for structure.",
+            "examples": [
+              "%5B%7B%22fallback%22%3A%20%22Required%20plain-text%20summary%20of%20the%20attachment.%22%2C%20%22color%22%3A%20%22%2336a64f%22%2C%20%22pretext%22%3A%20%22Optional%20text%20that%20appears%20above%20the%20attachment%20block%22%2C%20%22author_name%22%3A%20%22Bobby%20Tables%22%2C%20%22title%22%3A%20%22Slack%20API%20Documentation%22%2C%20%22title_link%22%3A%20%22https%3A%2F%2Fapi.slack.com%2F%22%2C%20%22text%22%3A%20%22Optional%20text%20that%20appears%20within%20the%20attachment%22%7D%5D"
+            ],
+            "title": "Attachments",
+            "type": "string"
+          },
+          "blocks": {
+            "description": "DEPRECATED: Use `markdown_text` field instead. URL-encoded JSON array of layout blocks for rich/interactive messages. See Slack API Block Kit docs for structure.",
+            "examples": [
+              "%5B%7B%22type%22%3A%20%22section%22%2C%20%22text%22%3A%20%7B%22type%22%3A%20%22mrkdwn%22%2C%20%22text%22%3A%20%22Hello%2C%20world%21%22%7D%7D%5D"
+            ],
+            "title": "Blocks",
+            "type": "string"
+          },
+          "channel": {
+            "description": "ID or name of the channel, private group, or IM channel to send the message to.",
+            "examples": [
+              "C1234567890",
+              "general"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "icon_emoji": {
+            "description": "Emoji for bot's icon (e.g., ':robot_face:'). Overrides `icon_url`. Applies if `as_user` is `false`.",
+            "examples": [
+              ":tada:",
+              ":slack:"
+            ],
+            "title": "Icon Emoji",
+            "type": "string"
+          },
+          "icon_url": {
+            "description": "Image URL for bot's icon (must be HTTPS). Applies if `as_user` is `false`.",
+            "examples": [
+              "https://slack.com/img/icons/appDir_2019_01/Tonito64.png"
+            ],
+            "title": "Icon Url",
+            "type": "string"
+          },
+          "link_names": {
+            "description": "Automatically hyperlink channel names (e.g., #channel) and usernames (e.g., @user) in message text. Defaults to `false` for bot messages.",
+            "title": "Link Names",
+            "type": "boolean"
+          },
+          "markdown_text": {
+            "description": "PREFERRED: Write your message in markdown for nicely formatted display. Supports: headers (# ## ###), bold (**text** or __text__), italic (*text* or _text_), strikethrough (~~text~~), inline code (`code`), code blocks (```), links ([text](url)), block quotes (>), lists (- item, 1. item), dividers (--- or ***), context blocks (:::context with images), and section buttons (:::section-button). IMPORTANT: Use \\n for line breaks (e.g., 'Line 1\\nLine 2'), not actual newlines. USER MENTIONS: To tag users, use their user ID with <@USER_ID> format (e.g., <@U1234567890>), not username. ",
+            "examples": [
+              "# Status Update\n\nSystem is **running smoothly** with *excellent* performance.\n\n```bash\nkubectl get pods\n```\n\n> All services operational ✅",
+              "## Daily Report\n\n- **Deployments**: 5 successful\n- *Issues*: 0 critical\n- ~~Maintenance~~: **Completed**\n\n---\n\n**Next**: Monitor for 24h"
+            ],
+            "title": "Markdown Text",
+            "type": "string"
+          },
+          "mrkdwn": {
+            "description": "Disable Slack's markdown for `text` field if `false`. Default `true` (allows *bold*, _italic_, etc.).",
+            "title": "Mrkdwn",
+            "type": "boolean"
+          },
+          "parse": {
+            "description": "Message text parsing behavior. Default `none` (no special parsing). `full` parses as user-typed (links @mentions, #channels). See Slack API docs for details.",
+            "examples": [
+              "none",
+              "full"
+            ],
+            "title": "Parse",
+            "type": "string"
+          },
+          "reply_broadcast": {
+            "description": "If `true` for a threaded reply, also posts to main channel. Defaults to `false`.",
+            "title": "Reply Broadcast",
+            "type": "boolean"
+          },
+          "text": {
+            "description": "DEPRECATED: This sends raw text only, use markdown_text field. Primary textual content. Recommended fallback if using `blocks` or `attachments`. Supports mrkdwn unless `mrkdwn` is `false`.",
+            "examples": [
+              "Hello from your friendly bot!",
+              "Reminder: Team meeting at 3 PM today."
+            ],
+            "title": "Text",
+            "type": "string"
+          },
+          "thread_ts": {
+            "description": "Timestamp (`ts`) of an existing message to make this a threaded reply. Use `ts` of the parent message, not another reply. Example: '1476746824.000004'.",
+            "examples": [
+              "1618033790.001500"
+            ],
+            "title": "Thread Ts",
+            "type": "string"
+          },
+          "unfurl_links": {
+            "description": "Enable unfurling of text-based URLs. Defaults `false` for bots, `true` if `as_user` is `true`.",
+            "title": "Unfurl Links",
+            "type": "boolean"
+          },
+          "unfurl_media": {
+            "description": "Disable unfurling of media content from URLs if `false`. Defaults to `true`.",
+            "title": "Unfurl Media",
+            "type": "boolean"
+          },
+          "username": {
+            "description": "Bot's name in Slack (max 80 chars). Applies if `as_user` is `false`.",
+            "examples": [
+              "MyBot",
+              "AlertBot"
+            ],
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL",
+        "noAuth": false,
+        "toolkitName": "Slack",
+        "toolkitSlug": "slack",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/slack.svg"
+      }
+    }
+  ],
+  "pipelines": [
+    {
+      "name": "GitHub Stats Logging Pipeline",
+      "description": "Sequential pipeline to fetch GitHub stats, log them to a Google Sheet, and notify #stats Slack channel.",
+      "agents": [
+        "Pipeline Step 1 - Fetch Views Data",
+        "Pipeline Step 2 - Fetch Clones Data",
+        "Pipeline Step 3 - Add Data to Sheet",
+        "Pipeline Step 4 - Send Slack Summary"
+      ]
+    }
+  ],
+  "startAgent": "GitHub Stats Pipeline Hub",
+  "name": "GitHub Data to Spreadsheet",
+  "description": "Fetches GitHub repository stats and logs them to a Google Sheet with Slack notifications"
+}

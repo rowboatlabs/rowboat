@@ -98,7 +98,7 @@ export function ComposeBoxCopilot({
                         onFocus={handleFocus}
                         onBlur={() => setIsFocused(false)}
                         disabled={loading}
-                        placeholder="Type a message..."
+                        placeholder="Ask Skipper to build or update your assistant..."
                         autoResize={true}
                         maxHeight={200}
                         className={`

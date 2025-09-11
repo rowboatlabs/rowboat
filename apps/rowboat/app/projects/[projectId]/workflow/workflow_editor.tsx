@@ -1254,9 +1254,27 @@ export function WorkflowEditor({
         dispatch({ type: "update_pipeline", name, pipeline });
     }
 
-    function handleDeleteAgent(name: string) {
+    async function handleDeleteAgent(name: string) {
         if (window.confirm(`Are you sure you want to delete the agent "${name}"?`)) {
-            dispatch({ type: "delete_agent", name });
+            // Optimistically update UI (guard will show modal in live mode)
+            dispatchGuarded({ type: "delete_agent", name });
+            // Persist immediately to avoid debounce races overwriting local state
+            if (!isLive) {
+                try {
+                    const remainingAgents = state.present.workflow.agents.filter(a => a.name !== name);
+                    const toSave = {
+                        ...state.present.workflow,
+                        agents: remainingAgents,
+                        // If startAgent was deleted, set to first remaining or ''
+                        startAgent: state.present.workflow.startAgent === name
+                            ? (remainingAgents[0]?.name || '')
+                            : state.present.workflow.startAgent,
+                    } as z.infer<typeof Workflow>;
+                    await saveWorkflow(projectId, toSave);
+                } catch (e) {
+                    console.error('Failed to persist agent deletion', e);
+                }
+            }
         }
     }
 
@@ -1264,9 +1282,22 @@ export function WorkflowEditor({
         dispatch({ type: "update_tool", name, tool });
     }
 
-    function handleDeleteTool(name: string) {
+    async function handleDeleteTool(name: string) {
         if (window.confirm(`Are you sure you want to delete the tool "${name}"?`)) {
-            dispatch({ type: "delete_tool", name });
+            // Optimistically update UI (guard will show modal in live mode)
+            dispatchGuarded({ type: "delete_tool", name });
+            // Persist immediately to avoid debounce races that can re-add the tool
+            if (!isLive) {
+                try {
+                    const toSave = {
+                        ...state.present.workflow,
+                        tools: state.present.workflow.tools.filter(t => t.name !== name),
+                    } as z.infer<typeof Workflow>;
+                    await saveWorkflow(projectId, toSave);
+                } catch (e) {
+                    console.error('Failed to persist tool deletion', e);
+                }
+            }
         }
     }
 
@@ -1283,9 +1314,22 @@ export function WorkflowEditor({
         dispatch({ type: "update_prompt_no_select", name, prompt });
     }
 
-    function handleDeletePrompt(name: string) {
+    async function handleDeletePrompt(name: string) {
         if (window.confirm(`Are you sure you want to delete the prompt "${name}"?`)) {
-            dispatch({ type: "delete_prompt", name });
+            // Optimistically update UI (guard will show modal in live mode)
+            dispatchGuarded({ type: "delete_prompt", name });
+            // Persist immediately to avoid debounce races overwriting local state
+            if (!isLive) {
+                try {
+                    const toSave = {
+                        ...state.present.workflow,
+                        prompts: state.present.workflow.prompts.filter(p => p.name !== name),
+                    } as z.infer<typeof Workflow>;
+                    await saveWorkflow(projectId, toSave);
+                } catch (e) {
+                    console.error('Failed to persist prompt deletion', e);
+                }
+            }
         }
     }
 
@@ -1345,15 +1389,12 @@ export function WorkflowEditor({
         onRevertModalClose();
     }
 
-    // Remove handleCopyJSON and add handleDownloadJSON
-    function handleDownloadJSON() {
+    // Helper: build exported JSON with masked prompt variables
+    function buildWorkflowExportJson() {
         const workflow = state.present.workflow;
-        
-        // Create a copy of the workflow and replace variable values with dummy text
         const workflowCopy = {
             ...workflow,
             prompts: workflow.prompts.map(prompt => {
-                // If this is a variable (base_prompt type), replace its value with dummy text
                 if (prompt.type === 'base_prompt') {
                     return {
                         ...prompt,
@@ -1363,8 +1404,12 @@ export function WorkflowEditor({
                 return prompt;
             })
         };
-        
-        const json = JSON.stringify(workflowCopy, null, 2);
+        return JSON.stringify(workflowCopy, null, 2);
+    }
+
+    // Download workflow as JSON file
+    function handleDownloadJSON() {
+        const json = buildWorkflowExportJson();
         const blob = new Blob([json], { type: 'application/json' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1375,6 +1420,39 @@ export function WorkflowEditor({
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
     }
+
+    // Share: upload JSON to server to get a share ID and reveal copy button
+    const [shareUrl, setShareUrl] = useState<string | null>(null);
+    async function handleShareWorkflow() {
+        try {
+            // POST to server to create a share token
+            const json = buildWorkflowExportJson();
+            const resp = await fetch('/api/shared-workflow', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: json,
+            });
+            if (!resp.ok) {
+                console.error('Failed to create share link');
+                return;
+            }
+            const data = await resp.json();
+            const createUrl = `${window.location.origin}/projects?shared=${encodeURIComponent(data.id)}`;
+            setShareUrl(createUrl);
+        } catch (e) {
+            console.error('Error sharing workflow:', e);
+        }
+    }
+
+    function handleCopyShareUrl() {
+        if (!shareUrl) return;
+        navigator.clipboard.writeText(shareUrl);
+        setShowCopySuccess(true);
+        setTimeout(() => setShowCopySuccess(false), 2000);
+    }
+
+    // Cleanup blob URL on unmount
+    // No-op cleanup; shareUrl is a normal URL now
 
     const processQueue = useCallback(async (state: State, dispatch: React.Dispatch<Action>) => {
         if (saving.current || saveQueue.current.length === 0) return;
@@ -1645,6 +1723,9 @@ export function WorkflowEditor({
                     onUndo={() => dispatchGuarded({ type: "undo" })}
                     onRedo={() => dispatchGuarded({ type: "redo" })}
                     onDownloadJSON={handleDownloadJSON}
+                    onShareWorkflow={handleShareWorkflow}
+                    shareUrl={shareUrl}
+                    onCopyShareUrl={handleCopyShareUrl}
                     onPublishWorkflow={handlePublishWorkflow}
                     onChangeMode={onChangeMode}
                     onRevertToLive={handleRevertToLive}

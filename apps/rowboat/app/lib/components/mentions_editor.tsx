@@ -29,7 +29,7 @@ Quill.register('modules/mention', Mention);
 
 function markdownToParts(markdown: string, atValues: Match[]): (string | Match)[] {
     // Regex match for pattern [@type:name](#type:something) where type is tool/prompt/agent
-    const mentionRegex = /\[@(tool|prompt|agent):([^\]]+)\]\(#mention\)/g;
+    const mentionRegex = /\[@(tool|prompt|agent|variable):([^\]]+)\]\(#mention\)/g;
     const parts: (string | Match)[] = [];
 
     let lastIndex = 0;

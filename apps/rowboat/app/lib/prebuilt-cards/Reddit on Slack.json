@@ -1,0 +1,297 @@
+{
+  "agents": [
+    {
+      "name": "Reddit Search Agent",
+      "type": "pipeline",
+      "description": "Searches Reddit for posts based on a given topic and subreddits.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nYou are a pipeline agent responsible for searching Reddit for the latest posts based on given subreddits and a lookback period.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the `Subreddits` and `LookbackInHours` variables from the parent agent.\n2. Calculate the `time_filter` parameter for the `Search across subreddits` tool based on `LookbackInHours`. For example, if `LookbackInHours` is 24, `time_filter` should be 'day'. If `LookbackInHours` is 1, `time_filter` should be 'hour'. If `LookbackInHours` is 7*24, `time_filter` should be 'week'.\n3. Use the [@tool:Search across subreddits](#mention) tool with the `Subreddits` as `search_query` and `sort` set to 'new', and the calculated `time_filter`.\n4. Return the raw search results to the parent agent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Searching Reddit for posts within a specified time frame.\n\n❌ Out of Scope:\n- Filtering posts by topic.\n- Sending posts to Slack.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure the search query includes the subreddits.\n- Accurately calculate and apply the `time_filter`.\n- Return all relevant search results.\n\n🚫 Don'ts:\n- Do not filter posts by topic.\n- Do not send messages to Slack.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Post Filter Agent",
+      "type": "pipeline",
+      "description": "Filters Reddit posts based on the Topics",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nYou are a pipeline agent responsible for filtering Reddit posts based on a specified topics.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the raw Reddit posts and the `Topic` variable from the parent agent.\n2. Filter the posts to include only those that are on the specified Topics.\n3. Return the filtered posts to the parent agent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Filtering Reddit posts by topic.\n\n❌ Out of Scope:\n- Searching Reddit.\n- Filtering posts by time.\n- Sending posts to Slack.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Accurately filter posts based on the provided topic.\n- Return only the posts that meet the topic criteria.\n\n🚫 Don'ts:\n- Do not perform Reddit searches or time-based filtering.\n- Do not send messages to Slack.\n",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Slack Post Agent",
+      "type": "pipeline",
+      "description": "Formats and sends filtered Reddit posts to a specified Slack channel.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nYou are a pipeline agent responsible for formatting and sending filtered Reddit posts to a specified Slack channel.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the filtered Reddit posts and the `SlackChannel` variable from the parent agent.\n2. Format the posts into a readable message for Slack, including the post title, URL, and a brief summary.\n3. Use the [@tool:Send message](#mention) tool to send the formatted message to the `SlackChannel`.\n4. Return a confirmation message to the parent agent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Formatting Reddit posts for Slack.\n- Sending messages to Slack.\n\n❌ Out of Scope:\n- Searching Reddit.\n- Filtering posts by time.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure the Slack message is well-formatted and easy to read.\n- Include all relevant information for each post.\n\n🚫 Don'ts:\n- Do not perform Reddit searches or filtering.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    }
+  ],
+  "prompts": [
+    {
+      "name": "Topics",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "Subreddits",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "SlackChannel",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "LookbackInHours",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    }
+  ],
+  "tools": [
+    {
+      "name": "Search across subreddits",
+      "description": "Searches reddit for content (e.g., posts, comments) using a query, with results typically confined to subreddits unless `restrict sr` is set to false.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 5,
+            "description": "The maximum number of search results to return. Default is 5. Maximum allowed value is 100.",
+            "examples": [
+              "5",
+              "10",
+              "25"
+            ],
+            "maximum": 100,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "restrict_sr": {
+            "default": true,
+            "description": "If True (default), confines the search to posts and comments within subreddits. If False, the search scope is broader and may include matching subreddit names or other Reddit entities.",
+            "examples": [
+              "True",
+              "False"
+            ],
+            "title": "Restrict Sr",
+            "type": "boolean"
+          },
+          "search_query": {
+            "description": "The search query string used to find content across subreddits.",
+            "examples": [
+              "latest AI research",
+              "funny cat videos",
+              "python programming tips"
+            ],
+            "title": "Search Query",
+            "type": "string"
+          },
+          "sort": {
+            "default": "relevance",
+            "description": "The criterion for sorting search results. 'relevance' (default) sorts by relevance to the query. 'new' sorts by newest first. 'top' sorts by highest score (typically all-time). 'comments' sorts by the number of comments.",
+            "enum": [
+              "relevance",
+              "new",
+              "top",
+              "comments"
+            ],
+            "examples": [
+              "relevance",
+              "new",
+              "top",
+              "comments"
+            ],
+            "title": "Sort",
+            "type": "string"
+          }
+        },
+        "required": [
+          "search_query"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "REDDIT_SEARCH_ACROSS_SUBREDDITS",
+        "noAuth": false,
+        "toolkitName": "reddit",
+        "toolkitSlug": "reddit",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/reddit.svg"
+      }
+    },
+    {
+      "name": "Send message",
+      "description": "Posts a message to a slack channel, direct message, or private group; requires content via `text`, `blocks`, or `attachments`.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "as_user": {
+            "description": "Post as the authenticated user instead of as a bot. Defaults to `false`. If `true`, `username`, `icon_emoji`, and `icon_url` are ignored. If `false`, the message is posted as a bot, allowing appearance customization.",
+            "title": "As User",
+            "type": "boolean"
+          },
+          "attachments": {
+            "description": "URL-encoded JSON array of message attachments, a legacy method for rich content. See Slack API documentation for structure.",
+            "examples": [
+              "%5B%7B%22fallback%22%3A%20%22Required%20plain-text%20summary%20of%20the%20attachment.%22%2C%20%22color%22%3A%20%22%2336a64f%22%2C%20%22pretext%22%3A%20%22Optional%20text%20that%20appears%20above%20the%20attachment%20block%22%2C%20%22author_name%22%3A%20%22Bobby%20Tables%22%2C%20%22title%22%3A%20%22Slack%20API%20Documentation%22%2C%20%22title_link%22%3A%20%22https%3A%2F%2Fapi.slack.com%2F%22%2C%20%22text%22%3A%20%22Optional%20text%20that%20appears%20within%20the%20attachment%22%7D%5D"
+            ],
+            "title": "Attachments",
+            "type": "string"
+          },
+          "blocks": {
+            "description": "DEPRECATED: Use `markdown_text` field instead. URL-encoded JSON array of layout blocks for rich/interactive messages. See Slack API Block Kit docs for structure.",
+            "examples": [
+              "%5B%7B%22type%22%3A%20%22section%22%2C%20%22text%22%3A%20%7B%22type%22%3A%20%22mrkdwn%22%2C%20%22text%22%3A%20%22Hello%2C%20world%21%22%7D%7D%5D"
+            ],
+            "title": "Blocks",
+            "type": "string"
+          },
+          "channel": {
+            "description": "ID or name of the channel, private group, or IM channel to send the message to.",
+            "examples": [
+              "C1234567890",
+              "general"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "icon_emoji": {
+            "description": "Emoji for bot's icon (e.g., ':robot_face:'). Overrides `icon_url`. Applies if `as_user` is `false`.",
+            "examples": [
+              ":tada:",
+              ":slack:"
+            ],
+            "title": "Icon Emoji",
+            "type": "string"
+          },
+          "icon_url": {
+            "description": "Image URL for bot's icon (must be HTTPS). Applies if `as_user` is `false`.",
+            "examples": [
+              "https://slack.com/img/icons/appDir_2019_01/Tonito64.png"
+            ],
+            "title": "Icon Url",
+            "type": "string"
+          },
+          "link_names": {
+            "description": "Automatically hyperlink channel names (e.g., #channel) and usernames (e.g., @user) in message text. Defaults to `false` for bot messages.",
+            "title": "Link Names",
+            "type": "boolean"
+          },
+          "markdown_text": {
+            "description": "PREFERRED: Write your message in markdown for nicely formatted display. Supports: headers (# ## ###), bold (**text** or __text__), italic (*text* or _text_), strikethrough (~~text~~), inline code (`code`), code blocks (```), links ([text](url)), block quotes (>), lists (- item, 1. item), dividers (--- or ***), context blocks (:::context with images), and section buttons (:::section-button). IMPORTANT: Use \\n for line breaks (e.g., 'Line 1\\nLine 2'), not actual newlines. USER MENTIONS: To tag users, use their user ID with <@USER_ID> format (e.g., <@U1234567890>), not username. ",
+            "examples": [
+              "# Status Update\\n\\nSystem is **running smoothly** with *excellent* performance.\\n\\n```bash\\nkubectl get pods\\n```\\n\\n> All services operational ✅",
+              "## Daily Report\\n\\n- **Deployments**: 5 successful\\n- *Issues*: 0 critical\\n- ~~Maintenance~~: **Completed**\\n\\n---\\n\\n**Next**: Monitor for 24h"
+            ],
+            "title": "Markdown Text",
+            "type": "string"
+          },
+          "mrkdwn": {
+            "description": "Disable Slack's markdown for `text` field if `false`. Default `true` (allows *bold*, _italic_, etc.).",
+            "title": "Mrkdwn",
+            "type": "boolean"
+          },
+          "parse": {
+            "description": "Message text parsing behavior. Default `none` (no special parsing). `full` parses as user-typed (links @mentions, #channels). See Slack API docs for details.",
+            "examples": [
+              "none",
+              "full"
+            ],
+            "title": "Parse",
+            "type": "string"
+          },
+          "reply_broadcast": {
+            "description": "If `true` for a threaded reply, also posts to main channel. Defaults to `false`.",
+            "title": "Reply Broadcast",
+            "type": "boolean"
+          },
+          "text": {
+            "description": "DEPRECATED: This sends raw text only, use markdown_text field. Primary textual content. Recommended fallback if using `blocks` or `attachments`. Supports mrkdwn unless `mrkdwn` is `false`.",
+            "examples": [
+              "Hello from your friendly bot!",
+              "Reminder: Team meeting at 3 PM today."
+            ],
+            "title": "Text",
+            "type": "string"
+          },
+          "thread_ts": {
+            "description": "Timestamp (`ts`) of an existing message to make this a threaded reply. Use `ts` of the parent message, not another reply. Example: '1476746824.000004'.",
+            "examples": [
+              "1618033790.001500"
+            ],
+            "title": "Thread Ts",
+            "type": "string"
+          },
+          "unfurl_links": {
+            "description": "Enable unfurling of text-based URLs. Defaults `false` for bots, `true` if `as_user` is `true`.",
+            "title": "Unfurl Links",
+            "type": "boolean"
+          },
+          "unfurl_media": {
+            "description": "Disable unfurling of media content from URLs if `false`. Defaults to `true`.",
+            "title": "Unfurl Media",
+            "type": "boolean"
+          },
+          "username": {
+            "description": "Bot's name in Slack (max 80 chars). Applies if `as_user` is `false`.",
+            "examples": [
+              "MyBot",
+              "AlertBot"
+            ],
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "SLACK_SEND_MESSAGE",
+        "noAuth": false,
+        "toolkitName": "slack",
+        "toolkitSlug": "slack",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/slack.svg"
+      }
+    }
+  ],
+  "pipelines": [
+    {
+      "name": "Reddit Post Pipeline",
+      "description": "Searches Reddit for posts, filters them by a lookback period, and sends them to a Slack channel.",
+      "agents": [
+        "Reddit Search Agent",
+        "Post Filter Agent",
+        "Slack Post Agent"
+      ]
+    }
+  ],
+  "startAgent": "Reddit Post Pipeline",
+  "lastUpdatedAt": "2025-09-09T17:48:53.292Z",
+  "name": "Browse Reddit on Slack",
+  "description": "Browses Reddit for topics of interest and sends them to a Slack channel.",
+  "category": "News & Social"
+}
