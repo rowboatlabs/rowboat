@@ -149,6 +149,8 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
     const searchParams = useSearchParams();
     const urlPrompt = searchParams.get('prompt');
     const urlTemplate = searchParams.get('template');
+    const sharedId = searchParams.get('shared');
+    const importUrl = searchParams.get('importUrl');
 
     // Add this effect to update name when defaultName changes
     useEffect(() => {
@@ -165,29 +167,48 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
     // Add effect to handle URL parameters for auto-creation
     useEffect(() => {
         const handleAutoCreate = async () => {
-            // Only auto-create if we have either a prompt or template, and we're not already loading
-            if ((urlPrompt || urlTemplate) && !importLoading && !autoCreateLoading) {
+            // Auto-create from template/prompt, or import from shared/id/url
+            if ((urlPrompt || urlTemplate || sharedId || importUrl) && !importLoading && !autoCreateLoading) {
                 setAutoCreateLoading(true);
                 try {
-                    await createProjectWithOptions({
-                        template: urlTemplate || undefined,
-                        prompt: urlPrompt || undefined,
-                        router,
-                        onError: (error) => {
-                            // Auto-creation failed, show the form instead
-                            setBillingError(error instanceof Error ? error.message : String(error));
-                            setAutoCreateLoading(false);
+                    if (sharedId || importUrl) {
+                        // Fetch workflow JSON via our API route
+                        const qs = sharedId ? `id=${encodeURIComponent(sharedId)}` : `url=${encodeURIComponent(importUrl!)}`;
+                        const resp = await fetch(`/api/shared-workflow?${qs}`, { cache: 'no-store' });
+                        if (!resp.ok) {
+                            const data = await resp.json().catch(() => ({}));
+                            throw new Error(data.error || `Failed to load shared workflow (${resp.status})`);
                         }
-                    });
+                        const workflowObj = await resp.json();
+                        await createProjectFromJsonWithOptions({
+                            workflowJson: JSON.stringify(workflowObj),
+                            router,
+                            onError: (error) => {
+                                setBillingError(error instanceof Error ? error.message : String(error));
+                            }
+                        });
+                    } else {
+                        await createProjectWithOptions({
+                            template: urlTemplate || undefined,
+                            prompt: urlPrompt || undefined,
+                            router,
+                            onError: (error) => {
+                                // Auto-creation failed, show the form instead
+                                setBillingError(error instanceof Error ? error.message : String(error));
+                                setAutoCreateLoading(false);
+                            }
+                        });
+                    }
                 } catch (error) {
                     console.error('Error auto-creating project:', error);
+                    setBillingError(error instanceof Error ? error.message : String(error));
                     setAutoCreateLoading(false);
                 }
             }
         };
 
         handleAutoCreate();
-    }, [urlPrompt, urlTemplate, importLoading, autoCreateLoading, router]);
+    }, [urlPrompt, urlTemplate, sharedId, importUrl, importLoading, autoCreateLoading, router]);
 
     // Inject glow animation styles
     useEffect(() => {
