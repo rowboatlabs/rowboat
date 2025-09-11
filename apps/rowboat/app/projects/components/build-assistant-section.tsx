@@ -492,6 +492,7 @@ export function BuildAssistantSection() {
                                     const workTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'work productivity');
                                     const devTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'developer productivity');
                                     const newsTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'news & social');
+                                    const customerSupportTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'customer support');
 
                                     const renderGrid = (items: any[]) => (
                                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -589,6 +590,16 @@ export function BuildAssistantSection() {
                                                         </span>
                                                     </div>
                                                     {renderGrid(newsTemplates)} 
+                                                </div>
+                                            )}
+                                            {customerSupportTemplates.length > 0 && (
+                                                <div>
+                                                    <div className="mb-3">
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-400/10 dark:text-red-300 dark:ring-red-400/30">
+                                                            Customer Support
+                                                        </span>
+                                                    </div>
+                                                    {renderGrid(customerSupportTemplates)}
                                                 </div>
                                             )}
                                         </div>
