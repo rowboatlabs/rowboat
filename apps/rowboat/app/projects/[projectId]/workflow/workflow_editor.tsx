@@ -1256,16 +1256,19 @@ export function WorkflowEditor({
 
     async function handleDeleteAgent(name: string) {
         if (window.confirm(`Are you sure you want to delete the agent "${name}"?`)) {
-            // Optimistically update UI
-            dispatch({ type: "delete_agent", name });
+            // Optimistically update UI (guard will show modal in live mode)
+            dispatchGuarded({ type: "delete_agent", name });
             // Persist immediately to avoid debounce races overwriting local state
             if (!isLive) {
                 try {
+                    const remainingAgents = state.present.workflow.agents.filter(a => a.name !== name);
                     const toSave = {
                         ...state.present.workflow,
-                        agents: state.present.workflow.agents.filter(a => a.name !== name),
-                        // If startAgent was deleted, reducer will already adjust it; preserve here from present state
-                        startAgent: state.present.workflow.startAgent,
+                        agents: remainingAgents,
+                        // If startAgent was deleted, set to first remaining or ''
+                        startAgent: state.present.workflow.startAgent === name
+                            ? (remainingAgents[0]?.name || '')
+                            : state.present.workflow.startAgent,
                     } as z.infer<typeof Workflow>;
                     await saveWorkflow(projectId, toSave);
                 } catch (e) {
@@ -1281,8 +1284,8 @@ export function WorkflowEditor({
 
     async function handleDeleteTool(name: string) {
         if (window.confirm(`Are you sure you want to delete the tool "${name}"?`)) {
-            // Optimistically update UI
-            dispatch({ type: "delete_tool", name });
+            // Optimistically update UI (guard will show modal in live mode)
+            dispatchGuarded({ type: "delete_tool", name });
             // Persist immediately to avoid debounce races that can re-add the tool
             if (!isLive) {
                 try {
@@ -1313,8 +1316,8 @@ export function WorkflowEditor({
 
     async function handleDeletePrompt(name: string) {
         if (window.confirm(`Are you sure you want to delete the prompt "${name}"?`)) {
-            // Optimistically update UI
-            dispatch({ type: "delete_prompt", name });
+            // Optimistically update UI (guard will show modal in live mode)
+            dispatchGuarded({ type: "delete_prompt", name });
             // Persist immediately to avoid debounce races overwriting local state
             if (!isLive) {
                 try {
