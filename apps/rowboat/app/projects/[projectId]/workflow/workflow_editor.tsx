@@ -1254,9 +1254,24 @@ export function WorkflowEditor({
         dispatch({ type: "update_pipeline", name, pipeline });
     }
 
-    function handleDeleteAgent(name: string) {
+    async function handleDeleteAgent(name: string) {
         if (window.confirm(`Are you sure you want to delete the agent "${name}"?`)) {
+            // Optimistically update UI
             dispatch({ type: "delete_agent", name });
+            // Persist immediately to avoid debounce races overwriting local state
+            if (!isLive) {
+                try {
+                    const toSave = {
+                        ...state.present.workflow,
+                        agents: state.present.workflow.agents.filter(a => a.name !== name),
+                        // If startAgent was deleted, reducer will already adjust it; preserve here from present state
+                        startAgent: state.present.workflow.startAgent,
+                    } as z.infer<typeof Workflow>;
+                    await saveWorkflow(projectId, toSave);
+                } catch (e) {
+                    console.error('Failed to persist agent deletion', e);
+                }
+            }
         }
     }
 
@@ -1264,9 +1279,22 @@ export function WorkflowEditor({
         dispatch({ type: "update_tool", name, tool });
     }
 
-    function handleDeleteTool(name: string) {
+    async function handleDeleteTool(name: string) {
         if (window.confirm(`Are you sure you want to delete the tool "${name}"?`)) {
+            // Optimistically update UI
             dispatch({ type: "delete_tool", name });
+            // Persist immediately to avoid debounce races that can re-add the tool
+            if (!isLive) {
+                try {
+                    const toSave = {
+                        ...state.present.workflow,
+                        tools: state.present.workflow.tools.filter(t => t.name !== name),
+                    } as z.infer<typeof Workflow>;
+                    await saveWorkflow(projectId, toSave);
+                } catch (e) {
+                    console.error('Failed to persist tool deletion', e);
+                }
+            }
         }
     }
 
@@ -1283,9 +1311,22 @@ export function WorkflowEditor({
         dispatch({ type: "update_prompt_no_select", name, prompt });
     }
 
-    function handleDeletePrompt(name: string) {
+    async function handleDeletePrompt(name: string) {
         if (window.confirm(`Are you sure you want to delete the prompt "${name}"?`)) {
+            // Optimistically update UI
             dispatch({ type: "delete_prompt", name });
+            // Persist immediately to avoid debounce races overwriting local state
+            if (!isLive) {
+                try {
+                    const toSave = {
+                        ...state.present.workflow,
+                        prompts: state.present.workflow.prompts.filter(p => p.name !== name),
+                    } as z.infer<typeof Workflow>;
+                    await saveWorkflow(projectId, toSave);
+                } catch (e) {
+                    console.error('Failed to persist prompt deletion', e);
+                }
+            }
         }
     }
 
