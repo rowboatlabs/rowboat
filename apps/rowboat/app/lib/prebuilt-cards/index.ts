@@ -6,6 +6,7 @@ import interviewScheduler from './interview-scheduler.json';
 import meetingPrepAssistant from './Meeting Prep Assistant.json';
 import redditOnSlack from './Reddit on Slack.json';
 import twitterSentiment from './twitter-sentiment.json';
+import tweetWithGeneratedImage from './Tweet with generated image.json';
 
 // Keep keys consistent with prior file basenames to avoid breaking links.
 export const prebuiltTemplates = {
@@ -14,5 +15,6 @@ export const prebuiltTemplates = {
   'Meeting Prep Assistant': meetingPrepAssistant,
   'Reddit on Slack': redditOnSlack,
   'Twitter Sentiment': twitterSentiment,
+  'Tweet with generated image': tweetWithGeneratedImage,
 };
 

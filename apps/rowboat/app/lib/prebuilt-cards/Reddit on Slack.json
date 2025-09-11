@@ -291,7 +291,7 @@
   ],
   "startAgent": "Reddit Post Pipeline",
   "lastUpdatedAt": "2025-09-09T17:48:53.292Z",
-  "name": "Reddit on Slack",
+  "name": "Browse Reddit on Slack",
   "description": "Browses Reddit for topics of interest and sends them to a Slack channel.",
-  "category": "News"
+  "category": "News & Social"
 }

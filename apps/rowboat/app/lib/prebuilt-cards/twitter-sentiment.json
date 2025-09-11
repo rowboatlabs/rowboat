@@ -375,5 +375,5 @@
   "lastUpdatedAt": "2025-09-11T17:26:48.865Z",
   "name": "Twitter Sentiment",
   "description": "Searches Twitter for tweets about a company and analyzes their sentiment.",
-  "category": "News"
+  "category": "News & Social"
 }
