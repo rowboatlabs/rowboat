@@ -645,9 +645,9 @@ export function createGenerateImageTool(
                     { modelName }
                 );
                 // If S3 bucket configured, store in S3 under generated_images/<c>/<d>/<filename>
-                const s3Bucket = process.env.UPLOADS_S3_BUCKET || '';
+                const s3Bucket = process.env.RAG_UPLOADS_S3_BUCKET || '';
                 if (s3Bucket) {
-                    const s3Region = process.env.UPLOADS_AWS_REGION || 'us-east-1';
+                    const s3Region = process.env.RAG_UPLOADS_S3_REGION || 'us-east-1';
                     const s3 = new S3Client({
                         region: s3Region,
                         credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? {
