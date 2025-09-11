@@ -471,6 +471,9 @@ export function BuildAssistantSection() {
                                 <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
                                     Prebuilt Assistants
                                 </h2>
+                                <p className="text-sm text-gray-600 dark:text-gray-400">
+                                    Start quickly and let Skipper adapt it to your needs.
+                                </p>
                             </div>
                             {templatesLoading ? (
                                 <div className="flex items-center justify-center py-12 text-sm text-gray-500 dark:text-gray-400">
