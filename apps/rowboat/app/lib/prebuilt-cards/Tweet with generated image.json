@@ -1,0 +1,299 @@
+{
+  "agents": [
+    {
+      "name": "Tweet Assistant",
+      "type": "conversation",
+      "description": "Assists users in creating and posting tweets with images, including crafting tweet text, generating images, and posting to Twitter.",
+      "instructions": "## 🧑‍💼 Role:\nYou are a helpful assistant that helps users create and post tweets with images. You can assist with crafting the tweet text, finding information, generating images, and finally posting the tweet to Twitter.\n\n---\n## ⚙️ Operating Procedure:\n1. Greet the user and ask for the text they want to include in the tweet. Offer to help them craft it or find information about a topic.\n2. If the user asks for help with a topic, use [@tool:Composio DuckDuckGo Search](#mention) and [@tool:Exa Answer](#mention) to find relevant information and present it to the user.\n3. Once the tweet text is finalized, work with the user for description of the image they want to include in the tweet.\n4. Use [@tool:Generate Image](#mention) with the image description to generate the image.\n5. Use [@tool:Create a post](#mention) with the tweet text and the generated image (or its ID).\n6. Inform the user when the tweet has been successfully posted.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Interacting with the user to get tweet text and image description.\n- Offering assistance in crafting tweets and finding information.\n- Generating images from text descriptions.\n- Posting tweets with images to Twitter.\n\n❌ Out of Scope:\n- None, this agent handles the entire workflow.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Always confirm the tweet text and image description with the user.\n- Be proactive in offering help and suggestions for tweet content.\n- Ensure the generated image matches the description.\n- Ensure the tweet text and image are correctly posted.\n\n🚫 Don'ts:\n- Do not fabricate information.\n\n",
+      "model": "google/gemini-2.5-flash",
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "controlType": "retain",
+      "outputVisibility": "user_facing",
+      "examples": "\n"
+    }
+  ],
+  "prompts": [],
+  "tools": [
+    {
+      "name": "Generate Image",
+      "description": "Generate an image using Google Gemini given a text prompt. Returns base64-encoded image data and any text parts.",
+      "isGeminiImage": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Text prompt describing the image to generate"
+          },
+          "modelName": {
+            "type": "string",
+            "description": "Optional Gemini model override"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "Create a post",
+      "description": "Creates a tweet on twitter; `text` is required unless `card uri`, `media media ids`, `poll options`, or `quote tweet id` is provided.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "card_uri": {
+            "description": "URI of a card to attach. Mutually exclusive with `quote_tweet_id`, `poll` parameters, `media` parameters, and `direct_message_deep_link`.",
+            "examples": [
+              "https://example.com/my-card"
+            ],
+            "title": "Card Uri",
+            "type": "string"
+          },
+          "direct_message_deep_link": {
+            "description": "Deep link to a private Direct Message conversation. Mutually exclusive with `card_uri`.",
+            "examples": [
+              "https://twitter.com/messages/compose?recipient_id=12345&text=Hi"
+            ],
+            "title": "Direct Message Deep Link",
+            "type": "string"
+          },
+          "for_super_followers_only": {
+            "default": false,
+            "description": "Restricts Tweet visibility to the author's Super Followers.",
+            "examples": [
+              "True",
+              "False"
+            ],
+            "title": "For Super Followers Only",
+            "type": "boolean"
+          },
+          "geo__place__id": {
+            "description": "Twitter Place ID to associate with the Tweet.",
+            "examples": [
+              "df51dec6f4ee2b2c"
+            ],
+            "title": "Geo  Place  Id",
+            "type": "string"
+          },
+          "media__media__ids": {
+            "description": "Up to 4 Media IDs obtained from prior uploads. Mutually exclusive with `card_uri`.",
+            "examples": [
+              [
+                "1146032800000000000",
+                "1146032800000000001"
+              ]
+            ],
+            "items": {
+              "properties": {},
+              "type": "string"
+            },
+            "title": "Media  Media  Ids",
+            "type": "array"
+          },
+          "media__tagged__user__ids": {
+            "description": "User IDs to tag in media; tagged users must have enabled photo tagging. Mutually exclusive with `card_uri`.",
+            "examples": [
+              [
+                "2244994945",
+                "783214"
+              ]
+            ],
+            "items": {
+              "properties": {},
+              "type": "string"
+            },
+            "title": "Media  Tagged  User  Ids",
+            "type": "array"
+          },
+          "nullcast": {
+            "default": false,
+            "description": "Marks the Tweet as a promoted-only post, not appearing in public timelines or served to followers.",
+            "examples": [
+              "True",
+              "False"
+            ],
+            "title": "Nullcast",
+            "type": "boolean"
+          },
+          "poll__duration__minutes": {
+            "description": "Poll duration in minutes (5-10080). Required if `poll_options` are provided. Mutually exclusive with `card_uri`.",
+            "examples": [
+              "60",
+              "1440",
+              "10080"
+            ],
+            "title": "Poll  Duration  Minutes",
+            "type": "integer"
+          },
+          "poll__options": {
+            "description": "List of 2 to 4 poll options (max 25 characters each). Required if creating a poll. Mutually exclusive with `card_uri`.",
+            "examples": [
+              [
+                "Yes",
+                "No"
+              ],
+              [
+                "Option A",
+                "Option B",
+                "Option C"
+              ]
+            ],
+            "items": {
+              "properties": {},
+              "type": "string"
+            },
+            "title": "Poll  Options",
+            "type": "array"
+          },
+          "poll__reply__settings": {
+            "description": "Specifies who can reply to the poll Tweet: 'following' or 'mentionedUsers'. Mutually exclusive with `card_uri`.",
+            "enum": [
+              "following",
+              "mentionedUsers"
+            ],
+            "examples": [
+              "following",
+              "mentionedUsers"
+            ],
+            "title": "Poll  Reply  Settings",
+            "type": "string"
+          },
+          "quote_tweet_id": {
+            "description": "ID of the Tweet to quote. Mutually exclusive with `card_uri`, `poll` parameters, and `direct_message_deep_link`.",
+            "examples": [
+              "1346889436626259968"
+            ],
+            "pattern": "^[0-9]{1,19}$",
+            "title": "Quote Tweet Id",
+            "type": "string"
+          },
+          "reply__exclude__reply__user__ids": {
+            "description": "User IDs to exclude from @mentioning in the reply; these users will not be notified. Used when `reply_in_reply_to_tweet_id` is set.",
+            "examples": [
+              [
+                "123456789",
+                "987654321"
+              ]
+            ],
+            "items": {
+              "properties": {},
+              "type": "string"
+            },
+            "title": "Reply  Exclude  Reply  User  Ids",
+            "type": "array"
+          },
+          "reply__in__reply__to__tweet__id": {
+            "description": "ID of the Tweet to which this is a reply. Required if creating a reply.",
+            "examples": [
+              "1346889436626259960"
+            ],
+            "pattern": "^[0-9]{1,19}$",
+            "title": "Reply  In  Reply  To  Tweet  Id",
+            "type": "string"
+          },
+          "reply_settings": {
+            "description": "Specifies who can reply to this Tweet: 'following', 'mentionedUsers', or 'subscribers' (X Premium subscribers).",
+            "enum": [
+              "following",
+              "mentionedUsers",
+              "subscribers"
+            ],
+            "examples": [
+              "following",
+              "mentionedUsers",
+              "subscribers"
+            ],
+            "title": "Reply Settings",
+            "type": "string"
+          },
+          "text": {
+            "description": "Text content of the Tweet (max 280 characters). Required unless `card_uri`, `media_media_ids`, `poll_options`, or `quote_tweet_id` are provided.",
+            "examples": [
+              "Hello world!",
+              "Check out this cool new feature! #innovation"
+            ],
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "mockTool": false,
+      "isComposio": true,
+      "composioData": {
+        "slug": "TWITTER_CREATION_OF_A_POST",
+        "noAuth": false,
+        "toolkitName": "twitter",
+        "toolkitSlug": "twitter",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/twitter.png"
+      }
+    },
+    {
+      "name": "Exa Answer",
+      "description": "Get answers with citations using the exa api.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "The user message content for the Exa answer API.",
+            "examples": [
+              "give me image of narendra modi"
+            ],
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "mockTool": false,
+      "isComposio": true,
+      "composioData": {
+        "slug": "COMPOSIO_SEARCH_EXA_ANSWER",
+        "noAuth": true,
+        "toolkitName": "composio_search",
+        "toolkitSlug": "composio_search",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master//composio-logo.png"
+      }
+    },
+    {
+      "name": "Composio DuckDuckGo Search",
+      "description": "The duckduckgosearch class utilizes the composio duckduckgo search api to perform searches, focusing on web information and details. it leverages the duckduckgo search engine via the composio duckduckgo search api to retrieve relevant web data based on the provided query.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "The search query for the Composio DuckDuckGo Search API, specifying the search topic.",
+            "examples": [
+              "Python programming"
+            ],
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "mockTool": false,
+      "isComposio": true,
+      "composioData": {
+        "slug": "COMPOSIO_SEARCH_DUCK_DUCK_GO_SEARCH",
+        "noAuth": true,
+        "toolkitName": "Composio search",
+        "toolkitSlug": "composio_search",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master//composio-logo.png"
+      }
+    }
+  ],
+  "pipelines": [],
+  "startAgent": "Tweet Assistant",
+  "lastUpdatedAt": "2025-09-11T18:02:35.880Z", 
+  "name": "Viral Tweet Assistant",
+  "description": "Research topics and create a tweet including generated images.",
+  "category": "News & Social"
+}

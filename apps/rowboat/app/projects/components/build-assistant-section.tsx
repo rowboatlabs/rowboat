@@ -471,6 +471,9 @@ export function BuildAssistantSection() {
                                 <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
                                     Prebuilt Assistants
                                 </h2>
+                                <p className="text-sm text-gray-600 dark:text-gray-400">
+                                    Start quickly and let Skipper adapt it to your needs.
+                                </p>
                             </div>
                             {templatesLoading ? (
                                 <div className="flex items-center justify-center py-12 text-sm text-gray-500 dark:text-gray-400">
@@ -488,7 +491,8 @@ export function BuildAssistantSection() {
                                 (() => {
                                     const workTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'work productivity');
                                     const devTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'developer productivity');
-                                    const newsTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'news');
+                                    const newsTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'news & social');
+                                    const customerSupportTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'customer support');
 
                                     const renderGrid = (items: any[]) => (
                                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -582,10 +586,20 @@ export function BuildAssistantSection() {
                                                 <div>
                                                     <div className="mb-3">
                                                         <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-50 text-green-700 ring-1 ring-green-200 dark:bg-green-400/10 dark:text-green-300 dark:ring-green-400/30">
-                                                            News
+                                                            News & Social
                                                         </span>
                                                     </div>
                                                     {renderGrid(newsTemplates)} 
+                                                </div>
+                                            )}
+                                            {customerSupportTemplates.length > 0 && (
+                                                <div>
+                                                    <div className="mb-3">
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-400/10 dark:text-red-300 dark:ring-red-400/30">
+                                                            Customer Support
+                                                        </span>
+                                                    </div>
+                                                    {renderGrid(customerSupportTemplates)}
                                                 </div>
                                             )}
                                         </div>
