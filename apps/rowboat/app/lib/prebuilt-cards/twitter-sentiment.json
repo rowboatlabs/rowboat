@@ -1,0 +1,379 @@
+{
+  "agents": [
+    {
+      "name": "Twitter Search Agent",
+      "type": "pipeline",
+      "description": "Searches Twitter for tweets about a specified keywords.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nSearch Twitter for tweets about a given keyword within a specified time window.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the keywords, `start_time`, and `end_time` from the parent agent.\n2. Use the [@tool:Search full archive of tweets](#mention) tool with each keyword as the query, and the provided `start_time` and `end_time`.\n3. Return the text of the tweets to the next agent in the pipeline.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Searching Twitter for tweets within a given time period.\n\n❌ Out of Scope:\n- Analyzing sentiment.\n- Interacting with the user directly.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Return only the tweet text.\n- Ensure `start_time` and `end_time` are correctly passed to the tool.\n\n🚫 Don'ts:\n- Do not perform sentiment analysis.\n- Do not interact with the user directly.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Sentiment Analysis Agent",
+      "type": "pipeline",
+      "description": "Analyzes the sentiment of tweets and provides a positive sentiment score for each.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nAnalyze the sentiment of tweets and provide a positive sentiment score for each.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive a list of tweets from the previous agent in the pipeline.\n2. For each tweet, classify its sentiment into positive, negative, or neutral.\n3. Return a list of tweets with their corresponding positive sentiment score.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Analyzing tweet sentiment.\n- Providing a positive sentiment score.\n\n❌ Out of Scope:\n- Searching Twitter.\n- Interacting with the user directly.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Provide a clear positive sentiment score for each tweet.\n\n🚫 Don'ts:\n- Do not search Twitter.\n- Do not interact with the user directly.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Sentiment Summary Agent",
+      "type": "pipeline",
+      "description": "Summarizes the sentiment of tweets in three sentences.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nSummarize the sentiment of tweets.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive a list of tweets with their positive sentiment scores from the previous agent.\n2. Calculate the percentage of positive tweets.\n3. Summarize the findings in three sentences, including:\n   - The percentage of positive tweets.\n   - General themes of positive comments.\n   - General themes of negative comments.\n4. Return the summary to the parent agent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Summarizing tweet sentiments.\n\n❌ Out of Scope:\n- Searching Twitter.\n- Analyzing sentiment.\n- Interacting with the user directly.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Provide a concise summary as requested.\n\n🚫 Don'ts:\n- Do not perform other tasks.\n- Do not interact with the user directly.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "controlType": "relinquish_to_parent",
+      "outputVisibility": "internal",
+      "maxCallsPerParentAgent": 3
+    }
+  ],
+  "prompts": [
+    {
+      "name": "Keyword",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "LookbackInHours",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    }
+  ],
+  "tools": [
+    {
+      "name": "Search full archive of tweets",
+      "description": "Searches the full archive of public tweets from march 2006 onwards; use 'start time' and 'end time' together for a defined time window.",
+      "mockTool": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "end_time": {
+            "description": "The newest UTC timestamp (YYYY-MM-DDTHH:mm:ssZ) to which Tweets will be provided. Exclusive. Example: '2021-01-31T23:59:59Z'.",
+            "examples": [
+              "2022-11-30T23:59:59Z"
+            ],
+            "title": "End Time",
+            "type": "string"
+          },
+          "expansions": {
+            "description": "Specifies which objects to expand in the response for more details.",
+            "examples": [
+              [
+                "author_id",
+                "referenced_tweets.id"
+              ]
+            ],
+            "items": {
+              "enum": [
+                "article.cover_media",
+                "article.media_entities",
+                "attachments.media_keys",
+                "attachments.media_source_tweet",
+                "attachments.poll_ids",
+                "author_id",
+                "author_screen_name",
+                "edit_history_tweet_ids",
+                "entities.mentions.username",
+                "entities.note.mentions.username",
+                "geo.place_id",
+                "in_reply_to_user_id",
+                "referenced_tweets.id",
+                "referenced_tweets.id.author_id"
+              ],
+              "properties": {},
+              "title": "ExpansionsEnm0",
+              "type": "string"
+            },
+            "title": "Expansions",
+            "type": "array"
+          },
+          "max_results": {
+            "default": 10,
+            "description": "The maximum number of search results to return per request. Values can be between 10 and the limit defined by the API (typically 100 or 500).",
+            "examples": [
+              100
+            ],
+            "title": "Max Results",
+            "type": "integer"
+          },
+          "media__fields": {
+            "description": "Specifies which media fields to include if 'attachments.media_keys' is expanded.",
+            "examples": [
+              [
+                "url",
+                "preview_image_url",
+                "public_metrics"
+              ]
+            ],
+            "items": {
+              "enum": [
+                "alt_text",
+                "duration_ms",
+                "height",
+                "media_key",
+                "non_public_metrics",
+                "organic_metrics",
+                "preview_image_url",
+                "promoted_metrics",
+                "public_metrics",
+                "type",
+                "url",
+                "variants",
+                "width"
+              ],
+              "properties": {},
+              "title": "MediaFieldsEnm0",
+              "type": "string"
+            },
+            "title": "Media  Fields",
+            "type": "array"
+          },
+          "next_token": {
+            "description": "A token obtained from a previous response to retrieve the next page of results. Do not modify this value.",
+            "examples": [
+              "7140dibdnow9c7btw423vh951v5cnqf09hyssx3h"
+            ],
+            "title": "Next Token",
+            "type": "string"
+          },
+          "pagination_token": {
+            "description": "Alternative to 'next_token' for paginating through results. Token from a previous response for the next page. Do not modify.",
+            "examples": [
+              "7140dibdnow9c7btw423vh951v5cnqf09hyssx3h"
+            ],
+            "title": "Pagination Token",
+            "type": "string"
+          },
+          "place__fields": {
+            "description": "Specifies which place fields to include if 'geo.place_id' is expanded.",
+            "examples": [
+              [
+                "full_name",
+                "country",
+                "geo"
+              ]
+            ],
+            "items": {
+              "enum": [
+                "contained_within",
+                "country",
+                "country_code",
+                "full_name",
+                "geo",
+                "id",
+                "name",
+                "place_type"
+              ],
+              "properties": {},
+              "title": "PlaceFieldsEnm0",
+              "type": "string"
+            },
+            "title": "Place  Fields",
+            "type": "array"
+          },
+          "poll__fields": {
+            "description": "Specifies which poll fields to include if 'attachments.poll_ids' is expanded.",
+            "examples": [
+              [
+                "duration_minutes",
+                "options",
+                "end_datetime"
+              ]
+            ],
+            "items": {
+              "enum": [
+                "duration_minutes",
+                "end_datetime",
+                "id",
+                "options",
+                "voting_status"
+              ],
+              "properties": {},
+              "title": "PollFieldsEnm0",
+              "type": "string"
+            },
+            "title": "Poll  Fields",
+            "type": "array"
+          },
+          "query": {
+            "description": "The search query or rule to match Tweets. Maximum length varies; refer to Twitter API documentation for details (e.g., https://t.co/rulelength).",
+            "examples": [
+              "#twitterdev OR @twitterdev",
+              "from:twitterdev -is:retweet"
+            ],
+            "title": "Query",
+            "type": "string"
+          },
+          "since_id": {
+            "description": "Returns results with a Tweet ID numerically greater (more recent) than the specified ID.",
+            "examples": [
+              "1346889436626259968"
+            ],
+            "title": "Since Id",
+            "type": "string"
+          },
+          "sort_order": {
+            "description": "Specifies the order in which to return results. 'recency' returns the most recent Tweets first, 'relevancy' returns Tweets based on relevance.",
+            "enum": [
+              "recency",
+              "relevancy"
+            ],
+            "examples": [
+              "recency"
+            ],
+            "title": "Sort Order",
+            "type": "string"
+          },
+          "start_time": {
+            "description": "The oldest UTC timestamp (YYYY-MM-DDTHH:mm:ssZ) from which Tweets will be provided. Inclusive. Example: '2021-01-01T00:00:00Z'.",
+            "examples": [
+              "2022-11-01T00:00:00Z"
+            ],
+            "title": "Start Time",
+            "type": "string"
+          },
+          "tweet__fields": {
+            "description": "Specifies which Tweet fields to include in the response.",
+            "examples": [
+              [
+                "created_at",
+                "text",
+                "public_metrics"
+              ]
+            ],
+            "items": {
+              "enum": [
+                "article",
+                "attachments",
+                "author_id",
+                "card_uri",
+                "context_annotations",
+                "conversation_id",
+                "created_at",
+                "edit_controls",
+                "edit_history_tweet_ids",
+                "entities",
+                "geo",
+                "id",
+                "in_reply_to_user_id",
+                "lang",
+                "non_public_metrics",
+                "note_tweet",
+                "organic_metrics",
+                "possibly_sensitive",
+                "promoted_metrics",
+                "public_metrics",
+                "referenced_tweets",
+                "reply_settings",
+                "scopes",
+                "source",
+                "text",
+                "username",
+                "withheld"
+              ],
+              "properties": {},
+              "title": "TweetFieldsEnm0",
+              "type": "string"
+            },
+            "title": "Tweet  Fields",
+            "type": "array"
+          },
+          "until_id": {
+            "description": "Returns results with a Tweet ID numerically less (older) than the specified ID.",
+            "examples": [
+              "1460323737035677698"
+            ],
+            "title": "Until Id",
+            "type": "string"
+          },
+          "user__fields": {
+            "description": "Specifies which user fields to include if 'author_id' or other user-related expansions are used.",
+            "examples": [
+              [
+                "username",
+                "public_metrics",
+                "profile_image_url"
+              ]
+            ],
+            "items": {
+              "enum": [
+                "affiliation",
+                "connection_status",
+                "created_at",
+                "description",
+                "entities",
+                "id",
+                "location",
+                "most_recent_tweet_id",
+                "name",
+                "pinned_tweet_id",
+                "profile_banner_url",
+                "profile_image_url",
+                "protected",
+                "public_metrics",
+                "receives_your_dm",
+                "subscription_type",
+                "url",
+                "username",
+                "verified",
+                "verified_type",
+                "withheld"
+              ],
+              "properties": {},
+              "title": "UserFieldsEnm0",
+              "type": "string"
+            },
+            "title": "User  Fields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "TWITTER_FULL_ARCHIVE_SEARCH",
+        "noAuth": false,
+        "toolkitName": "Twitter",
+        "toolkitSlug": "twitter",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/twitter.png"
+      }
+    }
+  ],
+  "pipelines": [
+    {
+      "name": "Twitter Sentiment Pipeline",
+      "description": "Searches Twitter for tweets about a company and analyzes their sentiment.",
+      "agents": [
+        "Twitter Search Agent",
+        "Sentiment Analysis Agent",
+        "Sentiment Summary Agent"
+      ]
+    }
+  ],
+  "startAgent": "Twitter Sentiment Pipeline",
+  "lastUpdatedAt": "2025-09-11T17:26:48.865Z",
+  "name": "Twitter Sentiment",
+  "description": "Searches Twitter for tweets about a company and analyzes their sentiment.",
+  "category": "News"
+}
