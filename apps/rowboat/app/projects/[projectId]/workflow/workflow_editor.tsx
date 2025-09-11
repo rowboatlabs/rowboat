@@ -41,11 +41,49 @@ import { TopBar } from "./components/TopBar";
 
 enablePatches();
 
+// View mode specific panel ratios
+// To maintain same absolute width for entityList across modes, we need to calculate
+// the percentage relative to visible panels only
+const VIEW_MODE_RATIOS = {
+    three_all: {
+        // Three panel layout with equal distribution between chat and copilot
+        entityList: 25,    // Agents panel takes 25% of total width
+        chatApp: 37.5,     // Chat panel takes 37.5% of total width
+        copilot: 37.5      // Copilot panel takes 37.5% of total width
+    },
+    two_agents_chat: {
+        // Two panel layout showing agents and chat
+        // entityList maintains same absolute width as three panel layout (25/62.5 = 40%)
+        entityList: 40,    // Agents panel takes 40% of visible width
+        chatApp: 60,       // Chat panel takes remaining 60% width
+        copilot: 0         // Copilot panel is hidden
+    },
+    two_agents_skipper: {
+        // Two panel layout showing agents and copilot
+        // entityList maintains same absolute width as three panel layout (25/62.5 = 40%)
+        entityList: 40,    // Agents panel takes 40% of visible width
+        chatApp: 0,        // Chat panel is hidden
+        copilot: 60        // Copilot panel takes remaining 60% width
+    },
+    two_chat_skipper: {
+        // Two panel layout showing chat and copilot with equal split
+        entityList: 0,     // Agents panel is hidden
+        chatApp: 50,       // Chat panel takes 50% width
+        copilot: 50        // Copilot panel takes 50% width
+    }
+} as const;
+
+// Legacy PANEL_RATIOS for backward compatibility
 const PANEL_RATIOS = {
     entityList: 25,    // Left panel
     chatApp: 40,       // Middle panel
     copilot: 35        // Right panel
 } as const;
+
+// Helper function to get panel ratios for current view mode
+const getPanelRatios = (viewMode: "two_agents_chat" | "two_agents_skipper" | "two_chat_skipper" | "three_all") => {
+    return VIEW_MODE_RATIOS[viewMode];
+};
 
 interface StateItem {
     workflow: z.infer<typeof Workflow>;
@@ -982,6 +1020,14 @@ export function WorkflowEditor({
 
     const updateViewMode = useCallback((mode: ViewMode) => {
         setViewMode(mode);
+        
+        // Clear selection when switching to hide agents mode to close configuration panels
+        if (mode === 'two_chat_skipper') {
+            // Clear any active selection to close configuration panels
+            // All unselect actions set selection to null, so we can use any of them
+            dispatch({ type: "unselect_agent" });
+        }
+        
         if (typeof window !== 'undefined') {
             localStorage.setItem('workflow_view_mode', mode);
             const url = new URL(window.location.href);
@@ -1882,12 +1928,12 @@ export function WorkflowEditor({
                 
                 {/* Content Area - hydration-safe layout */}
                 {!isHydrated ? (
-                <ResizablePanelGroup direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
+                <ResizablePanelGroup key={`hydration-${viewMode}`} direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
                     {(viewMode !== 'two_chat_skipper') && (
                     <ResizablePanel 
                         key={`entity-list-hydration`}
                         minSize={10} 
-                        defaultSize={PANEL_RATIOS.entityList}
+                        defaultSize={getPanelRatios(viewMode).entityList}
                         id="entities"
                         order={1}
                         className={`${isLeftPanelCollapsed ? 'hidden' : ''}`}
@@ -1940,33 +1986,33 @@ export function WorkflowEditor({
                     <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed) ? 'hidden' : ''}`} />
                     )}
                     {(viewMode === 'two_agents_chat' || viewMode === 'three_all') && (
-                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.chatApp} id="chat" order={2} className="overflow-hidden">
+                    <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).chatApp} id="chat" order={2} className="overflow-hidden">
                         {/* Minimal mount of Chat during SSR hydration */}
                         <div className="h-full" />
                     </ResizablePanel>
                     )}
                     {(viewMode === 'three_all') && (<ResizableHandle withHandle className="w-[3px] bg-transparent" />)}
                     {(viewMode === 'two_agents_skipper' || viewMode === 'three_all') && (
-                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.copilot} id="copilot" order={3} className="overflow-hidden">
+                    <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).copilot} id="copilot" order={3} className="overflow-hidden">
                         <div className="h-full" />
                     </ResizablePanel>
                     )}
                     {(viewMode === 'two_chat_skipper') && (
                         <>
-                            <ResizablePanel minSize={20} defaultSize={50} id="chat" order={1} className="overflow-hidden"><div className="h-full" /></ResizablePanel>
+                            <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).chatApp} id="chat" order={1} className="overflow-hidden"><div className="h-full" /></ResizablePanel>
                             <ResizableHandle withHandle className="w-[3px] bg-transparent" />
-                            <ResizablePanel minSize={20} defaultSize={50} id="copilot" order={2} className="overflow-hidden"><div className="h-full" /></ResizablePanel>
+                            <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).copilot} id="copilot" order={2} className="overflow-hidden"><div className="h-full" /></ResizablePanel>
                         </>
                     )}
                 </ResizablePanelGroup>
                 ) : (
-                <ResizablePanelGroup direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
+                <ResizablePanelGroup key={`main-${viewMode}`} direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
                     {/* Agents (Entity List) column */}
                     {(viewMode !== 'two_chat_skipper') && (
                     <ResizablePanel 
-                        key={`entity-list-${state.present.selection ? '3-pane' : '2-pane'}`}
+                        key={`entity-list-main`}
                         minSize={10} 
-                        defaultSize={PANEL_RATIOS.entityList}
+                        defaultSize={getPanelRatios(viewMode).entityList}
                         id="entities"
                         order={1}
                         className={`${isLeftPanelCollapsed ? 'hidden' : ''}`}
@@ -2029,7 +2075,7 @@ export function WorkflowEditor({
                     )}
                     
                     {/* Playground column - always mounted; hide via viewMode */}
-                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.chatApp} id="chat" order={2} className={`overflow-hidden relative ${viewMode === 'two_agents_skipper' ? 'hidden' : ''}`}>
+                    <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).chatApp} id="chat" order={2} className={`overflow-hidden relative ${viewMode === 'two_agents_skipper' ? 'hidden' : ''}`}>
                         <ChatApp
                             key={'' + state.present.chatKey}
                             projectId={projectId}
@@ -2043,7 +2089,7 @@ export function WorkflowEditor({
                             onMessageSent={markPlaygroundTested}
                         />
                         {/* Config overlay above Playground when selection open */}
-                        {state.present.selection && (
+                        {state.present.selection && viewMode !== 'two_agents_skipper' && (
                             <div className="absolute inset-0 z-10">
                                 <div className="h-full overflow-auto">
                                     {state.present.selection?.type === "agent" && <AgentConfig
@@ -2124,7 +2170,7 @@ export function WorkflowEditor({
                     )}
 
                     {/* Copilot column - always mounted; hide via viewMode */}
-                    <ResizablePanel minSize={20} defaultSize={PANEL_RATIOS.copilot} id="copilot" order={viewMode === 'three_all' ? 3 : 2} className={`overflow-hidden relative ${viewMode === 'two_agents_chat' ? 'hidden' : ''}`}>
+                    <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).copilot} id="copilot" order={viewMode === 'three_all' ? 3 : 2} className={`overflow-hidden relative ${viewMode === 'two_agents_chat' ? 'hidden' : ''}`}>
                         <Copilot
                             ref={copilotRef}
                             projectId={projectId}
@@ -2149,7 +2195,7 @@ export function WorkflowEditor({
                             onTogglePanel={handleTogglePanel}
                         />
                         {/* Config overlay above Copilot when agents + skipper layout is active */}
-                        {state.present.selection && (viewMode === 'two_agents_skipper' || viewMode === 'two_chat_skipper') && (
+                        {state.present.selection && viewMode === 'two_agents_skipper' && (
                             <div className="absolute inset-0 z-10">
                                 <div className="h-full overflow-auto">
                                     {state.present.selection?.type === "agent" && <AgentConfig
