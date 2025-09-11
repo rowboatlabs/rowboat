@@ -156,23 +156,54 @@ export function BuildAssistantSection() {
     useEffect(() => {
         const urlPrompt = searchParams.get('prompt');
         const urlTemplate = searchParams.get('template');
+        const sharedId = searchParams.get('shared');
+        const importUrl = searchParams.get('importUrl');
 
-        if (urlPrompt || urlTemplate) {
-            setAutoCreateLoading(true);
-            createProjectWithOptions({
-                template: urlTemplate || undefined,
-                prompt: urlPrompt || undefined,
-                router,
-                onError: (error) => {
-                    console.error('Error auto-creating project:', error);
-                    setAutoCreateLoading(false);
-                    // Fall back to showing the form with the prompt pre-filled
-                    if (urlPrompt) {
-                        setUserPrompt(urlPrompt);
+        const run = async () => {
+            if (sharedId || importUrl) {
+                try {
+                    setAutoCreateLoading(true);
+                    const qs = sharedId ? `id=${encodeURIComponent(sharedId)}` : `url=${encodeURIComponent(importUrl!)}`;
+                    const resp = await fetch(`/api/shared-workflow?${qs}`, { cache: 'no-store' });
+                    if (!resp.ok) {
+                        const data = await resp.json().catch(() => ({}));
+                        throw new Error(data.error || `Failed to load shared workflow (${resp.status})`);
                     }
+                    const workflowObj = await resp.json();
+                    await createProjectFromJsonWithOptions({
+                        workflowJson: JSON.stringify(workflowObj),
+                        router,
+                        onError: (error) => {
+                            console.error('Error creating project from shared workflow:', error);
+                            setAutoCreateLoading(false);
+                        }
+                    });
+                    return;
+                } catch (err) {
+                    console.error('Error auto-importing shared workflow:', err);
+                    setAutoCreateLoading(false);
                 }
-            });
-        }
+            }
+
+            if (urlPrompt || urlTemplate) {
+                setAutoCreateLoading(true);
+                createProjectWithOptions({
+                    template: urlTemplate || undefined,
+                    prompt: urlPrompt || undefined,
+                    router,
+                    onError: (error) => {
+                        console.error('Error auto-creating project:', error);
+                        setAutoCreateLoading(false);
+                        // Fall back to showing the form with the prompt pre-filled
+                        if (urlPrompt) {
+                            setUserPrompt(urlPrompt);
+                        }
+                    }
+                });
+            }
+        };
+
+        run();
     }, [searchParams, router]);
 
     const handleCreateAssistant = async () => {

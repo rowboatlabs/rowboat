@@ -2,7 +2,7 @@
 import React from "react";
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input } from "@heroui/react";
 import { Button as CustomButton } from "@/components/ui/button";
-import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug, MessageCircleIcon } from "lucide-react";
+import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug, MessageCircleIcon, ShareIcon } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { ProgressBar, ProgressStep } from "@/components/ui/progress-bar";
 
@@ -35,6 +35,9 @@ interface TopBarProps {
     onStartTestTour?: () => void;
     onStartPublishTour?: () => void;
     onStartUseTour?: () => void;
+    onShareWorkflow: () => void;
+    shareUrl: string | null;
+    onCopyShareUrl: () => void;
 }
 
 export function TopBar({
@@ -66,6 +69,9 @@ export function TopBar({
     onStartTestTour,
     onStartPublishTour,
     onStartUseTour,
+    onShareWorkflow,
+    shareUrl,
+    onCopyShareUrl,
 }: TopBarProps) {
     const router = useRouter();
     const params = useParams();
@@ -240,6 +246,27 @@ export function TopBar({
                                         <RadioIcon size={16} />
                                         Live workflow
                                     </div>
+                                    <Tooltip content="Share Assistant">
+                                        <button
+                                            onClick={onShareWorkflow}
+                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
+                                            aria-label="Share Assistant"
+                                            type="button"
+                                        >
+                                            <ShareIcon size={20} />
+                                        </button>
+                                    </Tooltip>
+                                    {shareUrl && (
+                                        <Tooltip content="Copy share URL">
+                                            <button
+                                                onClick={onCopyShareUrl}
+                                                className="px-2 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 rounded-md transition-colors"
+                                                type="button"
+                                            >
+                                                Copy URL
+                                            </button>
+                                        </Tooltip>
+                                    )}
                                     <Tooltip content="Download Assistant JSON">
                                         <button
                                             onClick={onDownloadJSON}
@@ -306,6 +333,27 @@ export function TopBar({
                                         <PenLine size={16} />
                                         Draft workflow
                                     </div>}
+                                    <Tooltip content="Share Assistant">
+                                        <button
+                                            onClick={onShareWorkflow}
+                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
+                                            aria-label="Share Assistant"
+                                            type="button"
+                                        >
+                                            <ShareIcon size={20} />
+                                        </button>
+                                    </Tooltip>
+                                    {shareUrl && (
+                                        <Tooltip content="Copy share URL">
+                                            <button
+                                                onClick={onCopyShareUrl}
+                                                className="px-2 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 rounded-md transition-colors"
+                                                type="button"
+                                            >
+                                                Copy URL
+                                            </button>
+                                        </Tooltip>
+                                    )}
                                     <Tooltip content="Download Assistant JSON">
                                         <button
                                             onClick={onDownloadJSON}
