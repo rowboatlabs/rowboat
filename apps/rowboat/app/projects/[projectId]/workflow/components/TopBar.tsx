@@ -38,7 +38,6 @@ interface TopBarProps {
     onStartNewChatAndFocus: () => void;
     onStartBuildTour?: () => void;
     onStartTestTour?: () => void;
-    onStartPublishTour?: () => void;
     onStartUseTour?: () => void;
     onShareWorkflow: () => void;
     shareUrl: string | null;
@@ -77,7 +76,6 @@ export function TopBar({
     onStartNewChatAndFocus,
     onStartBuildTour,
     onStartTestTour,
-    onStartPublishTour,
     onStartUseTour,
     onShareWorkflow,
     shareUrl,
@@ -98,16 +96,17 @@ export function TopBar({
     // Progress bar steps with completion logic and current step detection
     const step1Complete = hasAgentInstructionChanges;
     const step2Complete = hasPlaygroundTested && hasAgentInstructionChanges;
-    const step3Complete = hasPublished && hasPlaygroundTested && hasAgentInstructionChanges;
-    const step4Complete = hasClickedUse && hasPublished && hasPlaygroundTested && hasAgentInstructionChanges;
+    // Keep publish as a prerequisite for Use completion, but remove it from the visual steps
+    // Mark "Use" complete as soon as a Use Assistant option is clicked
+    const step4Complete = hasClickedUse;
     
-    // Determine current step (first incomplete step)
-    const currentStep = !step1Complete ? 1 : !step2Complete ? 2 : !step3Complete ? 3 : !step4Complete ? 4 : null;
+    // Determine current step (first incomplete visual step: 1 -> 2 -> 4)
+    const currentStep = !step1Complete ? 1 : !step2Complete ? 2 : !step4Complete ? 4 : null;
     
     const progressSteps: ProgressStep[] = [
         { id: 1, label: "Build: Ask the copilot to create your assistant. Add tools and connect data sources.", completed: step1Complete, isCurrent: currentStep === 1 },
         { id: 2, label: "Test: Test out your assistant by chatting with it. Use 'Fix' and 'Explain' to improve it.", completed: step2Complete, isCurrent: currentStep === 2 },
-        { id: 3, label: "Publish: Make it live with the Publish button. You can always switch back to draft.", completed: step3Complete, isCurrent: currentStep === 3 },
+        // Removed the 'Publish' step from the progress bar
         { id: 4, label: "Use: Click the 'Use Assistant' button to chat, set triggers (like emails), or connect via API.", completed: step4Complete, isCurrent: currentStep === 4 },
     ];
 
@@ -185,7 +184,6 @@ export function TopBar({
                         onStepClick={(step) => {
                             if (step.id === 1 && onStartBuildTour) onStartBuildTour();
                             if (step.id === 2 && onStartTestTour) onStartTestTour();
-                            if (step.id === 3 && onStartPublishTour) onStartPublishTour();
                             if (step.id === 4 && onStartUseTour) onStartUseTour();
                         }}
                     />
