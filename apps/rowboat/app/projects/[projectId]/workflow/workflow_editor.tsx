@@ -1077,7 +1077,6 @@ export function WorkflowEditor({
     const [showTour, setShowTour] = useState(true);
     const [showBuildTour, setShowBuildTour] = useState(false);
     const [showTestTour, setShowTestTour] = useState(false);
-    const [showPublishTour, setShowPublishTour] = useState(false);
     const [showUseTour, setShowUseTour] = useState(false);
 
     // Centralized mode transition handler
@@ -1917,18 +1916,6 @@ export function WorkflowEditor({
                             });
                         });
                     }}
-                    onStartPublishTour={() => {
-                        // Switch to 3-pane first to ensure elements are visible
-                        updateViewMode('three_all');
-                        if (isLive) {
-                            handleModeTransition('draft', 'switch_draft');
-                        }
-                        requestAnimationFrame(() => {
-                            requestAnimationFrame(() => {
-                                setShowPublishTour(true);
-                            });
-                        });
-                    }}
                     onStartUseTour={() => {
                         updateViewMode('three_all');
                         requestAnimationFrame(() => {
@@ -2340,16 +2327,7 @@ export function WorkflowEditor({
                         onComplete={() => setShowUseTour(false)}
                     />
                 )}
-                {showPublishTour && (
-                    <ProductTour
-                        projectId={projectId}
-                        forceStart
-                        stepsOverride={[
-                            { target: 'deploy', title: 'Publish', content: 'Click Publish to make your workflow live, enabling triggers and API/SDK access. You can revert to a draft at any time.' },
-                        ]}
-                        onComplete={() => setShowPublishTour(false)}
-                    />
-                )}
+                
                 
                 {/* Revert to Live Confirmation Modal */}
                 <Modal isOpen={isRevertModalOpen} onClose={onRevertModalClose}>

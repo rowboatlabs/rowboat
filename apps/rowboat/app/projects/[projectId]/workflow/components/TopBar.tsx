@@ -38,7 +38,6 @@ interface TopBarProps {
     onStartNewChatAndFocus: () => void;
     onStartBuildTour?: () => void;
     onStartTestTour?: () => void;
-    onStartPublishTour?: () => void;
     onStartUseTour?: () => void;
     onShareWorkflow: () => void;
     shareUrl: string | null;
@@ -77,7 +76,6 @@ export function TopBar({
     onStartNewChatAndFocus,
     onStartBuildTour,
     onStartTestTour,
-    onStartPublishTour,
     onStartUseTour,
     onShareWorkflow,
     shareUrl,
