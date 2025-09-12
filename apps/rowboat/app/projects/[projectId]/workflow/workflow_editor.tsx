@@ -1027,7 +1027,17 @@ export function WorkflowEditor({
             localStorage.setItem('workflow_view_mode', fromUrl);
             return fromUrl as ViewMode;
         }
-        return (localStorage.getItem('workflow_view_mode') as ViewMode) || "three_all";
+        
+        const storedViewMode = localStorage.getItem('workflow_view_mode') as ViewMode;
+        const hasAgents = workflow.agents.length > 0;
+        
+        // If workflow has agents and stored view mode is "Hide chat" (two_agents_skipper), 
+        // override to show all panels by default
+        if (hasAgents && storedViewMode === 'two_agents_skipper') {
+            return "three_all";
+        }
+        
+        return storedViewMode || "three_all";
     });
 
     const updateViewMode = useCallback((mode: ViewMode) => {
