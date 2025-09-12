@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input, ButtonGroup } from "@heroui/react";
+import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input, ButtonGroup, Checkbox, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
 import { Button as CustomButton } from "@/components/ui/button";
 import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug, MessageCircleIcon, ShareIcon } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
@@ -13,6 +13,8 @@ interface TopBarProps {
     onProjectNameCommit: (value: string) => Promise<void>;
     publishing: boolean;
     isLive: boolean;
+    autoPublishEnabled: boolean;
+    onToggleAutoPublish: (enabled: boolean) => void;
     showCopySuccess: boolean;
     showBuildModeBanner: boolean;
     canUndo: boolean;
@@ -50,6 +52,8 @@ export function TopBar({
     onProjectNameCommit,
     publishing,
     isLive,
+    autoPublishEnabled,
+    onToggleAutoPublish,
     showCopySuccess,
     showBuildModeBanner,
     canUndo,
@@ -82,6 +86,15 @@ export function TopBar({
     const router = useRouter();
     const params = useParams();
     const projectId = typeof (params as any).projectId === 'string' ? (params as any).projectId : (params as any).projectId?.[0];
+    
+    // Share modal state
+    const { isOpen: isShareModalOpen, onOpen: onShareModalOpen, onClose: onShareModalClose } = useDisclosure();
+    
+    const handleShareClick = () => {
+        onShareWorkflow(); // Call the original share function to generate URL
+        onShareModalOpen(); // Open the modal
+    };
+    
     // Progress bar steps with completion logic and current step detection
     const step1Complete = hasAgentInstructionChanges;
     const step2Complete = hasPlaygroundTested && hasAgentInstructionChanges;
@@ -99,9 +112,10 @@ export function TopBar({
     ];
 
     return (
+        <>
         <div className="rounded-xl bg-white/70 dark:bg-zinc-800/70 shadow-sm backdrop-blur-sm border border-zinc-200 dark:border-zinc-800 px-5 py-2">
             <div className="flex justify-between items-center">
-                <div className="workflow-version-selector flex items-center gap-4 px-2 text-gray-800 dark:text-gray-100">
+                <div className="workflow-version-selector flex items-center gap-3 -ml-1 pr-2 text-gray-800 dark:text-gray-100">
                     {/* Project Name Editor */}
                     <div className="flex flex-col min-w-0 max-w-xs">
                         <Input
@@ -121,15 +135,25 @@ export function TopBar({
                             size="sm"
                             classNames={{
                                 base: "max-w-xs",
-                                input: "text-base font-semibold px-2",
+                                input: "text-sm font-semibold px-2",
                                 inputWrapper: "min-h-[36px] h-[36px] border-gray-200 dark:border-gray-700 px-0"
                             }}
                         />
                     </div>
 
-                    {/* Show divider and mode indicator */}
-                    {isLive && <div className="h-4 w-px bg-gray-300 dark:bg-gray-600"></div>}
-                    {isLive ? (
+                    {/* Mode pill and auto-publish checkbox */}
+                    <div className="h-4 w-px bg-gray-300 dark:bg-gray-600"></div>
+                    
+                    {/* Mode pill */}
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 font-medium text-xs rounded-full">
+                        <RadioIcon size={12} />
+                        <span>
+                            {autoPublishEnabled ? 'Live ' : (isLive ? 'Live ' : 'Draft')}
+                        </span>
+                    </div>
+
+                    {/* Auto-publish checkbox or Switch to draft button */}
+                    {!autoPublishEnabled && isLive ? (
                         <Button
                             variant="solid"
                             size="sm"
@@ -140,10 +164,17 @@ export function TopBar({
                             Switch to draft
                         </Button>
                     ) : (
-                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 font-medium text-xs rounded-full">
-                            <PenLine size={12} />
-                            <span>Draft</span>
-                        </div>
+                        !isLive && (
+                            <div className="flex items-center">
+                                <Checkbox
+                                    size="sm"
+                                    isSelected={autoPublishEnabled}
+                                    onValueChange={onToggleAutoPublish}
+                                >
+                                    Auto-publish
+                                </Checkbox>
+                            </div>
+                        )
                     )}
                 </div>
 
@@ -274,10 +305,11 @@ export function TopBar({
                         })()}
                     </div>)}
 
-                    {/* Deploy CTA - always visible */}
+                    {/* Deploy CTA - conditional based on auto-publish mode */}
                     <div className="flex items-center gap-3">
-                        {isLive ? (
+                        {autoPublishEnabled ? (
                             <>
+                                {/* Auto-publish mode: Show Use Assistant button */}
                                 <Dropdown>
                                     <DropdownTrigger>
                                         <Button
@@ -327,167 +359,289 @@ export function TopBar({
 
                                 <div className="flex items-center gap-2 ml-2">
                                     {publishing && <Spinner size="sm" />}
-                                    <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
-                                        <RadioIcon size={16} />
-                                        Live workflow
+                                    <div className="flex">
+                                        <Button
+                                            variant="solid"
+                                            size="sm"
+                                            onPress={handleShareClick}
+                                            className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border-indigo-300`}
+                                            startContent={<ShareIcon size={14} />}
+                                        >
+                                            Share
+                                        </Button>
+                                        <Dropdown>
+                                            <DropdownTrigger>
+                                                <Button
+                                                    variant="solid"
+                                                    size="sm"
+                                                    className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border-indigo-300`}
+                                                >
+                                                    <ChevronDownIcon size={12} />
+                                                </Button>
+                                            </DropdownTrigger>
+                                            <DropdownMenu aria-label="Share actions">
+                                                <DropdownItem
+                                                    key="download-json"
+                                                    startContent={<DownloadIcon size={16} />}
+                                                    onPress={onDownloadJSON}
+                                                >
+                                                    Download JSON
+                                                </DropdownItem>
+                                            </DropdownMenu>
+                                        </Dropdown>
                                     </div>
-                                    <Tooltip content="Share Assistant">
-                                        <button
-                                            onClick={onShareWorkflow}
-                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
-                                            aria-label="Share Assistant"
-                                            type="button"
-                                        >
-                                            <ShareIcon size={20} />
-                                        </button>
-                                    </Tooltip>
-                                    {shareUrl && (
-                                        <Tooltip content="Copy share URL">
-                                            <button
-                                                onClick={onCopyShareUrl}
-                                                className="px-2 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 rounded-md transition-colors"
-                                                type="button"
-                                            >
-                                                Copy URL
-                                            </button>
-                                        </Tooltip>
-                                    )}
-                                    <Tooltip content="Download Assistant JSON">
-                                        <button
-                                            onClick={onDownloadJSON}
-                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors cursor-pointer"
-                                            aria-label="Download JSON"
-                                            type="button"
-                                        >
-                                            <DownloadIcon size={20} />
-                                        </button>
-                                    </Tooltip>
                                 </div>
                             </>
                         ) : (
-                            <>
-                                <div className="flex">
-                                {(!hasAgents) ? (
-                                    <Tooltip content="Create agents to publish your assistant">
-                                        <span className="inline-flex">
-                                            <Button
-                                                variant="solid"
-                                                size="sm"
-                                                onPress={onPublishWorkflow}
-                                                isDisabled
-                                                className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed`}
-                                                startContent={<RocketIcon size={14} />}
-                                                data-tour-target="deploy"
-                                            >
-                                                Publish
-                                            </Button>
-                                        </span>
-                                    </Tooltip>
-                                ) : (
-                                    <Button
-                                        variant="solid"
-                                        size="sm"
-                                        onPress={onPublishWorkflow}
-                                        className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-green-100 hover:bg-green-200 text-green-800 border-green-300`}
-                                        startContent={<RocketIcon size={14} />}
-                                        data-tour-target="deploy"
-                                    >
-                                        Publish
-                                    </Button>
-                                )}
-                                {hasAgents ? (
+                            // Manual publish mode: Show current publish/live logic
+                            isLive ? (
+                                <>
                                     <Dropdown>
                                         <DropdownTrigger>
                                             <Button
                                                 variant="solid"
                                                 size="sm"
-                                                className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-green-100 hover:bg-green-200 text-green-800 border-green-300`}
+                                                className="gap-2 px-3 h-8 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-semibold text-sm border border-blue-200 dark:border-blue-700 shadow-sm"
+                                                startContent={<Plug size={14} />}
+                                                onPress={onUseAssistantClick}
                                             >
+                                                Use Assistant
                                                 <ChevronDownIcon size={12} />
                                             </Button>
                                         </DropdownTrigger>
-                                        <DropdownMenu aria-label="Deploy actions">
+                                        <DropdownMenu aria-label="Assistant access options">
                                             <DropdownItem
-                                                key="view-live"
-                                                startContent={<RadioIcon size={16} />}
-                                                onPress={() => onChangeMode('live')}
+                                                key="chat"
+                                                startContent={<MessageCircleIcon size={16} />}
+                                                onPress={() => { 
+                                                    onUseAssistantClick();
+                                                    onStartNewChatAndFocus();
+                                                }}
                                             >
-                                                View live version
+                                                Chat with Assistant
                                             </DropdownItem>
                                             <DropdownItem
-                                                key="reset-to-live"
-                                                startContent={<AlertTriangle size={16} />}
-                                                onPress={onRevertToLive}
-                                                className="text-red-600 dark:text-red-400"
+                                                key="api-sdk"
+                                                startContent={<SettingsIcon size={16} />}
+                                                onPress={() => { 
+                                                    onUseAssistantClick();
+                                                    if (projectId) { router.push(`/projects/${projectId}/config`); } 
+                                                }}
                                             >
-                                                Reset to live version
+                                                API & SDK Settings
+                                            </DropdownItem>
+                                            <DropdownItem
+                                                key="manage-triggers"
+                                                startContent={<ZapIcon size={16} />}
+                                                onPress={() => { 
+                                                    onUseAssistantClick();
+                                                    if (projectId) { router.push(`/projects/${projectId}/manage-triggers`); } 
+                                                }}
+                                            >
+                                                Manage Triggers
                                             </DropdownItem>
                                         </DropdownMenu>
                                     </Dropdown>
-                                ) : (
-                                    <Tooltip content="Create agents to publish your assistant">
-                                        <span className="inline-flex">
+
+                                    <div className="flex items-center gap-2 ml-2">
+                                        {publishing && <Spinner size="sm" />}
+                                        <div className="flex">
                                             <Button
                                                 variant="solid"
                                                 size="sm"
-                                                isDisabled
-                                                className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed`}
+                                                onPress={handleShareClick}
+                                                className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border-indigo-300`}
+                                                startContent={<ShareIcon size={14} />}
                                             >
-                                                <ChevronDownIcon size={12} />
+                                                Share
                                             </Button>
-                                        </span>
-                                    </Tooltip>
-                                )}
-                                </div>
-
-                                <div className="flex items-center gap-2 ml-2">
-                                    {publishing && <Spinner size="sm" />}
-                                    {isLive && <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
-                                        <RadioIcon size={16} />
-                                        Live workflow
-                                    </div>}
-                                    {!isLive && <div className="bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5">
-                                        <PenLine size={16} />
-                                        Draft workflow
-                                    </div>}
-                                    <Tooltip content="Share Assistant">
-                                        <button
-                                            onClick={onShareWorkflow}
-                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
-                                            aria-label="Share Assistant"
-                                            type="button"
+                                            <Dropdown>
+                                                <DropdownTrigger>
+                                                    <Button
+                                                        variant="solid"
+                                                        size="sm"
+                                                        className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border-indigo-300`}
+                                                    >
+                                                        <ChevronDownIcon size={12} />
+                                                    </Button>
+                                                </DropdownTrigger>
+                                                <DropdownMenu aria-label="Share actions">
+                                                    <DropdownItem
+                                                        key="download-json"
+                                                        startContent={<DownloadIcon size={16} />}
+                                                        onPress={onDownloadJSON}
+                                                    >
+                                                        Download JSON
+                                                    </DropdownItem>
+                                                </DropdownMenu>
+                                            </Dropdown>
+                                        </div>
+                                    </div>
+                                </>) : (
+                                // Draft mode in manual publish: Show publish button
+                                <>
+                                    <div className="flex">
+                                    {(!hasAgents) ? (
+                                        <Tooltip content="Create agents to publish your assistant">
+                                            <span className="inline-flex">
+                                                <Button
+                                                    variant="solid"
+                                                    size="sm"
+                                                    onPress={onPublishWorkflow}
+                                                    isDisabled
+                                                    className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed min-w-[120px]`}
+                                                    startContent={<RocketIcon size={14} />}
+                                                    data-tour-target="deploy"
+                                                >
+                                                    Publish
+                                                </Button>
+                                            </span>
+                                        </Tooltip>
+                                    ) : (
+                                        <Button
+                                            variant="solid"
+                                            size="sm"
+                                            onPress={onPublishWorkflow}
+                                            className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-green-100 hover:bg-green-200 text-green-800 border-green-300 min-w-[132px]`}
+                                            startContent={<RocketIcon size={14} />}
+                                            data-tour-target="deploy"
                                         >
-                                            <ShareIcon size={20} />
-                                        </button>
-                                    </Tooltip>
-                                    {shareUrl && (
-                                        <Tooltip content="Copy share URL">
-                                            <button
-                                                onClick={onCopyShareUrl}
-                                                className="px-2 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 rounded-md transition-colors"
-                                                type="button"
-                                            >
-                                                Copy URL
-                                            </button>
+                                            Publish
+                                        </Button>
+                                    )}
+                                    {hasAgents ? (
+                                        <Dropdown>
+                                            <DropdownTrigger>
+                                                <Button
+                                                    variant="solid"
+                                                    size="sm"
+                                                    className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-green-100 hover:bg-green-200 text-green-800 border-green-300`}
+                                                >
+                                                    <ChevronDownIcon size={12} />
+                                                </Button>
+                                            </DropdownTrigger>
+                                            <DropdownMenu aria-label="Deploy actions">
+                                                <DropdownItem
+                                                    key="view-live"
+                                                    startContent={<RadioIcon size={16} />}
+                                                    onPress={() => onChangeMode('live')}
+                                                >
+                                                    View live version
+                                                </DropdownItem>
+                                                <DropdownItem
+                                                    key="reset-to-live"
+                                                    startContent={<AlertTriangle size={16} />}
+                                                    onPress={onRevertToLive}
+                                                    className="text-red-600 dark:text-red-400"
+                                                >
+                                                    Reset to live version
+                                                </DropdownItem>
+                                            </DropdownMenu>
+                                        </Dropdown>
+                                    ) : (
+                                        <Tooltip content="Create agents to publish your assistant">
+                                            <span className="inline-flex">
+                                                <Button
+                                                    variant="solid"
+                                                    size="sm"
+                                                    isDisabled
+                                                    className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed`}
+                                                >
+                                                    <ChevronDownIcon size={12} />
+                                                </Button>
+                                            </span>
                                         </Tooltip>
                                     )}
-                                    <Tooltip content="Download Assistant JSON">
-                                        <button
-                                            onClick={onDownloadJSON}
-                                            className="p-1.5 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors cursor-pointer"
-                                            aria-label="Download JSON"
-                                            type="button"
-                                        >
-                                            <DownloadIcon size={20} />
-                                        </button>
-                                    </Tooltip>
-                                </div>
-                            </>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 ml-2">
+                                        {publishing && <Spinner size="sm" />}
+                                        <div className="flex">
+                                            <Button
+                                                variant="solid"
+                                                size="sm"
+                                                onPress={handleShareClick}
+                                                className={`gap-2 px-3 h-8 font-semibold text-sm rounded-r-none border shadow-sm bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border-indigo-300`}
+                                                startContent={<ShareIcon size={14} />}
+                                            >
+                                                Share
+                                            </Button>
+                                            <Dropdown>
+                                                <DropdownTrigger>
+                                                    <Button
+                                                        variant="solid"
+                                                        size="sm"
+                                                        className={`min-w-0 px-2 h-8 rounded-l-none border border-l-0 shadow-sm bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border-indigo-300`}
+                                                    >
+                                                        <ChevronDownIcon size={12} />
+                                                    </Button>
+                                                </DropdownTrigger>
+                                                <DropdownMenu aria-label="Share actions">
+                                                    <DropdownItem
+                                                        key="download-json"
+                                                        startContent={<DownloadIcon size={16} />}
+                                                        onPress={onDownloadJSON}
+                                                    >
+                                                        Download JSON
+                                                    </DropdownItem>
+                                                </DropdownMenu>
+                                            </Dropdown>
+                                        </div>
+                                    </div>
+                                </>
+                            )
                         )}
                     </div>
 
                 </div>
             </div>
         </div>
+
+        {/* Share Modal */}
+        <Modal isOpen={isShareModalOpen} onClose={onShareModalClose} size="lg">
+            <ModalContent>
+                <ModalHeader className="flex flex-col gap-1">
+                    Share Assistant
+                </ModalHeader>
+                <ModalBody>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                            Share this assistant with others using the URL below:
+                        </p>
+                        {shareUrl ? (
+                            <div className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                <input
+                                    type="text"
+                                    value={shareUrl || ''}
+                                    readOnly
+                                    className="flex-1 bg-transparent text-sm text-gray-700 dark:text-gray-300 outline-none"
+                                />
+                                <Button
+                                    size="sm"
+                                    variant="solid"
+                                    onPress={onCopyShareUrl}
+                                    className="bg-indigo-100 hover:bg-indigo-200 text-indigo-800"
+                                >
+                                    Copy
+                                </Button>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                <Spinner size="sm" />
+                                <span className="text-sm text-gray-600 dark:text-gray-400">
+                                    Generating share URL...
+                                </span>
+                            </div>
+                        )}
+                    </div>
+                </ModalBody>
+                <ModalFooter>
+                    <Button variant="light" onPress={onShareModalClose}>
+                        Close
+                    </Button>
+                </ModalFooter>
+            </ModalContent>
+        </Modal>
+        </>
     );
 }

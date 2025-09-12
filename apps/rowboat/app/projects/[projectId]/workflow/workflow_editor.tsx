@@ -960,6 +960,8 @@ export function WorkflowEditor({
     projectConfig,
     eligibleModels,
     isLive,
+    autoPublishEnabled,
+    onToggleAutoPublish,
     onChangeMode,
     onRevertToLive,
     onProjectToolsUpdated,
@@ -978,6 +980,8 @@ export function WorkflowEditor({
     projectConfig: z.infer<typeof Project>;
     eligibleModels: z.infer<typeof ModelsResponse> | "*";
     isLive: boolean;
+    autoPublishEnabled: boolean;
+    onToggleAutoPublish: (enabled: boolean) => void;
     onChangeMode: (mode: 'draft' | 'live') => void;
     onRevertToLive: () => void;
     onProjectToolsUpdated?: () => void;
@@ -1604,10 +1608,17 @@ export function WorkflowEditor({
         saveQueue.current = [];
 
         try {
-            if (isLive) {
-                return;
-            } else {
+            if (autoPublishEnabled) {
+                // Auto-publish mode: save to both draft and live
                 await saveWorkflow(projectId, workflowToSave);
+                await publishWorkflow(projectId, workflowToSave);
+            } else {
+                // Manual mode: current logic
+                if (isLive) {
+                    return;
+                } else {
+                    await saveWorkflow(projectId, workflowToSave);
+                }
             }
         } finally {
             saving.current = false;
@@ -1617,7 +1628,7 @@ export function WorkflowEditor({
                 dispatch({ type: "set_saving", saving: false });
             }
         }
-    }, [isLive, projectId]);
+    }, [autoPublishEnabled, isLive, projectId]);
 
     useEffect(() => {
         if (state.present.pendingChanges && state.present.workflow) {
@@ -1863,6 +1874,8 @@ export function WorkflowEditor({
                     onProjectNameCommit={handleProjectNameCommit}
                     publishing={state.present.publishing}
                     isLive={isLive}
+                    autoPublishEnabled={autoPublishEnabled}
+                    onToggleAutoPublish={onToggleAutoPublish}
                     showCopySuccess={showCopySuccess}
                     showBuildModeBanner={showBuildModeBanner}
                     canUndo={state.currentIndex > 0}
