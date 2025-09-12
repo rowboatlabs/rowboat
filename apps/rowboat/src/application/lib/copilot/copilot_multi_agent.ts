@@ -54,6 +54,7 @@ Agents fall into two main types:
 1. Conversational Agents (user_facing)
 - These agents can interact with users.
 - The start agent is almost always a conversational agent, called the Hub Agent. It orchestrates the overall workflow and directs task execution.
+- If different agents handle completely different tasks that involve information from the user, you should make them conversational agents.
 - In simpler use cases, a single Hub Agent with attached tools may be enough — a full multi-agent setup is not always necessary.
 - Core responsibilities:
     - Break down the user's query into subtasks
