@@ -179,7 +179,7 @@ function AssistantMessage({
                         />
                     )}
                 </div>
-                <div className="text-sm leading-relaxed text-gray-800 dark:text-gray-100 animate-slideUpAndFade">
+                <div className="text-sm leading-relaxed text-gray-800 dark:text-gray-100 animate-slideUpAndFade pl-1">
                     <div className="flex flex-col gap-2">
                         <div className="text-left">
                             <MarkdownContent content={content} />
