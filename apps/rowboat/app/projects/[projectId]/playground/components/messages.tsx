@@ -225,15 +225,14 @@ function AssistantMessage({
     );
 }
 
-function AssistantMessageLoading() {
+function TypingIndicator() {
     return (
-        <div className="self-start flex flex-col gap-1 my-5">
-            <div className="max-w-[85%] inline-block">
-                <div className="bg-gray-50 dark:bg-gray-800 px-4 py-2.5 
-                    rounded-lg border border-gray-200 dark:border-gray-700
-                    shadow-sm animate-slideUpAndFade min-h-[2.5rem] flex items-center gap-2">
-                    <Spinner size="sm" />
-                    <span className="text-sm text-gray-600 dark:text-gray-400">Generating...</span>
+        <div className="flex justify-start items-center my-4 px-1">
+            <div className="flex items-center gap-1">
+                <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                 </div>
             </div>
         </div>
@@ -948,7 +947,7 @@ export function Messages({
                 }
                 return null;
             })}
-            {loadingAssistantResponse && <AssistantMessageLoading />}
+            {loadingAssistantResponse && <TypingIndicator />}
         </div>
     );
 }
