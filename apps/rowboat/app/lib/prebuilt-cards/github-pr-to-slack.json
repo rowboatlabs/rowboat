@@ -1,0 +1,133 @@
+{
+  "agents": [
+    {
+      "name": "PR to Slack Agent",
+      "type": "conversation",
+      "description": "Receives PR event details and sends a formatted Slack message to a specified channel.",
+      "instructions": "## 🧑‍💼 Role:\nYou are an internal agent that receives pull request (PR) event details and sends a Slack message with the PR information.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive PR event details (title, author, URL, description, etc.) and the Slack channel name.\n2. Format a clear, concise Slack message summarizing the PR (e.g., title, author, link, and description).\n3. Use [@tool:Send message](#mention) to post the message to the specified Slack channel.\n4. Return confirmation of message sent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Formatting PR details for Slack.\n- Sending messages to Slack channels.\n\n❌ Out of Scope:\n- Handling PR events directly (trigger is external).\n- User interaction or responding to user queries.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure the Slack message is clear and includes a link to the PR.\n- Use markdown formatting for readability.\n\n🚫 Don'ts:\n- Do not interact with users.\n- Do not process events other than PRs.\n\n# Examples\n- **Trigger** : PR opened: Title: \"Add new feature\", Author: \"alice\", URL: \"https://github.com/org/repo/pull/123\", Description: \"Implements feature X.\"\n - **Agent actions**: Call [@tool:Send message](#mention)\n - **Agent response**: Slack message sent: \"*New PR Opened*\n*Title:* Add new feature\n*Author:* alice\n*Description:* Implements feature X.\n<https://github.com/org/repo/pull/123>\"\n\n- **Trigger** : PR merged: Title: \"Fix bug\", Author: \"bob\", URL: \"https://github.com/org/repo/pull/456\", Description: \"Fixes Y bug.\"\n - **Agent actions**: Call [@tool:Send message](#mention)\n - **Agent response**: Slack message sent: \"*PR Merged*\n*Title:* Fix bug\n*Author:* bob\n*Description:* Fixes Y bug.\n<https://github.com/org/repo/pull/456>\"",
+      "model": "google/gemini-2.5-flash",
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 1
+    }
+  ],
+  "prompts": [
+    {
+      "name": "Slack Channel",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    }
+  ],
+  "tools": [
+    {
+      "name": "Send message",
+      "description": "Posts a message to a slack channel, direct message, or private group; requires content via `text`, `blocks`, or `attachments`.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "as_user": {
+            "description": "Post as the authenticated user instead of as a bot. Defaults to `false`. If `true`, `username`, `icon_emoji`, and `icon_url` are ignored. If `false`, the message is posted as a bot, allowing appearance customization.",
+            "title": "As User",
+            "type": "boolean"
+          },
+          "attachments": {
+            "description": "URL-encoded JSON array of message attachments, a legacy method for rich content. See Slack API documentation for structure.",
+            "title": "Attachments",
+            "type": "string"
+          },
+          "blocks": {
+            "description": "DEPRECATED: Use `markdown_text` field instead. URL-encoded JSON array of layout blocks for rich/interactive messages. See Slack API Block Kit docs for structure.",
+            "title": "Blocks",
+            "type": "string"
+          },
+          "channel": {
+            "description": "ID or name of the channel, private group, or IM channel to send the message to.",
+            "title": "Channel",
+            "type": "string"
+          },
+          "icon_emoji": {
+            "description": "Emoji for bot's icon (e.g., ':robot_face:'). Overrides `icon_url`. Applies if `as_user` is `false`.",
+            "title": "Icon Emoji",
+            "type": "string"
+          },
+          "icon_url": {
+            "description": "Image URL for bot's icon (must be HTTPS). Applies if `as_user` is `false`.",
+            "title": "Icon Url",
+            "type": "string"
+          },
+          "link_names": {
+            "description": "Automatically hyperlink channel names (e.g., #channel) and usernames (e.g., @user) in message text. Defaults to `false` for bot messages.",
+            "title": "Link Names",
+            "type": "boolean"
+          },
+          "markdown_text": {
+            "description": "PREFERRED: Write your message in markdown for nicely formatted display. Supports: headers (# ## ###), bold (**text** or __text__), italic (*text* or _text_), strikethrough (~~text~~), inline code (`code`), code blocks (```), links ([text](url)), block quotes (>), lists (- item, 1. item), dividers (--- or ***), context blocks (:::context with images), and section buttons (:::section-button). IMPORTANT: Use \\\\n for line breaks (e.g., 'Line 1\\\\nLine 2'), not actual newlines. USER MENTIONS: To tag users, use their user ID with <@USER_ID> format (e.g., <@U1234567890>), not username.",
+            "title": "Markdown Text",
+            "type": "string"
+          },
+          "mrkdwn": {
+            "description": "Disable Slack's markdown for `text` field if `false`. Default `true` (allows *bold*, _italic_, etc.).",
+            "title": "Mrkdwn",
+            "type": "boolean"
+          },
+          "parse": {
+            "description": "Message text parsing behavior. Default `none` (no special parsing). `full` parses as user-typed (links @mentions, #channels). See Slack API docs for details.",
+            "title": "Parse",
+            "type": "string"
+          },
+          "reply_broadcast": {
+            "description": "If `true` for a threaded reply, also posts to main channel. Defaults to `false`.",
+            "title": "Reply Broadcast",
+            "type": "boolean"
+          },
+          "text": {
+            "description": "DEPRECATED: This sends raw text only, use markdown_text field. Primary textual content. Recommended fallback if using `blocks` or `attachments`. Supports mrkdwn unless `mrkdwn` is `false`.",
+            "title": "Text",
+            "type": "string"
+          },
+          "thread_ts": {
+            "description": "Timestamp (`ts`) of an existing message to make this a threaded reply. Use `ts` of the parent message, not another reply. Example: '1476746824.000004'.",
+            "title": "Thread Ts",
+            "type": "string"
+          },
+          "unfurl_links": {
+            "description": "Enable unfurling of text-based URLs. Defaults `false` for bots, `true` if `as_user` is `true`.",
+            "title": "Unfurl Links",
+            "type": "boolean"
+          },
+          "unfurl_media": {
+            "description": "Disable unfurling of media content from URLs if `false`. Defaults to `true`.",
+            "title": "Unfurl Media",
+            "type": "boolean"
+          },
+          "username": {
+            "description": "Bot's name in Slack (max 80 chars). Applies if `as_user` is `false`.",
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "SLACK_SEND_MESSAGE",
+        "noAuth": false,
+        "toolkitName": "slack",
+        "toolkitSlug": "slack",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/slack.svg"
+      }
+    }
+  ],
+  "pipelines": [],
+  "startAgent": "PR to Slack Agent",
+  "lastUpdatedAt": "2025-09-12T06:30:34.203Z",
+  "name": "GitHub PR to Slack",
+  "description": "Assistant that sends a formatted Slack message with PR details when a PR is opened or merged.",
+  "category": "Developer Productivity"
+}
