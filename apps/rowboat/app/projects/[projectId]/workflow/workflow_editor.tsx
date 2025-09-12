@@ -1191,10 +1191,8 @@ export function WorkflowEditor({
         // Ensure chat is visible and collapse left panel
         setActivePanel('playground');
         setViewMode((prev: ViewMode) => prev);
-        updateViewMode(
-            viewMode === 'three_all' ? 'three_all' :
-            (viewMode === 'two_agents_skipper' ? 'two_agents_chat' : 'two_chat_skipper')
-        );
+        // Expand Chat to full view: hide Copilot panel and collapse Agents panel
+        updateViewMode('two_agents_chat');
         setIsLeftPanelCollapsed(true);
     }, [updateViewMode, viewMode]);
 

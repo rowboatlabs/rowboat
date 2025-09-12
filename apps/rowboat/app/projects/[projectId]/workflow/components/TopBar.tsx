@@ -97,7 +97,8 @@ export function TopBar({
     const step1Complete = hasAgentInstructionChanges;
     const step2Complete = hasPlaygroundTested && hasAgentInstructionChanges;
     // Keep publish as a prerequisite for Use completion, but remove it from the visual steps
-    const step4Complete = hasClickedUse && hasPublished && hasPlaygroundTested && hasAgentInstructionChanges;
+    // Mark "Use" complete as soon as a Use Assistant option is clicked
+    const step4Complete = hasClickedUse;
     
     // Determine current step (first incomplete visual step: 1 -> 2 -> 4)
     const currentStep = !step1Complete ? 1 : !step2Complete ? 2 : !step4Complete ? 4 : null;
