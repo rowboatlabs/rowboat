@@ -2304,7 +2304,11 @@ export function WorkflowEditor({
                             { target: 'copilot', title: 'Step 2/2', content: 'Ask Copilot to improve your agents based on test results. Use "Fix" and "Explain" to iterate quickly.' },
                         ]}
                         onStepChange={(index) => {
-                            if (index === 0) setActivePanel('playground');
+                            if (index === 0) {
+                                // Ensure Chat is focused and any middle-pane detail overlay is dismissed
+                                setActivePanel('playground');
+                                dispatch({ type: 'unselect_agent' });
+                            }
                             if (index === 1) setActivePanel('copilot');
                         }}
                         onComplete={() => setShowTestTour(false)}
@@ -2322,7 +2326,11 @@ export function WorkflowEditor({
                             { target: 'conversations', title: 'Step 5/5', content: 'Conversations: see all past interactions in one place, including manual chats, trigger activity, and API calls.' },
                         ]}
                         onStepChange={(index) => {
-                            if (index === 0) setActivePanel('playground');
+                            if (index === 0) {
+                                // Ensure Chat is focused and any middle-pane detail overlay is dismissed
+                                setActivePanel('playground');
+                                dispatch({ type: 'unselect_agent' });
+                            }
                         }}
                         onComplete={() => setShowUseTour(false)}
                     />
