@@ -379,20 +379,6 @@ function mapConfig(workflow: z.infer<typeof Workflow>): {
 }
 
 async function* emitGreetingTurn(logger: PrefixLogger, workflow: z.infer<typeof Workflow>): AsyncIterable<z.infer<typeof ZOutMessage>> {
-    // Check if there are no agents or no start agent
-    if (workflow.agents.length === 0 || !workflow.startAgent) {
-        logger.log(`no agents available, emitting no-agent message`);
-        
-        // emit no-agent message
-        yield* emitEvent(logger, {
-            role: 'assistant',
-            content: 'Hi! To get started with chatting with your Assistant please create an agent first!',
-            agentName: 'System',
-            responseType: 'external',
-        });
-        return;
-    }
-
     // find the greeting prompt
     const prompt = workflow.prompts.find(p => p.type === 'greeting')?.prompt || 'How can I help you today?';
     logger.log(`greeting turn: ${prompt}`);
@@ -1288,20 +1274,6 @@ export async function* streamResponse(
     logger.log(`start agent: ${workflow.startAgent}`);
     logger.log(`=== END CONFIGURATION ===`);
 
-    // Check if there are no agents or no start agent
-    if (Object.keys(agentConfig).length === 0 || !workflow.startAgent) {
-        logger.log(`no agents available, emitting no-agent message`);
-        
-        // emit no-agent message
-        yield* emitEvent(logger, {
-            role: 'assistant',
-            content: 'Hi! To get started with chatting with your Assistant please create an agent first!',
-            agentName: 'System',
-            responseType: 'external',
-        });
-        return;
-    }
-
     const stack: string[] = [];
     logger.log(`initialized stack: ${JSON.stringify(stack)}`);
 
@@ -1323,20 +1295,6 @@ export async function* streamResponse(
     // get the agent that should be starting this turn
     const startOfTurnAgentName = getStartOfTurnAgentName(logger, messages, agentConfig, pipelineConfig, workflow);
     logger.log(`🎯 START AGENT DECISION: ${startOfTurnAgentName}`);
-
-    // Additional safety check - if startOfTurnAgentName is empty or invalid, return no-agent message
-    if (!startOfTurnAgentName || !agentConfig[startOfTurnAgentName]) {
-        logger.log(`invalid start agent name: ${startOfTurnAgentName}, emitting no-agent message`);
-        
-        // emit no-agent message
-        yield* emitEvent(logger, {
-            role: 'assistant',
-            content: 'Hi! To get started with chatting with your Assistant please create an agent first!',
-            agentName: 'System',
-            responseType: 'external',
-        });
-        return;
-    }
 
     let agentName: string | null = startOfTurnAgentName;
 
