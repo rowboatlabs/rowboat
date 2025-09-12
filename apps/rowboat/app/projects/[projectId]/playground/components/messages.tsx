@@ -2,6 +2,7 @@
 import { Spinner } from "@heroui/react";
 import { useMemo, useState } from "react";
 import z from "zod";
+import Image from "next/image";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { WorkflowTool } from "@/app/lib/types/workflow_types";
 import MarkdownContent from "@/app/lib/components/markdown-content";
@@ -200,10 +201,13 @@ function AssistantMessage({
                                             >
                                                 <DownloadIcon size={16} className="text-gray-700 dark:text-gray-200" />
                                             </a>
-                                            <img
+                                            <Image
                                                 src={src}
                                                 alt={`Image ${i+1}`}
                                                 className="max-h-80 max-w-full object-contain rounded"
+                                                width={800}
+                                                height={320}
+                                                style={{ objectFit: 'contain' }}
                                             />
                                             {img.truncated && (
                                                 <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
@@ -525,10 +529,13 @@ function ClientToolCall({
                                             >
                                                 <DownloadIcon size={16} className="text-gray-700 dark:text-gray-200" />
                                             </a>
-                                            <img
+                                            <Image
                                                 src={src}
                                                 alt={`Tool image ${i+1}`}
                                                 className="max-h-64 max-w-full object-contain rounded"
+                                                width={800}
+                                                height={256}
+                                                style={{ objectFit: 'contain' }}
                                             />
                                             {img.truncated && (
                                                 <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
@@ -617,10 +624,13 @@ function ClientToolCall({
                                     <div className="flex flex-wrap gap-3">
                                         {imagePreviews.map((img, i) => (
                                             <div key={i} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
-                                                <img
+                                                <Image
                                                     src={img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`}
                                                     alt={`Tool image ${i+1}`}
                                                     className="max-h-64 max-w-full object-contain rounded"
+                                                    width={800}
+                                                    height={256}
+                                                    style={{ objectFit: 'contain' }}
                                                 />
                                                 {img.truncated && (
                                                     <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">

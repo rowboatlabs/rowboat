@@ -2103,7 +2103,7 @@ export function WorkflowEditor({
                         />
                         {/* Config overlay above Playground when selection open */}
                         {state.present.selection && viewMode !== 'two_agents_skipper' && (
-                            <div className="absolute inset-0 z-10">
+                            <div className="absolute inset-0 z-20">
                                 <div className="h-full overflow-auto">
                                     {state.present.selection?.type === "agent" && <AgentConfig
                                         key={`overlay-agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}-${configKey}`}
@@ -2209,7 +2209,7 @@ export function WorkflowEditor({
                         />
                         {/* Config overlay above Copilot when agents + skipper layout is active */}
                         {state.present.selection && viewMode === 'two_agents_skipper' && (
-                            <div className="absolute inset-0 z-10">
+                            <div className="absolute inset-0 z-20">
                                 <div className="h-full overflow-auto">
                                     {state.present.selection?.type === "agent" && <AgentConfig
                                         key={`overlay2-agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}-${configKey}`}
