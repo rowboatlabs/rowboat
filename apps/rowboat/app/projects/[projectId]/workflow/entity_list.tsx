@@ -55,6 +55,7 @@ interface EntityListProps {
         name: string;
     } | null;
     startAgentName: string | null;
+    isLive?: boolean;
     onSelectAgent: (name: string) => void;
     onSelectTool: (name: string) => void;
     onSelectPrompt: (name: string) => void;
@@ -63,6 +64,10 @@ interface EntityListProps {
     onAddAgent: (agent: Partial<z.infer<typeof WorkflowAgent>>) => void;
     onAddTool: (tool: Partial<z.infer<typeof WorkflowTool>>) => void;
     onAddPrompt: (prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
+    onShowAddDataSourceModal?: () => void;
+    onShowAddVariableModal?: () => void;
+    onShowAddAgentModal?: () => void;
+    onShowAddToolModal?: () => void;
     onUpdatePrompt: (name: string, prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
     onAddPromptFromModal: (prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
     onUpdatePromptFromModal: (name: string, prompt: Partial<z.infer<typeof WorkflowPrompt>>) => void;
@@ -315,6 +320,7 @@ interface PipelineCardProps {
     onSetMainAgent: (name: string) => void;
     selectedRef: React.RefObject<HTMLDivElement | null>;
     startAgentName: string | null;
+    isLive?: boolean;
     dragHandle?: React.ReactNode;
 }
 
@@ -330,6 +336,7 @@ const PipelineCard = ({
     onSetMainAgent,
     selectedRef,
     startAgentName,
+    isLive,
     dragHandle,
 }: PipelineCardProps) => {
     // Get agents that belong to this pipeline
@@ -474,7 +481,12 @@ const PipelineCard = ({
 };
 
 export const EntityList = forwardRef<
-    { openDataSourcesModal: () => void },
+    { 
+        openDataSourcesModal: () => void;
+        openAddVariableModal: () => void;
+        openAddAgentModal: () => void;
+        openAddToolModal: () => void;
+    },
     EntityListProps & { 
         projectId: string,
         onReorderAgents: (agents: z.infer<typeof WorkflowAgent>[]) => void 
@@ -488,6 +500,7 @@ export const EntityList = forwardRef<
     workflow,
     selectedEntity,
     startAgentName,
+    isLive,
     onSelectAgent,
     onSelectTool,
     onSelectPrompt,
@@ -496,6 +509,10 @@ export const EntityList = forwardRef<
     onAddAgent,
     onAddTool,
     onAddPrompt,
+    onShowAddDataSourceModal,
+    onShowAddVariableModal,
+    onShowAddAgentModal,
+    onShowAddToolModal,
     onUpdatePrompt,
     onAddPromptFromModal,
     onUpdatePromptFromModal,
@@ -701,6 +718,15 @@ export const EntityList = forwardRef<
     useImperativeHandle(ref, () => ({
         openDataSourcesModal: () => {
             setShowDataSourcesModal(true);
+        },
+        openAddVariableModal: () => {
+            setShowAddVariableModal(true);
+        },
+        openAddAgentModal: () => {
+            setShowAgentTypeModal(true);
+        },
+        openAddToolModal: () => {
+            setShowToolsModal(true);
         }
     }));
 
@@ -755,17 +781,17 @@ export const EntityList = forwardRef<
                                             <Eye className="w-4 h-4" />
                                         </Button>
                                     )}
-                                    <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedPanels(prev => ({ ...prev, agents: true }));
-                                            setShowAgentTypeModal(true);
-                                        }}
-                                        className={`group ${buttonClasses}`}
-                                        showHoverContent={true}
-                                        hoverContent="Add Agent"
+                                     <Button
+                                         variant="secondary"
+                                         size="sm"
+                                         onClick={(e) => {
+                                             e.stopPropagation();
+                                             setExpandedPanels(prev => ({ ...prev, agents: true }));
+                                             onShowAddAgentModal?.();
+                                         }}
+                                         className={`group ${buttonClasses}`}
+                                         showHoverContent={true}
+                                         hoverContent="Add Agent"
                                     >
                                         <PlusIcon className="w-4 h-4" />
                                     </Button>
@@ -803,6 +829,7 @@ export const EntityList = forwardRef<
                                                                 onSetMainAgent={onSetMainAgent}
                                                                 selectedRef={selectedRef}
                                                                 startAgentName={startAgentName}
+                                                                isLive={isLive}
                                                             />
                                                         ))}
                                                     </SortableContext>
@@ -891,17 +918,17 @@ export const EntityList = forwardRef<
                                     <span>Tools</span>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                    <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedPanels(prev => ({ ...prev, tools: true }));
-                                            setShowToolsModal(true);
-                                        }}
-                                        className={`group ${buttonClasses}`}
-                                        showHoverContent={true}
-                                        hoverContent="Add Tool"
+                                     <Button
+                                         variant="secondary"
+                                         size="sm"
+                                         onClick={(e) => {
+                                             e.stopPropagation();
+                                             setExpandedPanels(prev => ({ ...prev, tools: true }));
+                                             onShowAddToolModal?.();
+                                         }}
+                                         className={`group ${buttonClasses}`}
+                                         showHoverContent={true}
+                                         hoverContent="Add Tool"
                                     >
                                         <PlusIcon className="w-4 h-4" />
                                     </Button>
@@ -1039,17 +1066,17 @@ export const EntityList = forwardRef<
                                     <span>Data</span>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                    <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedPanels(prev => ({ ...prev, data: true }));
-                                            setShowDataSourcesModal(true);
-                                        }}
-                                        className={`group ${buttonClasses}`}
-                                        showHoverContent={true}
-                                        hoverContent="Add Data Source"
+                                     <Button
+                                         variant="secondary"
+                                         size="sm"
+                                         onClick={(e) => {
+                                             e.stopPropagation();
+                                             setExpandedPanels(prev => ({ ...prev, data: true }));
+                                             onShowAddDataSourceModal?.();
+                                         }}
+                                         className={`group ${buttonClasses}`}
+                                         showHoverContent={true}
+                                         hoverContent="Add Data Source"
                                     >
                                         <PlusIcon className="w-4 h-4" />
                                     </Button>
@@ -1190,17 +1217,17 @@ export const EntityList = forwardRef<
                                         <PenLine className="w-4 h-4" />
                                         <span>Variables</span>
                                     </div>
-                                    <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedPanels(prev => ({ ...prev, prompts: true }));
-                                            setShowAddVariableModal(true);
-                                        }}
-                                        className={`group ${buttonClasses}`}
-                                        showHoverContent={true}
-                                        hoverContent="Add Variable"
+                                     <Button
+                                         variant="secondary"
+                                         size="sm"
+                                         onClick={(e) => {
+                                             e.stopPropagation();
+                                             setExpandedPanels(prev => ({ ...prev, prompts: true }));
+                                             onShowAddVariableModal?.();
+                                         }}
+                                         className={`group ${buttonClasses}`}
+                                         showHoverContent={true}
+                                         hoverContent="Add Variable"
                                     >
                                         <PlusIcon className="w-4 h-4" />
                                     </Button>
@@ -1737,7 +1764,8 @@ const SortablePipelineItem = ({
     onAddAgentToPipeline, 
     onSetMainAgent,
     selectedRef, 
-    startAgentName 
+    startAgentName,
+    isLive 
 }: {
     pipeline: z.infer<typeof WorkflowPipeline>;
     agents: z.infer<typeof WorkflowAgent>[];
@@ -1753,6 +1781,7 @@ const SortablePipelineItem = ({
     onSetMainAgent: (name: string) => void;
     selectedRef: React.RefObject<HTMLDivElement | null>;
     startAgentName: string | null;
+    isLive?: boolean;
 }) => {
     const {
         attributes,
@@ -1783,6 +1812,7 @@ const SortablePipelineItem = ({
                 onSetMainAgent={onSetMainAgent}
                 selectedRef={selectedRef}
                 startAgentName={startAgentName}
+                isLive={isLive}
                 dragHandle={
                     <button className="cursor-grab" {...listeners}>
                         <GripVertical className="w-4 h-4 text-gray-400" />
