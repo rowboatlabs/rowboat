@@ -37,16 +37,32 @@ export function App({
         const stored = window.localStorage.getItem(`workflow_mode_${initialProjectData.id}`);
         return stored === 'live' || stored === 'draft' ? stored : 'draft';
     });
+    const [autoPublishEnabled, setAutoPublishEnabled] = useState(() => {
+        if (typeof window === 'undefined') return true; // Default to auto-publish
+        const stored = window.localStorage.getItem(`auto_publish_${initialProjectData.id}`);
+        return stored !== null ? stored === 'true' : true;
+    });
     const [project, setProject] = useState<z.infer<typeof Project>>(initialProjectData);
     const [dataSources, setDataSources] = useState<z.infer<typeof DataSource>[]>(initialDataSources);
     const [loading, setLoading] = useState(false);
 
     console.log('workflow app.tsx render');
 
+    const handleToggleAutoPublish = (enabled: boolean) => {
+        setAutoPublishEnabled(enabled);
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(`auto_publish_${initialProjectData.id}`, enabled.toString());
+        }
+    };
+
     // choose which workflow to display
-    let workflow: z.infer<typeof Workflow> | undefined = project?.draftWorkflow;
-    if (mode == 'live') {
-        workflow = project?.liveWorkflow;
+    let workflow: z.infer<typeof Workflow> | undefined;
+    if (autoPublishEnabled) {
+        // In auto-publish mode, always use draft (since they're synced)
+        workflow = project?.draftWorkflow;
+    } else {
+        // Manual mode: use current logic
+        workflow = mode === 'live' ? project?.liveWorkflow : project?.draftWorkflow;
     }
 
     const reloadData = useCallback(async () => {
@@ -132,6 +148,8 @@ export function App({
         {!loading && project && workflow && (dataSources !== null) && <WorkflowEditor
             projectId={initialProjectData.id}
             isLive={mode == 'live'}
+            autoPublishEnabled={autoPublishEnabled}
+            onToggleAutoPublish={handleToggleAutoPublish}
             workflow={workflow}
             dataSources={dataSources}
             projectConfig={project}

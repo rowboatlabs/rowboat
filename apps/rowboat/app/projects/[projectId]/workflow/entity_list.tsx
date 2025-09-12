@@ -565,7 +565,7 @@ export const EntityList = forwardRef<
         agents: true,
         tools: true,
         data: true,
-        prompts: false
+        prompts: true
     });
 
     // Default sizes when panels are expanded

@@ -41,11 +41,49 @@ import { TopBar } from "./components/TopBar";
 
 enablePatches();
 
+// View mode specific panel ratios
+// To maintain same absolute width for entityList across modes, we need to calculate
+// the percentage relative to visible panels only
+const VIEW_MODE_RATIOS = {
+    three_all: {
+        // Three panel layout with equal distribution between chat and copilot
+        entityList: 25,    // Agents panel takes 25% of total width
+        chatApp: 37.5,     // Chat panel takes 37.5% of total width
+        copilot: 37.5      // Copilot panel takes 37.5% of total width
+    },
+    two_agents_chat: {
+        // Two panel layout showing agents and chat
+        // entityList maintains same absolute width as three panel layout (25/62.5 = 40%)
+        entityList: 40,    // Agents panel takes 40% of visible width
+        chatApp: 60,       // Chat panel takes remaining 60% width
+        copilot: 0         // Copilot panel is hidden
+    },
+    two_agents_skipper: {
+        // Two panel layout showing agents and copilot
+        // entityList maintains same absolute width as three panel layout (25/62.5 = 40%)
+        entityList: 40,    // Agents panel takes 40% of visible width
+        chatApp: 0,        // Chat panel is hidden
+        copilot: 60        // Copilot panel takes remaining 60% width
+    },
+    two_chat_skipper: {
+        // Two panel layout showing chat and copilot with equal split
+        entityList: 0,     // Agents panel is hidden
+        chatApp: 50,       // Chat panel takes 50% width
+        copilot: 50        // Copilot panel takes 50% width
+    }
+} as const;
+
+// Legacy PANEL_RATIOS for backward compatibility
 const PANEL_RATIOS = {
     entityList: 25,    // Left panel
     chatApp: 40,       // Middle panel
     copilot: 35        // Right panel
 } as const;
+
+// Helper function to get panel ratios for current view mode
+const getPanelRatios = (viewMode: "two_agents_chat" | "two_agents_skipper" | "two_chat_skipper" | "three_all") => {
+    return VIEW_MODE_RATIOS[viewMode];
+};
 
 interface StateItem {
     workflow: z.infer<typeof Workflow>;
@@ -89,19 +127,20 @@ export type Action = {
 } | {
     type: "add_agent";
     agent: Partial<z.infer<typeof WorkflowAgent>>;
+    fromCopilot?: boolean;
 } | {
     type: "add_tool";
     tool: Partial<z.infer<typeof WorkflowTool>>;
+    fromCopilot?: boolean;
 } | {
     type: "add_prompt";
     prompt: Partial<z.infer<typeof WorkflowPrompt>>;
-} | {
-    type: "add_prompt_no_select";
-    prompt: Partial<z.infer<typeof WorkflowPrompt>>;
+    fromCopilot?: boolean;
 } | {
     type: "add_pipeline";
     pipeline: Partial<z.infer<typeof WorkflowPipeline>>;
     defaultModel?: string;
+    fromCopilot?: boolean;
 } | {
     type: "select_agent";
     name: string;
@@ -129,7 +168,15 @@ export type Action = {
     name: string;
     agent: Partial<z.infer<typeof WorkflowAgent>>;
 } | {
+    type: "update_agent_no_select";
+    name: string;
+    agent: Partial<z.infer<typeof WorkflowAgent>>;
+} | {
     type: "update_tool";
+    name: string;
+    tool: Partial<z.infer<typeof WorkflowTool>>;
+} | {
+    type: "update_tool_no_select";
     name: string;
     tool: Partial<z.infer<typeof WorkflowTool>>;
 } | {
@@ -363,6 +410,9 @@ function reducer(state: State, action: Action): State {
                                 newAgentName = `New agent ${draft.workflow.agents.filter((agent) =>
                                     agent.name.startsWith("New agent")).length + 1}`;
                             }
+                            
+                            const finalAgentName = action.agent.name || newAgentName;
+                            
                             draft.workflow?.agents.push({
                                 name: newAgentName,
                                 type: "conversation",
@@ -379,10 +429,19 @@ function reducer(state: State, action: Action): State {
                                 maxCallsPerParentAgent: 3,
                                 ...action.agent
                             });
-                            draft.selection = {
-                                type: "agent",
-                                name: action.agent.name || newAgentName
-                            };
+                            
+                            // If this is the first agent or there's no start agent, set it as start agent
+                            if (!draft.workflow?.startAgent || draft.workflow.agents.length === 1) {
+                                draft.workflow.startAgent = finalAgentName;
+                            }
+                            
+                            // Only set selection if not from Copilot
+                            if (!action.fromCopilot) {
+                                draft.selection = {
+                                    type: "agent",
+                                    name: action.agent.name || newAgentName
+                                };
+                            }
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
@@ -404,10 +463,13 @@ function reducer(state: State, action: Action): State {
                                 mockTool: false,
                                 ...action.tool
                             });
-                            draft.selection = {
-                                type: "tool",
-                                name: action.tool.name || newToolName
-                            };
+                            // Only set selection if not from Copilot
+                            if (!action.fromCopilot) {
+                                draft.selection = {
+                                    type: "tool",
+                                    name: action.tool.name || newToolName
+                                };
+                            }
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
@@ -424,27 +486,13 @@ function reducer(state: State, action: Action): State {
                                 prompt: "",
                                 ...action.prompt
                             });
-                            draft.selection = {
-                                type: "prompt",
-                                name: action.prompt.name || newPromptName
-                            };
-                            draft.pendingChanges = true;
-                            draft.chatKey++;
-                            break;
-                        }
-                        case "add_prompt_no_select": {
-                            let newPromptName = "New Variable";
-                            if (draft.workflow?.prompts.some((prompt) => prompt.name === newPromptName)) {
-                                newPromptName = `New Variable ${draft.workflow?.prompts.filter((prompt) =>
-                                    prompt.name.startsWith("New Variable")).length + 1}`;
+                            // Only set selection if not from Copilot
+                            if (!action.fromCopilot) {
+                                draft.selection = {
+                                    type: "prompt",
+                                    name: action.prompt.name || newPromptName
+                                };
                             }
-                            draft.workflow?.prompts.push({
-                                name: newPromptName,
-                                type: "base_prompt",
-                                prompt: "",
-                                ...action.prompt
-                            });
-                            // Don't set selection - this is the key difference
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
@@ -516,8 +564,8 @@ function reducer(state: State, action: Action): State {
                                 ...action.pipeline
                             });
                             
-                            // 4. ✅ Select the first agent for configuration
-                            if (pipelineAgents.length > 0) {
+                            // 4. ✅ Select the first agent for configuration (only if not from Copilot)
+                            if (pipelineAgents.length > 0 && !action.fromCopilot) {
                                 draft.selection = {
                                     type: "agent",
                                     name: pipelineAgents[0]
@@ -717,6 +765,18 @@ function reducer(state: State, action: Action): State {
                             draft.chatKey++;
                             break;
                         }
+                        case "update_agent_no_select": {
+                            // Same as update_agent but do not change selection
+                            if (action.agent.instructions !== undefined) {
+                                draft.agentInstructionsChanged = true;
+                            }
+                            draft.workflow.agents = draft.workflow.agents.map((agent) =>
+                                agent.name === action.name ? { ...agent, ...action.agent } : agent
+                            );
+                            draft.pendingChanges = true;
+                            draft.chatKey++;
+                            break;
+                        }
                         case "update_tool":
 
                             // update tool data
@@ -756,6 +816,13 @@ function reducer(state: State, action: Action): State {
                                 type: "tool",
                                 name: action.tool.name || action.name,
                             };
+                            draft.pendingChanges = true;
+                            draft.chatKey++;
+                            break;
+                        case "update_tool_no_select":
+                            draft.workflow.tools = draft.workflow.tools.map((tool) =>
+                                tool.name === action.name ? { ...tool, ...action.tool } : tool
+                            );
                             draft.pendingChanges = true;
                             draft.chatKey++;
                             break;
@@ -893,6 +960,8 @@ export function WorkflowEditor({
     projectConfig,
     eligibleModels,
     isLive,
+    autoPublishEnabled,
+    onToggleAutoPublish,
     onChangeMode,
     onRevertToLive,
     onProjectToolsUpdated,
@@ -911,6 +980,8 @@ export function WorkflowEditor({
     projectConfig: z.infer<typeof Project>;
     eligibleModels: z.infer<typeof ModelsResponse> | "*";
     isLive: boolean;
+    autoPublishEnabled: boolean;
+    onToggleAutoPublish: (enabled: boolean) => void;
     onChangeMode: (mode: 'draft' | 'live') => void;
     onRevertToLive: () => void;
     onProjectToolsUpdated?: () => void;
@@ -938,6 +1009,56 @@ export function WorkflowEditor({
         }
     });
 
+    // View mode state controls top-level layout visibility (not unmounting panes)
+    type ViewMode = "two_agents_chat" | "two_agents_skipper" | "two_chat_skipper" | "three_all";
+    const [viewMode, setViewMode] = useState<ViewMode>(() => {
+        if (typeof window === 'undefined') return "three_all";
+        const fromUrl = new URLSearchParams(window.location.search).get('view');
+        const valid: ViewMode[] = ["two_agents_chat", "two_agents_skipper", "two_chat_skipper", "three_all"];
+        if (fromUrl && (valid as string[]).includes(fromUrl)) {
+            localStorage.setItem('workflow_view_mode', fromUrl);
+            return fromUrl as ViewMode;
+        }
+        return (localStorage.getItem('workflow_view_mode') as ViewMode) || "three_all";
+    });
+
+    const updateViewMode = useCallback((mode: ViewMode) => {
+        setViewMode(mode);
+        
+        // Clear selection when switching to hide agents mode to close configuration panels
+        if (mode === 'two_chat_skipper') {
+            // Clear any active selection to close configuration panels
+            // All unselect actions set selection to null, so we can use any of them
+            dispatch({ type: "unselect_agent" });
+        }
+        
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('workflow_view_mode', mode);
+            const url = new URL(window.location.href);
+            url.searchParams.set('view', mode);
+            window.history.replaceState({}, '', url.toString());
+        }
+    }, []);
+
+    // 1) Auto-layout: when no agents exist, prefer Agents + Skipper
+    const prevAgentCountRef = useRef<number>(state.present.workflow.agents.length);
+    useEffect(() => {
+        const count = state.present.workflow.agents.length;
+        // If live mode, another effect will pin Agents + Chat; skip here
+        if (!isLive) {
+            if (count === 0) {
+                // Only auto-pin to Agents+Skipper if user hasn't explicitly chosen 3-pane
+                if (viewMode !== 'two_agents_skipper' && viewMode !== 'three_all') {
+                    updateViewMode('two_agents_skipper');
+                }
+            } else if (prevAgentCountRef.current === 0 && count > 0) {
+                // 2) As soon as first agent is created from zero, switch to default (three panes)
+                updateViewMode('three_all');
+            }
+        }
+        prevAgentCountRef.current = count;
+    }, [state.present.workflow.agents.length, isLive, updateViewMode, viewMode]);
+
     const [chatMessages, setChatMessages] = useState<z.infer<typeof Message>[]>([]);
     const updateChatMessages = useCallback((messages: z.infer<typeof Message>[]) => {
         setChatMessages(messages);
@@ -956,7 +1077,6 @@ export function WorkflowEditor({
     const [showTour, setShowTour] = useState(true);
     const [showBuildTour, setShowBuildTour] = useState(false);
     const [showTestTour, setShowTestTour] = useState(false);
-    const [showPublishTour, setShowPublishTour] = useState(false);
     const [showUseTour, setShowUseTour] = useState(false);
 
     // Centralized mode transition handler
@@ -1068,10 +1188,13 @@ export function WorkflowEditor({
         if (startNewChatRef.current) {
             startNewChatRef.current();
         }
-        // Switch to playground (chat) mode and collapse left panel
+        // Ensure chat is visible and collapse left panel
         setActivePanel('playground');
+        setViewMode((prev: ViewMode) => prev);
+        // Expand Chat to full view: hide Copilot panel and collapse Agents panel
+        updateViewMode('two_agents_chat');
         setIsLeftPanelCollapsed(true);
-    }, []);
+    }, [updateViewMode, viewMode]);
 
     // Load agent order from localStorage on mount
     // useEffect(() => {
@@ -1097,33 +1220,53 @@ export function WorkflowEditor({
     // Function to trigger copilot chat
     const triggerCopilotChat = useCallback((message: string) => {
         setActivePanel('copilot');
+        updateViewMode(
+            viewMode === 'three_all' ? 'three_all' :
+            (viewMode === 'two_agents_chat' ? 'two_agents_skipper' : 'two_chat_skipper')
+        );
         // Small delay to ensure copilot is mounted
         setTimeout(() => {
             copilotRef.current?.handleUserMessage(message);
         }, 100);
-    }, []);
+    }, [updateViewMode, viewMode]);
 
     const handleOpenDataSourcesModal = useCallback(() => {
         entityListRef.current?.openDataSourcesModal();
     }, []);
 
-    console.log(`workflow editor chat key: ${state.present.chatKey}`);
 
-    // Auto-show copilot and increment key when prompt is present
+    // Auto-show copilot and send initial prompt exactly once when present
+    const hasSentInitPromptRef = useRef<boolean>(false);
     useEffect(() => {
+        if (hasSentInitPromptRef.current) return;
         const prompt = localStorage.getItem(`project_prompt_${projectId}`);
         console.log('init project prompt', prompt);
-        if (prompt) {
-            setActivePanel('copilot');
-        }
-    }, [projectId]);
+        if (!prompt) return;
+
+        // Mark as handled and remove immediately to avoid any other readers
+        hasSentInitPromptRef.current = true;
+        localStorage.removeItem(`project_prompt_${projectId}`);
+
+        // Switch UI to show Copilot
+        setActivePanel('copilot');
+        updateViewMode(viewMode === 'three_all' ? 'three_all' : (viewMode.includes('agents') ? 'two_agents_skipper' : 'two_chat_skipper'));
+
+        // Allow layout to render Copilot, then send the prompt via ref
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                copilotRef.current?.handleUserMessage(prompt);
+            });
+        });
+    }, [projectId, updateViewMode, viewMode]);
 
     // Switch to playground when switching to live mode
     useEffect(() => {
         if (isLive) {
             setActivePanel('playground');
+            // 3) In live mode, pin view to Agents + Chat
+            updateViewMode('two_agents_chat');
         }
-    }, [isLive]);
+    }, [isLive, updateViewMode, viewMode]);
 
     // Reset initial state when user interacts with copilot or opens other menus
     useEffect(() => {
@@ -1307,7 +1450,7 @@ export function WorkflowEditor({
 
     // Modal-specific handlers that don't auto-select
     function handleAddPromptFromModal(prompt: Partial<z.infer<typeof WorkflowPrompt>>) {
-        dispatch({ type: "add_prompt_no_select", prompt });
+        dispatch({ type: "add_prompt", prompt, fromCopilot: true });
     }
 
     function handleUpdatePromptFromModal(name: string, prompt: Partial<z.infer<typeof WorkflowPrompt>>) {
@@ -1462,10 +1605,17 @@ export function WorkflowEditor({
         saveQueue.current = [];
 
         try {
-            if (isLive) {
-                return;
-            } else {
+            if (autoPublishEnabled) {
+                // Auto-publish mode: save to both draft and live
                 await saveWorkflow(projectId, workflowToSave);
+                await publishWorkflow(projectId, workflowToSave);
+            } else {
+                // Manual mode: current logic
+                if (isLive) {
+                    return;
+                } else {
+                    await saveWorkflow(projectId, workflowToSave);
+                }
             }
         } finally {
             saving.current = false;
@@ -1475,7 +1625,7 @@ export function WorkflowEditor({
                 dispatch({ type: "set_saving", saving: false });
             }
         }
-    }, [isLive, projectId]);
+    }, [autoPublishEnabled, isLive, projectId]);
 
     useEffect(() => {
         if (state.present.pendingChanges && state.present.workflow) {
@@ -1521,7 +1671,7 @@ export function WorkflowEditor({
     }, [isLive, state.present.publishing, onChangeMode]);
 
     const WORKFLOW_MOD_ACTIONS = useRef(new Set([
-        'add_agent','add_tool','add_prompt','add_prompt_no_select','add_pipeline',
+        'add_agent','add_tool','add_prompt','add_pipeline',
         'update_agent','update_tool','update_prompt','update_prompt_no_select','update_pipeline',
         'delete_agent','delete_tool','delete_prompt','delete_pipeline',
         'toggle_agent','set_main_agent','reorder_agents','reorder_pipelines'
@@ -1595,14 +1745,21 @@ export function WorkflowEditor({
     }, [isLive, state.present.isLive]);
 
     function handleTogglePanel() {
-        if (isLive && activePanel === 'playground') {
+        if (isLive && (viewMode === 'two_agents_chat' || viewMode === 'two_chat_skipper' || viewMode === 'three_all')) {
             // User is trying to switch to Build mode in live mode
             handleModeTransition('draft', 'switch_draft');
             setShowBuildModeBanner(true);
             // Auto-hide banner after 5 seconds
             setTimeout(() => setShowBuildModeBanner(false), 5000);
         } else {
-            setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground');
+            // Toggle between showing chat vs skipper within current context
+            if (viewMode === 'three_all') {
+                setActivePanel(activePanel === 'playground' ? 'copilot' : 'playground');
+                return;
+            }
+            if (viewMode === 'two_agents_chat') updateViewMode('two_agents_skipper');
+            else if (viewMode === 'two_agents_skipper') updateViewMode('two_agents_chat');
+            else if (viewMode === 'two_chat_skipper') updateViewMode('two_chat_skipper');
         }
     }
 
@@ -1663,6 +1820,9 @@ export function WorkflowEditor({
         }
     };
 
+    const [isHydrated, setIsHydrated] = useState(false);
+    useEffect(() => { setIsHydrated(true); }, []);
+
     return (
         <EntitySelectionContext.Provider value={{
             onSelectAgent: handleSelectAgent,
@@ -1711,11 +1871,15 @@ export function WorkflowEditor({
                     onProjectNameCommit={handleProjectNameCommit}
                     publishing={state.present.publishing}
                     isLive={isLive}
+                    autoPublishEnabled={autoPublishEnabled}
+                    onToggleAutoPublish={onToggleAutoPublish}
                     showCopySuccess={showCopySuccess}
                     showBuildModeBanner={showBuildModeBanner}
                     canUndo={state.currentIndex > 0}
                     canRedo={state.currentIndex < state.patches.length}
                     activePanel={activePanel}
+                    viewMode={viewMode}
+                    hasAgents={state.present.workflow.agents.length > 0}
                     hasAgentInstructionChanges={hasAgentInstructionChanges}
                     hasPlaygroundTested={hasPlaygroundTested}
                     hasPublished={hasPublished}
@@ -1730,26 +1894,126 @@ export function WorkflowEditor({
                     onChangeMode={onChangeMode}
                     onRevertToLive={handleRevertToLive}
                     onTogglePanel={handleTogglePanel}
+                    onSetViewMode={updateViewMode}
                     onUseAssistantClick={markUseAssistantClicked}
                     onStartNewChatAndFocus={handleStartNewChatAndFocus}
-                    onStartBuildTour={() => setShowBuildTour(true)}
-                    onStartTestTour={() => setShowTestTour(true)}
-                    onStartPublishTour={() => {
-                        if (isLive) {
-                            handleModeTransition('draft', 'switch_draft');
-                        }
-                        setShowPublishTour(true);
+                    onStartBuildTour={() => {
+                        // Ensure 3-pane layout first, then start tour after layout renders
+                        updateViewMode('three_all');
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                setShowBuildTour(true);
+                            });
+                        });
                     }}
-                    onStartUseTour={() => setShowUseTour(true)}
+                    onStartTestTour={() => {
+                        updateViewMode('three_all');
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                setShowTestTour(true);
+                            });
+                        });
+                    }}
+                    onStartUseTour={() => {
+                        updateViewMode('three_all');
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                setShowUseTour(true);
+                            });
+                        });
+                    }}
                 />
                 
-                {/* Content Area */}
-                <ResizablePanelGroup direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
+                {/* Content Area - hydration-safe layout */}
+                {!isHydrated ? (
+                <ResizablePanelGroup key={`hydration-${viewMode}`} direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
+                    {(viewMode !== 'two_chat_skipper') && (
                     <ResizablePanel 
-                        key={`entity-list-${state.present.selection ? '3-pane' : '2-pane'}`}
+                        key={`entity-list-hydration`}
                         minSize={10} 
-                        defaultSize={PANEL_RATIOS.entityList}
-                        className={isLeftPanelCollapsed ? 'hidden' : ''}
+                        defaultSize={getPanelRatios(viewMode).entityList}
+                        id="entities"
+                        order={1}
+                        className={`${isLeftPanelCollapsed ? 'hidden' : ''}`}
+                    >
+                        <div className="flex flex-col h-full">
+                            <EntityList
+                                ref={entityListRef}
+                                agents={state.present.workflow.agents}
+                                tools={state.present.workflow.tools}
+                                prompts={state.present.workflow.prompts}
+                                pipelines={state.present.workflow.pipelines || []}
+                                dataSources={dataSources}
+                                workflow={state.present.workflow}
+                                selectedEntity={null}
+                                startAgentName={state.present.workflow.startAgent}
+                                onSelectAgent={handleSelectAgent}
+                                onSelectTool={handleSelectTool}
+                                onSelectPrompt={handleSelectPrompt}
+                                onSelectPipeline={handleSelectPipeline}
+                                onSelectDataSource={handleSelectDataSource}
+                                onAddAgent={handleAddAgent}
+                                onAddTool={handleAddTool}
+                                onAddPrompt={handleAddPrompt}
+                                onUpdatePrompt={handleUpdatePrompt}
+                                onAddPromptFromModal={handleAddPromptFromModal}
+                                onUpdatePromptFromModal={handleUpdatePromptFromModal}
+                                onAddPipeline={handleAddPipeline}
+                                onAddAgentToPipeline={handleAddAgentToPipeline}
+                                onToggleAgent={handleToggleAgent}
+                                onSetMainAgent={handleSetMainAgent}
+                                onDeleteAgent={handleDeleteAgent}
+                                onDeleteTool={handleDeleteTool}
+                                onDeletePrompt={handleDeletePrompt}
+                                onDeletePipeline={handleDeletePipeline}
+                                onShowVisualise={handleShowVisualise}
+                                projectId={projectId}
+                                onProjectToolsUpdated={onProjectToolsUpdated}
+                                onDataSourcesUpdated={onDataSourcesUpdated}
+                                projectConfig={projectConfig}
+                                onReorderAgents={handleReorderAgents}
+                                onReorderPipelines={handleReorderPipelines}
+                                useRagUploads={useRagUploads}
+                                useRagS3Uploads={useRagS3Uploads}
+                                useRagScraping={useRagScraping}
+                            />
+                        </div>
+                    </ResizablePanel>
+                    )}
+                    {(viewMode !== 'two_chat_skipper') && (
+                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed) ? 'hidden' : ''}`} />
+                    )}
+                    {(viewMode === 'two_agents_chat' || viewMode === 'three_all') && (
+                    <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).chatApp} id="chat" order={2} className="overflow-hidden">
+                        {/* Minimal mount of Chat during SSR hydration */}
+                        <div className="h-full" />
+                    </ResizablePanel>
+                    )}
+                    {(viewMode === 'three_all') && (<ResizableHandle withHandle className="w-[3px] bg-transparent" />)}
+                    {(viewMode === 'two_agents_skipper' || viewMode === 'three_all') && (
+                    <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).copilot} id="copilot" order={3} className="overflow-hidden">
+                        <div className="h-full" />
+                    </ResizablePanel>
+                    )}
+                    {(viewMode === 'two_chat_skipper') && (
+                        <>
+                            <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).chatApp} id="chat" order={1} className="overflow-hidden"><div className="h-full" /></ResizablePanel>
+                            <ResizableHandle withHandle className="w-[3px] bg-transparent" />
+                            <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).copilot} id="copilot" order={2} className="overflow-hidden"><div className="h-full" /></ResizablePanel>
+                        </>
+                    )}
+                </ResizablePanelGroup>
+                ) : (
+                <ResizablePanelGroup key="main" direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
+                    {/* Agents (Entity List) column */}
+                    {(viewMode !== 'two_chat_skipper') && (
+                    <ResizablePanel 
+                        key={`entity-list-main`}
+                        minSize={10} 
+                        defaultSize={getPanelRatios(viewMode).entityList}
+                        id="entities"
+                        order={1}
+                        className={`${isLeftPanelCollapsed ? 'hidden' : ''}`}
                     >
                         <div className="flex flex-col h-full">
                             <EntityList
@@ -1803,150 +2067,209 @@ export function WorkflowEditor({
                             />
                         </div>
                     </ResizablePanel>
-                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed || !state.present.selection) ? 'hidden' : ''}`} />
+                    )}
+                    {(viewMode !== 'two_chat_skipper') && (
+                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed && !state.present.selection) ? 'hidden' : ''}`} />
+                    )}
                     
-                    {/* Config Panel - always rendered, visibility controlled */}
-                    <ResizablePanel
-                        minSize={20}
-                        defaultSize={45}
-                        className={`overflow-auto ${!state.present.selection ? 'hidden' : ''}`}
-                    >
-                        {state.present.selection?.type === "agent" && <AgentConfig
-                            key={`agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}-${configKey}`}
+                    {/* Playground column - always mounted; hide via viewMode */}
+                    <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).chatApp} id="chat" order={2} className={`overflow-hidden relative ${viewMode === 'two_agents_skipper' ? 'hidden' : ''}`}>
+                        <ChatApp
+                            key={'' + state.present.chatKey}
                             projectId={projectId}
                             workflow={state.present.workflow}
-                            agent={state.present.workflow.agents.find((agent) => agent.name === state.present.selection!.name)!}
-                            usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
-                            usedPipelineNames={new Set((state.present.workflow.pipelines || []).map((pipeline) => pipeline.name))}
-                            agents={state.present.workflow.agents}
-                            tools={state.present.workflow.tools}
-                            prompts={state.present.workflow.prompts}
-                            dataSources={dataSources}
-                            handleUpdate={(update) => { dispatchGuarded({ type: "update_agent", name: state.present.selection!.name, agent: update }); }}
-                            handleClose={handleUnselectAgent}
-                            useRag={useRag}
+                            messageSubscriber={updateChatMessages}
+                            onPanelClick={handlePlaygroundClick}
                             triggerCopilotChat={triggerCopilotChat}
-                            eligibleModels={eligibleModels === "*" ? "*" : eligibleModels.agentModels}
-                            onOpenDataSourcesModal={handleOpenDataSourcesModal}
-                        />}
-                        {state.present.selection?.type === "tool" && (() => {
-                            const selectedTool = state.present.workflow.tools.find(
-                                (tool) => tool.name === state.present.selection!.name
-                            );
-                            return <ToolConfig
-                                key={`${state.present.selection.name}-${configKey}`}
-                                tool={selectedTool!}
-                                usedToolNames={new Set([
-                                    ...state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name),
-                                ])}
-                                handleUpdate={(update) => { dispatchGuarded({ type: "update_tool", name: state.present.selection!.name, tool: update }); }}
-                                handleClose={handleUnselectTool}
-                            />;
-                        })()}
-                        {state.present.selection?.type === "prompt" && <PromptConfig
-                            key={`${state.present.selection.name}-${configKey}`}
-                            prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
-                            agents={state.present.workflow.agents}
-                            tools={state.present.workflow.tools}
-                            prompts={state.present.workflow.prompts}
-                            usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
-                            handleUpdate={(update) => { dispatchGuarded({ type: "update_prompt", name: state.present.selection!.name, prompt: update }); }}
-                            handleClose={handleUnselectPrompt}
-                        />}
-                        {state.present.selection?.type === "datasource" && <DataSourceConfig
-                            key={`${state.present.selection.name}-${configKey}`}
-                            dataSourceId={state.present.selection.name}
-                            handleClose={() => dispatch({ type: "unselect_datasource" })}
-                            onDataSourceUpdate={onDataSourcesUpdated}
-                        />}
-                        {state.present.selection?.type === "pipeline" && <PipelineConfig
-                            key={`${state.present.selection.name}-${configKey}`}
-                            projectId={projectId}
-                            workflow={state.present.workflow}
-                            pipeline={state.present.workflow.pipelines?.find((pipeline) => pipeline.name === state.present.selection!.name)!}
-                            usedPipelineNames={new Set((state.present.workflow.pipelines || []).filter((pipeline) => pipeline.name !== state.present.selection!.name).map((pipeline) => pipeline.name))}
-                            usedAgentNames={new Set(state.present.workflow.agents.map((agent) => agent.name))}
-                            agents={state.present.workflow.agents}
-                            pipelines={state.present.workflow.pipelines || []}
-                            handleUpdate={handleUpdatePipeline.bind(null, state.present.selection.name)}
-                            handleClose={() => dispatch({ type: "unselect_pipeline" })}
-                        />}
-                        {state.present.selection?.type === "visualise" && (
-                            <Panel 
-                                title={
-                                    <div className="flex items-center justify-between w-full">
-                                        <div className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                                            Agent Graph Visualizer
-                                        </div>
-                                        <CustomButton
-                                            variant="secondary"
-                                            size="sm"
-                                            onClick={handleHideVisualise}
-                                            showHoverContent={true}
-                                            hoverContent="Close"
-                                        >
-                                            <XIcon className="w-4 h-4" />
-                                        </CustomButton>
-                                    </div>
-                                }
-                            >
-                                <div className="h-full overflow-hidden">
-                                    <AgentGraphVisualizer workflow={state.present.workflow} />
+                            isLiveWorkflow={isLive}
+                            activePanel={activePanel}
+                            onTogglePanel={handleTogglePanel}
+                            onMessageSent={markPlaygroundTested}
+                        />
+                        {/* Config overlay above Playground when selection open */}
+                        {state.present.selection && viewMode !== 'two_agents_skipper' && (
+                            <div className="absolute inset-0 z-20">
+                                <div className="h-full overflow-auto">
+                                    {state.present.selection?.type === "agent" && <AgentConfig
+                                        key={`overlay-agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}-${configKey}`}
+                                        projectId={projectId}
+                                        workflow={state.present.workflow}
+                                        agent={state.present.workflow.agents.find((agent) => agent.name === state.present.selection!.name)!}
+                                        usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
+                                        usedPipelineNames={new Set((state.present.workflow.pipelines || []).map((pipeline) => pipeline.name))}
+                                        agents={state.present.workflow.agents}
+                                        tools={state.present.workflow.tools}
+                                        prompts={state.present.workflow.prompts}
+                                        dataSources={dataSources}
+                                        handleUpdate={(update) => { dispatchGuarded({ type: "update_agent", name: state.present.selection!.name, agent: update }); }}
+                                        handleClose={handleUnselectAgent}
+                                        useRag={useRag}
+                                        triggerCopilotChat={triggerCopilotChat}
+                                        eligibleModels={eligibleModels === "*" ? "*" : eligibleModels.agentModels}
+                                        onOpenDataSourcesModal={handleOpenDataSourcesModal}
+                                    />}
+                                    {state.present.selection?.type === "tool" && (() => {
+                                        const selectedTool = state.present.workflow.tools.find(
+                                            (tool) => tool.name === state.present.selection!.name
+                                        );
+                                        return <ToolConfig
+                                            key={`overlay-${state.present.selection.name}-${configKey}`}
+                                            tool={selectedTool!}
+                                            usedToolNames={new Set([
+                                                ...state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name),
+                                            ])}
+                                            handleUpdate={(update) => { dispatchGuarded({ type: "update_tool", name: state.present.selection!.name, tool: update }); }}
+                                            handleClose={handleUnselectTool}
+                                        />;
+                                    })()}
+                                    {state.present.selection?.type === "prompt" && <PromptConfig
+                                        key={`overlay-${state.present.selection.name}-${configKey}`}
+                                        prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
+                                        agents={state.present.workflow.agents}
+                                        tools={state.present.workflow.tools}
+                                        prompts={state.present.workflow.prompts}
+                                        usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
+                                        handleUpdate={(update) => { dispatchGuarded({ type: "update_prompt", name: state.present.selection!.name, prompt: update }); }}
+                                        handleClose={handleUnselectPrompt}
+                                    />}
+                                    {state.present.selection?.type === "datasource" && <DataSourceConfig
+                                        key={`overlay-${state.present.selection.name}-${configKey}`}
+                                        dataSourceId={state.present.selection.name}
+                                        handleClose={() => dispatch({ type: "unselect_datasource" })}
+                                        onDataSourceUpdate={onDataSourcesUpdated}
+                                    />}
+                                    {state.present.selection?.type === "pipeline" && <PipelineConfig
+                                        key={`overlay-${state.present.selection.name}-${configKey}`}
+                                        projectId={projectId}
+                                        workflow={state.present.workflow}
+                                        pipeline={state.present.workflow.pipelines?.find((pipeline) => pipeline.name === state.present.selection!.name)!}
+                                        usedPipelineNames={new Set((state.present.workflow.pipelines || []).filter((pipeline) => pipeline.name !== state.present.selection!.name).map((pipeline) => pipeline.name))}
+                                        usedAgentNames={new Set(state.present.workflow.agents.map((agent) => agent.name))}
+                                        agents={state.present.workflow.agents}
+                                        pipelines={state.present.workflow.pipelines || []}
+                                        handleUpdate={handleUpdatePipeline.bind(null, state.present.selection.name)}
+                                        handleClose={() => dispatch({ type: "unselect_pipeline" })}
+                                    />}
+                                    {state.present.selection?.type === "visualise" && (
+                                        <Panel title={<div className="flex items-center justify-between w-full"><div className="text-base font-semibold text-gray-900 dark:text-gray-100">Agent Graph Visualizer</div><CustomButton variant="secondary" size="sm" onClick={handleHideVisualise} showHoverContent={true} hoverContent="Close"><XIcon className="w-4 h-4" /></CustomButton></div>}>
+                                            <div className="h-full overflow-hidden">
+                                                <AgentGraphVisualizer workflow={state.present.workflow} />
+                                            </div>
+                                        </Panel>
+                                    )}
                                 </div>
-                            </Panel>
+                            </div>
                         )}
                     </ResizablePanel>
-                    {/* Second handle - between config and chat panels */}
-                    <ResizableHandle withHandle className={`w-[3px] bg-transparent ${(isLeftPanelCollapsed && !state.present.selection) ? 'hidden' : ''}`} />
-                    
-                    {/* ChatApp/Copilot Panel - always visible */}
-                    <ResizablePanel
-                        key={`chat-panel-${state.present.selection ? '3-pane' : '2-pane'}`}
-                        minSize={20}
-                        defaultSize={state.present.selection ? 30 : PANEL_RATIOS.chatApp + PANEL_RATIOS.copilot}
-                        className="overflow-auto"
-                    >
-                        <div className={(activePanel === 'playground') ? 'block h-full' : 'hidden h-full'}>
-                            <ChatApp
-                                key={'' + state.present.chatKey}
-                                projectId={projectId}
-                                workflow={state.present.workflow}
-                                messageSubscriber={updateChatMessages}
-                                onPanelClick={handlePlaygroundClick}
-                                triggerCopilotChat={triggerCopilotChat}
-                                isLiveWorkflow={isLive}
-                                activePanel={activePanel}
-                                onTogglePanel={handleTogglePanel}
-                                onMessageSent={markPlaygroundTested}
-                            />
-                        </div>
-                        <div className={(activePanel === 'copilot') ? 'block h-full' : 'hidden h-full'}>
-                            <Copilot
-                                ref={copilotRef}
-                                projectId={projectId}
-                                workflow={state.present.workflow}
-                                dispatch={dispatch}
-                                chatContext={
-                                    state.present.selection &&
-                                    (state.present.selection.type === "agent" ||
-                                     state.present.selection.type === "tool" ||
-                                     state.present.selection.type === "prompt")
-                                      ? {
-                                          type: state.present.selection.type,
-                                          name: state.present.selection.name
-                                        }
-                                      : chatMessages.length > 0
-                                        ? { type: 'chat', messages: chatMessages }
-                                        : undefined
-                                }
-                                isInitialState={isInitialState}
-                                dataSources={dataSources}
-                                activePanel={activePanel}
-                                onTogglePanel={handleTogglePanel}
-                            />
-                        </div>
+
+                    {/* Divider between playground and copilot when both visible */}
+                    {(viewMode === 'three_all' || viewMode === 'two_chat_skipper') && (
+                        <ResizableHandle withHandle className="w-[3px] bg-transparent" />
+                    )}
+
+                    {/* Copilot column - always mounted; hide via viewMode */}
+                    <ResizablePanel minSize={20} defaultSize={getPanelRatios(viewMode).copilot} id="copilot" order={viewMode === 'three_all' ? 3 : 2} className={`overflow-hidden relative ${viewMode === 'two_agents_chat' ? 'hidden' : ''}`}>
+                        <Copilot
+                            ref={copilotRef}
+                            projectId={projectId}
+                            workflow={state.present.workflow}
+                            dispatch={dispatch}
+                            chatContext={
+                                state.present.selection &&
+                                (state.present.selection.type === "agent" ||
+                                 state.present.selection.type === "tool" ||
+                                 state.present.selection.type === "prompt")
+                                  ? {
+                                      type: state.present.selection.type,
+                                      name: state.present.selection.name
+                                    }
+                                  : chatMessages.length > 0
+                                    ? { type: 'chat', messages: chatMessages }
+                                    : undefined
+                            }
+                            isInitialState={isInitialState}
+                            dataSources={dataSources}
+                            activePanel={activePanel}
+                            onTogglePanel={handleTogglePanel}
+                        />
+                        {/* Config overlay above Copilot when agents + skipper layout is active */}
+                        {state.present.selection && viewMode === 'two_agents_skipper' && (
+                            <div className="absolute inset-0 z-20">
+                                <div className="h-full overflow-auto">
+                                    {state.present.selection?.type === "agent" && <AgentConfig
+                                        key={`overlay2-agent-${state.present.workflow.agents.findIndex(agent => agent.name === state.present.selection!.name)}-${configKey}`}
+                                        projectId={projectId}
+                                        workflow={state.present.workflow}
+                                        agent={state.present.workflow.agents.find((agent) => agent.name === state.present.selection!.name)!}
+                                        usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
+                                        usedPipelineNames={new Set((state.present.workflow.pipelines || []).map((pipeline) => pipeline.name))}
+                                        agents={state.present.workflow.agents}
+                                        tools={state.present.workflow.tools}
+                                        prompts={state.present.workflow.prompts}
+                                        dataSources={dataSources}
+                                        handleUpdate={(update) => { dispatchGuarded({ type: "update_agent", name: state.present.selection!.name, agent: update }); }}
+                                        handleClose={handleUnselectAgent}
+                                        useRag={useRag}
+                                        triggerCopilotChat={triggerCopilotChat}
+                                        eligibleModels={eligibleModels === "*" ? "*" : eligibleModels.agentModels}
+                                        onOpenDataSourcesModal={handleOpenDataSourcesModal}
+                                    />}
+                                    {state.present.selection?.type === "tool" && (() => {
+                                        const selectedTool = state.present.workflow.tools.find(
+                                            (tool) => tool.name === state.present.selection!.name
+                                        );
+                                        return <ToolConfig
+                                            key={`overlay2-${state.present.selection.name}-${configKey}`}
+                                            tool={selectedTool!}
+                                            usedToolNames={new Set([
+                                                ...state.present.workflow.tools.filter((tool) => tool.name !== state.present.selection!.name).map((tool) => tool.name),
+                                            ])}
+                                            handleUpdate={(update) => { dispatchGuarded({ type: "update_tool", name: state.present.selection!.name, tool: update }); }}
+                                            handleClose={handleUnselectTool}
+                                        />;
+                                    })()}
+                                    {state.present.selection?.type === "prompt" && <PromptConfig
+                                        key={`overlay2-${state.present.selection.name}-${configKey}`}
+                                        prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
+                                        agents={state.present.workflow.agents}
+                                        tools={state.present.workflow.tools}
+                                        prompts={state.present.workflow.prompts}
+                                        usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
+                                        handleUpdate={(update) => { dispatchGuarded({ type: "update_prompt", name: state.present.selection!.name, prompt: update }); }}
+                                        handleClose={handleUnselectPrompt}
+                                    />}
+                                    {state.present.selection?.type === "datasource" && <DataSourceConfig
+                                        key={`overlay2-${state.present.selection.name}-${configKey}`}
+                                        dataSourceId={state.present.selection.name}
+                                        handleClose={() => dispatch({ type: "unselect_datasource" })}
+                                        onDataSourceUpdate={onDataSourcesUpdated}
+                                    />}
+                                    {state.present.selection?.type === "pipeline" && <PipelineConfig
+                                        key={`overlay2-${state.present.selection.name}-${configKey}`}
+                                        projectId={projectId}
+                                        workflow={state.present.workflow}
+                                        pipeline={state.present.workflow.pipelines?.find((pipeline) => pipeline.name === state.present.selection!.name)!}
+                                        usedPipelineNames={new Set((state.present.workflow.pipelines || []).filter((pipeline) => pipeline.name !== state.present.selection!.name).map((pipeline) => pipeline.name))}
+                                        usedAgentNames={new Set(state.present.workflow.agents.map((agent) => agent.name))}
+                                        agents={state.present.workflow.agents}
+                                        pipelines={state.present.workflow.pipelines || []}
+                                        handleUpdate={handleUpdatePipeline.bind(null, state.present.selection.name)}
+                                        handleClose={() => dispatch({ type: "unselect_pipeline" })}
+                                    />}
+                                    {state.present.selection?.type === "visualise" && (
+                                        <Panel title={<div className="flex items-center justify-between w-full"><div className="text-base font-semibold text-gray-900 dark:text-gray-100">Agent Graph Visualizer</div><CustomButton variant="secondary" size="sm" onClick={handleHideVisualise} showHoverContent={true} hoverContent="Close"><XIcon className="w-4 h-4" /></CustomButton></div>}>
+                                            <div className="h-full overflow-hidden">
+                                                <AgentGraphVisualizer workflow={state.present.workflow} />
+                                            </div>
+                                        </Panel>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </ResizablePanel>
+
                 </ResizablePanelGroup>
+                )}
                 {USE_PRODUCT_TOUR && showTour && (
                     <ProductTour
                         projectId={projectId}
@@ -1976,10 +2299,14 @@ export function WorkflowEditor({
                         forceStart
                         stepsOverride={[
                             { target: 'playground', title: 'Step 1/2', content: 'Chat with your assistant to test it. Send messages, watch tool calls in action, and debug agent flows.' },
-                            { target: 'copilot', title: 'Step 2/2', content: 'Ask Copilot to improve your agents based on test results. Use “Fix” and “Explain” to iterate quickly.' },
+                            { target: 'copilot', title: 'Step 2/2', content: 'Ask Copilot to improve your agents based on test results. Use "Fix" and "Explain" to iterate quickly.' },
                         ]}
                         onStepChange={(index) => {
-                            if (index === 0) setActivePanel('playground');
+                            if (index === 0) {
+                                // Ensure Chat is focused and any middle-pane detail overlay is dismissed
+                                setActivePanel('playground');
+                                dispatch({ type: 'unselect_agent' });
+                            }
                             if (index === 1) setActivePanel('copilot');
                         }}
                         onComplete={() => setShowTestTour(false)}
@@ -1997,21 +2324,16 @@ export function WorkflowEditor({
                             { target: 'conversations', title: 'Step 5/5', content: 'Conversations: see all past interactions in one place, including manual chats, trigger activity, and API calls.' },
                         ]}
                         onStepChange={(index) => {
-                            if (index === 0) setActivePanel('playground');
+                            if (index === 0) {
+                                // Ensure Chat is focused and any middle-pane detail overlay is dismissed
+                                setActivePanel('playground');
+                                dispatch({ type: 'unselect_agent' });
+                            }
                         }}
                         onComplete={() => setShowUseTour(false)}
                     />
                 )}
-                {showPublishTour && (
-                    <ProductTour
-                        projectId={projectId}
-                        forceStart
-                        stepsOverride={[
-                            { target: 'deploy', title: 'Publish', content: 'Click Publish to make your workflow live, enabling triggers and API/SDK access. You can revert to a draft at any time.' },
-                        ]}
-                        onComplete={() => setShowPublishTour(false)}
-                    />
-                )}
+                
                 
                 {/* Revert to Live Confirmation Modal */}
                 <Modal isOpen={isRevertModalOpen} onClose={onRevertModalClose}>

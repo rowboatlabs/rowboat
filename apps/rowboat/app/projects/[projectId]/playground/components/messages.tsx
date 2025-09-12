@@ -2,6 +2,7 @@
 import { Spinner } from "@heroui/react";
 import { useMemo, useState } from "react";
 import z from "zod";
+import Image from "next/image";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { WorkflowTool } from "@/app/lib/types/workflow_types";
 import MarkdownContent from "@/app/lib/components/markdown-content";
@@ -179,7 +180,7 @@ function AssistantMessage({
                         />
                     )}
                 </div>
-                <div className="text-sm leading-relaxed text-gray-800 dark:text-gray-100 animate-slideUpAndFade">
+                <div className="text-sm leading-relaxed text-gray-800 dark:text-gray-100 animate-slideUpAndFade pl-1">
                     <div className="flex flex-col gap-2">
                         <div className="text-left">
                             <MarkdownContent content={content} />
@@ -200,10 +201,13 @@ function AssistantMessage({
                                             >
                                                 <DownloadIcon size={16} className="text-gray-700 dark:text-gray-200" />
                                             </a>
-                                            <img
+                                            <Image
                                                 src={src}
                                                 alt={`Image ${i+1}`}
                                                 className="max-h-80 max-w-full object-contain rounded"
+                                                width={800}
+                                                height={320}
+                                                style={{ objectFit: 'contain' }}
                                             />
                                             {img.truncated && (
                                                 <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
@@ -225,15 +229,14 @@ function AssistantMessage({
     );
 }
 
-function AssistantMessageLoading() {
+function TypingIndicator() {
     return (
-        <div className="self-start flex flex-col gap-1 my-5">
-            <div className="max-w-[85%] inline-block">
-                <div className="bg-gray-50 dark:bg-gray-800 px-4 py-2.5 
-                    rounded-lg border border-gray-200 dark:border-gray-700
-                    shadow-sm animate-slideUpAndFade min-h-[2.5rem] flex items-center gap-2">
-                    <Spinner size="sm" />
-                    <span className="text-sm text-gray-600 dark:text-gray-400">Generating...</span>
+        <div className="flex justify-start items-center my-4 px-1">
+            <div className="flex items-center gap-1">
+                <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                 </div>
             </div>
         </div>
@@ -526,10 +529,13 @@ function ClientToolCall({
                                             >
                                                 <DownloadIcon size={16} className="text-gray-700 dark:text-gray-200" />
                                             </a>
-                                            <img
+                                            <Image
                                                 src={src}
                                                 alt={`Tool image ${i+1}`}
                                                 className="max-h-64 max-w-full object-contain rounded"
+                                                width={800}
+                                                height={256}
+                                                style={{ objectFit: 'contain' }}
                                             />
                                             {img.truncated && (
                                                 <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
@@ -618,10 +624,13 @@ function ClientToolCall({
                                     <div className="flex flex-wrap gap-3">
                                         {imagePreviews.map((img, i) => (
                                             <div key={i} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-zinc-900">
-                                                <img
+                                                <Image
                                                     src={img.url ? img.url : `data:${img.mimeType};base64,${img.dataBase64}`}
                                                     alt={`Tool image ${i+1}`}
                                                     className="max-h-64 max-w-full object-contain rounded"
+                                                    width={800}
+                                                    height={256}
+                                                    style={{ objectFit: 'contain' }}
                                                 />
                                                 {img.truncated && (
                                                     <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
@@ -948,7 +957,7 @@ export function Messages({
                 }
                 return null;
             })}
-            {loadingAssistantResponse && <AssistantMessageLoading />}
+            {loadingAssistantResponse && <TypingIndicator />}
         </div>
     );
 }
