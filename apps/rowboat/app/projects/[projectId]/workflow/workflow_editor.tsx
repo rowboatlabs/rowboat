@@ -2019,7 +2019,7 @@ export function WorkflowEditor({
                     )}
                 </ResizablePanelGroup>
                 ) : (
-                <ResizablePanelGroup key={`main-${viewMode}`} direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
+                <ResizablePanelGroup key="main" direction="horizontal" className="flex-1 flex overflow-auto gap-1 rounded-xl bg-zinc-50 dark:bg-zinc-900">
                     {/* Agents (Entity List) column */}
                     {(viewMode !== 'two_chat_skipper') && (
                     <ResizablePanel 
