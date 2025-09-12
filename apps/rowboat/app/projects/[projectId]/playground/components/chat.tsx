@@ -400,8 +400,8 @@ export function Chat({
                         messages={[
                             {
                                 role: 'assistant',
-                                content: 'Hi, how can I help you today?',
-                                agentName: 'Assistant',
+                                content: workflow.prompts.find(p => p.type === 'greeting')?.prompt || 'Hi, how can I help you today?',
+                                agentName: workflow.startAgent,
                                 responseType: 'external',
                             },
                             ...optimisticMessages,
