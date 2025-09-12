@@ -8,7 +8,7 @@ import clsx from 'clsx';
 import Image from 'next/image';
 import mascotImage from '@/public/mascot.png';
 import { Button } from "@/components/ui/button";
-import { Upload, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { TextareaWithSend } from "@/app/components/ui/textarea-with-send";
 import { Workflow } from '../../lib/types/workflow_types';
 import { PictureImg } from '@/components/ui/picture-img';
@@ -17,7 +17,7 @@ import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import Link from 'next/link';
 
-const SHOW_PREBUILT_CARDS = process.env.NEXT_PUBLIC_SHOW_PREBUILT_CARDS === 'true';
+const SHOW_PREBUILT_CARDS = process.env.NEXT_PUBLIC_SHOW_PREBUILT_CARDS !== 'false';
 
 
 
@@ -63,6 +63,7 @@ export function BuildAssistantSection() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [autoCreateLoading, setAutoCreateLoading] = useState(false);
+    const [loadingTemplateId, setLoadingTemplateId] = useState<string | null>(null);
 
     const totalPages = Math.ceil(projects.length / ITEMS_PER_PAGE);
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -107,7 +108,22 @@ export function BuildAssistantSection() {
 
     // Handle template selection
     const handleTemplateSelect = async (templateId: string) => {
-        await createProjectFromTemplate(templateId, router);
+        // Show a small non-blocking spinner on the clicked card
+        setLoadingTemplateId(templateId);
+        try {
+            await createProjectWithOptions({
+                template: templateId,
+                prompt: 'Explain this workflow',
+                router,
+                onError: () => {
+                    // Clear loading state if creation fails
+                    setLoadingTemplateId(null);
+                },
+            });
+        } catch (_err) {
+            // In case of unexpected error, clear loading state
+            setLoadingTemplateId(null);
+        }
     };
 
     // Handle prompt card selection
@@ -140,23 +156,54 @@ export function BuildAssistantSection() {
     useEffect(() => {
         const urlPrompt = searchParams.get('prompt');
         const urlTemplate = searchParams.get('template');
+        const sharedId = searchParams.get('shared');
+        const importUrl = searchParams.get('importUrl');
 
-        if (urlPrompt || urlTemplate) {
-            setAutoCreateLoading(true);
-            createProjectWithOptions({
-                template: urlTemplate || undefined,
-                prompt: urlPrompt || undefined,
-                router,
-                onError: (error) => {
-                    console.error('Error auto-creating project:', error);
-                    setAutoCreateLoading(false);
-                    // Fall back to showing the form with the prompt pre-filled
-                    if (urlPrompt) {
-                        setUserPrompt(urlPrompt);
+        const run = async () => {
+            if (sharedId || importUrl) {
+                try {
+                    setAutoCreateLoading(true);
+                    const qs = sharedId ? `id=${encodeURIComponent(sharedId)}` : `url=${encodeURIComponent(importUrl!)}`;
+                    const resp = await fetch(`/api/shared-workflow?${qs}`, { cache: 'no-store' });
+                    if (!resp.ok) {
+                        const data = await resp.json().catch(() => ({}));
+                        throw new Error(data.error || `Failed to load shared workflow (${resp.status})`);
                     }
+                    const workflowObj = await resp.json();
+                    await createProjectFromJsonWithOptions({
+                        workflowJson: JSON.stringify(workflowObj),
+                        router,
+                        onError: (error) => {
+                            console.error('Error creating project from shared workflow:', error);
+                            setAutoCreateLoading(false);
+                        }
+                    });
+                    return;
+                } catch (err) {
+                    console.error('Error auto-importing shared workflow:', err);
+                    setAutoCreateLoading(false);
                 }
-            });
-        }
+            }
+
+            if (urlPrompt || urlTemplate) {
+                setAutoCreateLoading(true);
+                createProjectWithOptions({
+                    template: urlTemplate || undefined,
+                    prompt: urlPrompt || undefined,
+                    router,
+                    onError: (error) => {
+                        console.error('Error auto-creating project:', error);
+                        setAutoCreateLoading(false);
+                        // Fall back to showing the form with the prompt pre-filled
+                        if (urlPrompt) {
+                            setUserPrompt(urlPrompt);
+                        }
+                    }
+                });
+            }
+        };
+
+        run();
     }, [searchParams, router]);
 
     const handleCreateAssistant = async () => {
@@ -276,6 +323,9 @@ export function BuildAssistantSection() {
                                                             setPromptError(null);
                                                         }}
                                                         onSubmit={handleCreateAssistant}
+                                                        onImportJson={handleImportJsonClick}
+                                                        isImporting={importLoading}
+                                                        importDisabled={importLoading}
                                                         isSubmitting={isCreating}
                                                         placeholder="Example: Build me an assistant to manage my email and calendar..."
                                                         className={clsx(
@@ -287,7 +337,7 @@ export function BuildAssistantSection() {
                                                             promptError && "border-red-500 focus:ring-red-500/20",
                                                             !userPrompt && "animate-pulse border-2 border-indigo-500/40 dark:border-indigo-400/40 shadow-lg shadow-indigo-500/20 dark:shadow-indigo-400/20"
                                                         )}
-                                                        rows={3}
+                                                        rows={4}
                                                         autoFocus
                                                         autoResize
                                                     />
@@ -298,40 +348,7 @@ export function BuildAssistantSection() {
                                                     )}
                                                 </div>
 
-                                                {/* Separation line with OR */}
-                                                <div className="relative my-3">
-                                                    <div className="absolute inset-0 flex items-center">
-                                                        <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
-                                                    </div>
-                                                    <div className="relative flex justify-center text-sm">
-                                                        <span className="bg-white dark:bg-gray-800 px-3 text-gray-500 dark:text-gray-400">OR</span>
-                                                    </div>
-                                                </div>
-
-                                                {/* Action buttons */}
-                                                <div className="flex gap-3 justify-start">
-                                                    <Button
-                                                        variant="primary"
-                                                        size="sm"
-                                                        onClick={handleImportJsonClick}
-                                                        type="button"
-                                                        startContent={<Upload size={14} />}
-                                                        className="bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600"
-                                                        disabled={importLoading}
-                                                    >
-                                                        {importLoading ? 'Importing...' : 'Import JSON'}
-                                                    </Button>
-                                                    <Button
-                                                        variant="primary"
-                                                        size="sm"
-                                                        onClick={handleCreateAssistant}
-                                                        isLoading={isCreating}
-                                                        type="button"
-                                                        className="bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600"
-                                                    >
-                                                        Go to Builder
-                                                    </Button>
-                                                </div>
+                                                {/* Removed separation line and secondary action per request */}
 
                                                 {importError && (
                                                     <p className="text-sm text-red-500 mt-2">
@@ -452,8 +469,11 @@ export function BuildAssistantSection() {
                         <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700">
                             <div className="text-left mb-6">
                                 <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                                    Pre-built Assistants
+                                    Prebuilt Assistants
                                 </h2>
+                                <p className="text-sm text-gray-600 dark:text-gray-400">
+                                    Start quickly and let Skipper adapt it to your needs.
+                                </p>
                             </div>
                             {templatesLoading ? (
                                 <div className="flex items-center justify-center py-12 text-sm text-gray-500 dark:text-gray-400">
@@ -468,60 +488,123 @@ export function BuildAssistantSection() {
                                     No pre-built assistants available
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {templates.map((template) => (
-                                        <button
-                                            key={template.id}
-                                            onClick={() => handleTemplateSelect(template.id)}
-                                            className="block p-4 border border-gray-200 dark:border-gray-700 rounded-xl hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all group hover:shadow-md text-left"
-                                        >
-                                            <div className="space-y-2">
-                                                <div className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1">
-                                                    {template.name}
-                                                </div>
-                                                <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-                                                    {template.description}
-                                                </div>
+                                (() => {
+                                    const workTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'work productivity');
+                                    const devTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'developer productivity');
+                                    const newsTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'news & social');
+                                    const customerSupportTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'customer support');
 
-                                                {/* Tool logos */}
-                                                {(() => {
-                                                    const tools = getUniqueTools(template);
-                                                    return tools.length > 0 && (
-                                                        <div className="flex items-center gap-2 mt-2">
-                                                            <div className="text-xs text-gray-400 dark:text-gray-500">
-                                                                Tools:
-                                                            </div>
-                                                            <div className="flex items-center gap-1">
-                                                                {tools.slice(0, 4).map((tool) => (
-                                                                    tool.logo && (
-                                                                        <PictureImg
-                                                                            key={tool.name}
-                                                                            src={tool.logo}
-                                                                            alt={`${tool.name} logo`}
-                                                                            className="w-4 h-4 rounded-sm object-cover flex-shrink-0"
-                                                                            title={tool.name}
-                                                                        />
-                                                                    )
-                                                                ))}
-                                                                {tools.length > 4 && (
-                                                                    <span className="text-xs text-gray-400 dark:text-gray-500">
-                                                                        +{tools.length - 4}
-                                                                    </span>
-                                                                )}
-                                                            </div>
+                                    const renderGrid = (items: any[]) => (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                            {items.map((template) => (
+                                                <button
+                                                    key={template.id}
+                                                    onClick={() => handleTemplateSelect(template.id)}
+                                                    disabled={loadingTemplateId === template.id}
+                                                    className={clsx(
+                                                        "relative block p-4 border border-gray-200 dark:border-gray-700 rounded-xl transition-all group text-left",
+                                                        "hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:shadow-md",
+                                                        loadingTemplateId === template.id && "opacity-90 cursor-not-allowed"
+                                                    )}
+                                                >
+                                                    <div className="space-y-2">
+                                                        <div className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1">
+                                                            {template.name}
                                                         </div>
-                                                    );
-                                                })()}
+                                                        <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                                                            {template.description}
+                                                        </div>
 
-                                                <div className="flex items-center justify-between mt-2">
-                                                    <div className="text-xs text-gray-400 dark:text-gray-500">
+                                                        {(() => {
+                                                            const tools = getUniqueTools(template);
+                                                            return tools.length > 0 && (
+                                                                <div className="flex items-center gap-2 mt-2">
+                                                                    <div className="text-xs text-gray-400 dark:text-gray-500">
+                                                                        Tools:
+                                                                    </div>
+                                                                    <div className="flex items-center gap-1">
+                                                                        {tools.slice(0, 4).map((tool) => (
+                                                                            tool.logo && (
+                                                                                <PictureImg
+                                                                                    key={tool.name}
+                                                                                    src={tool.logo}
+                                                                                    alt={`${tool.name} logo`}
+                                                                                    className="w-4 h-4 rounded-sm object-cover flex-shrink-0"
+                                                                                    title={tool.name}
+                                                                                />
+                                                                            )
+                                                                        ))}
+                                                                        {tools.length > 4 && (
+                                                                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                                                                                +{tools.length - 4}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
+
+                                                        <div className="flex items-center justify-between mt-2">
+                                                            <div className="text-xs text-gray-400 dark:text-gray-500"></div>
+                                                            {loadingTemplateId === template.id ? (
+                                                                <div className="text-blue-600 dark:text-blue-400">
+                                                                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="w-2 h-2 rounded-full bg-blue-500 opacity-75"></div>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                    <div className="w-2 h-2 rounded-full bg-blue-500 opacity-75"></div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    );
+
+                                    return (
+                                        <div className="space-y-8">
+                                            {workTemplates.length > 0 && (
+                                                <div>
+                                                    <div className="mb-3">
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-400/10 dark:text-amber-300 dark:ring-amber-400/30">
+                                                            Work Productivity
+                                                        </span>
+                                                    </div>
+                                                    {renderGrid(workTemplates)}
                                                 </div>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
+                                            )}
+                                            {devTemplates.length > 0 && (
+                                                <div>
+                                                    <div className="mb-3">
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 dark:bg-indigo-400/10 dark:text-indigo-300 dark:ring-indigo-400/30">
+                                                            Developer Productivity
+                                                        </span>
+                                                    </div>
+                                                    {renderGrid(devTemplates)}
+                                                </div>
+                                            )}
+                                            {newsTemplates.length > 0 && (
+                                                <div>
+                                                    <div className="mb-3">
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-50 text-green-700 ring-1 ring-green-200 dark:bg-green-400/10 dark:text-green-300 dark:ring-green-400/30">
+                                                            News & Social
+                                                        </span>
+                                                    </div>
+                                                    {renderGrid(newsTemplates)} 
+                                                </div>
+                                            )}
+                                            {customerSupportTemplates.length > 0 && (
+                                                <div>
+                                                    <div className="mb-3">
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-400/10 dark:text-red-300 dark:ring-red-400/30">
+                                                            Customer Support
+                                                        </span>
+                                                    </div>
+                                                    {renderGrid(customerSupportTemplates)}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()
                             )}
                         </div>
                     </div>

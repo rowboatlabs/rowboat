@@ -1,0 +1,469 @@
+{
+  "category": "Work Productivity",
+  "agents": [
+    {
+      "name": "Recruitment HR Bot",
+      "type": "conversation",
+      "description": "Hub agent to orchestrate interview scheduling with candidates from a Google Sheet.",
+      "instructions": "## 🧑‍💼 Role:\nYou are the Recruitment HR Bot, responsible for orchestrating the process of scheduling interviews with candidates from a Google Sheet and updating their status, or handling calendar event RSVPs.\n\n---\n## ⚙️ Steps to Follow:\n1. Greet the user.\n2. **IF** the input is a calendar event RSVP (e.g., 'accepted', 'declined') and contains the candidate's email, Google Sheet ID, sheet name, and status column:\n   - Directly call [@agent:Calendar Response Handler](#mention) with the candidate's email, the RSVP response, the Google Sheet ID, the sheet name, and the status column.\n   - Inform the user that the calendar response has been processed.\n3. **ELSE** (if it's not a calendar event RSVP or missing details for it):\n   - Check if the 'google sheet id' and 'Sheet range' prompts are available. If so, use their values. Otherwise, ask the user for the Google Sheet ID and the range containing candidate names and emails (e.g., 'Sheet1!A2:B').\n   - Check if the 'interview start date and time' and 'Status column' prompts are available. If so, use their values. Otherwise, ask for the desired start date and time for interviews (e.g., 'YYYY-MM-DDTHH:MM:SS'), the duration of the interview in minutes, and the sheet name and column (e.g., 'Sheet1!C') where the interview status should be updated.\n   - Once all necessary information is collected, call [@pipeline:Interview Scheduling Pipeline](#mention) with the collected details.\n   - Inform the user when the interview scheduling process is complete.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Orchestrating the workflow for fetching candidates, scheduling interviews, and updating sheet status.\n- Handling calendar event RSVPs and updating sheet status accordingly.\n\n❌ Out of Scope:\n- Directly fetching candidate data, scheduling interviews, or updating sheet status (handled by pipeline agents).\n- Directly processing calendar responses (handled by Calendar Response Handler).\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Prioritize handling calendar event RSVPs if the necessary information is present.\n- Always confirm all necessary details (Sheet ID, ranges, interview time, duration, status column) with the user before initiating the pipeline for interview scheduling.\n- Ensure all steps are completed in sequence.\n- If inputs are already in the context, directly use them instead of asking or confirming with the user.\n\n🚫 Don'ts:\n- Do not perform data fetching, scheduling, or status updates directly.\n- Do not skip any step in the workflow.\n- Do not mention internal agent names to the user.\n- Do not say 'connecting you to another agent'.\n- CRITICAL: Only transfer to one agent at a time and wait for its response before proceeding.\n\n---\n## 📥 Inputs:\n- **Google Sheet ID**: The unique identifier of the Google Spreadsheet containing candidate data. (e.g., '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms')\n- **Sheet Range**: The range in A1 notation (e.g., 'Sheet1!A2:B') containing candidate names and emails.\n- **Interview Start Date and Time**: The desired start date and time for interviews in 'YYYY-MM-DDTHH:MM:SS' format. Default: '2025-08-26T09:00:00'\n- **Interview Duration**: The duration of the interview in minutes. Default: 30\n- **Status Column**: The sheet name and column (e.g., 'Sheet1!C') where the interview status should be updated.",
+      "examples": "- **User** : I want to schedule interviews for candidates from a Google Sheet.\n - **Agent response**: Sure! Please provide the desired start date and time for interviews (e.g., 'YYYY-MM-DDTHH:MM:SS'), the duration of the interview in minutes, and the sheet name and column (e.g., 'Sheet1!C') where the interview status should be updated.\n\n- **User** : Start Time: 2024-09-01T10:00:00, Duration: 30, Status Column: Sheet1!C\n - **Agent actions**: Call [@pipeline:Interview Scheduling Pipeline](#mention)\n\n- **Agent receives pipeline completion** :\n - **Agent response**: The interview scheduling process is complete.\n\n- **User** : Candidate [candidate_email] has accepted the interview. Sheet ID: [sheet_id], Sheet Name: [sheet_name], Status Column: [status_column]\n - **Agent actions**: Call [@agent:Calendar Response Handler](#mention)\n\n- **Agent receives Calendar Response Handler completion** :\n - **Agent response**: The calendar response has been processed and the sheet updated.",
+      "model": "google/gemini-2.5-flash",
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "user_facing",
+      "controlType": "retain"
+    },
+    {
+      "name": "Pipeline Step 1 - Fetch Candidates",
+      "type": "pipeline",
+      "description": "Reads candidate names and emails from a specified Google Sheet range.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nFetch candidate names and emails from the provided Google Sheet and ranges.\n\n---\n## ⚙️ Steps to Follow:\n1. Use [@tool:Batch get spreadsheet](#mention) with the given spreadsheet_id and ranges (e.g., 'Sheet1!A2:B').\n2. Return a normalized array of { name, email } objects.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Fetching rows from Google Sheets and returning structured data.\n\n❌ Out of Scope:\n- Scheduling interviews or updating sheet status.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Validate rows and skip empties.\n🚫 Don'ts:\n- Do not schedule interviews or update sheet status.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Pipeline Step 2 - Schedule Interview",
+      "type": "pipeline",
+      "description": "Schedules an interview for each candidate using Google Calendar.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nSchedule an interview for each candidate.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive a list of { name, email } objects from the previous step.\n2. For each candidate, use [@tool:Create Event](#mention) to schedule an interview. The event summary should be 'Interview with [Candidate Name]', and the attendee should be the candidate's email. You will need to ask the user for the start_datetime and duration of the interview.\n3. Return a list of { candidate_email, status: 'scheduled' } for each successfully scheduled interview.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Scheduling interviews on Google Calendar.\n\n❌ Out of Scope:\n- Fetching candidate data or updating sheet status.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure all required fields for event creation are provided.\n🚫 Don'ts:\n- Do not fetch candidate data or update sheet status.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Pipeline Step 3 - Update Sheet Status",
+      "type": "pipeline",
+      "description": "Updates the status column in the Google Sheet to 'interview scheduled' for each candidate.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nUpdate the status column in the Google Sheet for scheduled interviews.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive a list of { candidate_email, status: 'scheduled' } objects from the previous step.\n2. For each candidate, use [@tool:Batch update spreadsheet](#mention) to update the corresponding row in the Google Sheet. You will need to ask the user for the spreadsheet_id, sheet_name, and the column where the status needs to be updated.\n3. The value to be updated should be 'invite sent'.\n4. Return a confirmation of the updates.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Updating the status column in the Google Sheet.\n\n❌ Out of Scope:\n- Fetching candidate data or scheduling interviews.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure the correct row and column are updated.\n🚫 Don'ts:\n- Do not fetch candidate data or schedule interviews.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Interview Scheduling Pipeline Step 1",
+      "type": "pipeline",
+      "description": "",
+      "disabled": false,
+      "instructions": "",
+      "model": "gpt-4o",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Calendar Response Handler",
+      "type": "conversation",
+      "description": "Handles calendar accept/reject responses and updates the Google Sheet status accordingly.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nProcess calendar responses (accept/reject) and update the Google Sheet with the appropriate interview status.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the candidate's email, the calendar response (e.g., 'accepted', 'declined'), the Google Sheet ID, the sheet name, and the column where the status needs to be updated.\n2. If the response is 'accepted', set the status to 'interview scheduled'.\n3. If the response is 'declined', set the status to 'declined'.\n4. Use [@tool:Batch update spreadsheet](#mention) to update the corresponding row in the Google Sheet with the determined status.\n5. Return a confirmation of the update.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Interpreting calendar responses and updating the Google Sheet status.\n\n❌ Out of Scope:\n- Scheduling interviews or fetching candidate data.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Accurately map calendar responses to interview statuses.\n- Ensure the correct row and column are updated in the Google Sheet.\n🚫 Don'ts:\n- Do not interact with the user directly.\n- Do not schedule interviews.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    }
+  ],
+  "prompts": [
+    {
+      "name": "google sheet id",
+      "type": "base_prompt",
+      "prompt": "<please add>"
+    },
+    {
+      "name": "Sheet range",
+      "type": "base_prompt",
+      "prompt": "<please add>"
+    },
+    {
+      "name": "interview start date and time",
+      "type": "base_prompt",
+      "prompt": "<please add>"
+    },
+    {
+      "name": "Status column",
+      "type": "base_prompt",
+      "prompt": "<please add>"
+    }
+  ],
+  "tools": [
+    {
+      "name": "Batch get spreadsheet",
+      "description": "Retrieves data from specified cell ranges in a google spreadsheet; ensure the spreadsheet has at least one worksheet and any explicitly referenced sheet names in ranges exist.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "ranges": {
+            "description": "A list of cell ranges in A1 notation (e.g., 'Sheet1!A1:B2', 'A1:C5') from which to retrieve data. If this list is omitted or empty, all data from the first sheet of the spreadsheet will be fetched. A range can specify a sheet name (e.g., 'Sheet2!A:A'); if no sheet name is provided in a range string (e.g., 'A1:B2'), it defaults to the first sheet.",
+            "examples": [
+              "Sheet1!A1:B2",
+              "Sheet1!A:A",
+              "Sheet1!1:2",
+              "Sheet1!A5:A",
+              "A1:B2"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ranges",
+            "type": "array"
+          },
+          "spreadsheet_id": {
+            "description": "The unique identifier of the Google Spreadsheet from which data will be retrieved.",
+            "title": "Spreadsheet Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spreadsheet_id"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GOOGLESHEETS_BATCH_GET",
+        "noAuth": false,
+        "toolkitName": "googlesheets",
+        "toolkitSlug": "googlesheets",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/google-sheets.svg"
+      }
+    },
+    {
+      "name": "Create Event",
+      "description": "Creates an event on a google calendar, needing rfc3339 utc start/end times (end after start) and write access to the calendar. by default, adds the organizer as an attendee unless exclude organizer is set to true.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "attendees": {
+            "default": null,
+            "description": "List of attendee emails (strings).",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "title": "Attendees",
+            "type": "array"
+          },
+          "calendar_id": {
+            "default": "primary",
+            "description": "Target calendar: 'primary' for the user's main calendar, or the calendar's email address.",
+            "examples": [
+              "primary",
+              "user@example.com",
+              "abcdefghijklmnopqrstuvwxyz@group.calendar.google.com"
+            ],
+            "title": "Calendar Id",
+            "type": "string"
+          },
+          "create_meeting_room": {
+            "default": null,
+            "description": "If true, a Google Meet link is created and added to the event. CRITICAL: As of 2024, this REQUIRES a paid Google Workspace account ($13+/month). Personal Gmail accounts will fail with 'Invalid conference type value' error. Solutions: 1) Upgrade to Workspace, 2) Use domain-wide delegation with Workspace user, 3) Use the new Google Meet REST API, or 4) Create events without conferences. See https://github.com/googleapis/google-api-nodejs-client/issues/3234",
+            "nullable": true,
+            "title": "Create Meeting Room",
+            "type": "boolean"
+          },
+          "description": {
+            "default": null,
+            "description": "Description of the event. Can contain HTML. Optional.",
+            "nullable": true,
+            "title": "Description",
+            "type": "string"
+          },
+          "eventType": {
+            "default": "default",
+            "description": "Type of the event, immutable post-creation. Currently, only 'default' and 'workingLocation' can be created.",
+            "enum": [
+              "default",
+              "outOfOffice",
+              "focusTime",
+              "workingLocation"
+            ],
+            "title": "Event Type",
+            "type": "string"
+          },
+          "event_duration_hour": {
+            "default": 0,
+            "description": "Number of hours (0-24). Increase by 1 here rather than passing 60 in `event_duration_minutes`",
+            "maximum": 24,
+            "minimum": 0,
+            "title": "Event Duration Hour",
+            "type": "integer"
+          },
+          "event_duration_minutes": {
+            "default": 30,
+            "description": "Duration in minutes (0-59 ONLY). NEVER use 60+ minutes - use event_duration_hour=1 instead. Maximum value is 59.",
+            "maximum": 59,
+            "minimum": 0,
+            "title": "Event Duration Minutes",
+            "type": "integer"
+          },
+          "exclude_organizer": {
+            "default": false,
+            "description": "If True, the organizer will NOT be added as an attendee. Default is False (organizer is included).",
+            "title": "Exclude Organizer",
+            "type": "boolean"
+          },
+          "guestsCanInviteOthers": {
+            "default": null,
+            "description": "Whether attendees other than the organizer can invite others to the event.",
+            "nullable": true,
+            "title": "Guests Can Invite Others",
+            "type": "boolean"
+          },
+          "guestsCanSeeOtherGuests": {
+            "default": null,
+            "description": "Whether attendees other than the organizer can see who the event's attendees are.",
+            "nullable": true,
+            "title": "Guests Can See Other Guests",
+            "type": "boolean"
+          },
+          "guests_can_modify": {
+            "default": false,
+            "description": "If True, guests can modify the event.",
+            "title": "Guests Can Modify",
+            "type": "boolean"
+          },
+          "location": {
+            "default": null,
+            "description": "Geographic location of the event as free-form text.",
+            "nullable": true,
+            "title": "Location",
+            "type": "string"
+          },
+          "recurrence": {
+            "default": null,
+            "description": "List of RRULE, EXRULE, RDATE, EXDATE lines for recurring events. Supported frequencies are DAILY, WEEKLY, MONTHLY, YEARLY.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "title": "Recurrence",
+            "type": "array"
+          },
+          "send_updates": {
+            "default": null,
+            "description": "Defaults to True. Whether to send updates to the attendees.",
+            "nullable": true,
+            "title": "Send Updates",
+            "type": "boolean"
+          },
+          "start_datetime": {
+            "description": "Naive date/time (YYYY-MM-DDTHH:MM:SS) with NO offsets or Z. e.g. '2025-01-16T13:00:00'",
+            "title": "Start Datetime",
+            "type": "string"
+          },
+          "summary": {
+            "default": null,
+            "description": "Summary (title) of the event.",
+            "nullable": true,
+            "title": "Summary",
+            "type": "string"
+          },
+          "timezone": {
+            "default": null,
+            "description": "IANA timezone name (e.g., 'America/New_York'). Required if datetime is naive. If datetime includes timezone info (Z or offset), this field is optional and defaults to UTC.",
+            "nullable": true,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "transparency": {
+            "default": "opaque",
+            "description": "'opaque' (busy) or 'transparent' (available).",
+            "enum": [
+              "opaque",
+              "transparent"
+            ],
+            "title": "Transparency",
+            "type": "string"
+          },
+          "visibility": {
+            "default": "default",
+            "description": "Event visibility: 'default', 'public', 'private', or 'confidential'.",
+            "enum": [
+              "default",
+              "public",
+              "private",
+              "confidential"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start_datetime"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GOOGLECALENDAR_CREATE_EVENT",
+        "noAuth": false,
+        "toolkitName": "googlecalendar",
+        "toolkitSlug": "googlecalendar",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/google-calendar.svg"
+      }
+    },
+    {
+      "name": "Batch update spreadsheet",
+      "description": "Updates a specified range in a google sheet with given values, or appends them as new rows if `first cell location` is omitted; ensure the target sheet exists and the spreadsheet contains at least one worksheet.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "first_cell_location": {
+            "description": "The starting cell for the update range, specified in A1 notation (e.g., 'A1', 'B2'). The update will extend from this cell to the right and down, based on the provided values. If omitted, values are appended to the sheet.",
+            "examples": [
+              "A1",
+              "D3"
+            ],
+            "title": "First Cell Location",
+            "type": "string"
+          },
+          "includeValuesInResponse": {
+            "default": false,
+            "description": "If set to True, the response will include the updated values from the spreadsheet.",
+            "examples": [
+              true,
+              false
+            ],
+            "title": "Include Values In Response",
+            "type": "boolean"
+          },
+          "sheet_name": {
+            "description": "The name of the specific sheet within the spreadsheet to update.",
+            "examples": [
+              "Sheet1"
+            ],
+            "title": "Sheet Name",
+            "type": "string"
+          },
+          "spreadsheet_id": {
+            "description": "The unique identifier of the Google Sheets spreadsheet to be updated.",
+            "examples": [
+              "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
+            ],
+            "title": "Spreadsheet Id",
+            "type": "string"
+          },
+          "valueInputOption": {
+            "default": "USER_ENTERED",
+            "description": "How input data is interpreted. 'USER_ENTERED': Values parsed as if typed by a user (e.g., strings may become numbers/dates, formulas are calculated); recommended for formulas. 'RAW': Values stored as-is without parsing (e.g., '123' stays string, '=SUM(A1:B1)' stays string).",
+            "enum": [
+              "RAW",
+              "USER_ENTERED"
+            ],
+            "examples": [
+              "USER_ENTERED",
+              "RAW"
+            ],
+            "title": "Value Input Option",
+            "type": "string"
+          },
+          "values": {
+            "description": "A 2D list of cell values. Each inner list represents a row. Values can be strings, numbers, or booleans. Ensure columns are properly aligned across rows.",
+            "examples": [
+              [
+                "Item",
+                "Cost",
+                "Stocked",
+                "Ship Date"
+              ],
+              [
+                "Wheel",
+                20.5,
+                true,
+                "2020-06-01"
+              ],
+              [
+                "Screw",
+                0.5,
+                true,
+                "2020-06-03"
+              ],
+              [
+                "Nut",
+                0.25,
+                false,
+                "2020-06-02"
+              ]
+            ],
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "spreadsheet_id",
+          "sheet_name",
+          "values"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GOOGLESHEETS_BATCH_UPDATE",
+        "noAuth": false,
+        "toolkitName": "googlesheets",
+        "toolkitSlug": "googlesheets",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/google-sheets.svg"
+      }
+    }
+  ],
+  "pipelines": [
+    {
+      "name": "Interview Scheduling Pipeline",
+      "description": "Automates interview scheduling: fetches candidates from Google Sheet, schedules interviews, and updates sheet status.",
+      "agents": [
+        "Pipeline Step 1 - Fetch Candidates",
+        "Pipeline Step 2 - Schedule Interview",
+        "Pipeline Step 3 - Update Sheet Status"
+      ]
+    }
+  ],
+  "startAgent": "Recruitment HR Bot",
+  "name": "Interview Scheduler",
+  "description": "Automate interview scheduling with candidates from Google Sheets"
+}

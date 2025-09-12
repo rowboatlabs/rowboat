@@ -222,7 +222,8 @@ function AssistantMessage({
                         agent: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
                 }
@@ -236,7 +237,8 @@ function AssistantMessage({
                         tool: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
                 }
@@ -246,7 +248,8 @@ function AssistantMessage({
                         prompt: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
                 case 'pipeline':
@@ -255,7 +258,8 @@ function AssistantMessage({
                         pipeline: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
             }
@@ -263,14 +267,14 @@ function AssistantMessage({
             switch (action.config_type) {
                 case 'agent':
                     dispatch({
-                        type: 'update_agent',
+                        type: 'update_agent_no_select',
                         name: action.name,
                         agent: action.config_changes
                     });
                     break;
                 case 'tool':
                     dispatch({
-                        type: 'update_tool',
+                        type: 'update_tool_no_select',
                         name: action.name,
                         tool: action.config_changes
                     });

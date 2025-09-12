@@ -1,0 +1,354 @@
+{
+  "category": "Work Productivity",
+  "agents": [
+    {
+      "name": "Meeting Prep Hub",
+      "type": "conversation",
+      "description": "Hub agent to orchestrate meeting guest research and email delivery.",
+      "instructions": "## 🧑‍💼 Role:\nYou are the hub agent responsible for orchestrating the process of researching meeting guests and sending a summary to the user via email.\n\n---\n## ⚙️ Steps to Follow:\n1. Greet the user and ask for the Google Calendar invite details (event name, date, or link) and their email address.\n2. Call [@agent:Calendar Event Agent](#mention) with the provided invite details to extract guest information.\n3. Wait for the guest list from Calendar Event Agent.\n4. Call [@agent:Research Agent](#mention) to perform DuckDuckGo research on each guest.\n5. Wait for the research summary from Research Agent.\n6. Call [@agent:Email Agent](#mention) to send the summary to the user's email.\n7. Inform the user when the research summary has been sent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Orchestrating the workflow for meeting guest research and email delivery.\n\n❌ Out of Scope:\n- Directly researching guests or sending emails (handled by sub-agents).\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Always confirm the invite details and email address with the user.\n- Ensure all steps are completed in sequence.\n\n🚫 Don'ts:\n- Do not perform research or send emails directly.\n- Do not skip any step in the workflow.\n- Do not mention internal agent names to the user.\n- Do not say 'connecting you to another agent'.\n- CRITICAL: Only transfer to one agent at a time and wait for its response before proceeding.\n\n# Examples\n- **User** : I have a meeting invite for 'Q3 Planning' on July 10. My email is user@email.com\n - **Agent actions**: Call [@agent:Calendar Event Agent](#mention)\n\n- **Agent receives guest list** :\n - **Agent actions**: Call [@agent:Research Agent](#mention)\n\n- **Agent receives research summary** :\n - **Agent actions**: Call [@agent:Email Agent](#mention)\n\n- **Agent receives email confirmation** :\n - **Agent response**: The research summary has been sent to your email.",
+      "examples": "- **User** : I have a meeting invite for 'Q3 Planning' on July 10. My email is user@email.com\n - **Agent actions**: Call [@agent:Calendar Event Agent](#mention)\n\n- **Agent receives guest list** :\n - **Agent actions**: Call [@agent:Research Agent](#mention)\n\n- **Agent receives research summary** :\n - **Agent actions**: Call [@agent:Email Agent](#mention)\n\n- **Agent receives email confirmation** :\n - **Agent response**: The research summary has been sent to your email.",
+      "model": "google/gemini-2.5-flash",
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "user_facing",
+      "controlType": "retain"
+    },
+    {
+      "name": "Calendar Event Agent",
+      "type": "conversation",
+      "description": "Extracts guest details from a provided Google Calendar invite.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nExtract guest (attendee) details from the provided Google Calendar invite information.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the event name, date, or link from the parent agent.\n2. Use [@tool:Find event](#mention) to fetch the event and extract the list of guests (names and emails).\n3. Return the guest list to the parent agent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Fetching event details and extracting guest information.\n\n❌ Out of Scope:\n- Researching guests.\n- Sending emails.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Return all relevant guest details.\n\n🚫 Don'ts:\n- Do not perform research or send emails.\n- Do not interact with the user directly.",
+      "examples": "- **Parent agent** : Get guests for 'Q3 Planning' on July 10.\n - **Agent actions**: Call [@tool:Find event](#mention)\n - **Agent response**: [List of guests with names and emails]",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Research Agent",
+      "type": "conversation",
+      "description": "Performs DuckDuckGo searches on each guest and summarizes the findings.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nResearch each guest using DuckDuckGo and summarize the findings.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive a list of guest names and emails from the parent agent.\n2. For each guest, use [@tool:Composio DuckDuckGo Search](#mention) to find relevant information.\n3. Summarize the findings for each guest (role, company, notable info).\n4. Return the research summary to the parent agent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Researching guests using DuckDuckGo.\n\n❌ Out of Scope:\n- Fetching event details.\n- Sending emails.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Provide concise, relevant guest profiles.\n\n🚫 Don'ts:\n- Do not fabricate information.\n- Do not interact with the user directly.",
+      "examples": "- **Parent agent** : Research guests: Alice Smith (alice@email.com), Bob Lee (bob@email.com)\n - **Agent actions**: Call [@tool:Composio DuckDuckGo Search](#mention) for each guest\n - **Agent response**: Alice Smith: [summary], Bob Lee: [summary]",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Email Agent",
+      "type": "conversation",
+      "description": "Sends the research summary to the user's email address.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nSend the provided research summary to the user's email address.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the research summary and recipient email from the parent agent.\n2. Use [@tool:Send Email](#mention) to send the summary.\n3. Confirm delivery to the parent agent.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Sending research summaries via email.\n\n❌ Out of Scope:\n- Fetching event details.\n- Researching guests.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure the summary is sent to the correct email.\n\n🚫 Don'ts:\n- Do not interact with the user directly.",
+      "examples": "- **Parent agent** : Send summary to user@email.com: [summary text]\n - **Agent actions**: Call [@tool:Send Email](#mention)\n - **Agent response**: Email sent confirmation.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    }
+  ],
+  "prompts": [],
+  "tools": [
+    {
+      "name": "Find event",
+      "description": "Finds events in a specified google calendar using text query, time ranges, and event types.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "calendar_id": {
+            "default": "primary",
+            "description": "Identifier of the Google Calendar to query.",
+            "examples": [
+              "primary",
+              "user@example.com",
+              "abc...@group.calendar.google.com"
+            ],
+            "title": "Calendar Id",
+            "type": "string"
+          },
+          "event_types": {
+            "default": [
+              "birthday",
+              "default",
+              "focusTime",
+              "outOfOffice",
+              "workingLocation"
+            ],
+            "description": "Event types to include.",
+            "examples": [
+              "default",
+              "focusTime",
+              "outOfOffice"
+            ],
+            "items": {
+              "enum": [
+                "birthday",
+                "default",
+                "focusTime",
+                "outOfOffice",
+                "workingLocation"
+              ],
+              "type": "string"
+            },
+            "title": "Event Types",
+            "type": "array"
+          },
+          "max_results": {
+            "default": 10,
+            "description": "Maximum number of events per page (1-2500).",
+            "title": "Max Results",
+            "type": "integer"
+          },
+          "order_by": {
+            "default": null,
+            "description": "Order of events: 'startTime' or 'updated'.",
+            "examples": [
+              "startTime",
+              "updated"
+            ],
+            "nullable": true,
+            "title": "Order By",
+            "type": "string"
+          },
+          "page_token": {
+            "default": null,
+            "description": "Token for pagination.",
+            "nullable": true,
+            "title": "Page Token",
+            "type": "string"
+          },
+          "query": {
+            "default": null,
+            "description": "Free-text search terms to find events.",
+            "examples": [
+              "Project Alpha Review",
+              "Birthday Party"
+            ],
+            "nullable": true,
+            "title": "Query",
+            "type": "string"
+          },
+          "show_deleted": {
+            "default": null,
+            "description": "Include deleted events.",
+            "nullable": true,
+            "title": "Show Deleted",
+            "type": "boolean"
+          },
+          "single_events": {
+            "default": true,
+            "description": "Expand recurring events into individual instances.",
+            "title": "Single Events",
+            "type": "boolean"
+          },
+          "timeMax": {
+            "default": null,
+            "description": "Upper bound for event's start time.",
+            "examples": [
+              "2024-12-31T23:59:59Z"
+            ],
+            "nullable": true,
+            "title": "Time Max",
+            "type": "string"
+          },
+          "timeMin": {
+            "default": null,
+            "description": "Lower bound for event's end time.",
+            "examples": [
+              "2024-01-01T00:00:00Z"
+            ],
+            "nullable": true,
+            "title": "Time Min",
+            "type": "string"
+          },
+          "updated_min": {
+            "default": null,
+            "description": "Lower bound for event's last modification time.",
+            "examples": [
+              "2024-07-01T00:00:00Z"
+            ],
+            "nullable": true,
+            "title": "Updated Min",
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GOOGLECALENDAR_FIND_EVENT",
+        "noAuth": false,
+        "toolkitName": "googlecalendar",
+        "toolkitSlug": "googlecalendar",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/google-calendar.svg"
+      }
+    },
+    {
+      "name": "Composio DuckDuckGo Search",
+      "description": "Performs web searches using DuckDuckGo to retrieve relevant information.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "The search query for DuckDuckGo.",
+            "examples": [
+              "Python programming"
+            ],
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "COMPOSIO_SEARCH_DUCK_DUCK_GO_SEARCH",
+        "noAuth": true,
+        "toolkitName": "composio_search",
+        "toolkitSlug": "composio_search",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master//composio-logo.png"
+      }
+    },
+    {
+      "name": "Send Email",
+      "description": "Sends an email via Gmail using the authenticated user's Google profile.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "attachment": {
+            "additionalProperties": false,
+            "description": "File to attach; ensure s3key, mimetype, and name are set if provided.",
+            "file_uploadable": true,
+            "properties": {
+              "mimetype": {
+                "title": "Mimetype",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "s3key": {
+                "title": "S3Key",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "mimetype",
+              "s3key"
+            ],
+            "title": "FileUploadable",
+            "type": "object"
+          },
+          "bcc": {
+            "default": [],
+            "description": "BCC recipients' email addresses.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Bcc",
+            "type": "array"
+          },
+          "body": {
+            "description": "Email content (plain text or HTML).",
+            "examples": [
+              "Hello team, let's discuss the project updates tomorrow."
+            ],
+            "title": "Body",
+            "type": "string"
+          },
+          "cc": {
+            "default": [],
+            "description": "CC recipients' email addresses.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Cc",
+            "type": "array"
+          },
+          "extra_recipients": {
+            "default": [],
+            "description": "Additional 'To' recipients' email addresses.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Extra Recipients",
+            "type": "array"
+          },
+          "is_html": {
+            "default": false,
+            "description": "Set to True if the email body contains HTML tags.",
+            "title": "Is Html",
+            "type": "boolean"
+          },
+          "recipient_email": {
+            "description": "Primary recipient's email address.",
+            "examples": [
+              "john@doe.com"
+            ],
+            "title": "Recipient Email",
+            "type": "string"
+          },
+          "subject": {
+            "default": null,
+            "description": "Subject line of the email.",
+            "examples": [
+              "Project Update Meeting"
+            ],
+            "nullable": true,
+            "title": "Subject",
+            "type": "string"
+          },
+          "user_id": {
+            "default": "me",
+            "description": "User's email address; 'me' refers to the authenticated user.",
+            "examples": [
+              "user@example.com",
+              "me"
+            ],
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipient_email",
+          "body"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GMAIL_SEND_EMAIL",
+        "noAuth": false,
+        "toolkitName": "gmail",
+        "toolkitSlug": "gmail",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/gmail.svg"
+      }
+    }
+  ],
+  "startAgent": "Meeting Prep Hub",
+  "lastUpdatedAt": "2025-09-07T17:06:05.564Z",
+  "name": "Meeting Prep",
+  "description": "Research meeting attendees and send summary to Slack"
+}

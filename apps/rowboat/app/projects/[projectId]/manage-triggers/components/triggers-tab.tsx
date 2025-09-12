@@ -460,9 +460,14 @@ export function TriggersTab({ projectId }: { projectId: string }) {
       return (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Select a Toolkit to Create Trigger
-            </h3>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                Select a Toolkit to Create Trigger
+              </h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Note: Triggers run only on the published version of your workflow. Publish any changes to make them active.
+              </p>
+            </div>
             {triggers.length > 0 && (
               <Button
                 variant="secondary"

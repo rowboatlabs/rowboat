@@ -67,14 +67,14 @@ export function Action({
         switch (action.config_type) {
             case 'agent':
                 dispatch({
-                    type: 'update_agent',
+                    type: 'update_agent_no_select',
                     name: action.name,
                     agent: changes
                 });
                 break;
             case 'tool':
                 dispatch({
-                    type: 'update_tool',
+                    type: 'update_tool_no_select',
                     name: action.name,
                     tool: changes
                 });

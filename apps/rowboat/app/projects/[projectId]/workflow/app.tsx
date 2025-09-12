@@ -32,7 +32,11 @@ export function App({
     defaultModel: string;
     chatWidgetHost: string;
 }) {
-    const [mode, setMode] = useState<'draft' | 'live'>('draft');
+    const [mode, setMode] = useState<'draft' | 'live'>(() => {
+        if (typeof window === 'undefined') return 'draft';
+        const stored = window.localStorage.getItem(`workflow_mode_${initialProjectData.id}`);
+        return stored === 'live' || stored === 'draft' ? stored : 'draft';
+    });
     const [project, setProject] = useState<z.infer<typeof Project>>(initialProjectData);
     const [dataSources, setDataSources] = useState<z.infer<typeof DataSource>[]>(initialDataSources);
     const [loading, setLoading] = useState(false);
@@ -101,6 +105,11 @@ export function App({
     }, [dataSources, initialProjectData.id]);
 
     function handleSetMode(mode: 'draft' | 'live') {
+        try {
+            if (typeof window !== 'undefined') {
+                window.localStorage.setItem(`workflow_mode_${initialProjectData.id}`, mode);
+            }
+        } catch {}
         setMode(mode);
         // Reload data to ensure we have the latest workflow data for the current mode
         reloadData();

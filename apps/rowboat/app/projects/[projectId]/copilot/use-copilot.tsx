@@ -38,6 +38,7 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
     const [billingError, setBillingError] = useState<string | null>(null);
     const cancelRef = useRef<() => void>(() => { });
     const responseRef = useRef('');
+    const inFlightRef = useRef(false);
 
     function clearError() {
         setError(null);
@@ -51,7 +52,19 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
         messages: z.infer<typeof CopilotMessage>[],
         onDone: (finalResponse: string) => void,
     ) => {
-        if (!messages.length || messages.at(-1)?.role !== 'user') return;
+        
+
+        if (!messages.length || messages.at(-1)?.role !== 'user') {
+            
+            return;
+        }
+
+        // Prevent duplicate/concurrent starts (e.g., StrictMode double effects or remounts)
+        if (inFlightRef.current) {
+            
+            return;
+        }
+        inFlightRef.current = true;
 
         setStreamingResponse('');
         responseRef.current = '';
@@ -61,16 +74,23 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
         setLoading(true);
 
         try {
+            // Wait 2 rAF frames to let layout stabilize (avoids StrictMode/remount race on initial load)
+            await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+            
             const res = await getCopilotResponseStream(projectId, messages, workflow, context || null, dataSources);
+            
             
             // Check for billing error
             if ('billingError' in res) {
+                
                 setLoading(false);
                 setError(res.billingError);
                 setBillingError(res.billingError);
+                inFlightRef.current = false;
                 return;
             }
 
+            
             const eventSource = new EventSource(`/api/copilot-stream-response/${res.streamId}`);
 
             eventSource.onmessage = (event) => {
@@ -102,24 +122,29 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
                 eventSource.close();
                 setLoading(false);
                 onDone(responseRef.current);
+                inFlightRef.current = false;
             });
 
             eventSource.onerror = () => {
                 eventSource.close();
                 setError('Streaming failed');
                 setLoading(false);
+                inFlightRef.current = false;
             };
 
             cancelRef.current = () => eventSource.close();
         } catch (err) {
+            console.error('❌ Error in useCopilot.start:', err);
             setError('Failed to initiate stream');
             setLoading(false);
+            inFlightRef.current = false;
         }
     }, [projectId, workflow, context, dataSources]);
 
     const cancel = useCallback(() => {
         cancelRef.current?.();
         setLoading(false);
+        inFlightRef.current = false;
     }, []);
 
     return {

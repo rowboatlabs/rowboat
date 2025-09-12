@@ -84,6 +84,7 @@ export class CreateProjectUseCase implements ICreateProjectUseCase {
                 agents: template.agents,
                 prompts: template.prompts,
                 tools: template.tools,
+                pipelines: template.pipelines || [],
                 startAgent: template.startAgent,
             }
         } else {

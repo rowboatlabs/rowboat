@@ -7,7 +7,7 @@ The design of the multi-agent system is represented by the following JSON schema
 {workflow_schema}
 \`\`\`
 
-If the workflow has an 'Example Agent' as the main agent, it means the user is yet to create the main agent. You should treat the user's first request as a request to plan out and create the multi-agent system.
+If the workflow has no agents or an empty startAgent, it means the user is yet to create their multi-agent system. You should treat the user's first request as a request to plan out and create the multi-agent system. When creating agents, you must always set a start agent.
 
 ---
 `;

@@ -28,8 +28,8 @@ export function App({
     onPanelClick?: () => void;
     triggerCopilotChat?: (message: string) => void;
     isLiveWorkflow: boolean;
-    activePanel: 'playground' | 'copilot';
-    onTogglePanel: () => void;
+    activePanel?: 'playground' | 'copilot';
+    onTogglePanel?: () => void;
     onMessageSent?: () => void;
 }) {
     const [counter, setCounter] = useState<number>(0);
@@ -56,6 +56,8 @@ export function App({
         }
     }, []);
 
+    const hasAgents = (workflow?.agents?.length || 0) > 0;
+
     return (
         <>
             <Panel 
@@ -63,35 +65,13 @@ export function App({
                 variant="playground"
                 tourTarget="playground"
                 title={
-                    <div className="flex items-center">
-                        <div className="flex items-center gap-2 rounded-lg p-1 bg-blue-50/70 dark:bg-blue-900/30">
-                            <button
-                                onClick={onTogglePanel}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                                    activePanel === 'copilot'
-                                        ? 'bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-300 shadow-md border border-indigo-200 dark:border-indigo-700'
-                                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
-                                }`}
-                            >
-                                <span className="text-base">✨</span>
-                                Build
-                            </button>
-                            <button
-                                onClick={onTogglePanel}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                                    activePanel === 'playground'
-                                        ? 'bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-300 shadow-md border border-indigo-200 dark:border-indigo-700'
-                                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
-                                }`}
-                            >
-                                <span className="text-base">💬</span>
-                                Chat
-                            </button>
-                        </div>
+                    <div className="flex items-center gap-2 text-zinc-800 dark:text-zinc-200 font-semibold">
+                        <MessageCircle className="w-4 h-4" />
+                        Chat
                     </div>
                 }
-                subtitle="Chat with your assistant"
-                rightActions={
+                subtitle={hasAgents ? "Chat with your assistant" : "Create an agent to start chatting"}
+                rightActions={hasAgents ? (
                     <div className="flex items-center gap-2">
                         <Button
                             variant="primary"
@@ -131,21 +111,46 @@ export function App({
                             )}
                         </Button>
                     </div>
-                }
+                ) : (
+                    // Preserve header height when there are zero agents
+                    <div className="h-8" />
+                )}
                 onClick={onPanelClick}
             >
                 <div className="h-full overflow-auto px-4 py-4">
-                    <Chat
-                        key={`chat-${counter}`}
-                        projectId={projectId}
-                        workflow={workflow}
-                        messageSubscriber={messageSubscriber}
-                        onCopyClick={(fn) => { getCopyContentRef.current = fn; }}
-                        showDebugMessages={showDebugMessages}
-                        triggerCopilotChat={triggerCopilotChat}
-                        isLiveWorkflow={isLiveWorkflow}
-                        onMessageSent={onMessageSent}
-                    />
+                    {hasAgents ? (
+                        <Chat
+                            key={`chat-${counter}`}
+                            projectId={projectId}
+                            workflow={workflow}
+                            messageSubscriber={messageSubscriber}
+                            onCopyClick={(fn) => { getCopyContentRef.current = fn; }}
+                            showDebugMessages={showDebugMessages}
+                            triggerCopilotChat={triggerCopilotChat}
+                            isLiveWorkflow={isLiveWorkflow}
+                            onMessageSent={onMessageSent}
+                        />
+                    ) : (
+                        <div className="h-full flex items-center justify-center">
+                            <div className="text-center max-w-md">
+                                <div className="mx-auto mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                                    <MessageCircle className="w-6 h-6" />
+                                </div>
+                                <div className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Create an agent to start chatting</div>
+                                <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">Skipper can build agents for you!</div>
+                                <div className="mt-4 flex items-center justify-center gap-3">
+                                    <Button
+                                        variant="primary"
+                                        size="sm"
+                                        className="!bg-blue-700 hover:!bg-blue-800 !text-white dark:!bg-blue-600 dark:hover:!bg-blue-700 !border !border-blue-700 dark:!border-blue-600"
+                                        onClick={() => triggerCopilotChat?.("Help me create my first agent.")}
+                                    >
+                                        Ask Skipper
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </Panel>
         </>
