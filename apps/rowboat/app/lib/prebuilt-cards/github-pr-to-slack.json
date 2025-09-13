@@ -129,5 +129,6 @@
   "lastUpdatedAt": "2025-09-12T06:30:34.203Z",
   "name": "GitHub PR to Slack",
   "description": "Assistant that sends a formatted Slack message with PR details when a PR is opened or merged.",
-  "category": "Developer Productivity"
+  "category": "Developer Productivity",
+  "copilotPrompt": "Give me a brief explanation of this assistant. Also briefly tell me about how to setup a trigger for this assistant."
 }
