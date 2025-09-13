@@ -1,5 +1,4 @@
 {
-  "category": "Developer Productivity",
   "agents": [
     {
       "name": "GitHub Stats Hub",
@@ -575,5 +574,7 @@
   ],
   "startAgent": "GitHub Stats Pipeline Hub",
   "name": "GitHub Data to Spreadsheet",
-  "description": "Fetches GitHub repository stats and logs them to a Google Sheet with Slack notifications"
+  "description": "Fetches GitHub repository stats and logs them to a Google Sheet with Slack notifications",
+  "category": "Developer Productivity",
+  "copilotPrompt": "Give me a brief explanation of this assistant. Also briefly tell me about how to setup a trigger for this assistant."
 }

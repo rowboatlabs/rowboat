@@ -465,5 +465,6 @@
   ],
   "startAgent": "Recruitment HR Bot",
   "name": "Interview Scheduler",
-  "description": "Automate interview scheduling with candidates from Google Sheets"
+  "description": "Automate interview scheduling with candidates from Google Sheets",
+  "copilotPrompt": "Give me a brief explanation of this assistant."
 }

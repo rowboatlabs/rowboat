@@ -115,5 +115,6 @@
   "lastUpdatedAt": "2025-09-12T13:46:12.039Z",
   "name": "GitHub Issue to Slack",
   "description": "Assistant that sends a formatted Slack message with GitHub issue details when a issue is opened or updated.",
-  "category": "Developer Productivity"
+  "category": "Developer Productivity",
+  "copilotPrompt": "Give me a brief explanation of this assistant. Also briefly tell me about how to setup a trigger for this assistant."
 }

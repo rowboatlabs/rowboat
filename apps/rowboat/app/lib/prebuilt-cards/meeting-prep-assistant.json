@@ -238,5 +238,6 @@
   "lastUpdatedAt": "2025-09-12T05:56:12.131Z",
   "name": "Meeting Prep Assistant",
   "description": "Assistant that researches meeting guests, compiles a summary, and sends it via email.",
-  "category": "Work Productivity"
+  "category": "Work Productivity",
+  "copilotPrompt": "Give me a brief explanation of this assistant. Also briefly tell me about how to setup a trigger for this assistant."
 }
