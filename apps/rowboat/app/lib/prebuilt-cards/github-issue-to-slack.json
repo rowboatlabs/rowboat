@@ -1,0 +1,120 @@
+{
+  "agents": [
+    {
+      "name": "GitHub Issue to Slack Hub",
+      "type": "conversation",
+      "description": "Receives new GitHub issue details and sends a formatted message to Slack.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nYou are the assistant responsible for sending new GitHub issue details to Slack.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive a new GitHub issue payload (via trigger).\n2. Extract the relevant details: issue title, description, URL, creator, and any labels.\n3. Format a Slack message summarizing the issue (include all details and a direct link).\n4. Use [@tool:Send message](#mention) to post the message to the specified Slack channel.\n5. Respond with 'done!' to indicate completion.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Formatting and sending Slack messages for new GitHub issues.\n\n❌ Out of Scope:\n- Handling other GitHub events.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure the message is clear and includes all relevant details.\n- Use markdown formatting for readability.\n\n🚫 Don'ts:\n- Do not process non-issue events.\n- CRITICAL: Only call the Slack tool once per issue event.\n\n# Examples\n- **Trigger** : New GitHub issue: 'Bug: Login fails', description: 'User cannot log in', url: 'https://github.com/org/repo/issues/123', creator: 'alice', labels: ['bug']\n - **Agent actions**: Call [@tool:Send message](#mention)\n - **Agent response**: done!",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "user_facing",
+      "controlType": "retain",
+      "maxCallsPerParentAgent": 3
+    }
+  ],
+  "prompts": [
+    {
+      "name": "Slack Channel",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    }
+  ],
+  "tools": [
+    {
+      "name": "Send message",
+      "description": "Posts a message to a slack channel, direct message, or private group; requires content via `text`, `blocks`, or `attachments`.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "as_user": {
+            "description": "Post as the authenticated user instead of as a bot. Defaults to `false`. If `true`, `username`, `icon_emoji`, and `icon_url` are ignored. If `false`, the message is posted as a bot, allowing appearance customization.",
+            "type": "boolean"
+          },
+          "attachments": {
+            "description": "URL-encoded JSON array of message attachments, a legacy method for rich content. See Slack API documentation for structure.",
+            "type": "string"
+          },
+          "blocks": {
+            "description": "DEPRECATED: Use `markdown_text` field instead. URL-encoded JSON array of layout blocks for rich/interactive messages. See Slack API Block Kit docs for structure.",
+            "type": "string"
+          },
+          "channel": {
+            "description": "ID or name of the channel, private group, or IM channel to send the message to.",
+            "type": "string"
+          },
+          "icon_emoji": {
+            "description": "Emoji for bot's icon (e.g., ':robot_face:'). Overrides `icon_url`. Applies if `as_user` is `false`.",
+            "type": "string"
+          },
+          "icon_url": {
+            "description": "Image URL for bot's icon (must be HTTPS). Applies if `as_user` is `false`.",
+            "type": "string"
+          },
+          "link_names": {
+            "description": "Automatically hyperlink channel names (e.g., #channel) and usernames (e.g., @user) in message text. Defaults to `false` for bot messages.",
+            "type": "boolean"
+          },
+          "markdown_text": {
+            "description": "PREFERRED: Write your message in markdown for nicely formatted display. Supports: headers (# ## ###), bold (**text** or __text__), italic (*text* or _text_), strikethrough (~~text~~), inline code (`code`), code blocks (```), links ([text](url)), block quotes (>), lists (- item, 1. item), dividers (--- or ***), context blocks (:::context with images), and section buttons (:::section-button). IMPORTANT: Use \\\\n for line breaks (e.g., 'Line 1\\\\nLine 2'), not actual newlines. USER MENTIONS: To tag users, use their user ID with <@USER_ID> format (e.g., <@U1234567890>), not username.",
+            "type": "string"
+          },
+          "mrkdwn": {
+            "description": "Disable Slack's markdown for `text` field if `false`. Default `true` (allows *bold*, _italic_, etc.).",
+            "type": "boolean"
+          },
+          "parse": {
+            "description": "Message text parsing behavior. Default `none` (no special parsing). `full` parses as user-typed (links @mentions, #channels). See Slack API docs for details.",
+            "type": "string"
+          },
+          "reply_broadcast": {
+            "description": "If `true` for a threaded reply, also posts to main channel. Defaults to `false`.",
+            "type": "boolean"
+          },
+          "text": {
+            "description": "DEPRECATED: This sends raw text only, use markdown_text field. Primary textual content. Recommended fallback if using `blocks` or `attachments`. Supports mrkdwn unless `mrkdwn` is `false`.",
+            "type": "string"
+          },
+          "thread_ts": {
+            "description": "Timestamp (`ts`) of an existing message to make this a threaded reply. Use `ts` of the parent message, not another reply. Example: '1476746824.000004'.",
+            "type": "string"
+          },
+          "unfurl_links": {
+            "description": "Enable unfurling of text-based URLs. Defaults `false` for bots, `true` if `as_user` is `true`.",
+            "type": "boolean"
+          },
+          "unfurl_media": {
+            "description": "Disable unfurling of media content from URLs if `false`. Defaults to `true`.",
+            "type": "boolean"
+          },
+          "username": {
+            "description": "Bot's name in Slack (max 80 chars). Applies if `as_user` is `false`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "SLACK_SEND_MESSAGE",
+        "noAuth": false,
+        "toolkitName": "slack",
+        "toolkitSlug": "slack",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/slack.svg"
+      }
+    }
+  ],
+  "pipelines": [],
+  "startAgent": "GitHub Issue to Slack Hub",
+  "lastUpdatedAt": "2025-09-12T13:46:12.039Z",
+  "name": "GitHub Issue to Slack",
+  "description": "Assistant that sends a formatted Slack message with GitHub issue details when a issue is opened or updated.",
+  "category": "Developer Productivity",
+  "copilotPrompt": "Give me a brief explanation of this assistant. Also briefly tell me about how to setup a trigger for this assistant."
+}

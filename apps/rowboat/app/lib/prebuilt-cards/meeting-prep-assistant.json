@@ -1,0 +1,243 @@
+{
+  "agents": [
+    {
+      "name": "Research Guests Agent",
+      "type": "pipeline",
+      "description": "Researches each guest in the calendar invite using Exa Answer and compiles a summary.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nYou are a pipeline agent that researches each guest in a Google Calendar invite.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive a list of guest names and emails from the calendar invite.\n2. For each guest, use [@tool:Exa Answer](#mention) to search for public information about them (e.g., 'Who is [Name] [Email]?').\n3. Summarize the findings for each guest in 2-3 sentences.\n4. Return a list of guest research summaries for the next step.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Be concise and factual.\n- If no information is found, state 'No public information found.'\n🚫 Don'ts:\n- Do not fabricate information.\n- Do not send emails or interact with the user.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Compile Email Agent",
+      "type": "pipeline",
+      "description": "Formats the guest research summaries into a clear email body.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nYou are a pipeline agent that formats guest research into an email body.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the list of guest research summaries.\n2. Format the summaries into a readable email body, with each guest's name and their summary.\n3. Add a subject line: 'Meeting Guest Research Summary'.\n4. Return the subject and body for the next step.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Use clear formatting (e.g., bullet points or sections per guest).\n🚫 Don'ts:\n- Do not send emails or interact with the user.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Send Email Agent",
+      "type": "pipeline",
+      "description": "Sends the compiled guest research summary to the user's email using Gmail.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nYou are a pipeline agent that sends the guest research summary email.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the subject, body, and recipient email address.\n2. Use [@tool:Send Email](#mention) to send the email.\n3. Return confirmation of sending.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Ensure the email is sent to the correct address.\n🚫 Don'ts:\n- Do not perform research or format the email body.",
+      "model": "google/gemini-2.5-flash",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    }
+  ],
+  "prompts": [
+    {
+      "name": "User's Email",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    }
+  ],
+  "tools": [
+    {
+      "name": "Exa Answer",
+      "description": "Get answers with citations using the exa api.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "The user message content for the Exa answer API.",
+            "examples": [
+              "give me image of narendra modi"
+            ],
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "COMPOSIO_SEARCH_EXA_ANSWER",
+        "noAuth": true,
+        "toolkitName": "composio_search",
+        "toolkitSlug": "composio_search",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master//composio-logo.png"
+      }
+    },
+    {
+      "name": "Send Email",
+      "description": "Sends an email via gmail api using the authenticated user's google profile display name, requiring `is html=true` if the body contains html and valid `s3key`, `mimetype`, `name` for any attachment.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "attachment": {
+            "additionalProperties": false,
+            "description": "File to attach; ensure `s3key`, `mimetype`, and `name` are set if provided. Omit or set to null for no attachment.",
+            "file_uploadable": true,
+            "properties": {
+              "mimetype": {
+                "title": "Mimetype",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "s3key": {
+                "title": "S3Key",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "mimetype",
+              "s3key"
+            ],
+            "title": "FileUploadable",
+            "type": "object"
+          },
+          "bcc": {
+            "default": [],
+            "description": "Blind Carbon Copy (BCC) recipients' email addresses.",
+            "examples": [
+              [
+                "auditor@example.com"
+              ]
+            ],
+            "items": {
+              "properties": {},
+              "type": "string"
+            },
+            "title": "Bcc",
+            "type": "array"
+          },
+          "body": {
+            "description": "Email content (plain text or HTML); if HTML, `is_html` must be `True`.",
+            "examples": [
+              "Hello team, let's discuss the project updates tomorrow.",
+              "<h1>Welcome!</h1><p>Thank you for signing up.</p>"
+            ],
+            "title": "Body",
+            "type": "string"
+          },
+          "cc": {
+            "default": [],
+            "description": "Carbon Copy (CC) recipients' email addresses.",
+            "examples": [
+              [
+                "manager@example.com",
+                "teamlead@example.com"
+              ]
+            ],
+            "items": {
+              "properties": {},
+              "type": "string"
+            },
+            "title": "Cc",
+            "type": "array"
+          },
+          "extra_recipients": {
+            "default": [],
+            "description": "Additional 'To' recipients' email addresses (not Cc or Bcc).",
+            "examples": [
+              [
+                "jane.doe@example.com",
+                "support@example.com"
+              ]
+            ],
+            "items": {
+              "properties": {},
+              "type": "string"
+            },
+            "title": "Extra Recipients",
+            "type": "array"
+          },
+          "is_html": {
+            "default": false,
+            "description": "Set to `True` if the email body contains HTML tags.",
+            "title": "Is Html",
+            "type": "boolean"
+          },
+          "recipient_email": {
+            "description": "Primary recipient's email address.",
+            "examples": [
+              "john@doe.com"
+            ],
+            "title": "Recipient Email",
+            "type": "string"
+          },
+          "subject": {
+            "default": null,
+            "description": "Subject line of the email.",
+            "examples": [
+              "Project Update Meeting",
+              "Your Weekly Newsletter"
+            ],
+            "nullable": true,
+            "title": "Subject",
+            "type": "string"
+          },
+          "user_id": {
+            "default": "me",
+            "description": "User's email address; the literal 'me' refers to the authenticated user.",
+            "examples": [
+              "user@example.com",
+              "me"
+            ],
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipient_email",
+          "body"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GMAIL_SEND_EMAIL",
+        "noAuth": false,
+        "toolkitName": "gmail",
+        "toolkitSlug": "gmail",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/gmail.svg"
+      }
+    }
+  ],
+  "pipelines": [
+    {
+      "name": "Meeting Prep Pipeline",
+      "description": "Pipeline that researches meeting guests, compiles a summary, and sends it via email.",
+      "agents": [
+        "Research Guests Agent",
+        "Compile Email Agent",
+        "Send Email Agent"
+      ]
+    }
+  ],
+  "startAgent": "Meeting Prep Pipeline",
+  "lastUpdatedAt": "2025-09-12T05:56:12.131Z",
+  "name": "Meeting Prep Assistant",
+  "description": "Assistant that researches meeting guests, compiles a summary, and sends it via email.",
+  "category": "Work Productivity",
+  "copilotPrompt": "Give me a brief explanation of this assistant. Also briefly tell me about how to setup a trigger for this assistant."
+}

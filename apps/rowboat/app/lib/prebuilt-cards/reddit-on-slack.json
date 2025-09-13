@@ -293,5 +293,6 @@
   "lastUpdatedAt": "2025-09-09T17:48:53.292Z",
   "name": "Browse Reddit on Slack",
   "description": "Browses Reddit for topics of interest and sends them to a Slack channel.",
-  "category": "News & Social"
+  "category": "News & Social",
+  "copilotPrompt": "Give me a brief explanation of this assistant. Also briefly tell me about how to setup a scheduled trigger for this assistant."
 }

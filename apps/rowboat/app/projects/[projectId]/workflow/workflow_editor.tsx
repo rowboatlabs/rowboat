@@ -238,6 +238,14 @@ export type Action = {
     type: "show_visualise";
 } | {
     type: "hide_visualise";
+} | {
+    type: "show_add_datasource_modal";
+} | {
+    type: "show_add_variable_modal";
+} | {
+    type: "show_add_agent_modal";
+} | {
+    type: "show_add_tool_modal";
 };
 
 function reducer(state: State, action: Action): State {
@@ -1019,7 +1027,17 @@ export function WorkflowEditor({
             localStorage.setItem('workflow_view_mode', fromUrl);
             return fromUrl as ViewMode;
         }
-        return (localStorage.getItem('workflow_view_mode') as ViewMode) || "three_all";
+        
+        const storedViewMode = localStorage.getItem('workflow_view_mode') as ViewMode;
+        const hasAgents = workflow.agents.length > 0;
+        
+        // If workflow has agents and stored view mode is "Hide chat" (two_agents_skipper), 
+        // override to show all panels by default
+        if (hasAgents && storedViewMode === 'two_agents_skipper') {
+            return "three_all";
+        }
+        
+        return storedViewMode || "three_all";
     });
 
     const updateViewMode = useCallback((mode: ViewMode) => {
@@ -1107,7 +1125,12 @@ export function WorkflowEditor({
         }
     }, [onChangeMode]);
     const copilotRef = useRef<{ handleUserMessage: (message: string) => void }>(null);
-    const entityListRef = useRef<{ openDataSourcesModal: () => void } | null>(null);
+    const entityListRef = useRef<{ 
+        openDataSourcesModal: () => void;
+        openAddVariableModal: () => void;
+        openAddAgentModal: () => void;
+        openAddToolModal: () => void;
+    } | null>(null);
     
     // Modal state for revert confirmation
     const { isOpen: isRevertModalOpen, onOpen: onRevertModalOpen, onClose: onRevertModalClose } = useDisclosure();
@@ -1194,7 +1217,7 @@ export function WorkflowEditor({
         // Expand Chat to full view: hide Copilot panel and collapse Agents panel
         updateViewMode('two_agents_chat');
         setIsLeftPanelCollapsed(true);
-    }, [updateViewMode, viewMode]);
+    }, [updateViewMode]);
 
     // Load agent order from localStorage on mount
     // useEffect(() => {
@@ -1340,6 +1363,22 @@ export function WorkflowEditor({
         dispatchGuarded({ type: "add_prompt", prompt });
     }
 
+    function handleShowAddDataSourceModal() {
+        dispatchGuarded({ type: "show_add_datasource_modal" });
+    }
+
+    function handleShowAddVariableModal() {
+        dispatchGuarded({ type: "show_add_variable_modal" });
+    }
+
+    function handleShowAddAgentModal() {
+        dispatchGuarded({ type: "show_add_agent_modal" });
+    }
+
+    function handleShowAddToolModal() {
+        dispatchGuarded({ type: "show_add_tool_modal" });
+    }
+
     function handleSelectPipeline(name: string) {
         dispatch({ type: "select_pipeline", name });
     }
@@ -1450,11 +1489,11 @@ export function WorkflowEditor({
 
     // Modal-specific handlers that don't auto-select
     function handleAddPromptFromModal(prompt: Partial<z.infer<typeof WorkflowPrompt>>) {
-        dispatch({ type: "add_prompt", prompt, fromCopilot: true });
+        dispatchGuarded({ type: "add_prompt", prompt, fromCopilot: true });
     }
 
     function handleUpdatePromptFromModal(name: string, prompt: Partial<z.infer<typeof WorkflowPrompt>>) {
-        dispatch({ type: "update_prompt_no_select", name, prompt });
+        dispatchGuarded({ type: "update_prompt_no_select", name, prompt });
     }
 
     async function handleDeletePrompt(name: string) {
@@ -1671,7 +1710,7 @@ export function WorkflowEditor({
     }, [isLive, state.present.publishing, onChangeMode]);
 
     const WORKFLOW_MOD_ACTIONS = useRef(new Set([
-        'add_agent','add_tool','add_prompt','add_pipeline',
+        'add_agent','add_tool','add_prompt','add_pipeline','show_add_datasource_modal','show_add_variable_modal','show_add_agent_modal','show_add_tool_modal',
         'update_agent','update_tool','update_prompt','update_prompt_no_select','update_pipeline',
         'delete_agent','delete_tool','delete_prompt','delete_pipeline',
         'toggle_agent','set_main_agent','reorder_agents','reorder_pipelines'
@@ -1684,6 +1723,26 @@ export function WorkflowEditor({
             setShowEditModal(true);
             return; // Block the action - it never reaches the reducer
         }
+        
+        // Handle modal show actions when not in live mode
+        const actionType = (action as any).type;
+        if (actionType === "show_add_datasource_modal") {
+            entityListRef.current?.openDataSourcesModal();
+            return;
+        }
+        if (actionType === "show_add_variable_modal") {
+            entityListRef.current?.openAddVariableModal();
+            return;
+        }
+        if (actionType === "show_add_agent_modal") {
+            entityListRef.current?.openAddAgentModal();
+            return;
+        }
+        if (actionType === "show_add_tool_modal") {
+            entityListRef.current?.openAddToolModal();
+            return;
+        }
+        
         dispatch(action); // Allow the action to proceed
     }, [WORKFLOW_MOD_ACTIONS, isLive, state.present.publishing, dispatch]);
 
@@ -1947,6 +2006,7 @@ export function WorkflowEditor({
                                 workflow={state.present.workflow}
                                 selectedEntity={null}
                                 startAgentName={state.present.workflow.startAgent}
+                                isLive={isLive}
                                 onSelectAgent={handleSelectAgent}
                                 onSelectTool={handleSelectTool}
                                 onSelectPrompt={handleSelectPrompt}
@@ -1955,6 +2015,10 @@ export function WorkflowEditor({
                                 onAddAgent={handleAddAgent}
                                 onAddTool={handleAddTool}
                                 onAddPrompt={handleAddPrompt}
+                                onShowAddDataSourceModal={handleShowAddDataSourceModal}
+                                onShowAddVariableModal={handleShowAddVariableModal}
+                                onShowAddAgentModal={handleShowAddAgentModal}
+                                onShowAddToolModal={handleShowAddToolModal}
                                 onUpdatePrompt={handleUpdatePrompt}
                                 onAddPromptFromModal={handleAddPromptFromModal}
                                 onUpdatePromptFromModal={handleUpdatePromptFromModal}
@@ -2035,6 +2099,7 @@ export function WorkflowEditor({
                                       : null
                                 }
                                 startAgentName={state.present.workflow.startAgent}
+                                isLive={isLive}
                                 onSelectAgent={handleSelectAgent}
                                 onSelectTool={handleSelectTool}
                                 onSelectPrompt={handleSelectPrompt}
@@ -2043,6 +2108,10 @@ export function WorkflowEditor({
                                 onAddAgent={handleAddAgent}
                                 onAddTool={handleAddTool}
                                 onAddPrompt={handleAddPrompt}
+                                onShowAddDataSourceModal={handleShowAddDataSourceModal}
+                                onShowAddVariableModal={handleShowAddVariableModal}
+                                onShowAddAgentModal={handleShowAddAgentModal}
+                                onShowAddToolModal={handleShowAddToolModal}
                                 onUpdatePrompt={handleUpdatePrompt}
                                 onAddPromptFromModal={handleAddPromptFromModal}
                                 onUpdatePromptFromModal={handleUpdatePromptFromModal}

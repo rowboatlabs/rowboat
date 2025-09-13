@@ -39,10 +39,6 @@ const copilotPrompts = {
     "Reddit & HN assistant": {
         prompt: "Build an assistant that helps me with browsing Reddit and Hacker News",
         emoji: "🔍"
-    },
-    "CRM assistant": {
-        prompt: "Build an assistant that helps me with my CRM",
-        emoji: "📊"
     }
 };
 
@@ -107,13 +103,14 @@ export function BuildAssistantSection() {
     };
 
     // Handle template selection
-    const handleTemplateSelect = async (templateId: string) => {
+    const handleTemplateSelect = async (template: any) => {
         // Show a small non-blocking spinner on the clicked card
-        setLoadingTemplateId(templateId);
+        setLoadingTemplateId(template.id);
         try {
             await createProjectWithOptions({
-                template: templateId,
-                prompt: 'Explain this workflow',
+                template: template.id,
+                // Prefer a card-specific copilot prompt if present on the template JSON
+                prompt: template.copilotPrompt || 'Explain this workflow',
                 router,
                 onError: () => {
                     // Clear loading state if creation fails
@@ -499,7 +496,7 @@ export function BuildAssistantSection() {
                                             {items.map((template) => (
                                                 <button
                                                     key={template.id}
-                                                    onClick={() => handleTemplateSelect(template.id)}
+                                                    onClick={() => handleTemplateSelect(template)}
                                                     disabled={loadingTemplateId === template.id}
                                                     className={clsx(
                                                         "relative block p-4 border border-gray-200 dark:border-gray-700 rounded-xl transition-all group text-left",
