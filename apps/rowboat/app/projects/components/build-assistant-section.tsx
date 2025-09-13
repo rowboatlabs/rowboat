@@ -39,10 +39,6 @@ const copilotPrompts = {
     "Reddit & HN assistant": {
         prompt: "Build an assistant that helps me with browsing Reddit and Hacker News",
         emoji: "🔍"
-    },
-    "CRM assistant": {
-        prompt: "Build an assistant that helps me with my CRM",
-        emoji: "📊"
     }
 };
 
