@@ -1,10 +1,12 @@
-"use client";
+    "use client";
 import React from "react";
-import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input, ButtonGroup, Checkbox, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
+import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Input, ButtonGroup, Checkbox, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, Textarea, Select, SelectItem, Chip, Radio, RadioGroup } from "@heroui/react";
 import { Button as CustomButton } from "@/components/ui/button";
 import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, DownloadIcon, SettingsIcon, ChevronDownIcon, ZapIcon, Clock, Plug, MessageCircleIcon, ShareIcon } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { ProgressBar, ProgressStep } from "@/components/ui/progress-bar";
+import { useUser } from '@auth0/nextjs-auth0';
+import { useState } from "react";
 
 interface TopBarProps {
     localProjectName: string;
@@ -42,6 +44,21 @@ interface TopBarProps {
     onShareWorkflow: () => void;
     shareUrl: string | null;
     onCopyShareUrl: () => void;
+    shareMode: 'url' | 'community';
+    setShareMode: (mode: 'url' | 'community') => void;
+    communityData: {
+        name: string;
+        description: string;
+        category: string;
+        tags: string[];
+        isAnonymous: boolean;
+        copilotPrompt: string;
+        estimatedComplexity: 'beginner' | 'intermediate' | 'advanced';
+    };
+    setCommunityData: (data: any) => void;
+    onCommunityPublish: () => void;
+    communityPublishing: boolean;
+    communityPublishSuccess: boolean;
 }
 
 export function TopBar({
@@ -80,6 +97,13 @@ export function TopBar({
     onShareWorkflow,
     shareUrl,
     onCopyShareUrl,
+    shareMode,
+    setShareMode,
+    communityData,
+    setCommunityData,
+    onCommunityPublish,
+    communityPublishing,
+    communityPublishSuccess,
 }: TopBarProps) {
     const router = useRouter();
     const params = useParams();
@@ -87,10 +111,26 @@ export function TopBar({
     
     // Share modal state
     const { isOpen: isShareModalOpen, onOpen: onShareModalOpen, onClose: onShareModalClose } = useDisclosure();
+    const [copyButtonText, setCopyButtonText] = useState('Copy');
     
     const handleShareClick = () => {
         onShareWorkflow(); // Call the original share function to generate URL
         onShareModalOpen(); // Open the modal
+    };
+
+    const handleCopyUrl = () => {
+        onCopyShareUrl(); // Call the original copy function
+        setCopyButtonText('Copied!');
+        setTimeout(() => {
+            setCopyButtonText('Copy');
+        }, 2000); // Reset after 2 seconds
+    };
+
+    const { user } = useUser();
+    
+    const getUserDisplayName = () => {
+        if (!user) return 'Anonymous';
+        return user.name ?? user.email ?? 'Anonymous';
     };
     
     // Progress bar steps with completion logic and current step detection
@@ -596,46 +636,205 @@ export function TopBar({
         </div>
 
         {/* Share Modal */}
-        <Modal isOpen={isShareModalOpen} onClose={onShareModalClose} size="lg">
+        <Modal 
+            isOpen={isShareModalOpen} 
+            onClose={onShareModalClose} 
+            size="2xl" 
+            scrollBehavior="inside"
+            classNames={{
+                base: "bg-white dark:bg-gray-900 max-h-[90vh]",
+                header: "border-b border-gray-200 dark:border-gray-700 pb-4 flex-shrink-0",
+                body: "py-6 overflow-y-auto flex-1",
+                footer: "border-t border-gray-200 dark:border-gray-700 pt-4 flex-shrink-0"
+            }}
+        >
             <ModalContent>
                 <ModalHeader className="flex flex-col gap-1">
-                    Share Assistant
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Share Assistant</h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-normal">Choose how you&apos;d like to share your assistant</p>
                 </ModalHeader>
                 <ModalBody>
-                    <div className="space-y-4">
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                            Share this assistant with others using the URL below:
-                        </p>
-                        {shareUrl ? (
-                            <div className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                <input
-                                    type="text"
-                                    value={shareUrl || ''}
-                                    readOnly
-                                    className="flex-1 bg-transparent text-sm text-gray-700 dark:text-gray-300 outline-none"
-                                />
-                                <Button
-                                    size="sm"
-                                    variant="solid"
-                                    onPress={onCopyShareUrl}
-                                    className="bg-indigo-100 hover:bg-indigo-200 text-indigo-800"
-                                >
-                                    Copy
-                                </Button>
+                    <div className="space-y-8">
+                        {/* Quick Share Section */}
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                                    <ShareIcon size={16} className="text-blue-600 dark:text-blue-400" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-medium text-gray-900 dark:text-gray-100">Quick Share</h3>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Share with a direct link</p>
+                                </div>
                             </div>
-                        ) : (
-                            <div className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                <Spinner size="sm" />
-                                <span className="text-sm text-gray-600 dark:text-gray-400">
-                                    Generating share URL...
-                                </span>
+                            
+                            {shareUrl ? (
+                                <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700">
+                                    <div className="flex-1 min-w-0">
+                                        <input
+                                            type="text"
+                                            value={shareUrl || ''}
+                                            readOnly
+                                            className="w-full bg-transparent text-sm text-gray-700 dark:text-gray-300 outline-none font-mono focus:outline-none !focus:ring-0 !focus:ring-offset-0 !ring-0 !ring-offset-0"
+                                        />
+                                    </div>
+                                    <Button
+                                        size="sm"
+                                        variant="solid"
+                                        onPress={handleCopyUrl}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
+                                    >
+                                        {copyButtonText}
+                                    </Button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700">
+                                    <Spinner size="sm" />
+                                    <span className="text-sm text-gray-500 dark:text-gray-400">
+                                        Generating share URL...
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Divider */}
+                        <div className="relative">
+                            <div className="absolute inset-0 flex items-center">
+                                <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
                             </div>
-                        )}
+                            <div className="relative flex justify-center">
+                                <span className="px-4 bg-white dark:bg-gray-900 text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">or</span>
+                            </div>
+                        </div>
+
+                        {/* Community Publishing Section */}
+                        <div className="space-y-6">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                                    <MessageCircleIcon size={16} className="text-purple-600 dark:text-purple-400" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-medium text-gray-900 dark:text-gray-100">Publish to Community</h3>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Make it discoverable by others</p>
+                                </div>
+                            </div>
+                            
+                            <div className="space-y-5">
+                                {/* Assistant Name */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        Assistant Name <span className="text-red-500">*</span>
+                                    </label>
+                                    <Input
+                                        placeholder="Enter assistant name"
+                                        value={communityData.name}
+                                        onChange={(e) => setCommunityData({ ...communityData, name: e.target.value })}
+                                        classNames={{
+                                            input: "text-sm focus:outline-none !focus:ring-0 !focus:ring-offset-0 !ring-0 !ring-offset-0",
+                                            inputWrapper: "border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 focus-within:border-gray-300 dark:focus-within:border-gray-500 !focus-within:ring-0 !focus-within:ring-offset-0 !ring-0 !ring-offset-0"
+                                        }}
+                                    />
+                                </div>
+
+                                {/* Description */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        Description <span className="text-red-500">*</span>
+                                    </label>
+                                    <Textarea
+                                        placeholder="Describe what this assistant does..."
+                                        value={communityData.description}
+                                        onChange={(e) => setCommunityData({ ...communityData, description: e.target.value })}
+                                        minRows={3}
+                                        classNames={{
+                                            input: "text-sm focus:outline-none !focus:ring-0 !focus:ring-offset-0 !ring-0 !ring-offset-0",
+                                            inputWrapper: "border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 focus-within:border-gray-300 dark:focus-within:border-gray-500 !focus-within:ring-0 !focus-within:ring-offset-0 !ring-0 !ring-offset-0"
+                                        }}
+                                    />
+                                </div>
+
+                                {/* Category */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        Category <span className="text-red-500">*</span>
+                                    </label>
+                                    <Select
+                                        placeholder="Select a category"
+                                        selectedKeys={communityData.category ? [communityData.category] : []}
+                                        onSelectionChange={(keys) => {
+                                            const selected = Array.from(keys)[0] as string;
+                                            setCommunityData({ ...communityData, category: selected });
+                                        }}
+                                        classNames={{
+                                            trigger: "border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 focus:outline-none !focus:ring-0 !focus:ring-offset-0 !ring-0 !ring-offset-0 focus-within:border-gray-300 dark:focus-within:border-gray-500 !focus-within:ring-0 !focus-within:ring-offset-0",
+                                            value: "text-sm"
+                                        }}
+                                    >
+                                        <SelectItem key="Work Productivity">Work Productivity</SelectItem>
+                                        <SelectItem key="Developer Productivity">Developer Productivity</SelectItem>
+                                        <SelectItem key="News & Social">News & Social</SelectItem>
+                                        <SelectItem key="Customer Support">Customer Support</SelectItem>
+                                        <SelectItem key="Education">Education</SelectItem>
+                                        <SelectItem key="Entertainment">Entertainment</SelectItem>
+                                        <SelectItem key="Other">Other</SelectItem>
+                                    </Select>
+                                </div>
+
+                                {/* Privacy Toggle */}
+                                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-200 dark:border-gray-700">
+                                    <div className="flex-1">
+                                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
+                                            {communityData.isAnonymous ? 'Publish anonymously' : `Publish as ${getUserDisplayName()}`}
+                                        </div>
+                                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                                            {communityData.isAnonymous ? 'Your name will be hidden from the community' : 'Your name will be visible to the community'}
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setCommunityData({ ...communityData, isAnonymous: !communityData.isAnonymous })}
+                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                                            communityData.isAnonymous ? 'bg-gray-300 dark:bg-gray-600' : 'bg-blue-600'
+                                        }`}
+                                    >
+                                        <span
+                                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                                communityData.isAnonymous ? 'translate-x-1' : 'translate-x-6'
+                                            }`}
+                                        />
+                                    </button>
+                                </div>
+
+                                {/* Success Message */}
+                                {communityPublishSuccess && (
+                                    <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                                        <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center">
+                                            <span className="text-green-600 dark:text-green-400 text-xs">✓</span>
+                                        </div>
+                                        <p className="text-green-700 dark:text-green-300 text-sm font-medium">
+                                            Successfully published to community!
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     </div>
                 </ModalBody>
-                <ModalFooter>
-                    <Button variant="light" onPress={onShareModalClose}>
-                        Close
+                <ModalFooter className="gap-3">
+                    <Button 
+                        variant="light" 
+                        onPress={onShareModalClose}
+                        className="px-6 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        color="primary"
+                        onPress={onCommunityPublish}
+                        isLoading={communityPublishing}
+                        isDisabled={!communityData.name.trim() || !communityData.description.trim() || !communityData.category}
+                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium"
+                    >
+                        {communityPublishing ? 'Publishing...' : 'Publish to Community'}
                     </Button>
                 </ModalFooter>
             </ModalContent>

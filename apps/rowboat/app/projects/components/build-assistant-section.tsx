@@ -16,6 +16,8 @@ import { Tabs, Tab } from "@/components/ui/tabs";
 import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import Link from 'next/link';
+import { CommunitySection } from '@/components/community/CommunitySection';
+import { AssistantSection } from '@/components/common/AssistantSection';
 
 const SHOW_PREBUILT_CARDS = process.env.NEXT_PUBLIC_SHOW_PREBUILT_CARDS !== 'false';
 
@@ -291,7 +293,9 @@ export function BuildAssistantSection() {
                     {/* Tabs Section */}
                     <div className="max-w-5xl mx-auto">
                         <div className="p-6 pb-0">
-                            <Tabs defaultSelectedKey="new" selectedKey={selectedTab} onSelectionChange={(key) => setSelectedTab(key as string)} className="w-full">
+                            <Tabs defaultSelectedKey="new" selectedKey={selectedTab} onSelectionChange={(key) => {
+                                setSelectedTab(key as string);
+                            }} className="w-full">
                                 <Tab key="new" title="New Assistant">
                                     <div className="pt-4">
                                         <div className="flex items-center gap-12">
@@ -463,149 +467,31 @@ export function BuildAssistantSection() {
                     {/* Pre-built Assistants Section - Only show for New Assistant tab */}
                     {selectedTab === 'new' && SHOW_PREBUILT_CARDS && (
                         <div className="max-w-5xl mx-auto mt-16">
-                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700">
-                            <div className="text-left mb-6">
-                                <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                                    Prebuilt Assistants
-                                </h2>
-                                <p className="text-sm text-gray-600 dark:text-gray-400">
-                                    Start quickly and let Skipper adapt it to your needs.
-                                </p>
-                            </div>
-                            {templatesLoading ? (
-                                <div className="flex items-center justify-center py-12 text-sm text-gray-500 dark:text-gray-400">
-                                    Loading pre-built assistants...
-                                </div>
-                            ) : templatesError ? (
-                                <div className="flex items-center justify-center py-12 text-sm text-red-500 dark:text-red-400">
-                                    Error: {templatesError}
-                                </div>
-                            ) : templates.length === 0 ? (
-                                <div className="flex items-center justify-center py-12 text-sm text-gray-500 dark:text-gray-400">
-                                    No pre-built assistants available
-                                </div>
-                            ) : (
-                                (() => {
-                                    const workTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'work productivity');
-                                    const devTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'developer productivity');
-                                    const newsTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'news & social');
-                                    const customerSupportTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'customer support');
-
-                                    const renderGrid = (items: any[]) => (
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                            {items.map((template) => (
-                                                <button
-                                                    key={template.id}
-                                                    onClick={() => handleTemplateSelect(template)}
-                                                    disabled={loadingTemplateId === template.id}
-                                                    className={clsx(
-                                                        "relative block p-4 border border-gray-200 dark:border-gray-700 rounded-xl transition-all group text-left",
-                                                        "hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:shadow-md",
-                                                        loadingTemplateId === template.id && "opacity-90 cursor-not-allowed"
-                                                    )}
-                                                >
-                                                    <div className="space-y-2">
-                                                        <div className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1">
-                                                            {template.name}
-                                                        </div>
-                                                        <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-                                                            {template.description}
-                                                        </div>
-
-                                                        {(() => {
-                                                            const tools = getUniqueTools(template);
-                                                            return tools.length > 0 && (
-                                                                <div className="flex items-center gap-2 mt-2">
-                                                                    <div className="text-xs text-gray-400 dark:text-gray-500">
-                                                                        Tools:
-                                                                    </div>
-                                                                    <div className="flex items-center gap-1">
-                                                                        {tools.slice(0, 4).map((tool) => (
-                                                                            tool.logo && (
-                                                                                <PictureImg
-                                                                                    key={tool.name}
-                                                                                    src={tool.logo}
-                                                                                    alt={`${tool.name} logo`}
-                                                                                    className="w-4 h-4 rounded-sm object-cover flex-shrink-0"
-                                                                                    title={tool.name}
-                                                                                />
-                                                                            )
-                                                                        ))}
-                                                                        {tools.length > 4 && (
-                                                                            <span className="text-xs text-gray-400 dark:text-gray-500">
-                                                                                +{tools.length - 4}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })()}
-
-                                                        <div className="flex items-center justify-between mt-2">
-                                                            <div className="text-xs text-gray-400 dark:text-gray-500"></div>
-                                                            {loadingTemplateId === template.id ? (
-                                                                <div className="text-blue-600 dark:text-blue-400">
-                                                                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
-                                                                </div>
-                                                            ) : (
-                                                                <div className="w-2 h-2 rounded-full bg-blue-500 opacity-75"></div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    );
-
-                                    return (
-                                        <div className="space-y-8">
-                                            {workTemplates.length > 0 && (
-                                                <div>
-                                                    <div className="mb-3">
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-400/10 dark:text-amber-300 dark:ring-amber-400/30">
-                                                            Work Productivity
-                                                        </span>
-                                                    </div>
-                                                    {renderGrid(workTemplates)}
-                                                </div>
-                                            )}
-                                            {devTemplates.length > 0 && (
-                                                <div>
-                                                    <div className="mb-3">
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 dark:bg-indigo-400/10 dark:text-indigo-300 dark:ring-indigo-400/30">
-                                                            Developer Productivity
-                                                        </span>
-                                                    </div>
-                                                    {renderGrid(devTemplates)}
-                                                </div>
-                                            )}
-                                            {newsTemplates.length > 0 && (
-                                                <div>
-                                                    <div className="mb-3">
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-50 text-green-700 ring-1 ring-green-200 dark:bg-green-400/10 dark:text-green-300 dark:ring-green-400/30">
-                                                            News & Social
-                                                        </span>
-                                                    </div>
-                                                    {renderGrid(newsTemplates)} 
-                                                </div>
-                                            )}
-                                            {customerSupportTemplates.length > 0 && (
-                                                <div>
-                                                    <div className="mb-3">
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-400/10 dark:text-red-300 dark:ring-red-400/30">
-                                                            Customer Support
-                                                        </span>
-                                                    </div>
-                                                    {renderGrid(customerSupportTemplates)}
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })()
-                            )}
+                            <AssistantSection
+                                title="Prebuilt Assistants"
+                                description="Start quickly and let Skipper adapt it to your needs."
+                                items={templates.map(template => ({
+                                    id: template.id,
+                                    name: template.name,
+                                    description: template.description,
+                                    category: template.category || 'Other',
+                                    tools: template.tools,
+                                    estimatedComplexity: template.estimatedComplexity
+                                }))}
+                                loading={templatesLoading}
+                                error={templatesError}
+                                onItemClick={handleTemplateSelect}
+                                loadingItemId={loadingTemplateId}
+                                emptyMessage="No pre-built assistants available"
+                                getUniqueTools={getUniqueTools}
+                            />
                         </div>
-                    </div>
                     )}
+
+                    {/* Community Assistants Section */}
+                    <div className="max-w-5xl mx-auto mt-16">
+                        <CommunitySection />
+                    </div>
                 </div>
             </div>
             )}
