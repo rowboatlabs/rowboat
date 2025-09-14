@@ -1633,6 +1633,51 @@ export function WorkflowEditor({
         setTimeout(() => setShowCopySuccess(false), 2000);
     }
 
+    // Community publishing functions
+    const [shareMode, setShareMode] = useState<'url' | 'community'>('url');
+    const [communityData, setCommunityData] = useState({
+        name: projectConfig.name || '',
+        description: '',
+        category: '',
+        tags: [] as string[],
+        isAnonymous: false,
+        copilotPrompt: '',
+    });
+    const [communityPublishing, setCommunityPublishing] = useState(false);
+    const [communityPublishSuccess, setCommunityPublishSuccess] = useState(false);
+
+    const handleCommunityPublish = async () => {
+        if (!communityData.name.trim() || !communityData.description.trim() || !communityData.category) {
+            return;
+        }
+
+        setCommunityPublishing(true);
+        try {
+            const response = await fetch('/api/assistant-templates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...communityData,
+                    workflow: state.present.workflow, // Use the current workflow
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to publish to community');
+            }
+
+            setCommunityPublishSuccess(true);
+            setTimeout(() => {
+                setCommunityPublishSuccess(false);
+                // Close modal or reset
+            }, 2000);
+        } catch (error) {
+            console.error('Error publishing to community:', error);
+        } finally {
+            setCommunityPublishing(false);
+        }
+    };
+
     // Cleanup blob URL on unmount
     // No-op cleanup; shareUrl is a normal URL now
 
@@ -1949,6 +1994,13 @@ export function WorkflowEditor({
                     onShareWorkflow={handleShareWorkflow}
                     shareUrl={shareUrl}
                     onCopyShareUrl={handleCopyShareUrl}
+                    shareMode={shareMode}
+                    setShareMode={setShareMode}
+                    communityData={communityData}
+                    setCommunityData={setCommunityData}
+                    onCommunityPublish={handleCommunityPublish}
+                    communityPublishing={communityPublishing}
+                    communityPublishSuccess={communityPublishSuccess}
                     onPublishWorkflow={handlePublishWorkflow}
                     onChangeMode={onChangeMode}
                     onRevertToLive={handleRevertToLive}
