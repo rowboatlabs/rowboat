@@ -107,6 +107,6 @@
   "lastUpdatedAt": "2025-09-11T18:51:15.548Z",
   "name": "Customer Support",
   "description": "Answers product information (RAG) and delivery status (MCP) questions.",
-  "category": "Customer Support",
+  "category": "Support",
   "copilotPrompt": "Give me a brief explanation of this assistant."
 }
