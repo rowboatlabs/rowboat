@@ -11,6 +11,7 @@ import { ToolConfig } from "../entities/tool_config";
 import { App as ChatApp } from "../playground/app";
 import { z } from "zod";
 import { createSharedWorkflowFromJson } from '@/app/actions/shared-workflow.actions';
+import { createAssistantTemplate } from '@/app/actions/assistant-templates.actions';
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
 import { PromptConfig } from "../entities/prompt_config";
 import { DataSourceConfig } from "../entities/datasource_config";
@@ -1645,18 +1646,10 @@ export function WorkflowEditor({
 
         setCommunityPublishing(true);
         try {
-            const response = await fetch('/api/assistant-templates', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ...communityData,
-                    workflow: state.present.workflow, // Use the current workflow
-                }),
+            await createAssistantTemplate({
+                ...communityData,
+                workflow: state.present.workflow, // Use the current workflow
             });
-
-            if (!response.ok) {
-                throw new Error('Failed to publish to community');
-            }
 
             setCommunityPublishSuccess(true);
             setTimeout(() => {

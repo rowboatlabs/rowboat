@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { listProjects } from "@/app/actions/project.actions";
 import { createProjectWithOptions, createProjectFromJsonWithOptions, createProjectFromTemplate } from "../lib/project-creation-utils";
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -19,6 +19,13 @@ import { z } from "zod";
 import Link from 'next/link';
 import { AssistantSection } from '@/components/common/AssistantSection';
 import { UnifiedTemplatesSection } from '@/components/common/UnifiedTemplatesSection';
+import { 
+    listAssistantTemplates, 
+    getAssistantTemplateCategories, 
+    toggleTemplateLike,
+    deleteAssistantTemplate,
+    getAssistantTemplate
+} from '@/app/actions/assistant-templates.actions';
 
 const SHOW_PREBUILT_CARDS = process.env.NEXT_PUBLIC_SHOW_PREBUILT_CARDS !== 'false';
 
@@ -99,15 +106,15 @@ export function BuildAssistantSection() {
         return Array.from(uniqueToolsMap.values()).filter(tool => tool.logo); // Only show tools with logos like ToolkitCard
     };
 
-    const fetchLibraryTemplatesPage = async (cursor?: string | null, limit: number = 20) => {
+    const fetchLibraryTemplatesPage = useCallback(async (cursor?: string | null, limit: number = 20) => {
         setTemplatesLoading(true);
         setTemplatesError(null);
         try {
-            const params = new URLSearchParams({ source: 'library', limit: String(limit) });
-            if (cursor) params.set('cursor', cursor);
-            const response = await fetch(`/api/assistant-templates?${params.toString()}`);
-            if (!response.ok) throw new Error('Failed to fetch library templates');
-            const data = await response.json();
+            const data = await listAssistantTemplates({
+                source: 'library',
+                limit,
+                cursor: cursor || undefined
+            });
             setTemplates(prev => cursor ? [...prev, ...data.items] : data.items);
             setTemplatesCursor(data.nextCursor || null);
         } catch (error) {
@@ -116,17 +123,17 @@ export function BuildAssistantSection() {
         } finally {
             setTemplatesLoading(false);
         }
-    };
+    }, []);
 
-    const fetchCommunityTemplatesPage = async (cursor?: string | null, limit: number = 20) => {
+    const fetchCommunityTemplatesPage = useCallback(async (cursor?: string | null, limit: number = 20) => {
         setCommunityTemplatesLoading(true);
         setCommunityTemplatesError(null);
         try {
-            const params = new URLSearchParams({ source: 'community', limit: String(limit) });
-            if (cursor) params.set('cursor', cursor);
-            const response = await fetch(`/api/assistant-templates?${params.toString()}`);
-            if (!response.ok) throw new Error('Failed to fetch community templates');
-            const data = await response.json();
+            const data = await listAssistantTemplates({
+                source: 'community',
+                limit,
+                cursor: cursor || undefined
+            });
             setCommunityTemplates(prev => cursor ? [...prev, ...data.items] : data.items);
             setCommunityCursor(data.nextCursor || null);
         } catch (error) {
@@ -135,10 +142,10 @@ export function BuildAssistantSection() {
         } finally {
             setCommunityTemplatesLoading(false);
         }
-    };
+    }, []);
 
     // Ensure we have at least `targetCount` items loaded for a given type
-    const ensureTemplatesLoaded = async (type: 'prebuilt' | 'community', targetCount: number) => {
+    const ensureTemplatesLoaded = useCallback(async (type: 'prebuilt' | 'community', targetCount: number) => {
         const current = type === 'prebuilt' ? templates.length : communityTemplates.length;
         const cursor = type === 'prebuilt' ? templatesCursor : communityCursor;
         if (current >= targetCount) return;
@@ -159,7 +166,7 @@ export function BuildAssistantSection() {
             needed = targetCount - (type === 'prebuilt' ? templates.length : communityTemplates.length);
             if (nextCursor === null) break;
         }
-    };
+    }, [templates.length, communityTemplates.length, templatesCursor, communityCursor, fetchLibraryTemplatesPage, fetchCommunityTemplatesPage]);
 
     // Handle template selection
     const handleTemplateSelect = async (template: any) => {
@@ -167,10 +174,8 @@ export function BuildAssistantSection() {
         setLoadingTemplateId(template.id);
         try {
             if (template.type === 'prebuilt') {
-                // Fetch full workflow from unified API, then create from JSON
-                const res = await fetch(`/api/assistant-templates/${template.id}`);
-                if (!res.ok) throw new Error('Failed to fetch template details');
-                const data = await res.json();
+                // Fetch full workflow from server action, then create from JSON
+                const data = await getAssistantTemplate(template.id);
                 await createProjectFromJsonWithOptions({
                     workflowJson: JSON.stringify(data.workflow),
                     router,
@@ -181,9 +186,7 @@ export function BuildAssistantSection() {
                 });
             } else if (template.type === 'community') {
                 // Fetch full workflow for community template, then create from JSON
-                const res = await fetch(`/api/assistant-templates/${template.id}`);
-                if (!res.ok) throw new Error('Failed to fetch community template details');
-                const data = await res.json();
+                const data = await getAssistantTemplate(template.id);
                 await createProjectFromJsonWithOptions({
                     workflowJson: JSON.stringify(data.workflow),
                     router,
@@ -202,44 +205,23 @@ export function BuildAssistantSection() {
         }
     };
 
-    // Stable guest id for like toggles
-    const getGuestId = () => {
-        try {
-            let guestId = sessionStorage.getItem('guestId');
-            if (!guestId) {
-                guestId = `guest-${crypto.randomUUID()}`;
-                sessionStorage.setItem('guestId', guestId);
-            }
-            return guestId;
-        } catch (_e) {
-            return `guest-${crypto.randomUUID()}`;
-        }
-    };
-
-    // Handle template like (unified for library and community)
+    // Handle template like (unified for library and community) - now uses proper authentication
     const handleTemplateLike = async (template: any) => {
         try {
-            const guestId = getGuestId();
-            const response = await fetch(`/api/assistant-templates/${template.id}/like`, {
-                method: 'POST',
-                headers: { 'x-guest-id': guestId },
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                if (template.type === 'community') {
-                    setCommunityTemplates(prev => prev.map(t => 
-                        t.id === template.id 
-                            ? { ...t, likeCount: data.likeCount, isLiked: data.liked }
-                            : t
-                    ));
-                } else {
-                    setTemplates(prev => prev.map(t => 
-                        t.id === template.id 
-                            ? { ...t, likeCount: data.likeCount, isLiked: data.liked } as any
-                            : t
-                    ));
-                }
+            const data = await toggleTemplateLike(template.id);
+            
+            if (template.type === 'community') {
+                setCommunityTemplates(prev => prev.map(t => 
+                    t.id === template.id 
+                        ? { ...t, likeCount: data.likeCount, isLiked: data.liked }
+                        : t
+                ));
+            } else {
+                setTemplates(prev => prev.map(t => 
+                    t.id === template.id 
+                        ? { ...t, likeCount: data.likeCount, isLiked: data.liked } as any
+                        : t
+                ));
             }
         } catch (err) {
             console.error('Error toggling like:', err);
@@ -250,9 +232,7 @@ export function BuildAssistantSection() {
     const handleTemplateShare = async (template: any) => {
         try {
             // Fetch workflow for the template and create a shared snapshot
-            const res = await fetch(`/api/assistant-templates/${template.id}`);
-            if (!res.ok) throw new Error('Failed to fetch template for sharing');
-            const data = await res.json();
+            const data = await getAssistantTemplate(template.id);
 
             const shareResp = await fetch('/api/shared-workflow', {
                 method: 'POST',
@@ -294,7 +274,7 @@ export function BuildAssistantSection() {
         // Load initial library templates to fill 4 rows x up to 3 columns ≈ 12
         fetchProjects();
         ensureTemplatesLoaded('prebuilt', 12);
-    }, []);
+    }, [ensureTemplatesLoaded]);
 
     // Handle URL parameters for auto-creation and direct redirect to build view
     useEffect(() => {
@@ -328,9 +308,7 @@ export function BuildAssistantSection() {
                     const isMongoId = !!urlTemplate && /^[a-f0-9]{24}$/i.test(urlTemplate);
                     if (urlTemplate && isMongoId) {
                         // New-style share: template is an assistant-templates id
-                        const res = await fetch(`/api/assistant-templates/${urlTemplate}`);
-                        if (!res.ok) throw new Error('Failed to fetch shared template');
-                        const data = await res.json();
+                        const data = await getAssistantTemplate(urlTemplate);
                         await createProjectFromJsonWithOptions({
                             workflowJson: JSON.stringify(data.workflow),
                             router,
@@ -663,10 +641,7 @@ export function BuildAssistantSection() {
                                 onShare={handleTemplateShare}
                                 onDelete={async (item) => {
                                     try {
-                                        const resp = await fetch(`/api/assistant-templates/${item.id}`, { method: 'DELETE' });
-                                        if (!resp.ok) {
-                                            throw new Error('Failed to delete template');
-                                        }
+                                        await deleteAssistantTemplate(item.id);
                                         setCommunityTemplates(prev => prev.filter(t => t.id !== item.id));
                                     } catch (e) {
                                         console.error(e);

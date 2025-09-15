@@ -73,6 +73,14 @@ export class MongoDBAssistantTemplatesRepository {
         return result?.likeCount || 0;
     }
 
+    async getLikedTemplates(templateIds: string[], userId: string): Promise<string[]> {
+        const likes = await this.likesCollection.find({ 
+            assistantId: { $in: templateIds }, 
+            userId 
+        }).toArray();
+        return likes.map(like => like.assistantId);
+    }
+
     async getCategories(): Promise<string[]> {
         const categories = await this.collection.distinct('category', { isPublic: true });
         return categories.filter(Boolean);

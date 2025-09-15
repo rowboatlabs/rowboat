@@ -5,6 +5,7 @@ import { Input } from "@heroui/react";
 import { Search, Filter } from 'lucide-react';
 import { AssistantCard } from './AssistantCard';
 import { Button } from "@/components/ui/button";
+import { getCurrentUser } from '@/app/actions/assistant-templates.actions';
 
 interface TemplateItem {
     id: string;
@@ -69,14 +70,31 @@ export function UnifiedTemplatesSection({
     // Row-based pagination state
     const [columns, setColumns] = useState<number>(1);
     const [rowsShown, setRowsShown] = useState<number>(4);
+    
+    // Track if user has interacted with likes to prevent ALL re-sorting
+    const [hasUserInteractedWithLikes, setHasUserInteractedWithLikes] = useState(false);
+    const [originalOrder, setOriginalOrder] = useState<Map<string, number>>(new Map());
+    
+    // Handle like interaction - capture current order and disable further sorting
+    const handleLike = (item: TemplateItem) => {
+        if (!hasUserInteractedWithLikes) {
+            // Capture the current sorted order when user first interacts with likes
+            const currentOrder = new Map<string, number>();
+            filteredTemplates.forEach((template, index) => {
+                currentOrder.set(template.id, index);
+            });
+            setOriginalOrder(currentOrder);
+        }
+        setHasUserInteractedWithLikes(true);
+        onLike?.(item);
+    };
+    
 
     useEffect(() => {
         let isMounted = true;
         (async () => {
             try {
-                const resp = await fetch('/api/me', { cache: 'no-store' });
-                if (!resp.ok) return;
-                const data = await resp.json();
+                const data = await getCurrentUser();
                 if (isMounted) setCurrentUserId(data.id || null);
             } catch (_e) {}
         })();
@@ -97,6 +115,7 @@ export function UnifiedTemplatesSection({
         const categories = new Set(allTemplates.map(item => item.category));
         return Array.from(categories).sort();
     }, [allTemplates]);
+
 
     // Filter and sort templates
     const filteredTemplates = useMemo(() => {
@@ -120,33 +139,41 @@ export function UnifiedTemplatesSection({
             filtered = filtered.filter(item => selectedCategories.has(item.category));
         }
 
-        // Apply sorting
-        filtered.sort((a, b) => {
-            switch (sortBy) {
-                case 'newest':
-                    if (a.createdAt && b.createdAt) {
-                        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-                    }
-                    return 0;
-                case 'alphabetical':
-                    return a.name.localeCompare(b.name);
-                case 'popular':
-                default:
-                    // Sort across both types by like count desc; tie-break by createdAt desc, then name
-                    {
-                        const aLikes = a.likeCount || 0;
-                        const bLikes = b.likeCount || 0;
+        // Apply sorting ONLY if user hasn't interacted with likes
+        if (!hasUserInteractedWithLikes) {
+            // Normal sorting
+            filtered.sort((a, b) => {
+                switch (sortBy) {
+                    case 'newest':
+                        if (a.createdAt && b.createdAt) {
+                            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+                        }
+                        return 0;
+                    case 'alphabetical':
+                        return a.name.localeCompare(b.name);
+                    case 'popular':
+                    default:
+                        // Normal sorting by like count when no user interaction
+                        const aLikes = Number(a.likeCount) || 0;
+                        const bLikes = Number(b.likeCount) || 0;
                         if (bLikes !== aLikes) return bLikes - aLikes;
                         const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
                         const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
                         if (bTime !== aTime) return bTime - aTime;
                         return a.name.localeCompare(b.name);
-                    }
-            }
-        });
+                }
+            });
+        } else {
+            // User has interacted - use original order to prevent jumping
+            filtered.sort((a, b) => {
+                const aOrder = originalOrder.get(a.id) ?? 0;
+                const bOrder = originalOrder.get(b.id) ?? 0;
+                return aOrder - bOrder;
+            });
+        }
 
         return filtered;
-    }, [allTemplates, searchQuery, selectedType, selectedCategories, sortBy]);
+    }, [allTemplates, searchQuery, selectedType, selectedCategories, sortBy, hasUserInteractedWithLikes, originalOrder]);
 
     // Determine columns based on Tailwind breakpoints used by the grid
     useEffect(() => {
@@ -163,9 +190,12 @@ export function UnifiedTemplatesSection({
         return () => window.removeEventListener('resize', update);
     }, []);
 
-    // Reset rowsShown when filters/sort change
+    // Reset rowsShown and allow re-sorting when filters/sort change
     useEffect(() => {
         setRowsShown(4);
+        // Reset the like interaction flag so sorting can work again
+        setHasUserInteractedWithLikes(false);
+        setOriginalOrder(new Map());
     }, [searchQuery, selectedType, selectedCategories, sortBy]);
 
     const itemsPerRow = Math.max(columns, 1);
@@ -401,7 +431,7 @@ export function UnifiedTemplatesSection({
                                     onClick={() => onTemplateClick?.(item)}
                                     loading={loadingItemId === item.id}
                                     getUniqueTools={getUniqueTools}
-                                    onLike={() => onLike?.(item)}
+                                    onLike={() => handleLike(item)}
                                     onShare={() => onShare?.(item)}
                                     onDelete={onDelete && currentUserId && item.type === 'community' && item.authorId === currentUserId ? () => {
                                         setPendingDeleteItem(item);
