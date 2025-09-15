@@ -119,7 +119,7 @@
   "startAgent": "Eisenhower Email Pipeline",
   "lastUpdatedAt": "2025-09-13T20:34:42.747Z",
   "name": "Eisenhower Email Organizer",
-  "description": "Organises emails into the four Eisenhower Matrix categories.",
+  "description": "Organizes emails into the four Eisenhower Matrix categories.",
   "category": "Work Productivity",
   "copilotPrompt": "Give me a brief explanation of this assistant. Also briefly tell me about how to setup a trigger for this assistant."
 }
