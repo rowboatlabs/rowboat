@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from "react";
-import { listTemplates, listProjects } from "@/app/actions/project.actions";
+import { listProjects } from "@/app/actions/project.actions";
 import { createProjectWithOptions, createProjectFromJsonWithOptions, createProjectFromTemplate } from "../lib/project-creation-utils";
 import { useRouter, useSearchParams } from 'next/navigation';
 import clsx from 'clsx';
@@ -50,12 +50,17 @@ export function BuildAssistantSection() {
     const [promptError, setPromptError] = useState<string | null>(null);
     const [importLoading, setImportLoading] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
+    // Library templates (paginated)
     const [templates, setTemplates] = useState<any[]>([]);
     const [templatesLoading, setTemplatesLoading] = useState(false);
     const [templatesError, setTemplatesError] = useState<string | null>(null);
+    const [templatesCursor, setTemplatesCursor] = useState<string | null>(null);
+    
+    // Community templates (paginated)
     const [communityTemplates, setCommunityTemplates] = useState<any[]>([]);
     const [communityTemplatesLoading, setCommunityTemplatesLoading] = useState(false);
     const [communityTemplatesError, setCommunityTemplatesError] = useState<string | null>(null);
+    const [communityCursor, setCommunityCursor] = useState<string | null>(null);
     const [projects, setProjects] = useState<z.infer<typeof Project>[]>([]);
     const [projectsLoading, setProjectsLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
@@ -93,33 +98,65 @@ export function BuildAssistantSection() {
         return Array.from(uniqueToolsMap.values()).filter(tool => tool.logo); // Only show tools with logos like ToolkitCard
     };
 
-    const fetchTemplates = async () => {
+    const fetchLibraryTemplatesPage = async (cursor?: string | null, limit: number = 20) => {
         setTemplatesLoading(true);
         setTemplatesError(null);
         try {
-            const templatesArray = await listTemplates();
-            setTemplates(templatesArray);
+            const params = new URLSearchParams({ source: 'library', limit: String(limit) });
+            if (cursor) params.set('cursor', cursor);
+            const response = await fetch(`/api/assistant-templates?${params.toString()}`);
+            if (!response.ok) throw new Error('Failed to fetch library templates');
+            const data = await response.json();
+            setTemplates(prev => cursor ? [...prev, ...data.items] : data.items);
+            setTemplatesCursor(data.nextCursor || null);
         } catch (error) {
-            console.error('Error fetching templates:', error);
+            console.error('Error fetching library templates:', error);
             setTemplatesError(error instanceof Error ? error.message : 'Failed to load templates');
         } finally {
             setTemplatesLoading(false);
         }
     };
 
-    const fetchCommunityTemplates = async () => {
+    const fetchCommunityTemplatesPage = async (cursor?: string | null, limit: number = 20) => {
         setCommunityTemplatesLoading(true);
         setCommunityTemplatesError(null);
         try {
-            const response = await fetch('/api/assistant-templates?source=community');
+            const params = new URLSearchParams({ source: 'community', limit: String(limit) });
+            if (cursor) params.set('cursor', cursor);
+            const response = await fetch(`/api/assistant-templates?${params.toString()}`);
             if (!response.ok) throw new Error('Failed to fetch community templates');
             const data = await response.json();
-            setCommunityTemplates(data.items || []);
+            setCommunityTemplates(prev => cursor ? [...prev, ...data.items] : data.items);
+            setCommunityCursor(data.nextCursor || null);
         } catch (error) {
             console.error('Error fetching community templates:', error);
             setCommunityTemplatesError(error instanceof Error ? error.message : 'Failed to load community templates');
         } finally {
             setCommunityTemplatesLoading(false);
+        }
+    };
+
+    // Ensure we have at least `targetCount` items loaded for a given type
+    const ensureTemplatesLoaded = async (type: 'prebuilt' | 'community', targetCount: number) => {
+        const current = type === 'prebuilt' ? templates.length : communityTemplates.length;
+        const cursor = type === 'prebuilt' ? templatesCursor : communityCursor;
+        if (current >= targetCount) return;
+        // Fetch pages until we meet or exceed target or run out of pages
+        // Use page size equal to remaining needed but capped reasonably
+        let needed = targetCount - current;
+        let nextCursor = cursor;
+        while (needed > 0 && (nextCursor !== null || current === 0)) {
+            const pageSize = Math.min(Math.max(needed, 12), 30);
+            if (type === 'prebuilt') {
+                await fetchLibraryTemplatesPage(nextCursor, pageSize);
+                nextCursor = templatesCursor; // will be updated by set state; slight lag acceptable
+            } else {
+                await fetchCommunityTemplatesPage(nextCursor, pageSize);
+                nextCursor = communityCursor;
+            }
+            // Update needed based on latest lengths
+            needed = targetCount - (type === 'prebuilt' ? templates.length : communityTemplates.length);
+            if (nextCursor === null) break;
         }
     };
 
@@ -253,9 +290,9 @@ export function BuildAssistantSection() {
     };
 
     useEffect(() => {
-        fetchTemplates();
-        fetchCommunityTemplates();
+        // Load initial library templates to fill 4 rows x up to 3 columns ≈ 12
         fetchProjects();
+        ensureTemplatesLoaded('prebuilt', 12);
     }, []);
 
     // Handle URL parameters for auto-creation and direct redirect to build view
@@ -624,8 +661,8 @@ export function BuildAssistantSection() {
                                 error={templatesError || communityTemplatesError}
                                 onTemplateClick={handleTemplateSelect}
                                 onRetry={() => {
-                                    fetchTemplates();
-                                    fetchCommunityTemplates();
+                                    fetchLibraryTemplatesPage(undefined, 12);
+                                    fetchCommunityTemplatesPage(undefined, 12);
                                 }}
                                 loadingItemId={loadingTemplateId}
                                 onLike={handleTemplateLike}
@@ -643,6 +680,12 @@ export function BuildAssistantSection() {
                                     }
                                 }}
                                 getUniqueTools={getUniqueTools}
+                                onLoadMore={async (type, target) => {
+                                    await ensureTemplatesLoaded(type, target);
+                                }}
+                                onTypeChange={async (type, target) => {
+                                    await ensureTemplatesLoaded(type, target);
+                                }}
                             />
                         </div>
                     )}

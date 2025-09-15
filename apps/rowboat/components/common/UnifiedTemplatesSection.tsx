@@ -39,6 +39,8 @@ interface UnifiedTemplatesSectionProps {
     onShare?: (item: TemplateItem) => void;
     onDelete?: (item: TemplateItem) => void;
     getUniqueTools?: (item: TemplateItem) => Array<{ name: string; logo?: string }>;
+    onLoadMore?: (type: 'prebuilt' | 'community', targetCount: number) => Promise<void> | void;
+    onTypeChange?: (type: 'prebuilt' | 'community', targetCount: number) => Promise<void> | void;
 }
 
 export function UnifiedTemplatesSection({
@@ -52,7 +54,9 @@ export function UnifiedTemplatesSection({
     onLike,
     onShare,
     onDelete,
-    getUniqueTools
+    getUniqueTools,
+    onLoadMore,
+    onTypeChange,
 }: UnifiedTemplatesSectionProps) {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedType, setSelectedType] = useState<'prebuilt' | 'community'>('prebuilt');
@@ -278,12 +282,19 @@ export function UnifiedTemplatesSection({
                         {/* Type Filter Segmented Control (Library | Community) */}
                         <div className="flex gap-0.5 items-center h-8 rounded-full border border-gray-200 dark:border-gray-700 p-0 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
                             {[
-                                { key: 'prebuilt', label: 'Library', count: prebuiltTemplates.length },
-                                { key: 'community', label: 'Community', count: communityTemplates.length }
-                            ].map(({ key, label, count }) => (
+                                { key: 'prebuilt', label: 'Library' },
+                                { key: 'community', label: 'Community' }
+                            ].map(({ key, label }) => (
                                 <button
                                     key={key}
-                                    onClick={() => setSelectedType(key as any)}
+                                    onClick={async () => {
+                                        const newType = key as 'prebuilt' | 'community';
+                                        const target = rowsShown * itemsPerRow;
+                                        if (onTypeChange) {
+                                            await onTypeChange(newType, target);
+                                        }
+                                        setSelectedType(newType);
+                                    }}
                                     aria-pressed={selectedType === key}
                                     className={`inline-flex items-center h-8 px-2.5 rounded-full text-[13px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                                         selectedType === key
@@ -291,7 +302,7 @@ export function UnifiedTemplatesSection({
                                             : 'bg-transparent text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700'
                                     }`}
                                 >
-                                    {label} ({count})
+                                    {label}
                                 </button>
                             ))}
                         </div>
@@ -404,7 +415,13 @@ export function UnifiedTemplatesSection({
                         {hasMore && (
                             <div className="flex items-center justify-center pt-2">
                                 <button
-                                    onClick={() => setRowsShown(prev => prev + 4)}
+                                    onClick={async () => {
+                                        const target = (rowsShown + 4) * itemsPerRow;
+                                        if (onLoadMore) {
+                                            await onLoadMore(selectedType, target);
+                                        }
+                                        setRowsShown(prev => prev + 4);
+                                    }}
                                     className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium underline-offset-2 hover:underline"
                                 >
                                     View more
