@@ -118,19 +118,19 @@ export function AssistantCard({
     const getCategoryColor = (category: string) => {
         const lowerCategory = category.toLowerCase();
         if (lowerCategory.includes('work productivity')) {
-            return 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-400/10 dark:text-amber-300 dark:ring-amber-400/30';
+            return 'bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300';
         } else if (lowerCategory.includes('developer productivity')) {
-            return 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 dark:bg-indigo-400/10 dark:text-indigo-300 dark:ring-indigo-400/30';
+            return 'bg-indigo-50 text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300';
         } else if (lowerCategory.includes('news') || lowerCategory.includes('social')) {
-            return 'bg-green-50 text-green-700 ring-1 ring-green-200 dark:bg-green-400/10 dark:text-green-300 dark:ring-green-400/30';
+            return 'bg-green-50 text-green-700 dark:bg-green-400/10 dark:text-green-300';
         } else if (lowerCategory.includes('customer support')) {
-            return 'bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-400/10 dark:text-red-300 dark:ring-red-400/30';
+            return 'bg-red-50 text-red-700 dark:bg-red-400/10 dark:text-red-300';
         } else if (lowerCategory.includes('education')) {
-            return 'bg-blue-50 text-blue-700 ring-1 ring-blue-200 dark:bg-blue-400/10 dark:text-blue-300 dark:ring-blue-400/30';
+            return 'bg-blue-50 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300';
         } else if (lowerCategory.includes('entertainment')) {
-            return 'bg-purple-50 text-purple-700 ring-1 ring-purple-200 dark:bg-purple-400/10 dark:text-purple-300 dark:ring-purple-400/30';
+            return 'bg-purple-50 text-purple-700 dark:bg-purple-400/10 dark:text-purple-300';
         } else {
-            return 'bg-gray-50 text-gray-700 ring-1 ring-gray-200 dark:bg-gray-400/10 dark:text-gray-300 dark:ring-gray-400/30';
+            return 'bg-gray-50 text-gray-700 dark:bg-gray-400/10 dark:text-gray-300';
         }
     };
 
@@ -157,51 +157,51 @@ export function AssistantCard({
                                 "inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0",
                                 templateType === 'prebuilt' 
                                     ? "bg-blue-50 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300"
-                                    : "bg-purple-50 text-purple-700 dark:bg-purple-400/10 dark:text-purple-300"
+                                    : "bg-rose-50 text-rose-700 dark:bg-rose-400/10 dark:text-rose-300"
                             )}>
                                 {templateType === 'prebuilt' ? 'Library' : 'Community'}
                             </span>
                         )}
                     </div>
-                    <div className="mt-1">
+                    <div className="mt-1 relative">
                         <div
                             ref={descriptionRef}
                             className={clsx(
-                                "text-sm leading-5 text-gray-600 dark:text-gray-400 relative min-h-[3.75rem]",
+                                "text-sm leading-5 text-gray-600 dark:text-gray-400 relative min-h-[2.5rem]",
+                                (!isDescriptionExpanded && showDescriptionToggle) && "pr-20",
                                 !isDescriptionExpanded && "line-clamp-2"
                             )}
                         >
                             {description}
                         </div>
                         {showDescriptionToggle && (
-                            <button
-                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsDescriptionExpanded(!isDescriptionExpanded); }}
-                                className="mt-1 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                                aria-label={isDescriptionExpanded ? "Show less" : "Read more"}
-                            >
-                                {isDescriptionExpanded ? 'Show less' : 'Read more'}
-                            </button>
+                            !isDescriptionExpanded ? (
+                                <div className="pointer-events-none absolute inset-0">
+                                    <div className="absolute bottom-0 right-0 h-5 w-24 pl-2 flex items-center justify-end bg-gradient-to-l from-white dark:from-gray-800/95 to-transparent">
+                                        <button
+                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsDescriptionExpanded(true); }}
+                                            className="pointer-events-auto text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1"
+                                            aria-label="Read more"
+                                        >
+                                            Read more
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <button
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsDescriptionExpanded(false); }}
+                                    className="mt-1 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                    aria-label="Show less"
+                                >
+                                    Show less
+                                </button>
+                            )
                         )}
                     </div>
                 </div>
 
-                {/* Category Badge */}
-                <div className="flex items-center justify-between">
-                    <span className={clsx(
-                        "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold",
-                        getCategoryColor(category)
-                    )}>
-                        {category}
-                    </span>
-                    {loading && (
-                        <div className="text-blue-600 dark:text-blue-400">
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
-                        </div>
-                    )}
-                </div>
-
                 {/* Tools (reserve row height even when absent to align cards) */}
-                <div className="flex items-center gap-2 min-h-[20px]">
+                <div className="flex items-center gap-2 min-h-[20px] -mt-1">
                     {displayTools.length > 0 && (
                         <>
                             <div className="text-xs text-gray-400 dark:text-gray-500">
@@ -229,12 +229,40 @@ export function AssistantCard({
                     )}
                 </div>
 
+                {/* Category Badge */}
+                <div className="flex items-center justify-between">
+                    <span className={clsx(
+                        "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
+                        getCategoryColor(category)
+                    )}>
+                        {category}
+                    </span>
+                    {loading && (
+                        <div className="text-blue-600 dark:text-blue-400">
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
+                        </div>
+                    )}
+                </div>
+
                 {/* Author and interaction info */}
                 <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                     <div className="flex items-center gap-2">
                         <span>
-                            {authorName ? (isAnonymous ? 'Anonymous' : authorName) : 'Rowboat'}
+                            {isAnonymous ? 'Anonymous' : (authorName ? (authorName.split(' ')[0] || 'Rowboat') : 'Rowboat')}
                         </span>
+                        {onDelete && (
+                            <button
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onDelete();
+                                }}
+                                className="ml-1 inline-flex items-center justify-center text-gray-400 hover:text-red-600 transition-colors"
+                                aria-label="Delete template"
+                            >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>
+                            </button>
+                        )}
                         {createdAt && (
                             <div className="flex items-center gap-1">
                                 <Calendar size={12} />
@@ -270,20 +298,6 @@ export function AssistantCard({
                             <Share2 size={14} className={copied ? "text-blue-600" : undefined} />
                             {copied && <span className="text-[10px] text-blue-600">Copied</span>}
                         </button>
-                        {onDelete && (
-                            <button
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onDelete();
-                                }}
-                                className="flex items-center gap-1 hover:text-red-600 transition-colors"
-                                aria-label="Delete template"
-                            >
-                                {/* small x icon */}
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>
-                            </button>
-                        )}
                     </div>
                 </div>
 

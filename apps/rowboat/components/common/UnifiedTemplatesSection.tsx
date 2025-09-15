@@ -62,6 +62,10 @@ export function UnifiedTemplatesSection({
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [pendingDeleteItem, setPendingDeleteItem] = useState<TemplateItem | null>(null);
 
+    // Row-based pagination state
+    const [columns, setColumns] = useState<number>(1);
+    const [rowsShown, setRowsShown] = useState<number>(4);
+
     useEffect(() => {
         let isMounted = true;
         (async () => {
@@ -126,23 +130,49 @@ export function UnifiedTemplatesSection({
                     return a.name.localeCompare(b.name);
                 case 'popular':
                 default:
-                    // For prebuilt templates, use a default order
-                    // For community templates, use like count
-                    if (a.type === 'community' && b.type === 'community') {
-                        return (b.likeCount || 0) - (a.likeCount || 0);
-                    }
-                    if (a.type === 'prebuilt' && b.type === 'prebuilt') {
+                    // Sort across both types by like count desc; tie-break by createdAt desc, then name
+                    {
+                        const aLikes = a.likeCount || 0;
+                        const bLikes = b.likeCount || 0;
+                        if (bLikes !== aLikes) return bLikes - aLikes;
+                        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                        if (bTime !== aTime) return bTime - aTime;
                         return a.name.localeCompare(b.name);
                     }
-                    // Prebuilt templates first, then community
-                    if (a.type === 'prebuilt' && b.type === 'community') return -1;
-                    if (a.type === 'community' && b.type === 'prebuilt') return 1;
-                    return 0;
             }
         });
 
         return filtered;
     }, [allTemplates, searchQuery, selectedType, selectedCategories, sortBy]);
+
+    // Determine columns based on Tailwind breakpoints used by the grid
+    useEffect(() => {
+        const computeColumns = () => {
+            if (typeof window === 'undefined') return 1;
+            // Tailwind: grid-cols-1 sm:grid-cols-2 lg:grid-cols-3
+            const isLg = window.matchMedia('(min-width: 1024px)').matches;
+            const isSm = window.matchMedia('(min-width: 640px)').matches;
+            return isLg ? 3 : (isSm ? 2 : 1);
+        };
+        const update = () => setColumns(computeColumns());
+        update();
+        window.addEventListener('resize', update);
+        return () => window.removeEventListener('resize', update);
+    }, []);
+
+    // Reset rowsShown when filters/sort change
+    useEffect(() => {
+        setRowsShown(4);
+    }, [searchQuery, selectedType, selectedCategories, sortBy]);
+
+    const itemsPerRow = Math.max(columns, 1);
+    const visibleCount = rowsShown * itemsPerRow;
+    const hasMore = filteredTemplates.length > visibleCount;
+    const remainingItems = Math.max(filteredTemplates.length - visibleCount, 0);
+    const remainingRows = Math.ceil(remainingItems / itemsPerRow);
+
+    const visibleTemplates = filteredTemplates.slice(0, visibleCount);
 
     // Handle category toggle
     const toggleCategory = (category: string) => {
@@ -345,10 +375,10 @@ export function UnifiedTemplatesSection({
                 ) : (
                     <>
                         <div className="text-sm text-gray-600 dark:text-gray-400">
-                            Showing {filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''}
+                            Showing {Math.min(visibleCount, filteredTemplates.length)} of {filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''} ({rowsShown} row{rowsShown !== 1 ? 's' : ''})
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {filteredTemplates.map((item) => (
+                            {visibleTemplates.map((item) => (
                                 <AssistantCard
                                     key={`${item.type}-${item.id}`}
                                     id={item.id}
@@ -374,6 +404,16 @@ export function UnifiedTemplatesSection({
                                 />
                             ))}
                         </div>
+                        {hasMore && (
+                            <div className="flex items-center justify-center pt-2">
+                                <button
+                                    onClick={() => setRowsShown(prev => prev + 4)}
+                                    className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium underline-offset-2 hover:underline"
+                                >
+                                    View more
+                                </button>
+                            </div>
+                        )}
                     </>
                 )}
             </div>

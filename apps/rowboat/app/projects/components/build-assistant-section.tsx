@@ -628,7 +628,6 @@ export function BuildAssistantSection() {
                                 onLike={handleTemplateLike}
                                 onShare={handleTemplateShare}
                                 onDelete={async (item) => {
-                                    if (!confirm('Delete this template? This action cannot be undone.')) return;
                                     try {
                                         const resp = await fetch(`/api/assistant-templates/${item.id}`, { method: 'DELETE' });
                                         if (!resp.ok) {
@@ -637,7 +636,7 @@ export function BuildAssistantSection() {
                                         setCommunityTemplates(prev => prev.filter(t => t.id !== item.id));
                                     } catch (e) {
                                         console.error(e);
-                                        alert('Failed to delete template');
+                                        // Optional: surface non-blocking feedback; keeping console error for now
                                     }
                                 }}
                                 getUniqueTools={getUniqueTools}
