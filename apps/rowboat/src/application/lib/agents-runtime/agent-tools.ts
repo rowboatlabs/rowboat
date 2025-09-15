@@ -659,11 +659,11 @@ export function createGenerateImageTool(
                     const images = await Promise.all(result.images.map(async (img) => {
                         const buf = Buffer.from(img.dataBase64, 'base64');
                         const ext = img.mimeType === 'image/jpeg' ? '.jpg' : img.mimeType === 'image/webp' ? '.webp' : '.png';
-                        const base = `${projectId}-${Math.floor(Math.random() * 1e12).toString(36)}`;
-                        const last2 = base.slice(-2).padStart(2, '0');
+                        const imageId = crypto.randomUUID();
+                        const last2 = imageId.slice(-2).padStart(2, '0');
                         const dirA = last2.charAt(0);
                         const dirB = last2.charAt(1);
-                        const filename = `${base}${ext}`;
+                        const filename = `${imageId}${ext}`;
                         const key = `generated_images/${dirA}/${dirB}/${filename}`;
                         await s3.send(new PutObjectCommand({
                             Bucket: s3Bucket,
