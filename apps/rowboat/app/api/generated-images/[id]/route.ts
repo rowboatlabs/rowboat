@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
 
-export async function GET(request: NextRequest, props: { params: Promise<{ path: string[] }> }) {
+// Serves generated images from S3 by UUID-only path: /api/generated-images/{id}
+// Reconstructs the S3 key using the same sharding logic as image creation.
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const path = params.path || [];
-  if (path.length < 3) {
-    return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+  const id = params.id;
+  if (!id) {
+    return NextResponse.json({ error: 'Missing id' }, { status: 400 });
   }
 
   const bucket = process.env.RAG_UPLOADS_S3_BUCKET || '';
@@ -23,8 +25,31 @@ export async function GET(request: NextRequest, props: { params: Promise<{ path:
     } as any : undefined,
   });
 
-  const filename = path[path.length - 1];
-  const key = `generated_images/${path.join('/')}`;
+  // Reconstruct directory sharding from last two characters of UUID
+  const last2 = id.slice(-2).padStart(2, '0');
+  const dirA = last2.charAt(0);
+  const dirB = last2.charAt(1);
+  const baseKey = `generated_images/${dirA}/${dirB}/${id}`;
+
+  // Try known extensions in order used by generator
+  const exts = ['.png', '.jpg', '.webp'];
+  let foundExt: string | null = null;
+  for (const ext of exts) {
+    try {
+      await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: `${baseKey}${ext}` }));
+      foundExt = ext;
+      break;
+    } catch {
+      // continue trying next extension
+    }
+  }
+
+  if (!foundExt) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  const key = `${baseKey}${foundExt}`;
+  const filename = `${id}${foundExt}`;
   try {
     const resp = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
     const contentType = resp.ContentType || 'application/octet-stream';
