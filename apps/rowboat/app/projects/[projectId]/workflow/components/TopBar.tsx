@@ -110,6 +110,8 @@ export function TopBar({
     
     // Share modal state
     const { isOpen: isShareModalOpen, onOpen: onShareModalOpen, onClose: onShareModalClose } = useDisclosure();
+    const { isOpen: isConfirmOpen, onOpen: onConfirmOpen, onClose: onConfirmClose } = useDisclosure();
+    const [acknowledged, setAcknowledged] = useState(false);
     const [copyButtonText, setCopyButtonText] = useState('Copy');
     
     const handleShareClick = () => {
@@ -838,12 +840,68 @@ export function TopBar({
                     </Button>
                     <Button
                         color={communityPublishSuccess ? "success" : "primary"}
-                        onPress={onCommunityPublish}
+                        onPress={() => {
+                            // Open confirmation first
+                            onConfirmOpen();
+                        }}
                         isLoading={communityPublishing}
                         isDisabled={communityPublishSuccess || !communityData.name.trim() || !communityData.description.trim() || !communityData.category}
                         className={`${communityPublishSuccess ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} px-6 py-2 text-white font-medium`}
                     >
                         {communityPublishSuccess ? 'Published' : (communityPublishing ? 'Publishing...' : 'Publish to Community')}
+                    </Button>
+                </ModalFooter>
+            </ModalContent>
+        </Modal>
+
+        {/* Confirmation Modal for Community Publish */}
+        <Modal 
+            isOpen={isConfirmOpen} 
+            onClose={() => { setAcknowledged(false); onConfirmClose(); }}
+            size="md"
+            classNames={{
+                base: "bg-white dark:bg-gray-900",
+                header: "border-b border-gray-200 dark:border-gray-700 pb-3",
+                body: "py-5",
+                footer: "border-t border-gray-200 dark:border-gray-700 pt-3"
+            }}
+        >
+            <ModalContent>
+                <ModalHeader>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Confirm publish to community</h3>
+                </ModalHeader>
+                <ModalBody>
+                    <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
+                        <p>Publishing to community will make this assistant and its description publicly visible to other users.</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li>Your assistant may appear in the community templates library.</li>
+                            <li>Others can import and use this assistant in their own projects.</li>
+                            <li>Do not include secrets or private data in the description or workflow.</li>
+                        </ul>
+                        <div className="mt-3 flex items-start gap-2">
+                            <input
+                                id="ack-publish"
+                                type="checkbox"
+                                checked={acknowledged}
+                                onChange={(e) => setAcknowledged(e.target.checked)}
+                                className="mt-1 h-4 w-4"
+                            />
+                            <label htmlFor="ack-publish" className="text-sm">I understand this will be publicly available.</label>
+                        </div>
+                    </div>
+                </ModalBody>
+                <ModalFooter>
+                    <Button variant="light" onPress={() => { setAcknowledged(false); onConfirmClose(); }}>Cancel</Button>
+                    <Button
+                        color="primary"
+                        isDisabled={!acknowledged}
+                        onPress={() => {
+                            onConfirmClose();
+                            setAcknowledged(false);
+                            onCommunityPublish();
+                        }}
+                    >
+                        Confirm & Publish
                     </Button>
                 </ModalFooter>
             </ModalContent>
