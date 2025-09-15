@@ -40,3 +40,6 @@ chunked.jsonl
 crawled.jsonl
 embeddings.jsonl
 rewritten.jsonl
+
+# Sentry Config File
+.env.sentry-build-plugin

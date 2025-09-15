@@ -39,6 +39,7 @@
     "@openai/agents-extensions": "^0.0.15",
     "@primer/react": "^37.27.0",
     "@qdrant/js-client-rest": "^1.13.0",
+    "@sentry/nextjs": "^10.5.0",
     "ai": "^4.3.13",
     "awilix": "^12.0.5",
     "clsx": "^2.1.1",
