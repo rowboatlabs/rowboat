@@ -10,6 +10,7 @@ import tweetWithGeneratedImage from './tweet-with-generated-image.json';
 import customerSupport from './customer-support.json';
 import githubIssueToSlack from './github-issue-to-slack.json';
 import githubPrToSlack from './github-pr-to-slack.json';
+import eisenhowerEmailOrganiser from './eisenhower-email-organiser.json';
 
 // Keep keys consistent with prior file basenames to avoid breaking links.
 export const prebuiltTemplates = {
@@ -22,5 +23,6 @@ export const prebuiltTemplates = {
   'Customer Support': customerSupport,
   'GitHub Issue to Slack': githubIssueToSlack,
   'GitHub PR to Slack': githubPrToSlack,
+  'Eisenhower Email Organiser': eisenhowerEmailOrganiser,
 };
 
