@@ -293,7 +293,7 @@
   "pipelines": [],
   "startAgent": "Tweet Assistant",
   "lastUpdatedAt": "2025-09-11T18:02:35.880Z", 
-  "name": "Viral Tweet Assistant",
+  "name": "Tweet Assistant",
   "description": "Research topics and create a tweet including generated images.",
   "category": "News & Social",
   "copilotPrompt": "Give me a brief explanation of this assistant."
