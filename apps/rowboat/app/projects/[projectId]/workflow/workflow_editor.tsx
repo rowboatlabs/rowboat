@@ -1636,7 +1636,7 @@ export function WorkflowEditor({
     // Community publishing functions
     const [shareMode, setShareMode] = useState<'url' | 'community'>('url');
     const [communityData, setCommunityData] = useState({
-        name: projectConfig.name || '',
+        name: '',
         description: '',
         category: '',
         tags: [] as string[],
