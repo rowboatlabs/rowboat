@@ -55,7 +55,7 @@ export function UnifiedTemplatesSection({
     getUniqueTools
 }: UnifiedTemplatesSectionProps) {
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedType, setSelectedType] = useState<'all' | 'prebuilt' | 'community'>('all');
+    const [selectedType, setSelectedType] = useState<'prebuilt' | 'community'>('prebuilt');
     const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
     const [sortBy, setSortBy] = useState<'popular' | 'newest' | 'alphabetical'>('popular');
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -108,10 +108,8 @@ export function UnifiedTemplatesSection({
             );
         }
 
-        // Apply type filter
-        if (selectedType !== 'all') {
-            filtered = filtered.filter(item => item.type === selectedType);
-        }
+        // Apply type filter (default to 'prebuilt' / Library)
+        filtered = filtered.filter(item => item.type === selectedType);
 
         // Apply category filter
         if (selectedCategories.size > 0) {
@@ -187,17 +185,17 @@ export function UnifiedTemplatesSection({
         });
     };
 
-    // Clear all filters
+    // Clear all filters (default type back to 'prebuilt' / Library)
     const clearFilters = () => {
         setSearchQuery('');
-        setSelectedType('all');
+        setSelectedType('prebuilt');
         setSelectedCategories(new Set());
         setSortBy('popular');
     };
 
     // Check if any filters are active
     const hasActiveFilters = useMemo(() => {
-        return searchQuery || selectedType !== 'all' || selectedCategories.size > 0;
+        return !!searchQuery || selectedType !== 'prebuilt' || selectedCategories.size > 0;
     }, [searchQuery, selectedType, selectedCategories]);
 
     if (loading) {
@@ -277,10 +275,9 @@ export function UnifiedTemplatesSection({
                     </div>
                     
                     <div className="flex gap-2">
-                        {/* Type Filter Segmented Control */}
+                        {/* Type Filter Segmented Control (Library | Community) */}
                         <div className="flex gap-0.5 items-center h-8 rounded-full border border-gray-200 dark:border-gray-700 p-0 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
                             {[
-                                { key: 'all', label: 'All', count: allTemplates.length },
                                 { key: 'prebuilt', label: 'Library', count: prebuiltTemplates.length },
                                 { key: 'community', label: 'Community', count: communityTemplates.length }
                             ].map(({ key, label, count }) => (
@@ -358,12 +355,12 @@ export function UnifiedTemplatesSection({
                 {filteredTemplates.length === 0 ? (
                     <div className="text-center py-12">
                         <p className="text-gray-500 dark:text-gray-400">
-                            {searchQuery || selectedType !== 'all' || selectedCategories.size > 0
+                            {searchQuery || selectedType !== 'prebuilt' || selectedCategories.size > 0
                                 ? 'No templates found matching your filters'
                                 : 'No templates available'
                             }
                         </p>
-                        {(searchQuery || selectedType !== 'all' || selectedCategories.size > 0) && (
+                        {(searchQuery || selectedType !== 'prebuilt' || selectedCategories.size > 0) && (
                             <button
                                 onClick={clearFilters}
                                 className="mt-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 text-sm"
