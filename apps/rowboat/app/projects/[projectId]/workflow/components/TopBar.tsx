@@ -6,7 +6,7 @@ import { RadioIcon, RedoIcon, UndoIcon, RocketIcon, PenLine, AlertTriangle, Down
 import { useParams, useRouter } from "next/navigation";
 import { ProgressBar, ProgressStep } from "@/components/ui/progress-bar";
 import { useUser } from '@auth0/nextjs-auth0';
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface TopBarProps {
     localProjectName: string;
@@ -124,6 +124,16 @@ export function TopBar({
             setCopyButtonText('Copy');
         }, 2000); // Reset after 2 seconds
     };
+
+    // After successful community publish, briefly show success and then close modal
+    useEffect(() => {
+        if (communityPublishSuccess) {
+            const timer = setTimeout(() => {
+                onShareModalClose();
+            }, 1200);
+            return () => clearTimeout(timer);
+        }
+    }, [communityPublishSuccess, onShareModalClose]);
 
     const { user } = useUser();
     
@@ -827,13 +837,13 @@ export function TopBar({
                         Cancel
                     </Button>
                     <Button
-                        color="primary"
+                        color={communityPublishSuccess ? "success" : "primary"}
                         onPress={onCommunityPublish}
                         isLoading={communityPublishing}
-                        isDisabled={!communityData.name.trim() || !communityData.description.trim() || !communityData.category}
-                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium"
+                        isDisabled={communityPublishSuccess || !communityData.name.trim() || !communityData.description.trim() || !communityData.category}
+                        className={`${communityPublishSuccess ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} px-6 py-2 text-white font-medium`}
                     >
-                        {communityPublishing ? 'Publishing...' : 'Publish to Community'}
+                        {communityPublishSuccess ? 'Published' : (communityPublishing ? 'Publishing...' : 'Publish to Community')}
                     </Button>
                 </ModalFooter>
             </ModalContent>

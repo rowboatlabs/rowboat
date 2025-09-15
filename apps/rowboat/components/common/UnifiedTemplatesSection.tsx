@@ -227,8 +227,8 @@ export function UnifiedTemplatesSection({
                     </div>
                     
                     <div className="flex gap-2">
-                        {/* Type Filter Pills */}
-                        <div className="flex gap-1">
+                        {/* Type Filter Segmented Control */}
+                        <div className="flex gap-0.5 items-center h-8 rounded-full border border-gray-200 dark:border-gray-700 p-0 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
                             {[
                                 { key: 'all', label: 'All', count: allTemplates.length },
                                 { key: 'prebuilt', label: 'Library', count: prebuiltTemplates.length },
@@ -237,10 +237,11 @@ export function UnifiedTemplatesSection({
                                 <button
                                     key={key}
                                     onClick={() => setSelectedType(key as any)}
-                                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                                    aria-pressed={selectedType === key}
+                                    className={`inline-flex items-center h-8 px-2.5 rounded-full text-[13px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                                         selectedType === key
-                                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600'
+                                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                            : 'bg-transparent text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700'
                                     }`}
                                 >
                                     {label} ({count})
@@ -253,14 +254,14 @@ export function UnifiedTemplatesSection({
                             <select
                                 value={sortBy}
                                 onChange={(e) => setSortBy(e.target.value as any)}
-                                className="w-32 px-3 py-1.5 pr-8 border border-gray-200 dark:border-gray-700 rounded-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 appearance-none text-sm"
+                                className="w-44 h-8 px-4 pr-10 border border-gray-300 dark:border-gray-700 rounded-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 appearance-none text-sm hover:bg-gray-50 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                             >
                                 <option value="popular">Most Popular</option>
                                 <option value="newest">Newest First</option>
                                 <option value="alphabetical">A-Z</option>
                             </select>
-                            <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
-                                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+                                <svg className="w-4 h-4 text-gray-400 -translate-y-[2px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                 </svg>
                             </div>
@@ -278,10 +279,10 @@ export function UnifiedTemplatesSection({
                         <button
                             key={category}
                             onClick={() => toggleCategory(category)}
-                            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors border shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                                 selectedCategories.has(category)
-                                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600'
+                                    ? 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-700'
+                                    : 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700'
                             }`}
                         >
                             {category}

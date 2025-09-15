@@ -1653,7 +1653,7 @@ export function WorkflowEditor({
 
         setCommunityPublishing(true);
         try {
-            const response = await fetch('/api/community-assistants', {
+            const response = await fetch('/api/assistant-templates', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

@@ -16,7 +16,6 @@ import { Tabs, Tab } from "@/components/ui/tabs";
 import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import Link from 'next/link';
-import { CommunitySection } from '@/components/community/CommunitySection';
 import { AssistantSection } from '@/components/common/AssistantSection';
 import { UnifiedTemplatesSection } from '@/components/common/UnifiedTemplatesSection';
 
