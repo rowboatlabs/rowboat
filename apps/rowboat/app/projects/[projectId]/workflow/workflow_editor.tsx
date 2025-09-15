@@ -1646,9 +1646,12 @@ export function WorkflowEditor({
 
         setCommunityPublishing(true);
         try {
+            // Use the same redaction logic as URL sharing to mask environment variables
+            const redactedWorkflow = JSON.parse(buildWorkflowExportJson());
+            
             await createAssistantTemplate({
                 ...communityData,
-                workflow: state.present.workflow, // Use the current workflow
+                workflow: redactedWorkflow, // Use the redacted workflow
             });
 
             setCommunityPublishSuccess(true);
