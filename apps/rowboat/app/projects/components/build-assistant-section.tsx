@@ -142,9 +142,12 @@ export function BuildAssistantSection() {
                     }
                 });
             } else if (template.type === 'community') {
-                // Handle community template import
+                // Fetch full workflow for community template, then create from JSON
+                const res = await fetch(`/api/assistant-templates/${template.id}`);
+                if (!res.ok) throw new Error('Failed to fetch community template details');
+                const data = await res.json();
                 await createProjectFromJsonWithOptions({
-                    workflowJson: JSON.stringify(template.workflow),
+                    workflowJson: JSON.stringify(data.workflow),
                     router,
                     onSuccess: (projectId) => {
                         router.push(`/projects/${projectId}/workflow`);
