@@ -301,13 +301,12 @@ export function BuildAssistantSection() {
         const urlPrompt = searchParams.get('prompt');
         const urlTemplate = searchParams.get('template');
         const sharedId = searchParams.get('shared');
-        const importUrl = searchParams.get('importUrl');
 
         const run = async () => {
-            if (sharedId || importUrl) {
+            if (sharedId) {
                 try {
                     setAutoCreateLoading(true);
-                    const workflowObj = await loadSharedWorkflow(sharedId || importUrl!);
+                    const workflowObj = await loadSharedWorkflow(sharedId);
                     await createProjectFromJsonWithOptions({
                         workflowJson: JSON.stringify(workflowObj),
                         router,

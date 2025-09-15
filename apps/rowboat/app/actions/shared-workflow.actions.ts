@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { db } from "@/app/lib/mongodb";
 import { SHARED_WORKFLOWS_COLLECTION } from "@/src/infrastructure/repositories/mongodb.shared-workflows.indexes";
+import { requireAuth } from "@/app/lib/auth";
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24; // 24 hours
 
@@ -26,6 +27,8 @@ function validateWorkflowJson(obj: unknown) {
 
 export async function createSharedWorkflowFromJson(json: string): Promise<{ id: string; ttlSeconds: number; }>
 {
+  // Require an authenticated user (respects guest mode when auth is disabled)
+  await requireAuth();
   const obj = JSON.parse(json);
   const workflow = validateWorkflowJson(obj);
 
@@ -38,23 +41,18 @@ export async function createSharedWorkflowFromJson(json: string): Promise<{ id: 
   return { id, ttlSeconds: DEFAULT_TTL_SECONDS };
 }
 
-export async function loadSharedWorkflow(idOrUrl: string): Promise<z.infer<typeof Workflow>> {
-  // If it's an http(s) URL, fetch JSON and validate
-  const isHttp = idOrUrl.startsWith('http://') || idOrUrl.startsWith('https://');
-  if (isHttp) {
-    const resp = await fetch(idOrUrl, { cache: 'no-store' });
-    if (!resp.ok) {
-      throw new Error(`Failed to fetch URL: ${resp.status} ${resp.statusText}`);
-    }
-    const text = await resp.text();
-    const obj = JSON.parse(text);
-    return validateWorkflowJson(obj);
-  }
+/**
+ * Load a shared workflow by ephemeral share id stored in MongoDB.
+ * Expected when the query param `shared` is present in the UI.
+ */
+export async function loadSharedWorkflow(id: string): Promise<z.infer<typeof Workflow>> {
+  // Ensure caller is authenticated (guest allowed when auth disabled)
+  await requireAuth();
 
-  // Otherwise, look up by shared id in MongoDB
+  // Look up by shared id in MongoDB
   const coll = db.collection<SharedWorkflowDoc>(SHARED_WORKFLOWS_COLLECTION);
   const doc = await coll.findOne(
-    { _id: idOrUrl },
+    { _id: id },
     { projection: { workflow: 1, expiresAt: 1 } }
   );
   if (!doc) {
@@ -65,4 +63,3 @@ export async function loadSharedWorkflow(idOrUrl: string): Promise<z.infer<typeo
   }
   return validateWorkflowJson(doc.workflow);
 }
-
