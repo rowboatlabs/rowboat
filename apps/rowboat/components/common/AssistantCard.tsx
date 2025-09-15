@@ -60,6 +60,7 @@ interface AssistantCardProps {
     createdAt?: string;
     onLike?: () => void;
     onShare?: () => void;
+    onDelete?: () => void;
     isLiked?: boolean;
     // Template type indicator
     templateType?: 'prebuilt' | 'community';
@@ -83,6 +84,7 @@ export function AssistantCard({
     onLike,
     onShare,
     isLiked = false,
+    onDelete,
     templateType,
     onClick,
     loading = false,
@@ -268,6 +270,20 @@ export function AssistantCard({
                             <Share2 size={14} className={copied ? "text-blue-600" : undefined} />
                             {copied && <span className="text-[10px] text-blue-600">Copied</span>}
                         </button>
+                        {onDelete && (
+                            <button
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onDelete();
+                                }}
+                                className="flex items-center gap-1 hover:text-red-600 transition-colors"
+                                aria-label="Delete template"
+                            >
+                                {/* small x icon */}
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>
+                            </button>
+                        )}
                     </div>
                 </div>
 

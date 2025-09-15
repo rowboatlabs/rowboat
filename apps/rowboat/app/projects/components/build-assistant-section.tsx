@@ -608,6 +608,8 @@ export function BuildAssistantSection() {
                                     name: template.name,
                                     description: template.description,
                                     category: template.category,
+                                    authorId: template.authorId,
+                                    source: template.source,
                                     authorName: template.authorName,
                                     isAnonymous: template.isAnonymous,
                                     likeCount: template.likeCount,
@@ -625,6 +627,19 @@ export function BuildAssistantSection() {
                                 loadingItemId={loadingTemplateId}
                                 onLike={handleTemplateLike}
                                 onShare={handleTemplateShare}
+                                onDelete={async (item) => {
+                                    if (!confirm('Delete this template? This action cannot be undone.')) return;
+                                    try {
+                                        const resp = await fetch(`/api/assistant-templates/${item.id}`, { method: 'DELETE' });
+                                        if (!resp.ok) {
+                                            throw new Error('Failed to delete template');
+                                        }
+                                        setCommunityTemplates(prev => prev.filter(t => t.id !== item.id));
+                                    } catch (e) {
+                                        console.error(e);
+                                        alert('Failed to delete template');
+                                    }
+                                }}
                                 getUniqueTools={getUniqueTools}
                             />
                         </div>

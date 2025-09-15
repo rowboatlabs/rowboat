@@ -11,6 +11,8 @@ interface TemplateItem {
     name: string;
     description: string;
     category: string;
+    authorId?: string;
+    source?: 'library' | 'community';
     tools?: Array<{
         name: string;
         logo?: string;
@@ -35,6 +37,7 @@ interface UnifiedTemplatesSectionProps {
     loadingItemId?: string | null;
     onLike?: (item: TemplateItem) => void;
     onShare?: (item: TemplateItem) => void;
+    onDelete?: (item: TemplateItem) => void;
     getUniqueTools?: (item: TemplateItem) => Array<{ name: string; logo?: string }>;
 }
 
@@ -48,12 +51,29 @@ export function UnifiedTemplatesSection({
     loadingItemId = null,
     onLike,
     onShare,
+    onDelete,
     getUniqueTools
 }: UnifiedTemplatesSectionProps) {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedType, setSelectedType] = useState<'all' | 'prebuilt' | 'community'>('all');
     const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
     const [sortBy, setSortBy] = useState<'popular' | 'newest' | 'alphabetical'>('popular');
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [pendingDeleteItem, setPendingDeleteItem] = useState<TemplateItem | null>(null);
+
+    useEffect(() => {
+        let isMounted = true;
+        (async () => {
+            try {
+                const resp = await fetch('/api/me', { cache: 'no-store' });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (isMounted) setCurrentUserId(data.id || null);
+            } catch (_e) {}
+        })();
+        return () => { isMounted = false; };
+    }, []);
 
     // Combine all templates
     const allTemplates = useMemo(() => {
@@ -345,6 +365,10 @@ export function UnifiedTemplatesSection({
                                     getUniqueTools={getUniqueTools}
                                     onLike={() => onLike?.(item)}
                                     onShare={() => onShare?.(item)}
+                                    onDelete={onDelete && currentUserId && item.type === 'community' && item.authorId === currentUserId ? () => {
+                                        setPendingDeleteItem(item);
+                                        setConfirmOpen(true);
+                                    } : undefined}
                                     isLiked={item.isLiked}
                                     templateType={item.type}
                                 />
@@ -353,6 +377,38 @@ export function UnifiedTemplatesSection({
                     </>
                 )}
             </div>
+        
+        {/* Delete confirmation modal */}
+        {confirmOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 max-w-sm w-full p-5">
+                    <div className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Delete template?</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                        This will permanently remove &quot;{pendingDeleteItem?.name}&quot; from the community templates. This action cannot be undone.
+                    </div>
+                    <div className="mt-5 flex justify-end gap-2">
+                        <button
+                            onClick={() => { setConfirmOpen(false); setPendingDeleteItem(null); }}
+                            className="px-4 py-2 text-sm rounded-md bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={async () => {
+                                if (pendingDeleteItem && onDelete) {
+                                    await onDelete(pendingDeleteItem);
+                                }
+                                setConfirmOpen(false);
+                                setPendingDeleteItem(null);
+                            }}
+                            className="px-4 py-2 text-sm rounded-md bg-red-600 hover:bg-red-700 text-white"
+                        >
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
         </div>
     );
 }

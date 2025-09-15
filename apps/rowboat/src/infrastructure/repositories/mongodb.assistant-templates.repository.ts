@@ -77,6 +77,16 @@ export class MongoDBAssistantTemplatesRepository {
         const categories = await this.collection.distinct('category', { isPublic: true });
         return categories.filter(Boolean);
     }
+
+    async deleteByIdAndAuthor(id: string, authorId: string): Promise<boolean> {
+        const result = await this.collection.deleteOne({ _id: new ObjectId(id), authorId } as any);
+        if (result.deletedCount && result.deletedCount > 0) {
+            // Clean up likes associated with this assistant template
+            await this.likesCollection.deleteMany({ assistantId: id } as any);
+            return true;
+        }
+        return false;
+    }
 }
 
 
