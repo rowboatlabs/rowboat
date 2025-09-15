@@ -18,6 +18,7 @@ import { z } from "zod";
 import Link from 'next/link';
 import { CommunitySection } from '@/components/community/CommunitySection';
 import { AssistantSection } from '@/components/common/AssistantSection';
+import { UnifiedTemplatesSection } from '@/components/common/UnifiedTemplatesSection';
 
 const SHOW_PREBUILT_CARDS = process.env.NEXT_PUBLIC_SHOW_PREBUILT_CARDS !== 'false';
 
@@ -53,6 +54,9 @@ export function BuildAssistantSection() {
     const [templates, setTemplates] = useState<any[]>([]);
     const [templatesLoading, setTemplatesLoading] = useState(false);
     const [templatesError, setTemplatesError] = useState<string | null>(null);
+    const [communityTemplates, setCommunityTemplates] = useState<any[]>([]);
+    const [communityTemplatesLoading, setCommunityTemplatesLoading] = useState(false);
+    const [communityTemplatesError, setCommunityTemplatesError] = useState<string | null>(null);
     const [projects, setProjects] = useState<z.infer<typeof Project>[]>([]);
     const [projectsLoading, setProjectsLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
@@ -104,24 +108,124 @@ export function BuildAssistantSection() {
         }
     };
 
+    const fetchCommunityTemplates = async () => {
+        setCommunityTemplatesLoading(true);
+        setCommunityTemplatesError(null);
+        try {
+            const response = await fetch('/api/assistant-templates?source=community');
+            if (!response.ok) throw new Error('Failed to fetch community templates');
+            const data = await response.json();
+            setCommunityTemplates(data.items || []);
+        } catch (error) {
+            console.error('Error fetching community templates:', error);
+            setCommunityTemplatesError(error instanceof Error ? error.message : 'Failed to load community templates');
+        } finally {
+            setCommunityTemplatesLoading(false);
+        }
+    };
+
     // Handle template selection
     const handleTemplateSelect = async (template: any) => {
         // Show a small non-blocking spinner on the clicked card
         setLoadingTemplateId(template.id);
         try {
-            await createProjectWithOptions({
-                template: template.id,
-                // Prefer a card-specific copilot prompt if present on the template JSON
-                prompt: template.copilotPrompt || 'Explain this workflow',
-                router,
-                onError: () => {
-                    // Clear loading state if creation fails
-                    setLoadingTemplateId(null);
-                },
-            });
+            if (template.type === 'prebuilt') {
+                // Fetch full workflow from unified API, then create from JSON
+                const res = await fetch(`/api/assistant-templates/${template.id}`);
+                if (!res.ok) throw new Error('Failed to fetch template details');
+                const data = await res.json();
+                await createProjectFromJsonWithOptions({
+                    workflowJson: JSON.stringify(data.workflow),
+                    router,
+                    onSuccess: (_projectId) => {},
+                    onError: () => {
+                        setLoadingTemplateId(null);
+                    }
+                });
+            } else if (template.type === 'community') {
+                // Handle community template import
+                await createProjectFromJsonWithOptions({
+                    workflowJson: JSON.stringify(template.workflow),
+                    router,
+                    onSuccess: (projectId) => {
+                        router.push(`/projects/${projectId}/workflow`);
+                    },
+                    onError: (error) => {
+                        console.error('Error creating project from community template:', error);
+                        setLoadingTemplateId(null);
+                    }
+                });
+            }
         } catch (_err) {
             // In case of unexpected error, clear loading state
             setLoadingTemplateId(null);
+        }
+    };
+
+    // Stable guest id for like toggles
+    const getGuestId = () => {
+        try {
+            let guestId = sessionStorage.getItem('guestId');
+            if (!guestId) {
+                guestId = `guest-${crypto.randomUUID()}`;
+                sessionStorage.setItem('guestId', guestId);
+            }
+            return guestId;
+        } catch (_e) {
+            return `guest-${crypto.randomUUID()}`;
+        }
+    };
+
+    // Handle template like (unified for library and community)
+    const handleTemplateLike = async (template: any) => {
+        try {
+            const guestId = getGuestId();
+            const response = await fetch(`/api/assistant-templates/${template.id}/like`, {
+                method: 'POST',
+                headers: { 'x-guest-id': guestId },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (template.type === 'community') {
+                    setCommunityTemplates(prev => prev.map(t => 
+                        t.id === template.id 
+                            ? { ...t, likeCount: data.likeCount, isLiked: data.liked }
+                            : t
+                    ));
+                } else {
+                    setTemplates(prev => prev.map(t => 
+                        t.id === template.id 
+                            ? { ...t, likeCount: data.likeCount, isLiked: data.liked } as any
+                            : t
+                    ));
+                }
+            }
+        } catch (err) {
+            console.error('Error toggling like:', err);
+        }
+    };
+
+    // Handle template share (for both library and community)
+    const handleTemplateShare = async (template: any) => {
+        try {
+            // Fetch workflow for the template and create a shared snapshot
+            const res = await fetch(`/api/assistant-templates/${template.id}`);
+            if (!res.ok) throw new Error('Failed to fetch template for sharing');
+            const data = await res.json();
+
+            const shareResp = await fetch('/api/shared-workflow', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ workflow: data.workflow }),
+            });
+            if (!shareResp.ok) throw new Error('Failed to create shared workflow');
+            const shareData = await shareResp.json();
+            const url = `${window.location.origin}/projects?shared=${shareData.id}`;
+            await navigator.clipboard.writeText(url);
+            console.log('URL copied to clipboard');
+        } catch (err) {
+            console.error('Failed to copy shared URL:', err);
         }
     };
 
@@ -148,6 +252,7 @@ export function BuildAssistantSection() {
 
     useEffect(() => {
         fetchTemplates();
+        fetchCommunityTemplates();
         fetchProjects();
     }, []);
 
@@ -186,19 +291,40 @@ export function BuildAssistantSection() {
 
             if (urlPrompt || urlTemplate) {
                 setAutoCreateLoading(true);
-                createProjectWithOptions({
-                    template: urlTemplate || undefined,
-                    prompt: urlPrompt || undefined,
-                    router,
-                    onError: (error) => {
-                        console.error('Error auto-creating project:', error);
-                        setAutoCreateLoading(false);
-                        // Fall back to showing the form with the prompt pre-filled
-                        if (urlPrompt) {
-                            setUserPrompt(urlPrompt);
-                        }
+                try {
+                    const isMongoId = !!urlTemplate && /^[a-f0-9]{24}$/i.test(urlTemplate);
+                    if (urlTemplate && isMongoId) {
+                        // New-style share: template is an assistant-templates id
+                        const res = await fetch(`/api/assistant-templates/${urlTemplate}`);
+                        if (!res.ok) throw new Error('Failed to fetch shared template');
+                        const data = await res.json();
+                        await createProjectFromJsonWithOptions({
+                            workflowJson: JSON.stringify(data.workflow),
+                            router,
+                            onError: (error) => {
+                                console.error('Error auto-creating project from template id:', error);
+                                setAutoCreateLoading(false);
+                            }
+                        });
+                    } else {
+                        // Legacy share using static key
+                        await createProjectWithOptions({
+                            template: urlTemplate || undefined,
+                            prompt: urlPrompt || undefined,
+                            router,
+                            onError: (error) => {
+                                console.error('Error auto-creating project:', error);
+                                setAutoCreateLoading(false);
+                                if (urlPrompt) {
+                                    setUserPrompt(urlPrompt);
+                                }
+                            }
+                        });
                     }
-                });
+                } catch (err) {
+                    console.error('Error handling template auto-create:', err);
+                    setAutoCreateLoading(false);
+                }
             }
         };
 
@@ -464,34 +590,46 @@ export function BuildAssistantSection() {
                         </div>
                     </div>
 
-                    {/* Pre-built Assistants Section - Only show for New Assistant tab */}
+                    {/* Unified Templates Section - Only show for New Assistant tab */}
                     {selectedTab === 'new' && SHOW_PREBUILT_CARDS && (
                         <div className="max-w-5xl mx-auto mt-16">
-                            <AssistantSection
-                                title="Prebuilt Assistants"
-                                description="Start quickly and let Skipper adapt it to your needs."
-                                items={templates.map(template => ({
+                            <UnifiedTemplatesSection
+                                prebuiltTemplates={templates.map(template => ({
                                     id: template.id,
                                     name: template.name,
                                     description: template.description,
                                     category: template.category || 'Other',
                                     tools: template.tools,
-                                    estimatedComplexity: template.estimatedComplexity
+                                    type: 'prebuilt' as const,
+                                    likeCount: (template as any).likeCount || 0,
+                                    isLiked: (template as any).isLiked || false,
                                 }))}
-                                loading={templatesLoading}
-                                error={templatesError}
-                                onItemClick={handleTemplateSelect}
+                                communityTemplates={communityTemplates.map(template => ({
+                                    id: template.id,
+                                    name: template.name,
+                                    description: template.description,
+                                    category: template.category,
+                                    authorName: template.authorName,
+                                    isAnonymous: template.isAnonymous,
+                                    likeCount: template.likeCount,
+                                    createdAt: template.publishedAt,
+                                    isLiked: template.isLiked,
+                                    type: 'community' as const,
+                                }))}
+                                loading={templatesLoading || communityTemplatesLoading}
+                                error={templatesError || communityTemplatesError}
+                                onTemplateClick={handleTemplateSelect}
+                                onRetry={() => {
+                                    fetchTemplates();
+                                    fetchCommunityTemplates();
+                                }}
                                 loadingItemId={loadingTemplateId}
-                                emptyMessage="No pre-built assistants available"
+                                onLike={handleTemplateLike}
+                                onShare={handleTemplateShare}
                                 getUniqueTools={getUniqueTools}
                             />
                         </div>
                     )}
-
-                    {/* Community Assistants Section */}
-                    <div className="max-w-5xl mx-auto mt-16">
-                        <CommunitySection />
-                    </div>
                 </div>
             </div>
             )}

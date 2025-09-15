@@ -61,8 +61,8 @@ interface AssistantCardProps {
     onLike?: () => void;
     onShare?: () => void;
     isLiked?: boolean;
-    // Pre-built specific props
-    estimatedComplexity?: string;
+    // Template type indicator
+    templateType?: 'prebuilt' | 'community';
     // Common props
     onClick?: () => void;
     loading?: boolean;
@@ -83,14 +83,35 @@ export function AssistantCard({
     onLike,
     onShare,
     isLiked = false,
-    estimatedComplexity,
+    templateType,
     onClick,
     loading = false,
     disabled = false,
     getUniqueTools
 }: AssistantCardProps) {
     const displayTools = getUniqueTools ? getUniqueTools({ tools }) : tools;
-    const isCommunity = authorName !== undefined;
+    const [isDescriptionExpanded, setIsDescriptionExpanded] = React.useState(false);
+    const [showDescriptionToggle, setShowDescriptionToggle] = React.useState(false);
+    const descriptionRef = React.useRef<HTMLDivElement | null>(null);
+    const [copied, setCopied] = React.useState(false);
+    React.useEffect(() => {
+        let t: any;
+        if (copied) {
+            t = setTimeout(() => setCopied(false), 1500);
+        }
+        return () => t && clearTimeout(t);
+    }, [copied]);
+
+    React.useEffect(() => {
+        const el = descriptionRef.current;
+        if (!el) return;
+        // Measure if truncated (only when collapsed)
+        if (!isDescriptionExpanded) {
+            setShowDescriptionToggle(el.scrollHeight > el.clientHeight + 1);
+        } else {
+            setShowDescriptionToggle(true);
+        }
+    }, [description, isDescriptionExpanded]);
 
     const getCategoryColor = (category: string) => {
         const lowerCategory = category.toLowerCase();
@@ -124,11 +145,41 @@ export function AssistantCard({
             <div className="space-y-3">
                 {/* Title and Description */}
                 <div>
-                    <div className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1">
-                        {name}
+                    <div className="flex items-start justify-between gap-2">
+                        <div className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1 flex-1">
+                            {name}
+                        </div>
+                        {/* Template Type Badge */}
+                        {templateType && (
+                            <span className={clsx(
+                                "inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0",
+                                templateType === 'prebuilt' 
+                                    ? "bg-blue-50 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300"
+                                    : "bg-purple-50 text-purple-700 dark:bg-purple-400/10 dark:text-purple-300"
+                            )}>
+                                {templateType === 'prebuilt' ? 'Library' : 'Community'}
+                            </span>
+                        )}
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 mt-1">
-                        {description}
+                    <div className="mt-1">
+                        <div
+                            ref={descriptionRef}
+                            className={clsx(
+                                "text-sm leading-5 text-gray-600 dark:text-gray-400 relative min-h-[3.75rem]",
+                                !isDescriptionExpanded && "line-clamp-2"
+                            )}
+                        >
+                            {description}
+                        </div>
+                        {showDescriptionToggle && (
+                            <button
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsDescriptionExpanded(!isDescriptionExpanded); }}
+                                className="mt-1 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                aria-label={isDescriptionExpanded ? "Show less" : "Read more"}
+                            >
+                                {isDescriptionExpanded ? 'Show less' : 'Read more'}
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -147,87 +198,79 @@ export function AssistantCard({
                     )}
                 </div>
 
-                {/* Community-specific info */}
-                {isCommunity && (
-                    <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                        <div className="flex items-center gap-2">
-                            <span>{isAnonymous ? 'Anonymous' : (authorName || 'Unknown')}</span>
-                            {createdAt && (
-                                <div className="flex items-center gap-1">
-                                    <Calendar size={12} />
-                                    <span>{getRelativeTime(createdAt)}</span>
-                                </div>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onLike?.();
-                                }}
-                                className={clsx(
-                                    "flex items-center gap-1 hover:text-red-500 transition-colors",
-                                    isLiked && "text-red-500"
+                {/* Tools (reserve row height even when absent to align cards) */}
+                <div className="flex items-center gap-2 min-h-[20px]">
+                    {displayTools.length > 0 && (
+                        <>
+                            <div className="text-xs text-gray-400 dark:text-gray-500">
+                                Tools:
+                            </div>
+                            <div className="flex items-center gap-1">
+                                {displayTools.slice(0, 4).map((tool) => (
+                                    tool.logo && (
+                                        <PictureImg
+                                            key={tool.name}
+                                            src={tool.logo}
+                                            alt={`${tool.name} logo`}
+                                            className="w-4 h-4 rounded-sm object-cover flex-shrink-0"
+                                            title={tool.name}
+                                        />
+                                    )
+                                ))}
+                                {displayTools.length > 4 && (
+                                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                                        +{displayTools.length - 4}
+                                    </span>
                                 )}
-                            >
-                                <Heart size={14} className={isLiked ? "fill-current" : ""} />
-                                <span>{likeCount}</span>
-                            </button>
-                            <button
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onShare?.();
-                                }}
-                                className="flex items-center gap-1 hover:text-blue-500 transition-colors"
-                            >
-                                <Share2 size={14} />
-                            </button>
-                        </div>
-                    </div>
-                )}
+                            </div>
+                        </>
+                    )}
+                </div>
 
-                {/* Tools */}
-                {displayTools.length > 0 && (
+                {/* Author and interaction info */}
+                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                     <div className="flex items-center gap-2">
-                        <div className="text-xs text-gray-400 dark:text-gray-500">
-                            Tools:
-                        </div>
-                        <div className="flex items-center gap-1">
-                            {displayTools.slice(0, 4).map((tool) => (
-                                tool.logo && (
-                                    <PictureImg
-                                        key={tool.name}
-                                        src={tool.logo}
-                                        alt={`${tool.name} logo`}
-                                        className="w-4 h-4 rounded-sm object-cover flex-shrink-0"
-                                        title={tool.name}
-                                    />
-                                )
-                            ))}
-                            {displayTools.length > 4 && (
-                                <span className="text-xs text-gray-400 dark:text-gray-500">
-                                    +{displayTools.length - 4}
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {/* Complexity for pre-built templates */}
-                {estimatedComplexity && (
-                    <div className="mt-2">
-                        <span className={clsx(
-                            "inline-flex items-center px-2 py-1 rounded-full text-xs font-medium",
-                            estimatedComplexity === 'beginner' && "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400",
-                            estimatedComplexity === 'intermediate' && "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400",
-                            estimatedComplexity === 'advanced' && "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400"
-                        )}>
-                            {estimatedComplexity}
+                        <span>
+                            {authorName ? (isAnonymous ? 'Anonymous' : authorName) : 'Rowboat'}
                         </span>
+                        {createdAt && (
+                            <div className="flex items-center gap-1">
+                                <Calendar size={12} />
+                                <span>{getRelativeTime(createdAt)}</span>
+                            </div>
+                        )}
                     </div>
-                )}
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onLike?.();
+                            }}
+                            className={clsx(
+                                "flex items-center gap-1 hover:text-red-500 transition-colors",
+                                isLiked && "text-red-500"
+                            )}
+                        >
+                            <Heart size={14} className={isLiked ? "fill-current" : ""} />
+                            <span>{likeCount || 0}</span>
+                        </button>
+                        <button
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setCopied(true);
+                                onShare?.();
+                            }}
+                            className="flex items-center gap-1 hover:text-blue-500 transition-colors"
+                            aria-label="Copy share URL"
+                        >
+                            <Share2 size={14} className={copied ? "text-blue-600" : undefined} />
+                            {copied && <span className="text-[10px] text-blue-600">Copied</span>}
+                        </button>
+                    </div>
+                </div>
+
             </div>
         </div>
     );

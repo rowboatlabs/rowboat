@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Workflow } from "../../../app/lib/types/workflow_types";
 
-export const CommunityAssistant = z.object({
+export const AssistantTemplate = z.object({
     id: z.string(),
     name: z.string(),
     description: z.string(),
@@ -19,21 +19,24 @@ export const CommunityAssistant = z.object({
     featured: z.boolean().default(false),
     isPublic: z.boolean().default(true),
     // Social features
-    likes: z.array(z.string()).default([]), // Array of user IDs who liked it
+    likes: z.array(z.string()).default([]),
     // Template-like metadata
     copilotPrompt: z.string().optional(),
     thumbnailUrl: z.string().optional(),
-    estimatedComplexity: z.enum(['beginner', 'intermediate', 'advanced']).default('beginner'),
+    // New field to indicate source of template
+    source: z.enum(["library", "community"]),
 });
 
-export type CommunityAssistant = z.infer<typeof CommunityAssistant>;
+export type AssistantTemplate = z.infer<typeof AssistantTemplate>;
 
-export const CommunityAssistantLike = z.object({
+export const AssistantTemplateLike = z.object({
     id: z.string(),
     assistantId: z.string(),
-    userId: z.string(), // Can be guest ID for anonymous users
-    userEmail: z.string().optional(), // For logged-in users
+    userId: z.string(),
+    userEmail: z.string().optional(),
     createdAt: z.string().datetime(),
 });
 
-export type CommunityAssistantLike = z.infer<typeof CommunityAssistantLike>;
+export type AssistantTemplateLike = z.infer<typeof AssistantTemplateLike>;
+
+

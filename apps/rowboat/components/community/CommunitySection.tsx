@@ -25,7 +25,6 @@ interface CommunityAssistant {
     likes: string[];
     copilotPrompt?: string;
     thumbnailUrl?: string | null;
-    estimatedComplexity: 'beginner' | 'intermediate' | 'advanced';
 }
 
 interface CommunitySectionProps {
@@ -48,8 +47,8 @@ export function CommunitySection({ onImport }: CommunitySectionProps) {
             const params = new URLSearchParams();
             if (filters?.searchQuery) params.append('search', filters.searchQuery);
             if (filters?.selectedCategory) params.append('category', filters.selectedCategory);
-            
-            const url = `/api/community-assistants?${params}`;
+            params.append('source', 'community');
+            const url = `/api/assistant-templates?${params}`;
             const response = await fetch(url);
             if (!response.ok) throw new Error('Failed to fetch assistants');
             
@@ -107,7 +106,7 @@ export function CommunitySection({ onImport }: CommunitySectionProps) {
 
         try {
             const guestId = getGuestId();
-            const response = await fetch(`/api/community-assistants/${assistant.id}/like`, {
+            const response = await fetch(`/api/assistant-templates/${assistant.id}/like`, {
                 method: 'POST',
                 headers: {
                     'x-guest-id': guestId,
@@ -144,7 +143,7 @@ export function CommunitySection({ onImport }: CommunitySectionProps) {
         const assistant = assistants.find(a => a.id === item.id);
         if (!assistant) return;
 
-        const url = `${window.location.origin}/community-assistants/${assistant.id}`;
+        const url = `${window.location.origin}/assistant-templates/${assistant.id}`;
         navigator.clipboard.writeText(url).then(() => {
             // You could add a toast notification here
             console.log('URL copied to clipboard');

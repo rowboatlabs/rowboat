@@ -53,7 +53,6 @@ interface TopBarProps {
         tags: string[];
         isAnonymous: boolean;
         copilotPrompt: string;
-        estimatedComplexity: 'beginner' | 'intermediate' | 'advanced';
     };
     setCommunityData: (data: any) => void;
     onCommunityPublish: () => void;

@@ -1642,7 +1642,6 @@ export function WorkflowEditor({
         tags: [] as string[],
         isAnonymous: false,
         copilotPrompt: '',
-        estimatedComplexity: 'beginner' as 'beginner' | 'intermediate' | 'advanced',
     });
     const [communityPublishing, setCommunityPublishing] = useState(false);
     const [communityPublishSuccess, setCommunityPublishSuccess] = useState(false);

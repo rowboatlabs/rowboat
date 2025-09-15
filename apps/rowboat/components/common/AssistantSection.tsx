@@ -20,8 +20,6 @@ interface AssistantItem {
     likeCount?: number;
     createdAt?: string;
     isLiked?: boolean;
-    // Pre-built specific
-    estimatedComplexity?: string;
 }
 
 interface AssistantSectionProps {
@@ -225,7 +223,6 @@ export function AssistantSection({
                             isAnonymous={item.isAnonymous}
                             likeCount={item.likeCount}
                             createdAt={item.createdAt}
-                            estimatedComplexity={item.estimatedComplexity}
                             onClick={() => onItemClick?.(item)}
                             loading={loadingItemId === item.id}
                             getUniqueTools={getUniqueTools}
