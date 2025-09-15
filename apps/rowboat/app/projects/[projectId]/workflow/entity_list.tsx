@@ -1532,10 +1532,6 @@ const ComposioCard = ({
                             case 'remove-toolkit':
                                 setShowRemoveToolkitModal(true);
                                 break;
-                            case 'more-tools':
-                                setSelectedToolkitSlug(card.slug);
-                                setShowToolsModal(true);
-                                break;
                         }
                     }}
                     disabledKeys={[
@@ -1543,12 +1539,6 @@ const ComposioCard = ({
                         ...(isProcessingRemove ? ['remove-toolkit'] : []),
                     ]}
                 >
-                    <DropdownItem
-                        key="more-tools"
-                        startContent={<PlusIcon className="h-3 w-3" />}
-                    >
-                        More tools
-                    </DropdownItem>
                     {hasToolkitWithAuth && isToolkitConnected ? (
                         <DropdownItem
                             key="disconnect"
