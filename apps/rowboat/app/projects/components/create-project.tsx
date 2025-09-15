@@ -12,6 +12,7 @@ import { HorizontalDivider } from "@/components/ui/horizontal-divider";
 import { Tooltip } from "@heroui/react";
 import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { Workflow } from '@/app/lib/types/workflow_types';
+import { loadSharedWorkflow } from '@/app/actions/shared-workflow.actions';
 import { Modal } from '@/components/ui/modal';
 import { Upload, Send, X } from "lucide-react";
 
@@ -172,14 +173,8 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
                 setAutoCreateLoading(true);
                 try {
                     if (sharedId || importUrl) {
-                        // Fetch workflow JSON via our API route
-                        const qs = sharedId ? `id=${encodeURIComponent(sharedId)}` : `url=${encodeURIComponent(importUrl!)}`;
-                        const resp = await fetch(`/api/shared-workflow?${qs}`, { cache: 'no-store' });
-                        if (!resp.ok) {
-                            const data = await resp.json().catch(() => ({}));
-                            throw new Error(data.error || `Failed to load shared workflow (${resp.status})`);
-                        }
-                        const workflowObj = await resp.json();
+                        // Load workflow via server action (supports id or URL)
+                        const workflowObj = await loadSharedWorkflow(sharedId || importUrl!);
                         await createProjectFromJsonWithOptions({
                             workflowJson: JSON.stringify(workflowObj),
                             router,

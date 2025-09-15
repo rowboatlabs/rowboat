@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { TextareaWithSend } from "@/app/components/ui/textarea-with-send";
 import { Workflow } from '../../lib/types/workflow_types';
+import { loadSharedWorkflow } from '@/app/actions/shared-workflow.actions';
 import { PictureImg } from '@/components/ui/picture-img';
 import { Tabs, Tab } from "@/components/ui/tabs";
 import { Project } from "@/src/entities/models/project";
@@ -160,13 +161,7 @@ export function BuildAssistantSection() {
             if (sharedId || importUrl) {
                 try {
                     setAutoCreateLoading(true);
-                    const qs = sharedId ? `id=${encodeURIComponent(sharedId)}` : `url=${encodeURIComponent(importUrl!)}`;
-                    const resp = await fetch(`/api/shared-workflow?${qs}`, { cache: 'no-store' });
-                    if (!resp.ok) {
-                        const data = await resp.json().catch(() => ({}));
-                        throw new Error(data.error || `Failed to load shared workflow (${resp.status})`);
-                    }
-                    const workflowObj = await resp.json();
+                    const workflowObj = await loadSharedWorkflow(sharedId || importUrl!);
                     await createProjectFromJsonWithOptions({
                         workflowJson: JSON.stringify(workflowObj),
                         router,

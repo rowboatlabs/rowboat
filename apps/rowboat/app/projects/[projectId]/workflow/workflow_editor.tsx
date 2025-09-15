@@ -10,6 +10,7 @@ import { PipelineConfig } from "../entities/pipeline_config";
 import { ToolConfig } from "../entities/tool_config";
 import { App as ChatApp } from "../playground/app";
 import { z } from "zod";
+import { createSharedWorkflowFromJson } from '@/app/actions/shared-workflow.actions';
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
 import { PromptConfig } from "../entities/prompt_config";
 import { DataSourceConfig } from "../entities/datasource_config";
@@ -1603,22 +1604,13 @@ export function WorkflowEditor({
         document.body.removeChild(a);
     }
 
-    // Share: upload JSON to server to get a share ID and reveal copy button
+    // Share: create a shared workflow via server action to get an ID and reveal copy button
     const [shareUrl, setShareUrl] = useState<string | null>(null);
     async function handleShareWorkflow() {
         try {
             // POST to server to create a share token
             const json = buildWorkflowExportJson();
-            const resp = await fetch('/api/shared-workflow', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: json,
-            });
-            if (!resp.ok) {
-                console.error('Failed to create share link');
-                return;
-            }
-            const data = await resp.json();
+            const data = await createSharedWorkflowFromJson(json);
             const createUrl = `${window.location.origin}/projects?shared=${encodeURIComponent(data.id)}`;
             setShareUrl(createUrl);
         } catch (e) {
