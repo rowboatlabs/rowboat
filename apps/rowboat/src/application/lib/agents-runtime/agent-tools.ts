@@ -671,7 +671,7 @@ export function createGenerateImageTool(
                             Body: buf,
                             ContentType: img.mimeType,
                         }));
-                        const url = `/api/generated-images/${dirA}/${dirB}/${filename}`;
+                        const url = `/api/generated-images/${imageId}`;
                         return { mimeType: img.mimeType, bytes: buf.length, url };
                     }));
                     const payload = {
