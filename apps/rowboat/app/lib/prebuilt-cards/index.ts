@@ -24,9 +24,5 @@ export const prebuiltTemplates = {
   'GitHub Issue to Slack': githubIssueToSlack,
   'GitHub PR to Slack': githubPrToSlack,
   'Eisenhower Email Organizer': eisenhowerEmailOrganizer,
-  'Test 3': test3,
-  'Test 4': test4,
-  'Test 5': test5,
-  'Test 6': test6,
 };
 
