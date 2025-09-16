@@ -95,6 +95,8 @@ export class CreateProjectUseCase implements ICreateProjectUseCase {
             }
         }
 
+        // Do not auto-attach image generation tool; it is available as a default library tool in the editor/runtime
+
         // create project secret
         const secret = crypto.randomBytes(32).toString('hex');
 

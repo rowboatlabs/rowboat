@@ -12,6 +12,7 @@ import { HorizontalDivider } from "@/components/ui/horizontal-divider";
 import { Tooltip } from "@heroui/react";
 import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { Workflow } from '@/app/lib/types/workflow_types';
+import { loadSharedWorkflow } from '@/app/actions/shared-workflow.actions';
 import { Modal } from '@/components/ui/modal';
 import { Upload, Send, X } from "lucide-react";
 
@@ -150,7 +151,6 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
     const urlPrompt = searchParams.get('prompt');
     const urlTemplate = searchParams.get('template');
     const sharedId = searchParams.get('shared');
-    const importUrl = searchParams.get('importUrl');
 
     // Add this effect to update name when defaultName changes
     useEffect(() => {
@@ -167,19 +167,13 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
     // Add effect to handle URL parameters for auto-creation
     useEffect(() => {
         const handleAutoCreate = async () => {
-            // Auto-create from template/prompt, or import from shared/id/url
-            if ((urlPrompt || urlTemplate || sharedId || importUrl) && !importLoading && !autoCreateLoading) {
+            // Auto-create from template/prompt, or import from shared id
+            if ((urlPrompt || urlTemplate || sharedId) && !importLoading && !autoCreateLoading) {
                 setAutoCreateLoading(true);
                 try {
-                    if (sharedId || importUrl) {
-                        // Fetch workflow JSON via our API route
-                        const qs = sharedId ? `id=${encodeURIComponent(sharedId)}` : `url=${encodeURIComponent(importUrl!)}`;
-                        const resp = await fetch(`/api/shared-workflow?${qs}`, { cache: 'no-store' });
-                        if (!resp.ok) {
-                            const data = await resp.json().catch(() => ({}));
-                            throw new Error(data.error || `Failed to load shared workflow (${resp.status})`);
-                        }
-                        const workflowObj = await resp.json();
+                    if (sharedId) {
+                        // Load workflow via server action (by id)
+                        const workflowObj = await loadSharedWorkflow(sharedId);
                         await createProjectFromJsonWithOptions({
                             workflowJson: JSON.stringify(workflowObj),
                             router,
@@ -208,7 +202,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
         };
 
         handleAutoCreate();
-    }, [urlPrompt, urlTemplate, sharedId, importUrl, importLoading, autoCreateLoading, router]);
+    }, [urlPrompt, urlTemplate, sharedId, importLoading, autoCreateLoading, router]);
 
     // Inject glow animation styles
     useEffect(() => {

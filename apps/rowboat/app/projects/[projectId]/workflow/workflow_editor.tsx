@@ -10,6 +10,8 @@ import { PipelineConfig } from "../entities/pipeline_config";
 import { ToolConfig } from "../entities/tool_config";
 import { App as ChatApp } from "../playground/app";
 import { z } from "zod";
+import { createSharedWorkflowFromJson } from '@/app/actions/shared-workflow.actions';
+import { createAssistantTemplate } from '@/app/actions/assistant-templates.actions';
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, Tooltip, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
 import { PromptConfig } from "../entities/prompt_config";
 import { DataSourceConfig } from "../entities/datasource_config";
@@ -36,6 +38,7 @@ import { Panel } from "@/components/common/panel-common";
 import { Button as CustomButton } from "@/components/ui/button";
 
 import { InputField } from "@/app/lib/components/input-field";
+import { getDefaultTools } from "@/app/lib/default_tools";
 import { VoiceSection } from "../config/components/voice";
 import { TopBar } from "./components/TopBar";
 
@@ -1603,22 +1606,13 @@ export function WorkflowEditor({
         document.body.removeChild(a);
     }
 
-    // Share: upload JSON to server to get a share ID and reveal copy button
+    // Share: create a shared workflow via server action to get an ID and reveal copy button
     const [shareUrl, setShareUrl] = useState<string | null>(null);
     async function handleShareWorkflow() {
         try {
             // POST to server to create a share token
             const json = buildWorkflowExportJson();
-            const resp = await fetch('/api/shared-workflow', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: json,
-            });
-            if (!resp.ok) {
-                console.error('Failed to create share link');
-                return;
-            }
-            const data = await resp.json();
+            const data = await createSharedWorkflowFromJson(json);
             const createUrl = `${window.location.origin}/projects?shared=${encodeURIComponent(data.id)}`;
             setShareUrl(createUrl);
         } catch (e) {
@@ -1632,6 +1626,46 @@ export function WorkflowEditor({
         setShowCopySuccess(true);
         setTimeout(() => setShowCopySuccess(false), 2000);
     }
+
+    // Community publishing functions
+    const [shareMode, setShareMode] = useState<'url' | 'community'>('url');
+    const [communityData, setCommunityData] = useState({
+        name: '',
+        description: '',
+        category: '',
+        tags: [] as string[],
+        isAnonymous: false,
+        copilotPrompt: '',
+    });
+    const [communityPublishing, setCommunityPublishing] = useState(false);
+    const [communityPublishSuccess, setCommunityPublishSuccess] = useState(false);
+
+    const handleCommunityPublish = async () => {
+        if (!communityData.name.trim() || !communityData.description.trim() || !communityData.category) {
+            return;
+        }
+
+        setCommunityPublishing(true);
+        try {
+            // Use the same redaction logic as URL sharing to mask environment variables
+            const redactedWorkflow = JSON.parse(buildWorkflowExportJson());
+            
+            await createAssistantTemplate({
+                ...communityData,
+                workflow: redactedWorkflow, // Use the redacted workflow
+            });
+
+            setCommunityPublishSuccess(true);
+            setTimeout(() => {
+                setCommunityPublishSuccess(false);
+                // Close modal or reset
+            }, 2000);
+        } catch (error) {
+            console.error('Error publishing to community:', error);
+        } finally {
+            setCommunityPublishing(false);
+        }
+    };
 
     // Cleanup blob URL on unmount
     // No-op cleanup; shareUrl is a normal URL now
@@ -1949,6 +1983,13 @@ export function WorkflowEditor({
                     onShareWorkflow={handleShareWorkflow}
                     shareUrl={shareUrl}
                     onCopyShareUrl={handleCopyShareUrl}
+                    shareMode={shareMode}
+                    setShareMode={setShareMode}
+                    communityData={communityData}
+                    setCommunityData={setCommunityData}
+                    onCommunityPublish={handleCommunityPublish}
+                    communityPublishing={communityPublishing}
+                    communityPublishSuccess={communityPublishSuccess}
                     onPublishWorkflow={handlePublishWorkflow}
                     onChangeMode={onChangeMode}
                     onRevertToLive={handleRevertToLive}
@@ -2167,7 +2208,14 @@ export function WorkflowEditor({
                                         usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
                                         usedPipelineNames={new Set((state.present.workflow.pipelines || []).map((pipeline) => pipeline.name))}
                                         agents={state.present.workflow.agents}
-                                        tools={state.present.workflow.tools}
+                                        tools={(() => {
+                                            const { tools } = state.present.workflow;
+                                            const defaults = getDefaultTools();
+                                            const map = new Map<string, any>();
+                                            for (const t of tools) map.set(t.name, t);
+                                            for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t);
+                                            return Array.from(map.values());
+                                        })()}
                                         prompts={state.present.workflow.prompts}
                                         dataSources={dataSources}
                                         handleUpdate={(update) => { dispatchGuarded({ type: "update_agent", name: state.present.selection!.name, agent: update }); }}
@@ -2195,7 +2243,14 @@ export function WorkflowEditor({
                                         key={`overlay-${state.present.selection.name}-${configKey}`}
                                         prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
                                         agents={state.present.workflow.agents}
-                                        tools={state.present.workflow.tools}
+                                        tools={(() => {
+                                            const { tools } = state.present.workflow;
+                                            const defaults = getDefaultTools();
+                                            const map = new Map<string, any>();
+                                            for (const t of tools) map.set(t.name, t);
+                                            for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t);
+                                            return Array.from(map.values());
+                                        })()}
                                         prompts={state.present.workflow.prompts}
                                         usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
                                         handleUpdate={(update) => { dispatchGuarded({ type: "update_prompt", name: state.present.selection!.name, prompt: update }); }}
@@ -2273,7 +2328,14 @@ export function WorkflowEditor({
                                         usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
                                         usedPipelineNames={new Set((state.present.workflow.pipelines || []).map((pipeline) => pipeline.name))}
                                         agents={state.present.workflow.agents}
-                                        tools={state.present.workflow.tools}
+                                        tools={(() => {
+                                            const { tools } = state.present.workflow;
+                                            const defaults = getDefaultTools();
+                                            const map = new Map<string, any>();
+                                            for (const t of tools) map.set(t.name, t);
+                                            for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t);
+                                            return Array.from(map.values());
+                                        })()}
                                         prompts={state.present.workflow.prompts}
                                         dataSources={dataSources}
                                         handleUpdate={(update) => { dispatchGuarded({ type: "update_agent", name: state.present.selection!.name, agent: update }); }}
@@ -2301,7 +2363,14 @@ export function WorkflowEditor({
                                         key={`overlay2-${state.present.selection.name}-${configKey}`}
                                         prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
                                         agents={state.present.workflow.agents}
-                                        tools={state.present.workflow.tools}
+                                        tools={(() => {
+                                            const { tools } = state.present.workflow;
+                                            const defaults = getDefaultTools();
+                                            const map = new Map<string, any>();
+                                            for (const t of tools) map.set(t.name, t);
+                                            for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t);
+                                            return Array.from(map.values());
+                                        })()}
                                         prompts={state.present.workflow.prompts}
                                         usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
                                         handleUpdate={(update) => { dispatchGuarded({ type: "update_prompt", name: state.present.selection!.name, prompt: update }); }}

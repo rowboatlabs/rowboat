@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from "react";
-import { listTemplates, listProjects } from "@/app/actions/project.actions";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { listProjects } from "@/app/actions/project.actions";
 import { createProjectWithOptions, createProjectFromJsonWithOptions, createProjectFromTemplate } from "../lib/project-creation-utils";
 import { useRouter, useSearchParams } from 'next/navigation';
 import clsx from 'clsx';
@@ -11,11 +11,21 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { TextareaWithSend } from "@/app/components/ui/textarea-with-send";
 import { Workflow } from '../../lib/types/workflow_types';
+import { loadSharedWorkflow } from '@/app/actions/shared-workflow.actions';
 import { PictureImg } from '@/components/ui/picture-img';
 import { Tabs, Tab } from "@/components/ui/tabs";
 import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import Link from 'next/link';
+import { AssistantSection } from '@/components/common/AssistantSection';
+import { UnifiedTemplatesSection } from '@/components/common/UnifiedTemplatesSection';
+import { 
+    listAssistantTemplates, 
+    getAssistantTemplateCategories, 
+    toggleTemplateLike,
+    deleteAssistantTemplate,
+    getAssistantTemplate
+} from '@/app/actions/assistant-templates.actions';
 
 const SHOW_PREBUILT_CARDS = process.env.NEXT_PUBLIC_SHOW_PREBUILT_CARDS !== 'false';
 
@@ -48,9 +58,17 @@ export function BuildAssistantSection() {
     const [promptError, setPromptError] = useState<string | null>(null);
     const [importLoading, setImportLoading] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
+    // Library templates (paginated)
     const [templates, setTemplates] = useState<any[]>([]);
     const [templatesLoading, setTemplatesLoading] = useState(false);
     const [templatesError, setTemplatesError] = useState<string | null>(null);
+    const [templatesCursor, setTemplatesCursor] = useState<string | null>(null);
+    
+    // Community templates (paginated)
+    const [communityTemplates, setCommunityTemplates] = useState<any[]>([]);
+    const [communityTemplatesLoading, setCommunityTemplatesLoading] = useState(false);
+    const [communityTemplatesError, setCommunityTemplatesError] = useState<string | null>(null);
+    const [communityCursor, setCommunityCursor] = useState<string | null>(null);
     const [projects, setProjects] = useState<z.infer<typeof Project>[]>([]);
     const [projectsLoading, setProjectsLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
@@ -88,38 +106,135 @@ export function BuildAssistantSection() {
         return Array.from(uniqueToolsMap.values()).filter(tool => tool.logo); // Only show tools with logos like ToolkitCard
     };
 
-    const fetchTemplates = async () => {
-        setTemplatesLoading(true);
-        setTemplatesError(null);
-        try {
-            const templatesArray = await listTemplates();
-            setTemplates(templatesArray);
-        } catch (error) {
-            console.error('Error fetching templates:', error);
-            setTemplatesError(error instanceof Error ? error.message : 'Failed to load templates');
-        } finally {
-            setTemplatesLoading(false);
+    // Utility: append unique by id (prevents duplicates when paginating)
+    const appendUniqueById = useCallback((prev: any[], next: any[]) => {
+        const seen = new Set(prev.map(i => i.id));
+        const merged = [...prev];
+        for (const item of next) {
+            if (!seen.has(item.id)) {
+                merged.push(item);
+                seen.add(item.id);
+            }
         }
-    };
+        return merged;
+    }, []);
+
+    // Clean, single loader: load pages for 'library' or 'community' until target count
+    const loadTemplatesToCount = useCallback(async (source: 'library' | 'community', targetCount: number) => {
+        const setLoading = source === 'library' ? setTemplatesLoading : setCommunityTemplatesLoading;
+        const setError = source === 'library' ? setTemplatesError : setCommunityTemplatesError;
+        const getItems = () => (source === 'library' ? templates : communityTemplates);
+        const setItems = source === 'library' ? setTemplates : setCommunityTemplates;
+        const getCursor = () => (source === 'library' ? templatesCursor : communityCursor);
+        const setCursor = source === 'library' ? setTemplatesCursor : setCommunityCursor;
+
+        setLoading(true);
+        setError(null);
+        try {
+            let items = getItems();
+            let cursor = getCursor();
+            while (items.length < targetCount && (cursor !== null || items.length === 0)) {
+                const pageSize = Math.min(Math.max(targetCount - items.length, 12), 30);
+                const data = await listAssistantTemplates({ source, limit: pageSize, cursor: cursor || undefined });
+                items = appendUniqueById(items, data.items);
+                setItems(items);
+                cursor = data.nextCursor || null;
+                setCursor(cursor);
+                if (!cursor) break;
+            }
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : 'Failed to load templates';
+            setError(msg);
+        } finally {
+            setLoading(false);
+        }
+    }, [templates, communityTemplates, templatesCursor, communityCursor, appendUniqueById]);
+
+    // Adapter used by UI: map 'prebuilt' to 'library'
+    const ensureTemplatesLoaded = useCallback(async (type: 'prebuilt' | 'community', targetCount: number) => {
+        const source = type === 'prebuilt' ? 'library' : 'community';
+        await loadTemplatesToCount(source, targetCount);
+    }, [loadTemplatesToCount]);
 
     // Handle template selection
     const handleTemplateSelect = async (template: any) => {
         // Show a small non-blocking spinner on the clicked card
         setLoadingTemplateId(template.id);
         try {
-            await createProjectWithOptions({
-                template: template.id,
-                // Prefer a card-specific copilot prompt if present on the template JSON
-                prompt: template.copilotPrompt || 'Explain this workflow',
-                router,
-                onError: () => {
-                    // Clear loading state if creation fails
-                    setLoadingTemplateId(null);
-                },
-            });
+            if (template.type === 'prebuilt') {
+                // Fetch full workflow from server action, then create from JSON
+                const data = await getAssistantTemplate(template.id);
+                await createProjectFromJsonWithOptions({
+                    workflowJson: JSON.stringify(data.workflow),
+                    router,
+                    onSuccess: (_projectId) => {},
+                    onError: () => {
+                        setLoadingTemplateId(null);
+                    }
+                });
+            } else if (template.type === 'community') {
+                // Fetch full workflow for community template, then create from JSON
+                const data = await getAssistantTemplate(template.id);
+                await createProjectFromJsonWithOptions({
+                    workflowJson: JSON.stringify(data.workflow),
+                    router,
+                    onSuccess: (projectId) => {
+                        router.push(`/projects/${projectId}/workflow`);
+                    },
+                    onError: (error) => {
+                        console.error('Error creating project from community template:', error);
+                        setLoadingTemplateId(null);
+                    }
+                });
+            }
         } catch (_err) {
             // In case of unexpected error, clear loading state
             setLoadingTemplateId(null);
+        }
+    };
+
+    // Handle template like (unified for library and community) - now uses proper authentication
+    const handleTemplateLike = async (template: any) => {
+        if (template.type === 'prebuilt') return;
+        try {
+            const data = await toggleTemplateLike(template.id);
+            
+            if (template.type === 'community') {
+                setCommunityTemplates(prev => prev.map(t => 
+                    t.id === template.id 
+                        ? { ...t, likeCount: data.likeCount, isLiked: data.liked }
+                        : t
+                ));
+            } else {
+                setTemplates(prev => prev.map(t => 
+                    t.id === template.id 
+                        ? { ...t, likeCount: data.likeCount, isLiked: data.liked } as any
+                        : t
+                ));
+            }
+        } catch (err) {
+            console.error('Error toggling like:', err);
+        }
+    };
+
+    // Handle template share (for both library and community)
+    const handleTemplateShare = async (template: any) => {
+        try {
+            // Fetch workflow for the template and create a shared snapshot
+            const data = await getAssistantTemplate(template.id);
+
+            const shareResp = await fetch('/api/shared-workflow', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ workflow: data.workflow }),
+            });
+            if (!shareResp.ok) throw new Error('Failed to create shared workflow');
+            const shareData = await shareResp.json();
+            const url = `${window.location.origin}/projects?shared=${shareData.id}`;
+            await navigator.clipboard.writeText(url);
+            console.log('URL copied to clipboard');
+        } catch (err) {
+            console.error('Failed to copy shared URL:', err);
         }
     };
 
@@ -145,28 +260,22 @@ export function BuildAssistantSection() {
     };
 
     useEffect(() => {
-        fetchTemplates();
+        // Load initial library templates to fill 4 rows x up to 3 columns ≈ 12
         fetchProjects();
-    }, []);
+        ensureTemplatesLoaded('prebuilt', 12);
+    }, [ensureTemplatesLoaded]);
 
     // Handle URL parameters for auto-creation and direct redirect to build view
     useEffect(() => {
         const urlPrompt = searchParams.get('prompt');
         const urlTemplate = searchParams.get('template');
         const sharedId = searchParams.get('shared');
-        const importUrl = searchParams.get('importUrl');
 
         const run = async () => {
-            if (sharedId || importUrl) {
+            if (sharedId) {
                 try {
                     setAutoCreateLoading(true);
-                    const qs = sharedId ? `id=${encodeURIComponent(sharedId)}` : `url=${encodeURIComponent(importUrl!)}`;
-                    const resp = await fetch(`/api/shared-workflow?${qs}`, { cache: 'no-store' });
-                    if (!resp.ok) {
-                        const data = await resp.json().catch(() => ({}));
-                        throw new Error(data.error || `Failed to load shared workflow (${resp.status})`);
-                    }
-                    const workflowObj = await resp.json();
+                    const workflowObj = await loadSharedWorkflow(sharedId);
                     await createProjectFromJsonWithOptions({
                         workflowJson: JSON.stringify(workflowObj),
                         router,
@@ -184,19 +293,38 @@ export function BuildAssistantSection() {
 
             if (urlPrompt || urlTemplate) {
                 setAutoCreateLoading(true);
-                createProjectWithOptions({
-                    template: urlTemplate || undefined,
-                    prompt: urlPrompt || undefined,
-                    router,
-                    onError: (error) => {
-                        console.error('Error auto-creating project:', error);
-                        setAutoCreateLoading(false);
-                        // Fall back to showing the form with the prompt pre-filled
-                        if (urlPrompt) {
-                            setUserPrompt(urlPrompt);
-                        }
+                try {
+                    const isMongoId = !!urlTemplate && /^[a-f0-9]{24}$/i.test(urlTemplate);
+                    if (urlTemplate && isMongoId) {
+                        // New-style share: template is an assistant-templates id
+                        const data = await getAssistantTemplate(urlTemplate);
+                        await createProjectFromJsonWithOptions({
+                            workflowJson: JSON.stringify(data.workflow),
+                            router,
+                            onError: (error) => {
+                                console.error('Error auto-creating project from template id:', error);
+                                setAutoCreateLoading(false);
+                            }
+                        });
+                    } else {
+                        // Legacy share using static key
+                        await createProjectWithOptions({
+                            template: urlTemplate || undefined,
+                            prompt: urlPrompt || undefined,
+                            router,
+                            onError: (error) => {
+                                console.error('Error auto-creating project:', error);
+                                setAutoCreateLoading(false);
+                                if (urlPrompt) {
+                                    setUserPrompt(urlPrompt);
+                                }
+                            }
+                        });
                     }
-                });
+                } catch (err) {
+                    console.error('Error handling template auto-create:', err);
+                    setAutoCreateLoading(false);
+                }
             }
         };
 
@@ -291,7 +419,9 @@ export function BuildAssistantSection() {
                     {/* Tabs Section */}
                     <div className="max-w-5xl mx-auto">
                         <div className="p-6 pb-0">
-                            <Tabs defaultSelectedKey="new" selectedKey={selectedTab} onSelectionChange={(key) => setSelectedTab(key as string)} className="w-full">
+                            <Tabs defaultSelectedKey="new" selectedKey={selectedTab} onSelectionChange={(key) => {
+                                setSelectedTab(key as string);
+                            }} className="w-full">
                                 <Tab key="new" title="New Assistant">
                                     <div className="pt-4">
                                         <div className="flex items-center gap-12">
@@ -460,151 +590,62 @@ export function BuildAssistantSection() {
                         </div>
                     </div>
 
-                    {/* Pre-built Assistants Section - Only show for New Assistant tab */}
+                    {/* Unified Templates Section - Only show for New Assistant tab */}
                     {selectedTab === 'new' && SHOW_PREBUILT_CARDS && (
                         <div className="max-w-5xl mx-auto mt-16">
-                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700">
-                            <div className="text-left mb-6">
-                                <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                                    Prebuilt Assistants
-                                </h2>
-                                <p className="text-sm text-gray-600 dark:text-gray-400">
-                                    Start quickly and let Skipper adapt it to your needs.
-                                </p>
-                            </div>
-                            {templatesLoading ? (
-                                <div className="flex items-center justify-center py-12 text-sm text-gray-500 dark:text-gray-400">
-                                    Loading pre-built assistants...
-                                </div>
-                            ) : templatesError ? (
-                                <div className="flex items-center justify-center py-12 text-sm text-red-500 dark:text-red-400">
-                                    Error: {templatesError}
-                                </div>
-                            ) : templates.length === 0 ? (
-                                <div className="flex items-center justify-center py-12 text-sm text-gray-500 dark:text-gray-400">
-                                    No pre-built assistants available
-                                </div>
-                            ) : (
-                                (() => {
-                                    const workTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'work productivity');
-                                    const devTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'developer productivity');
-                                    const newsTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'news & social');
-                                    const customerSupportTemplates = templates.filter((t) => (t.category || '').toLowerCase() === 'customer support');
-
-                                    const renderGrid = (items: any[]) => (
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                            {items.map((template) => (
-                                                <button
-                                                    key={template.id}
-                                                    onClick={() => handleTemplateSelect(template)}
-                                                    disabled={loadingTemplateId === template.id}
-                                                    className={clsx(
-                                                        "relative block p-4 border border-gray-200 dark:border-gray-700 rounded-xl transition-all group text-left",
-                                                        "hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:shadow-md",
-                                                        loadingTemplateId === template.id && "opacity-90 cursor-not-allowed"
-                                                    )}
-                                                >
-                                                    <div className="space-y-2">
-                                                        <div className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1">
-                                                            {template.name}
-                                                        </div>
-                                                        <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-                                                            {template.description}
-                                                        </div>
-
-                                                        {(() => {
-                                                            const tools = getUniqueTools(template);
-                                                            return tools.length > 0 && (
-                                                                <div className="flex items-center gap-2 mt-2">
-                                                                    <div className="text-xs text-gray-400 dark:text-gray-500">
-                                                                        Tools:
-                                                                    </div>
-                                                                    <div className="flex items-center gap-1">
-                                                                        {tools.slice(0, 4).map((tool) => (
-                                                                            tool.logo && (
-                                                                                <PictureImg
-                                                                                    key={tool.name}
-                                                                                    src={tool.logo}
-                                                                                    alt={`${tool.name} logo`}
-                                                                                    className="w-4 h-4 rounded-sm object-cover flex-shrink-0"
-                                                                                    title={tool.name}
-                                                                                />
-                                                                            )
-                                                                        ))}
-                                                                        {tools.length > 4 && (
-                                                                            <span className="text-xs text-gray-400 dark:text-gray-500">
-                                                                                +{tools.length - 4}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })()}
-
-                                                        <div className="flex items-center justify-between mt-2">
-                                                            <div className="text-xs text-gray-400 dark:text-gray-500"></div>
-                                                            {loadingTemplateId === template.id ? (
-                                                                <div className="text-blue-600 dark:text-blue-400">
-                                                                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
-                                                                </div>
-                                                            ) : (
-                                                                <div className="w-2 h-2 rounded-full bg-blue-500 opacity-75"></div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    );
-
-                                    return (
-                                        <div className="space-y-8">
-                                            {workTemplates.length > 0 && (
-                                                <div>
-                                                    <div className="mb-3">
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-400/10 dark:text-amber-300 dark:ring-amber-400/30">
-                                                            Work Productivity
-                                                        </span>
-                                                    </div>
-                                                    {renderGrid(workTemplates)}
-                                                </div>
-                                            )}
-                                            {devTemplates.length > 0 && (
-                                                <div>
-                                                    <div className="mb-3">
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 dark:bg-indigo-400/10 dark:text-indigo-300 dark:ring-indigo-400/30">
-                                                            Developer Productivity
-                                                        </span>
-                                                    </div>
-                                                    {renderGrid(devTemplates)}
-                                                </div>
-                                            )}
-                                            {newsTemplates.length > 0 && (
-                                                <div>
-                                                    <div className="mb-3">
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-50 text-green-700 ring-1 ring-green-200 dark:bg-green-400/10 dark:text-green-300 dark:ring-green-400/30">
-                                                            News & Social
-                                                        </span>
-                                                    </div>
-                                                    {renderGrid(newsTemplates)} 
-                                                </div>
-                                            )}
-                                            {customerSupportTemplates.length > 0 && (
-                                                <div>
-                                                    <div className="mb-3">
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-400/10 dark:text-red-300 dark:ring-red-400/30">
-                                                            Customer Support
-                                                        </span>
-                                                    </div>
-                                                    {renderGrid(customerSupportTemplates)}
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })()
-                            )}
+                            <UnifiedTemplatesSection
+                                prebuiltTemplates={templates.map(template => ({
+                                    id: template.id,
+                                    name: template.name,
+                                    description: template.description,
+                                    category: template.category || 'Other',
+                                    tools: template.tools,
+                                    type: 'prebuilt' as const,
+                                    likeCount: (template as any).likeCount || 0,
+                                    isLiked: (template as any).isLiked || false,
+                                }))}
+                                communityTemplates={communityTemplates.map(template => ({
+                                    id: template.id,
+                                    name: template.name,
+                                    description: template.description,
+                                    category: template.category,
+                                    authorId: template.authorId,
+                                    source: template.source,
+                                    authorName: template.authorName,
+                                    isAnonymous: template.isAnonymous,
+                                    likeCount: template.likeCount,
+                                    createdAt: template.publishedAt,
+                                    isLiked: template.isLiked,
+                                    type: 'community' as const,
+                                }))}
+                                loading={templatesLoading || communityTemplatesLoading}
+                                error={templatesError || communityTemplatesError}
+                                onTemplateClick={handleTemplateSelect}
+                                onRetry={() => {
+                                    loadTemplatesToCount('library', 12);
+                                    loadTemplatesToCount('community', 12);
+                                }}
+                                loadingItemId={loadingTemplateId}
+                                onLike={handleTemplateLike}
+                                onShare={handleTemplateShare}
+                                onDelete={async (item) => {
+                                    try {
+                                        await deleteAssistantTemplate(item.id);
+                                        setCommunityTemplates(prev => prev.filter(t => t.id !== item.id));
+                                    } catch (e) {
+                                        console.error(e);
+                                        // Optional: surface non-blocking feedback; keeping console error for now
+                                    }
+                                }}
+                                getUniqueTools={getUniqueTools}
+                                onLoadMore={async (type, target) => {
+                                    await ensureTemplatesLoaded(type, target);
+                                }}
+                                onTypeChange={async (type, target) => {
+                                    await ensureTemplatesLoaded(type, target);
+                                }}
+                            />
                         </div>
-                    </div>
                     )}
                 </div>
             </div>

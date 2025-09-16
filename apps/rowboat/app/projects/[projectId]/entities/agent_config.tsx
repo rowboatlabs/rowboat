@@ -16,6 +16,7 @@ import { Panel } from "@/components/common/panel-common";
 import { Button as CustomButton } from "@/components/ui/button";
 import clsx from "clsx";
 import { InputField } from "@/app/lib/components/input-field";
+import { getDefaultTools } from "@/app/lib/default_tools";
 import { USE_TRANSFER_CONTROL_OPTIONS } from "@/app/lib/feature_flags";
 import { Info as InfoIcon } from "lucide-react";
 import { useCopilot } from "../copilot/use-copilot";
@@ -68,7 +69,6 @@ export function AgentConfig({
     const [isAdvancedConfigOpen, setIsAdvancedConfigOpen] = useState(false);
     const [showGenerateModal, setShowGenerateModal] = useState(false);
     const [isInstructionsMaximized, setIsInstructionsMaximized] = useState(false);
-    const [isExamplesMaximized, setIsExamplesMaximized] = useState(false);
     const { showPreview } = usePreviewModal();
     const [localName, setLocalName] = useState(agent.name);
     const [nameError, setNameError] = useState<string | null>(null);
@@ -172,15 +172,12 @@ export function AgentConfig({
                 if (isInstructionsMaximized) {
                     setIsInstructionsMaximized(false);
                 }
-                if (isExamplesMaximized) {
-                    setIsExamplesMaximized(false);
-                }
             }
         };
 
         window.addEventListener('keydown', handleEscape);
         return () => window.removeEventListener('keydown', handleEscape);
-    }, [isInstructionsMaximized, isExamplesMaximized]);
+    }, [isInstructionsMaximized]);
 
     const validateName = (value: string) => {
         if (value.length === 0) {
@@ -240,7 +237,13 @@ export function AgentConfig({
     const atMentions = createAtMentions({
         agents: agents,
         prompts,
-        tools,
+        tools: (() => {
+            const defaults = getDefaultTools();
+            const map = new Map<string, z.infer<typeof WorkflowTool>>();
+            for (const t of tools) map.set(t.name, t);
+            for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t as any);
+            return Array.from(map.values());
+        })(),
         pipelines: agent.type === "pipeline" ? [] : (workflow.pipelines || []), // Pipeline agents can't reference pipelines
         currentAgentName: agent.name,
         currentAgent: agent
@@ -438,98 +441,7 @@ export function AgentConfig({
                                             className="h-full min-h-0 overflow-auto !mb-0 !mt-0 min-h-[300px]"
                                         />
                                     </div>
-                                    {/* Examples Section */}
-                                    <div className="space-y-2 mb-6">
-                                        <div className="flex items-center gap-2">
-                                            <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Examples</label>
-                                            <button
-                                                type="button"
-                                                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-                                                style={{ lineHeight: 0 }}
-                                                onClick={() => setIsExamplesMaximized(!isExamplesMaximized)}
-                                            >
-                                                {isExamplesMaximized ? (
-                                                    <Minimize2 className="w-4 h-4" style={{ width: 16, height: 16 }} />
-                                                ) : (
-                                                    <Maximize2 className="w-4 h-4" style={{ width: 16, height: 16 }} />
-                                                )}
-                                            </button>
-                                        </div>
-                                        {!isExamplesMaximized && (
-                                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                                                💡 Tip: Use the maximized view for a better editing experience
-                                            </div>
-                                        )}
-                                        {isExamplesMaximized ? (
-                                            <div className="fixed inset-0 z-50 bg-white dark:bg-gray-900">
-                                                <div className="h-full flex flex-col">
-                                                    {/* Saved Banner for maximized examples */}
-                                                    {showSavedBanner && (
-                                                        <div className="absolute top-4 left-4 z-10 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 duration-300">
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                            </svg>
-                                                            <span className="text-sm font-medium">Changes saved</span>
-                                                        </div>
-                                                    )}
-                                                    <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{agent.name}</span>
-                                                            <span className="text-sm text-gray-500 dark:text-gray-400">/</span>
-                                                            <span className="text-sm text-gray-500 dark:text-gray-400">Examples</span>
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-                                                            style={{ lineHeight: 0 }}
-                                                            onClick={() => setIsExamplesMaximized(false)}
-                                                        >
-                                                            <Minimize2 className="w-4 h-4" style={{ width: 16, height: 16 }} />
-                                                        </button>
-                                                    </div>
-                                                    <div className="flex-1 overflow-hidden p-4">
-                                                        <InputField
-                                                            type="text"
-                                                            key="examples-maximized"
-                                                            value={agent.examples || ""}
-                                                            onChange={(value) => {
-                                                                handleUpdate({
-                                                                    ...agent,
-                                                                    examples: value
-                                                                });
-                                                                showSavedMessage();
-                                                            }}
-                                                            placeholder="Enter examples for this agent"
-                                                            markdown
-                                                            multiline
-                                                            mentions
-                                                            mentionsAtValues={atMentions}
-                                                            className="h-full min-h-0 overflow-auto !mb-0 !mt-0"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <InputField
-                                                type="text"
-                                                key="examples"
-                                                value={agent.examples || ""}
-                                                onChange={(value) => {
-                                                    handleUpdate({
-                                                        ...agent,
-                                                        examples: value
-                                                    });
-                                                    showSavedMessage();
-                                                }}
-                                                placeholder="Enter examples for this agent"
-                                                markdown
-                                                multiline
-                                                mentions
-                                                mentionsAtValues={atMentions}
-                                                className="h-full min-h-0 overflow-auto !mb-0 !mt-0"
-                                            />
-                                        )}
-                                    </div>
+                                    {/* Examples Section removed */}
                                 </div>
                             )}
                         </>

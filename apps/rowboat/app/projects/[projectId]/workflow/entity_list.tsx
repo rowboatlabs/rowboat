@@ -6,7 +6,7 @@ import { DataSource } from "@/src/entities/models/data-source";
 import { WithStringId } from "../../../lib/types/types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
-import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, MoreVertical, Eye, Trash2, AlertTriangle, Circle, Database } from "lucide-react";
+import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, MoreVertical, Eye, Trash2, AlertTriangle, Circle, Database, Image as ImageIcon } from "lucide-react";
 import { Tooltip } from "@heroui/react";
 import { DndContext, DragEndEvent, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -20,6 +20,7 @@ import { ServerLogo } from '../tools/components/MCPServersCommon';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/react";
 import { ToolsModal } from './components/ToolsModal';
 import { DataSourcesModal } from './components/DataSourcesModal';
+import { getDefaultTools } from "@/app/lib/default_tools";
 import { DataSourceIcon } from '../../../lib/components/datasource-icon';
 import { deleteDataSource } from '../../../actions/data-source.actions';
 import { ToolkitAuthModal } from '../tools/components/ToolkitAuthModal';
@@ -939,97 +940,121 @@ export const EntityList = forwardRef<
                         {expandedPanels.tools && (
                             <div className="h-full overflow-y-auto">
                                 <div className="p-2">
-                                    {tools.length > 0 ? (
-                                        <div className="space-y-1">
-                                            {/* Group tools by server */}
-                                            {(() => {
-                                                // Get custom tools (non-MCP tools)
-                                                const customTools = tools.filter(tool => !tool.isMcp && !tool.isComposio);
-                                                
-                                                // Group MCP tools by server
-                                                const serverTools = tools.reduce((acc, tool) => {
-                                                    if (tool.isMcp && tool.mcpServerName) {
-                                                        if (!acc[tool.mcpServerName]) {
-                                                            acc[tool.mcpServerName] = [];
-                                                        }
-                                                        acc[tool.mcpServerName].push(tool);
-                                                    }
-                                                    return acc;
-                                                }, {} as Record<string, typeof tools>);
+                                    {(() => {
+                                        // Merge workflow tools with default library tools (unique by name)
+                                        const defaults = getDefaultTools();
+                                        const toolMap = new Map<string, z.infer<typeof WorkflowTool>>();
+                                        for (const t of tools) toolMap.set(t.name, t);
+                                        for (const t of defaults) if (!toolMap.has(t.name)) toolMap.set(t.name, t as any);
+                                        const toolsForDisplay = Array.from(toolMap.values());
 
-                                                return (
-                                                    <>
-                                                        {/* Show composio cards - ordered by status */}
-                                                        {Object.values(composioTools)
-                                                            .map((card) => (
-                                                                <ComposioCard 
-                                                                    key={card.slug} 
-                                                                    card={card}
-                                                                    selectedEntity={selectedEntity}
-                                                                    onSelectTool={handleToolSelection}
-                                                                    onDeleteTool={onDeleteTool}
-                                                                    selectedRef={selectedRef}
-                                                                    projectConfig={projectConfig}
-                                                                    projectId={projectId}
-                                                                    workflow={workflow}
-                                                                    onProjectToolsUpdated={onProjectToolsUpdated}
-                                                                    setSelectedToolkitSlug={setSelectedToolkitSlug}
-                                                                    setShowToolsModal={setShowToolsModal}
-                                                                />
-                                                            ))}
+                                        if (toolsForDisplay.length > 0) {
+                                            return (
+                                                <div className="space-y-1">
+                                                    {/* Group tools by server */}
+                                                    {(() => {
+                                                        // Get custom tools (non-MCP, non-Composio)
+                                                        const customTools = toolsForDisplay.filter(tool => !tool.isMcp && !tool.isComposio);
 
-                                                        {/* Show MCP server cards */}
-                                                        {Object.entries(serverTools).map(([serverName, tools]) => (
-                                                            <ServerCard
-                                                                key={serverName}
-                                                                serverName={serverName}
-                                                                tools={tools}
-                                                                selectedEntity={selectedEntity}
-                                                                onSelectTool={handleToolSelection}
-                                                                onDeleteTool={onDeleteTool}
-                                                                selectedRef={selectedRef}
-                                                            />
-                                                        ))}
+                                                        // Group MCP tools by server
+                                                        const serverTools = toolsForDisplay.reduce((acc, tool) => {
+                                                            if (tool.isMcp && tool.mcpServerName) {
+                                                                if (!acc[tool.mcpServerName]) {
+                                                                    acc[tool.mcpServerName] = [];
+                                                                }
+                                                                acc[tool.mcpServerName].push(tool);
+                                                            }
+                                                            return acc;
+                                                        }, {} as Record<string, typeof toolsForDisplay>);
 
-                                                        {/* Show custom tools */}
-                                                        {customTools.length > 0 && (
-                                                            <div className="mt-2">
-                                                                                                                        {customTools.map((tool, index) => (
-                                                            <div
-                                                                key={`custom-tool-${index}`}
-                                                                className={clsx(
-                                                                    "flex items-center gap-2 px-3 py-2 rounded cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800",
-                                                                    selectedEntity?.type === "tool" && selectedEntity.name === tool.name && "bg-indigo-50 dark:bg-indigo-950/30"
+                                                        return (
+                                                            <>
+                                                                {/* Show composio cards - ordered by status */}
+                                                                {Object.values(composioTools)
+                                                                    .map((card) => (
+                                                                        <ComposioCard 
+                                                                            key={card.slug} 
+                                                                            card={card}
+                                                                            selectedEntity={selectedEntity}
+                                                                            onSelectTool={handleToolSelection}
+                                                                            onDeleteTool={onDeleteTool}
+                                                                            selectedRef={selectedRef}
+                                                                            projectConfig={projectConfig}
+                                                                            projectId={projectId}
+                                                                            workflow={workflow}
+                                                                            onProjectToolsUpdated={onProjectToolsUpdated}
+                                                                            setSelectedToolkitSlug={setSelectedToolkitSlug}
+                                                                            setShowToolsModal={setShowToolsModal}
+                                                                        />
+                                                                    ))}
+
+                                                                {/* Show MCP server cards */}
+                                                                {Object.entries(serverTools).map(([serverName, tools]) => (
+                                                                    <ServerCard
+                                                                        key={serverName}
+                                                                        serverName={serverName}
+                                                                        tools={tools}
+                                                                        selectedEntity={selectedEntity}
+                                                                        onSelectTool={handleToolSelection}
+                                                                        onDeleteTool={onDeleteTool}
+                                                                        selectedRef={selectedRef}
+                                                                    />
+                                                                ))}
+
+                                                                {/* Show custom tools, including default library tools (read-only) */}
+                                                                {customTools.length > 0 && (
+                                                                    <div className="mt-2">
+                                                                        {customTools.map((tool, index) => (
+                                                                            <div
+                                                                                key={`custom-tool-${index}`}
+                                                                                className={clsx(
+                                                                                    "flex items-center gap-2 px-3 py-2 rounded cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800",
+                                                                                    selectedEntity?.type === "tool" && selectedEntity.name === tool.name && "bg-indigo-50 dark:bg-indigo-950/30",
+                                                                                    tool.isLibrary ? "cursor-default" : ""
+                                                                                )}
+                                                                                onClick={() => { if (!tool.isLibrary) handleToolSelection(tool.name); }}
+                                                                            >
+                                                                                {tool.isGeminiImage ? (
+                                                                                    <ImageIcon className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />
+                                                                                ) : (
+                                                                                    <Boxes className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />
+                                                                                )}
+                                                                                <span className={clsx(
+                                                                                    "flex-1 text-xs whitespace-normal break-words",
+                                                                                    // Match font styling to other tools even if read-only
+                                                                                    "text-zinc-900 dark:text-zinc-100"
+                                                                                )}>{tool.name}</span>
+                                                                                {tool.mockTool && (
+                                                                                    <span className="ml-2 px-1 py-0 rounded bg-purple-50 text-purple-400 dark:bg-purple-900/40 dark:text-purple-200 text-[11px] font-normal align-middle">Mocked</span>
+                                                                                )}
+                                                                                {!tool.isLibrary && (
+                                                                                    <Tooltip content="Remove tool" size="sm" delay={500}>
+                                                                                        <button
+                                                                                            className="ml-1 p-1 pr-2 rounded hover:bg-red-100 dark:hover:bg-red-900 flex items-center"
+                                                                                            onClick={e => { e.stopPropagation(); onDeleteTool(tool.name); }}
+                                                                                        >
+                                                                                            <Trash2 className="w-3 h-3 text-red-500" />
+                                                                                        </button>
+                                                                                    </Tooltip>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
                                                                 )}
-                                                                onClick={() => handleToolSelection(tool.name)}
-                                                            >
-                                                                <Boxes className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />
-                                                                <span className="flex-1 text-xs text-zinc-900 dark:text-zinc-100 whitespace-normal break-words">{tool.name}</span>
-                                                                {tool.mockTool && (
-                                                                    <span className="ml-2 px-1 py-0 rounded bg-purple-50 text-purple-400 dark:bg-purple-900/40 dark:text-purple-200 text-[11px] font-normal align-middle">Mocked</span>
-                                                                )}
-                                                                <Tooltip content="Remove tool" size="sm" delay={500}>
-                                                                    <button
-                                                                        className="ml-1 p-1 pr-2 rounded hover:bg-red-100 dark:hover:bg-red-900 flex items-center"
-                                                                        onClick={e => { e.stopPropagation(); onDeleteTool(tool.name); }}
-                                                                    >
-                                                                        <Trash2 className="w-3 h-3 text-red-500" />
-                                                                    </button>
-                                                                </Tooltip>
-                                                            </div>
-                                                        ))}
-                                                            </div>
-                                                        )}
-                                                    </>
-                                                );
-                                            })()}
-                                        </div>
-                                    ) : (
-                                        <EmptyState 
-                                            entity="tools" 
-                                            hasFilteredItems={false}
-                                        />
-                                    )}
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            );
+                                        }
+
+                                        return (
+                                            <EmptyState 
+                                                entity="tools" 
+                                                hasFilteredItems={false}
+                                            />
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         )}
@@ -1532,10 +1557,6 @@ const ComposioCard = ({
                             case 'remove-toolkit':
                                 setShowRemoveToolkitModal(true);
                                 break;
-                            case 'more-tools':
-                                setSelectedToolkitSlug(card.slug);
-                                setShowToolsModal(true);
-                                break;
                         }
                     }}
                     disabledKeys={[
@@ -1543,12 +1564,6 @@ const ComposioCard = ({
                         ...(isProcessingRemove ? ['remove-toolkit'] : []),
                     ]}
                 >
-                    <DropdownItem
-                        key="more-tools"
-                        startContent={<PlusIcon className="h-3 w-3" />}
-                    >
-                        More tools
-                    </DropdownItem>
                     {hasToolkitWithAuth && isToolkitConnected ? (
                         <DropdownItem
                             key="disconnect"
@@ -1637,7 +1652,8 @@ const ComposioCard = ({
                                 <button
                                     className={clsx(
                                         "flex-1 flex items-center gap-2 text-sm text-left bg-transparent border-none p-0 m-0",
-                                        tool.isLibrary ? "text-zinc-400 dark:text-zinc-600" : "text-zinc-900 dark:text-zinc-100"
+                                        // Use same font styling for library tools; keep disabled state only
+                                        "text-zinc-900 dark:text-zinc-100"
                                     )}
                                     onClick={() => onSelectTool(tool.name)}
                                     disabled={tool.isLibrary}

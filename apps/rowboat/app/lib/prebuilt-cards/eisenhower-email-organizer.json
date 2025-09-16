@@ -1,0 +1,125 @@
+{
+  "agents": [
+    {
+      "name": "Classification Agent",
+      "type": "pipeline",
+      "description": "Classifies a single email into one of the four Eisenhower Matrix categories.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nClassify the provided email into one of the four Eisenhower Matrix categories:\n- Urgent + Important: Critical, requires immediate action (e.g., legal, financial, investor, user-blocking).\n- Not Urgent + Important: High-value, strategic, should be scheduled (e.g., partnerships, key coordination).\n- Urgent + Not Important: Time-sensitive but delegable (e.g., routine ops, technical updates).\n- Not Urgent + Not Important: Low-value, noise, spam, promotions (should be labeled as 'Low Priority').\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the email (subject, sender, body, etc.).\n2. Analyze the content and assign the correct category.\n3. Return the category as a string.\n\n---\n## 📋 Guidelines:\n- Use the provided definitions for each category.\n- Be accurate and consistent.\n- Do not perform any actions other than classification.",
+      "model": "",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    },
+    {
+      "name": "Label Agent",
+      "type": "pipeline",
+      "description": "Applies the correct Gmail label to the email based on its Eisenhower Matrix category.",
+      "disabled": false,
+      "instructions": "## 🧑‍💼 Role:\nApply the correct Gmail label to the email based on its Eisenhower Matrix category, using the provided label IDs.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the email's message_id and its assigned category.\n2. Map the category to the correct label ID using these variables:\n   - 'Important + Not Urgent': [@variable:Important + Not Urgent Label ID](#mention)\n   - 'Important + Urgent': [@variable:Important + Urgent Label ID](#mention)\n   - 'Not Important + Urgent': [@variable:Not Important + Urgent Label ID](#mention)\n   - 'Not Important + Not Urgent': [@variable:Not Important + Not Urgent Label ID](#mention)\n3. Use [@tool:Modify email labels](#mention) to add the correct label ID to the email (add_label_ids).\n4. Return a status indicating the label was applied.\n\n---\n## 📋 Guidelines:\n- Always use the provided label IDs.\n- Always apply the correct label.\n- Do not archive or delete emails.",
+      "model": "",
+      "locked": false,
+      "toggleAble": true,
+      "ragReturnType": "chunks",
+      "ragK": 3,
+      "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
+      "maxCallsPerParentAgent": 3
+    }
+  ],
+  "prompts": [
+    {
+      "name": "Important + Not Urgent Label ID",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "Important + Urgent Label ID",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "Not Important + Urgent Label ID",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "Not Important + Not Urgent Label ID",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "user_id",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    }
+  ],
+  "tools": [
+    {
+      "name": "Modify email labels",
+      "description": "Adds and/or removes specified gmail labels for a message; ensure `message id` and all `label ids` are valid.",
+      "mockTool": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "add_label_ids": {
+            "type": "array",
+            "description": "Label IDs to add.",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "message_id": {
+            "type": "string",
+            "description": "Immutable ID of the message to modify."
+          },
+          "remove_label_ids": {
+            "type": "array",
+            "description": "Label IDs to remove.",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "user_id": {
+            "type": "string",
+            "description": "User's email address or 'me' for the authenticated user.",
+            "default": "me"
+          }
+        },
+        "required": [
+          "message_id"
+        ]
+      },
+      "isComposio": true,
+      "composioData": {
+        "slug": "GMAIL_ADD_LABEL_TO_EMAIL",
+        "noAuth": false,
+        "toolkitName": "gmail",
+        "toolkitSlug": "gmail",
+        "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/gmail.svg"
+      }
+    }
+  ],
+  "pipelines": [
+    {
+      "name": "Eisenhower Email Pipeline",
+      "description": "Pipeline that classifies an email and applies the correct label (including 'Low Priority' for low-value emails).",
+      "agents": [
+        "Classification Agent",
+        "Label Agent"
+      ]
+    }
+  ],
+  "startAgent": "Eisenhower Email Pipeline",
+  "lastUpdatedAt": "2025-09-13T20:34:42.747Z",
+  "name": "Eisenhower Email Organizer",
+  "description": "Organizes emails into the four Eisenhower Matrix categories.",
+  "category": "Work Productivity",
+  "copilotPrompt": "Give me a brief explanation of this assistant. Also briefly tell me about how to setup a trigger for this assistant."
+}

@@ -9,6 +9,7 @@ import crypto from "crypto";
 // Internal dependencies
 import { createTools, createRagTool } from "./agent-tools";
 import { ConnectedEntity, sanitizeTextWithMentions, Workflow, WorkflowAgent, WorkflowPipeline, WorkflowPrompt, WorkflowTool } from "@/app/lib/types/workflow_types";
+import { getDefaultTools } from "@/app/lib/default_tools";
 import { CHILD_TRANSFER_RELATED_INSTRUCTIONS, CONVERSATION_TYPE_INSTRUCTIONS, PIPELINE_TYPE_INSTRUCTIONS, RAG_INSTRUCTIONS, TASK_TYPE_INSTRUCTIONS, VARIABLES_CONTEXT_INSTRUCTIONS } from "./agent_instructions";
 import { PrefixLogger } from "@/app/lib/utils";
 import { Message, AssistantMessage, AssistantMessageWithToolCalls, ToolMessage } from "@/app/lib/types/types";
@@ -21,7 +22,7 @@ import { PipelineStateManager } from "./pipeline-state-manager";
 // Provider configuration
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
-const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
+const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4.1';
 
 // Feature flags
 const USE_NATIVE_HANDOFFS = process.env.USE_NATIVE_HANDOFFS === 'true';
@@ -361,7 +362,15 @@ function mapConfig(workflow: z.infer<typeof Workflow>): {
         ...acc,
         [agent.name]: agent
     }), {});
-    const toolConfig: Record<string, z.infer<typeof WorkflowTool>> = workflow.tools.reduce((acc, tool) => ({
+    // Merge workflow tools with default library tools (unique by name)
+    const mergedTools = (() => {
+        const defaults = getDefaultTools();
+        const map = new Map<string, z.infer<typeof WorkflowTool>>();
+        for (const t of workflow.tools) map.set(t.name, t);
+        for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t as any);
+        return Array.from(map.values());
+    })();
+    const toolConfig: Record<string, z.infer<typeof WorkflowTool>> = mergedTools.reduce((acc, tool) => ({
         ...acc,
         [tool.name]: tool
     }), {});

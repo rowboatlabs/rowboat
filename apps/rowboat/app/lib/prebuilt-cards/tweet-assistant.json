@@ -3,44 +3,23 @@
     {
       "name": "Tweet Assistant",
       "type": "conversation",
-      "description": "Assists users in creating and posting tweets with images, including crafting tweet text, generating images, and posting to Twitter.",
-      "instructions": "## 🧑‍💼 Role:\nYou are a helpful assistant that helps users create and post tweets with images. You can assist with crafting the tweet text, finding information, generating images, and finally posting the tweet to Twitter.\n\n---\n## ⚙️ Operating Procedure:\n1. Greet the user and ask for the text they want to include in the tweet. Offer to help them craft it or find information about a topic.\n2. If the user asks for help with a topic, use [@tool:Composio DuckDuckGo Search](#mention) and [@tool:Exa Answer](#mention) to find relevant information and present it to the user.\n3. Once the tweet text is finalized, work with the user for description of the image they want to include in the tweet.\n4. Use [@tool:Generate Image](#mention) with the image description to generate the image.\n5. Use [@tool:Create a post](#mention) with the tweet text and the generated image (or its ID).\n6. Inform the user when the tweet has been successfully posted.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Interacting with the user to get tweet text and image description.\n- Offering assistance in crafting tweets and finding information.\n- Generating images from text descriptions.\n- Posting tweets with images to Twitter.\n\n❌ Out of Scope:\n- None, this agent handles the entire workflow.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Always confirm the tweet text and image description with the user.\n- Be proactive in offering help and suggestions for tweet content.\n- Ensure the generated image matches the description.\n- Ensure the tweet text and image are correctly posted.\n\n🚫 Don'ts:\n- Do not fabricate information.\n\n",
-      "model": "google/gemini-2.5-flash",
+      "description": "Assists users in creating and posting tweets, including crafting tweet text, finding information, and posting to Twitter.",
+      "instructions": "## 🧑‍💼 Role:\nYou are a helpful assistant that helps users create and post tweets. You can assist with crafting the tweet text, finding information, and finally posting the tweet to Twitter.\n\n---\n## ⚙️ Operating Procedure:\n1. Greet the user and ask for the text they want to include in the tweet. Offer to help them craft it or find information about a topic.\n2. If the user asks for help with a topic, use [@tool:Composio DuckDuckGo Search](#mention) and [@tool:Exa Answer](#mention) to find relevant information and present it to the user.\n3. Once the tweet text is finalized, confirm with the user that they are ready to post it.\n4. Use [@tool:Create a post](#mention) with the tweet text to post the tweet to Twitter.\n5. Inform the user when the tweet has been successfully posted.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Interacting with the user to get tweet text.\n- Offering assistance in crafting tweets and finding information.\n- Posting tweets to Twitter.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Always confirm the tweet text with the user before posting.\n- Be proactive in offering help and suggestions for tweet content.\n- Ensure the tweet text is correctly posted.\n\n🚫 Don'ts:\n- Do not fabricate information.\n",
+      "examples": "\n",
+      "model": "",
       "toggleAble": true,
       "ragReturnType": "chunks",
       "ragK": 3,
-      "controlType": "retain",
       "outputVisibility": "user_facing",
-      "examples": "\n"
+      "controlType": "retain"
     }
   ],
   "prompts": [],
   "tools": [
     {
-      "name": "Generate Image",
-      "description": "Generate an image using Google Gemini given a text prompt. Returns base64-encoded image data and any text parts.",
-      "isGeminiImage": true,
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "prompt": {
-            "type": "string",
-            "description": "Text prompt describing the image to generate"
-          },
-          "modelName": {
-            "type": "string",
-            "description": "Optional Gemini model override"
-          }
-        },
-        "required": [
-          "prompt"
-        ],
-        "additionalProperties": true
-      }
-    },
-    {
       "name": "Create a post",
       "description": "Creates a tweet on twitter; `text` is required unless `card uri`, `media media ids`, `poll options`, or `quote tweet id` is provided.",
+      "mockTool": false,
       "parameters": {
         "type": "object",
         "properties": {
@@ -221,7 +200,6 @@
         },
         "required": []
       },
-      "mockTool": false,
       "isComposio": true,
       "composioData": {
         "slug": "TWITTER_CREATION_OF_A_POST",
@@ -234,6 +212,7 @@
     {
       "name": "Exa Answer",
       "description": "Get answers with citations using the exa api.",
+      "mockTool": false,
       "parameters": {
         "type": "object",
         "properties": {
@@ -250,7 +229,6 @@
           "content"
         ]
       },
-      "mockTool": false,
       "isComposio": true,
       "composioData": {
         "slug": "COMPOSIO_SEARCH_EXA_ANSWER",
@@ -263,6 +241,7 @@
     {
       "name": "Composio DuckDuckGo Search",
       "description": "The duckduckgosearch class utilizes the composio duckduckgo search api to perform searches, focusing on web information and details. it leverages the duckduckgo search engine via the composio duckduckgo search api to retrieve relevant web data based on the provided query.",
+      "mockTool": false,
       "parameters": {
         "type": "object",
         "properties": {
@@ -279,7 +258,6 @@
           "query"
         ]
       },
-      "mockTool": false,
       "isComposio": true,
       "composioData": {
         "slug": "COMPOSIO_SEARCH_DUCK_DUCK_GO_SEARCH",
@@ -292,9 +270,9 @@
   ],
   "pipelines": [],
   "startAgent": "Tweet Assistant",
-  "lastUpdatedAt": "2025-09-11T18:02:35.880Z", 
-  "name": "Viral Tweet Assistant",
-  "description": "Research topics and create a tweet including generated images.",
+  "lastUpdatedAt": "2025-09-16T09:18:26.925Z",
+  "name": "Tweet Assistant",
+  "description": "Research topics and creates a tweet.",
   "category": "News & Social",
   "copilotPrompt": "Give me a brief explanation of this assistant."
 }

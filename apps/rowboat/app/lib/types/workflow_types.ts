@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getDefaultTools } from "@/app/lib/default_tools";
 export const WorkflowAgent = z.object({
     name: z.string(),
     order: z.number().int().optional(),
@@ -165,7 +166,10 @@ export function sanitizeTextWithMentions(
                 const agent = workflow.agents.find(a => a.name === entity.name);
                 return agent && agent.type !== 'pipeline';
             } else if (entity.type === 'tool') {
-                return workflow.tools.some(t => t.name === entity.name);
+                // Allow referencing workflow tools or default library tools
+                const inWorkflow = workflow.tools.some(t => t.name === entity.name);
+                const inDefaults = getDefaultTools().some(t => t.name === entity.name);
+                return inWorkflow || inDefaults;
             } else if (entity.type === 'prompt') {
                 return workflow.prompts.some(p => p.name === entity.name);
             } else if (entity.type === 'pipeline') {

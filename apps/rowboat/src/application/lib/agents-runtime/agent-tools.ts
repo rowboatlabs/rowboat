@@ -27,7 +27,7 @@ import { IProjectsRepository } from "@/src/application/repositories/projects.rep
 // Provider configuration
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
-const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
+const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4.1';
 
 const openai = createOpenAI({
     apiKey: PROVIDER_API_KEY,
@@ -659,11 +659,11 @@ export function createGenerateImageTool(
                     const images = await Promise.all(result.images.map(async (img) => {
                         const buf = Buffer.from(img.dataBase64, 'base64');
                         const ext = img.mimeType === 'image/jpeg' ? '.jpg' : img.mimeType === 'image/webp' ? '.webp' : '.png';
-                        const base = `${projectId}-${Math.floor(Math.random() * 1e12).toString(36)}`;
-                        const last2 = base.slice(-2).padStart(2, '0');
+                        const imageId = crypto.randomUUID();
+                        const last2 = imageId.slice(-2).padStart(2, '0');
                         const dirA = last2.charAt(0);
                         const dirB = last2.charAt(1);
-                        const filename = `${base}${ext}`;
+                        const filename = `${imageId}${ext}`;
                         const key = `generated_images/${dirA}/${dirB}/${filename}`;
                         await s3.send(new PutObjectCommand({
                             Bucket: s3Bucket,
@@ -671,7 +671,7 @@ export function createGenerateImageTool(
                             Body: buf,
                             ContentType: img.mimeType,
                         }));
-                        const url = `/api/generated-images/${dirA}/${dirB}/${filename}`;
+                        const url = `/api/generated-images/${imageId}`;
                         return { mimeType: img.mimeType, bytes: buf.length, url };
                     }));
                     const payload = {
