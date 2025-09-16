@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { authCheck } from "./auth.actions";
 import { MongoDBAssistantTemplatesRepository } from '@/src/infrastructure/repositories/mongodb.assistant-templates.repository';
 import { prebuiltTemplates } from '@/app/lib/prebuilt-cards';
-import { auth0 } from '@/app/lib/auth0';
 import { USE_AUTH } from '@/app/lib/feature_flags';
 
 const repo = new MongoDBAssistantTemplatesRepository();
@@ -146,6 +145,7 @@ export async function createAssistantTemplate(data: z.infer<typeof CreateTemplat
     
     if (USE_AUTH) {
         try {
+            const { auth0 } = await import('@/app/lib/auth0');
             const { user: auth0User } = await auth0.getSession() || {};
             if (auth0User) {
                 authorName = auth0User.name ?? auth0User.email ?? 'Anonymous';

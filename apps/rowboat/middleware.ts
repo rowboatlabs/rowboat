@@ -1,6 +1,5 @@
 import { NextFetchEvent, NextRequest, NextResponse } from "next/server";
 import { auth0 } from "./app/lib/auth0";
-import { USE_AUTH } from "./app/lib/feature_flags";
 
 const corsOptions = {
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
@@ -18,13 +17,9 @@ async function authCheck(request: NextRequest) {
 }
 
 export async function middleware(request: NextRequest, event: NextFetchEvent) {
-  // Check if the request path starts with /auth
+  // Check if the request path starts with /api/auth/
   if (request.nextUrl.pathname.startsWith('/auth')) {
-    // Only delegate to Auth0 when auth is enabled; otherwise allow through
-    if (USE_AUTH) {
-      return await auth0.middleware(request);
-    }
-    return NextResponse.next();
+    return await auth0.middleware(request);
   }
 
   // Check if the request path starts with /api/
@@ -54,7 +49,8 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   if (request.nextUrl.pathname.startsWith('/projects') ||
     request.nextUrl.pathname.startsWith('/billing') ||
     request.nextUrl.pathname.startsWith('/onboarding')) {
-    if (USE_AUTH) {
+    // Skip auth check if USE_AUTH is not enabled
+    if (process.env.USE_AUTH === 'true') {
       return await authCheck(request);
     }
   }
