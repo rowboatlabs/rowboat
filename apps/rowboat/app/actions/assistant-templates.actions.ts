@@ -5,6 +5,7 @@ import { authCheck } from "./auth.actions";
 import { MongoDBAssistantTemplatesRepository } from '@/src/infrastructure/repositories/mongodb.assistant-templates.repository';
 import { prebuiltTemplates } from '@/app/lib/prebuilt-cards';
 import { USE_AUTH } from '@/app/lib/feature_flags';
+import { ensureLibraryTemplatesSeeded } from '@/app/lib/assistant_templates_seed';
 
 const repo = new MongoDBAssistantTemplatesRepository();
 
@@ -40,7 +41,8 @@ const CreateTemplateSchema = z.object({
 export async function listAssistantTemplates(request: z.infer<typeof ListTemplatesSchema>) {
     const user = await authCheck();
     
-    // No longer seeding all templates upfront - using lazy seeding instead
+    // Kick off best-effort library reconcile/seed on each UI fetch (non-blocking)
+    try { void ensureLibraryTemplatesSeeded(); } catch {}
     
     const params = ListTemplatesSchema.parse(request);
 

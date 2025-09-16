@@ -14,6 +14,7 @@ export async function ensureLibraryTemplatesSeeded(): Promise<void> {
         console.log('[PrebuiltTemplates] Starting template seeding...');
 
         const entries = Object.entries(prebuiltTemplates);
+        const currentPrebuiltKeys = new Set<string>(entries.map(([key]) => key));
         for (const [prebuiltKey, tpl] of entries) {
             // minimal guard; only ingest valid workflow-like objects
             if (!(tpl as any)?.agents || !Array.isArray((tpl as any).agents)) continue;
@@ -50,6 +51,33 @@ export async function ensureLibraryTemplatesSeeded(): Promise<void> {
             } as const;
 
             await collection.insertOne(doc as any);
+        }
+
+        // Simple reconcile: delete library templates that are no longer present in prebuilt files
+        try {
+            const cursor = collection.find({
+                source: 'library',
+                authorName: 'Rowboat',
+                tags: { $in: ["__library__"] },
+            }, { projection: { _id: 1, tags: 1, name: 1 } });
+
+            const toDeleteIds: any[] = [];
+            const removedNames: string[] = [];
+            for await (const doc of cursor as any) {
+                const prebuiltTag: string | undefined = (doc.tags || []).find((t: string) => t.startsWith('prebuilt:'));
+                const key = prebuiltTag ? prebuiltTag.replace('prebuilt:', '') : undefined;
+                if (!key || !currentPrebuiltKeys.has(key)) {
+                    toDeleteIds.push(doc._id);
+                    if (doc.name) removedNames.push(doc.name);
+                }
+            }
+
+            if (toDeleteIds.length > 0) {
+                await collection.deleteMany({ _id: { $in: toDeleteIds } } as any);
+                console.log(`[PrebuiltTemplates] Reconciled by deleting ${toDeleteIds.length} removed templates:`, removedNames);
+            }
+        } catch (reconcileErr) {
+            console.error('[PrebuiltTemplates] Reconcile (delete missing) failed:', reconcileErr);
         }
     } catch (err) {
         // best-effort seed; do not throw to avoid breaking requests
