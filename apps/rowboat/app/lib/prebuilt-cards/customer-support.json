@@ -62,28 +62,6 @@
   ],
   "tools": [
     {
-      "name": "Generate Image",
-      "description": "Generate an image using Google Gemini given a text prompt. Returns base64-encoded image data and any text parts.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "prompt": {
-            "type": "string",
-            "description": "Text prompt describing the image to generate"
-          },
-          "modelName": {
-            "type": "string",
-            "description": "Optional Gemini model override"
-          }
-        },
-        "required": [
-          "prompt"
-        ],
-        "additionalProperties": true
-      },
-      "isGeminiImage": true
-    },
-    {
       "name": "Mock Delivery Status",
       "description": "A mock tool to simulate checking delivery status.",
       "mockTool": true,

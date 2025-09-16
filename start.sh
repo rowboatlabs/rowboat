@@ -22,17 +22,6 @@ export USE_KLAVIS_TOOLS=true
 #   export USE_KLAVIS_TOOLS=true
 # fi
 
-# default to disabling auth if not explicitly enabled
-export USE_AUTH="${USE_AUTH:-false}"
-
-# provide dummy auth0 env vars if missing (to silence build-time warnings)
-# Note: app/lib/auth0.ts expects AUTH0_ISSUER_BASE_URL and AUTH0_BASE_URL
-export AUTH0_ISSUER_BASE_URL="${AUTH0_ISSUER_BASE_URL:-${AUTH0_DOMAIN:-test}}"
-export AUTH0_CLIENT_ID="${AUTH0_CLIENT_ID:-test}"
-export AUTH0_BASE_URL="${AUTH0_BASE_URL:-${APP_BASE_URL:-test}}"
-export AUTH0_SECRET="${AUTH0_SECRET:-test}"
-export AUTH0_CLIENT_SECRET="${AUTH0_CLIENT_SECRET:-test}"
-
 # Start with the base command and profile flags
 CMD="docker compose"
 CMD="$CMD --profile setup_qdrant"
