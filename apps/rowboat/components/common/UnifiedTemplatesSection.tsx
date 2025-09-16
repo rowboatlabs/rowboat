@@ -66,9 +66,9 @@ export function UnifiedTemplatesSection({
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [pendingDeleteItem, setPendingDeleteItem] = useState<TemplateItem | null>(null);
+    const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
 
-    // Row-based pagination state (lock to 3 columns per row)
-    const [columns, setColumns] = useState<number>(3);
+    // Row-based pagination: paginate in rows of 3 regardless of screen size
     const [rowsShown, setRowsShown] = useState<number>(4);
     
     // Track if user has interacted with likes to prevent ALL re-sorting
@@ -175,10 +175,7 @@ export function UnifiedTemplatesSection({
         return filtered;
     }, [allTemplates, searchQuery, selectedType, selectedCategories, sortBy, hasUserInteractedWithLikes, originalOrder]);
 
-    // Lock columns to 3 at all times to ensure consistent rows and pagination
-    useEffect(() => {
-        setColumns(3);
-    }, []);
+    // No-op: pagination decoupled from display columns
 
     // Reset rowsShown and allow re-sorting when filters/sort change
     useEffect(() => {
@@ -188,9 +185,11 @@ export function UnifiedTemplatesSection({
         setOriginalOrder(new Map());
     }, [searchQuery, selectedType, selectedCategories, sortBy]);
 
-    const itemsPerRow = Math.max(columns, 1);
+    const itemsPerRow = 3; // paginate by 3 items per row irrespective of viewport
     const visibleCount = rowsShown * itemsPerRow;
-    const hasMore = filteredTemplates.length > visibleCount;
+    // Show "View more" when there are more items than visible OR
+    // when we filled the current page and can load more
+    const hasMore = filteredTemplates.length > visibleCount || (!!onLoadMore && filteredTemplates.length >= visibleCount);
     const remainingItems = Math.max(filteredTemplates.length - visibleCount, 0);
     const remainingRows = Math.ceil(remainingItems / itemsPerRow);
 
@@ -405,7 +404,7 @@ export function UnifiedTemplatesSection({
                         <div className="text-sm text-gray-600 dark:text-gray-400">
                             Showing {Math.min(visibleCount, filteredTemplates.length)} of {filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''} ({rowsShown} row{rowsShown !== 1 ? 's' : ''})
                         </div>
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                             {visibleTemplates.map((item) => (
                                 <AssistantCard
                                     key={`${item.type}-${item.id}`}
@@ -436,15 +435,24 @@ export function UnifiedTemplatesSection({
                             <div className="flex items-center justify-center pt-2">
                                 <button
                                     onClick={async () => {
-                                        const target = (rowsShown + 4) * itemsPerRow;
+                                        if (isLoadingMore) return;
+                                        setIsLoadingMore(true);
+                                        const nextRows = rowsShown + 4; // paginate in 4-row blocks
+                                        const target = nextRows * itemsPerRow;
                                         if (onLoadMore) {
-                                            await onLoadMore(selectedType, target);
+                                            try {
+                                                await onLoadMore(selectedType, target);
+                                            } catch (_e) {
+                                                // ignore
+                                            }
                                         }
-                                        setRowsShown(prev => prev + 4);
+                                        setRowsShown(nextRows);
+                                        setIsLoadingMore(false);
                                     }}
-                                    className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium underline-offset-2 hover:underline"
+                                    disabled={isLoadingMore}
+                                    className={`text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium underline-offset-2 hover:underline ${isLoadingMore ? 'opacity-60 cursor-not-allowed' : ''}`}
                                 >
-                                    View more
+                                    {isLoadingMore ? 'Loading…' : 'View more'}
                                 </button>
                             </div>
                         )}

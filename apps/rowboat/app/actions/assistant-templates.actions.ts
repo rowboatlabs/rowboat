@@ -41,8 +41,15 @@ const CreateTemplateSchema = z.object({
 export async function listAssistantTemplates(request: z.infer<typeof ListTemplatesSchema>) {
     const user = await authCheck();
     
-    // Kick off best-effort library reconcile/seed on each UI fetch (non-blocking)
-    try { void ensureLibraryTemplatesSeeded(); } catch {}
+    // Throttle best-effort library reconcile/seed to avoid repeated bursts
+    try {
+        const last = (globalThis as any).__lastLibrarySeedAt as number | undefined;
+        const now = Date.now();
+        if (!last || now - last > 60_000) { // at most once per minute
+            (globalThis as any).__lastLibrarySeedAt = now;
+            void ensureLibraryTemplatesSeeded();
+        }
+    } catch {}
     
     const params = ListTemplatesSchema.parse(request);
 

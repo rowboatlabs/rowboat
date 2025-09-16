@@ -21,13 +21,12 @@ export async function ensureLibraryTemplatesSeeded(): Promise<void> {
 
             const name = (tpl as any).name || prebuiltKey;
 
-            // check if already present (by name + authorName Rowboat and special tag)
-            const existing = await collection.findOne({ name, authorName: "Rowboat", tags: { $in: [ `prebuilt:${prebuiltKey}`, "__library__" ] } });
-            if (existing) {
-                // Skip updating existing templates - we use original JSON at runtime
-                continue;
-            }
-
+            // Upsert to avoid race-condition duplicates
+            const filter = {
+                authorName: "Rowboat",
+                source: 'library',
+                tags: { $all: ["__library__", `prebuilt:${prebuiltKey}`] },
+            } as const;
             const doc = {
                 name,
                 description: (tpl as any).description || "",
@@ -49,35 +48,64 @@ export async function ensureLibraryTemplatesSeeded(): Promise<void> {
                 thumbnailUrl: undefined,
                 source: 'library' as const,
             } as const;
-
-            await collection.insertOne(doc as any);
+            await collection.updateOne(
+                filter as any,
+                { $setOnInsert: doc } as any,
+                { upsert: true } as any
+            );
         }
 
-        // Simple reconcile: delete library templates that are no longer present in prebuilt files
+        // Strong reconcile: ensure DB exactly matches code exports
         try {
-            const cursor = collection.find({
+            const libCursor = collection.find({
                 source: 'library',
                 authorName: 'Rowboat',
                 tags: { $in: ["__library__"] },
-            }, { projection: { _id: 1, tags: 1, name: 1 } });
+            }, { projection: { _id: 1, tags: 1, name: 1, publishedAt: 1 } });
 
-            const toDeleteIds: any[] = [];
-            const removedNames: string[] = [];
-            for await (const doc of cursor as any) {
-                const prebuiltTag: string | undefined = (doc.tags || []).find((t: string) => t.startsWith('prebuilt:'));
-                const key = prebuiltTag ? prebuiltTag.replace('prebuilt:', '') : undefined;
-                if (!key || !currentPrebuiltKeys.has(key)) {
-                    toDeleteIds.push(doc._id);
-                    if (doc.name) removedNames.push(doc.name);
+            type DocLite = { _id: any; tags?: string[]; name?: string; publishedAt?: string };
+            const keyToDocs = new Map<string, DocLite[]>();
+            const orphans: any[] = [];
+            const orphanNames: string[] = [];
+
+            for await (const doc of libCursor as any as AsyncIterable<DocLite>) {
+                const prebuiltTag = (doc.tags || []).find(t => typeof t === 'string' && t.startsWith('prebuilt:'));
+                if (!prebuiltTag) {
+                    orphans.push(doc._id);
+                    if (doc.name) orphanNames.push(doc.name);
+                    continue;
                 }
+                const key = prebuiltTag.replace('prebuilt:', '');
+                if (!currentPrebuiltKeys.has(key)) {
+                    orphans.push(doc._id);
+                    if (doc.name) orphanNames.push(doc.name);
+                    continue;
+                }
+                const arr = keyToDocs.get(key) || [];
+                arr.push(doc);
+                keyToDocs.set(key, arr);
             }
 
-            if (toDeleteIds.length > 0) {
-                await collection.deleteMany({ _id: { $in: toDeleteIds } } as any);
-                console.log(`[PrebuiltTemplates] Reconciled by deleting ${toDeleteIds.length} removed templates:`, removedNames);
+            // Delete orphans (no key or key not in code)
+            if (orphans.length > 0) {
+                await collection.deleteMany({ _id: { $in: orphans } } as any);
+                console.log(`[PrebuiltTemplates] Reconciled by deleting ${orphans.length} orphans/removed templates:`, orphanNames);
+            }
+
+            // For each key, keep newest by publishedAt; delete others
+            const dupRemovals: any[] = [];
+            for (const [key, docs] of keyToDocs.entries()) {
+                if (docs.length <= 1) continue;
+                const sorted = [...docs].sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
+                const extras = sorted.slice(1).map(d => d._id);
+                dupRemovals.push(...extras);
+            }
+            if (dupRemovals.length > 0) {
+                await collection.deleteMany({ _id: { $in: dupRemovals } } as any);
+                console.log(`[PrebuiltTemplates] De-duplicated ${dupRemovals.length} duplicate templates`);
             }
         } catch (reconcileErr) {
-            console.error('[PrebuiltTemplates] Reconcile (delete missing) failed:', reconcileErr);
+            console.error('[PrebuiltTemplates] Reconcile (strict sync) failed:', reconcileErr);
         }
     } catch (err) {
         // best-effort seed; do not throw to avoid breaking requests

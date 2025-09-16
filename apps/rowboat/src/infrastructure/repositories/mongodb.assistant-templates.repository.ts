@@ -48,7 +48,13 @@ export class MongoDBAssistantTemplatesRepository {
         }
 
         const skip = cursor ? parseInt(cursor) : 0;
-        const results = await this.collection.find(query).sort({ publishedAt: -1 }).skip(skip).limit(limit).toArray();
+        // Stable sort: newest first, with _id as tiebreaker to ensure deterministic pages
+        const results = await this.collection
+            .find(query)
+            .sort({ publishedAt: -1, _id: -1 } as any)
+            .skip(skip)
+            .limit(limit)
+            .toArray();
         const items = results.map(r => ({ ...r, id: r._id.toString() }));
         const nextCursor = results.length === limit ? (skip + limit).toString() : null;
         return { items, nextCursor } as any;

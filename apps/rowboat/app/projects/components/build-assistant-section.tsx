@@ -106,67 +106,55 @@ export function BuildAssistantSection() {
         return Array.from(uniqueToolsMap.values()).filter(tool => tool.logo); // Only show tools with logos like ToolkitCard
     };
 
-    const fetchLibraryTemplatesPage = useCallback(async (cursor?: string | null, limit: number = 20) => {
-        setTemplatesLoading(true);
-        setTemplatesError(null);
-        try {
-            const data = await listAssistantTemplates({
-                source: 'library',
-                limit,
-                cursor: cursor || undefined
-            });
-            setTemplates(prev => cursor ? [...prev, ...data.items] : data.items);
-            setTemplatesCursor(data.nextCursor || null);
-        } catch (error) {
-            console.error('Error fetching library templates:', error);
-            setTemplatesError(error instanceof Error ? error.message : 'Failed to load templates');
-        } finally {
-            setTemplatesLoading(false);
-        }
-    }, []);
-
-    const fetchCommunityTemplatesPage = useCallback(async (cursor?: string | null, limit: number = 20) => {
-        setCommunityTemplatesLoading(true);
-        setCommunityTemplatesError(null);
-        try {
-            const data = await listAssistantTemplates({
-                source: 'community',
-                limit,
-                cursor: cursor || undefined
-            });
-            setCommunityTemplates(prev => cursor ? [...prev, ...data.items] : data.items);
-            setCommunityCursor(data.nextCursor || null);
-        } catch (error) {
-            console.error('Error fetching community templates:', error);
-            setCommunityTemplatesError(error instanceof Error ? error.message : 'Failed to load community templates');
-        } finally {
-            setCommunityTemplatesLoading(false);
-        }
-    }, []);
-
-    // Ensure we have at least `targetCount` items loaded for a given type
-    const ensureTemplatesLoaded = useCallback(async (type: 'prebuilt' | 'community', targetCount: number) => {
-        const current = type === 'prebuilt' ? templates.length : communityTemplates.length;
-        const cursor = type === 'prebuilt' ? templatesCursor : communityCursor;
-        if (current >= targetCount) return;
-        // Fetch pages until we meet or exceed target or run out of pages
-        // Use page size equal to remaining needed but capped reasonably
-        let needed = targetCount - current;
-        let nextCursor = cursor;
-        while (needed > 0 && (nextCursor !== null || current === 0)) {
-            const pageSize = Math.min(Math.max(needed, 12), 30);
-            if (type === 'prebuilt') {
-                await fetchLibraryTemplatesPage(nextCursor, pageSize);
-                nextCursor = templatesCursor; // will be updated by set state; slight lag acceptable
-            } else {
-                await fetchCommunityTemplatesPage(nextCursor, pageSize);
-                nextCursor = communityCursor;
+    // Utility: append unique by id (prevents duplicates when paginating)
+    const appendUniqueById = useCallback((prev: any[], next: any[]) => {
+        const seen = new Set(prev.map(i => i.id));
+        const merged = [...prev];
+        for (const item of next) {
+            if (!seen.has(item.id)) {
+                merged.push(item);
+                seen.add(item.id);
             }
-            // Update needed based on latest lengths
-            needed = targetCount - (type === 'prebuilt' ? templates.length : communityTemplates.length);
-            if (nextCursor === null) break;
         }
-    }, [templates.length, communityTemplates.length, templatesCursor, communityCursor, fetchLibraryTemplatesPage, fetchCommunityTemplatesPage]);
+        return merged;
+    }, []);
+
+    // Clean, single loader: load pages for 'library' or 'community' until target count
+    const loadTemplatesToCount = useCallback(async (source: 'library' | 'community', targetCount: number) => {
+        const setLoading = source === 'library' ? setTemplatesLoading : setCommunityTemplatesLoading;
+        const setError = source === 'library' ? setTemplatesError : setCommunityTemplatesError;
+        const getItems = () => (source === 'library' ? templates : communityTemplates);
+        const setItems = source === 'library' ? setTemplates : setCommunityTemplates;
+        const getCursor = () => (source === 'library' ? templatesCursor : communityCursor);
+        const setCursor = source === 'library' ? setTemplatesCursor : setCommunityCursor;
+
+        setLoading(true);
+        setError(null);
+        try {
+            let items = getItems();
+            let cursor = getCursor();
+            while (items.length < targetCount && (cursor !== null || items.length === 0)) {
+                const pageSize = Math.min(Math.max(targetCount - items.length, 12), 30);
+                const data = await listAssistantTemplates({ source, limit: pageSize, cursor: cursor || undefined });
+                items = appendUniqueById(items, data.items);
+                setItems(items);
+                cursor = data.nextCursor || null;
+                setCursor(cursor);
+                if (!cursor) break;
+            }
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : 'Failed to load templates';
+            setError(msg);
+        } finally {
+            setLoading(false);
+        }
+    }, [templates, communityTemplates, templatesCursor, communityCursor, appendUniqueById]);
+
+    // Adapter used by UI: map 'prebuilt' to 'library'
+    const ensureTemplatesLoaded = useCallback(async (type: 'prebuilt' | 'community', targetCount: number) => {
+        const source = type === 'prebuilt' ? 'library' : 'community';
+        await loadTemplatesToCount(source, targetCount);
+    }, [loadTemplatesToCount]);
 
     // Handle template selection
     const handleTemplateSelect = async (template: any) => {
@@ -633,8 +621,8 @@ export function BuildAssistantSection() {
                                 error={templatesError || communityTemplatesError}
                                 onTemplateClick={handleTemplateSelect}
                                 onRetry={() => {
-                                    fetchLibraryTemplatesPage(undefined, 12);
-                                    fetchCommunityTemplatesPage(undefined, 12);
+                                    loadTemplatesToCount('library', 12);
+                                    loadTemplatesToCount('community', 12);
                                 }}
                                 loadingItemId={loadingTemplateId}
                                 onLike={handleTemplateLike}
