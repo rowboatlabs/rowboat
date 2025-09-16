@@ -11,10 +11,6 @@ import customerSupport from './customer-support.json';
 import githubIssueToSlack from './github-issue-to-slack.json';
 import githubPrToSlack from './github-pr-to-slack.json';
 import eisenhowerEmailOrganizer from './eisenhower-email-organizer.json';
-import test3 from './test3.json';
-import test4 from './test4.json';
-import test5 from './test5.json';
-import test6 from './test6.json';
 
 // Keep keys consistent with prior file basenames to avoid breaking links.
 export const prebuiltTemplates = {
