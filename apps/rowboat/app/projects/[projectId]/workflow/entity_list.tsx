@@ -6,7 +6,7 @@ import { DataSource } from "@/src/entities/models/data-source";
 import { WithStringId } from "../../../lib/types/types";
 import { Dropdown, DropdownItem, DropdownTrigger, DropdownMenu } from "@heroui/react";
 import { useRef, useEffect, useState } from "react";
-import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, MoreVertical, Eye, Trash2, AlertTriangle, Circle, Database } from "lucide-react";
+import { EllipsisVerticalIcon, ImportIcon, PlusIcon, Brain, Boxes, Wrench, PenLine, Library, ChevronDown, ChevronRight, ServerIcon, Component, ScrollText, GripVertical, Users, Cog, CheckCircle2, LinkIcon, UnlinkIcon, MoreVertical, Eye, Trash2, AlertTriangle, Circle, Database, Image as ImageIcon } from "lucide-react";
 import { Tooltip } from "@heroui/react";
 import { DndContext, DragEndEvent, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -1014,7 +1014,11 @@ export const EntityList = forwardRef<
                                                                                 )}
                                                                                 onClick={() => { if (!tool.isLibrary) handleToolSelection(tool.name); }}
                                                                             >
-                                                                                <Boxes className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />
+                                                                                {tool.isGeminiImage ? (
+                                                                                    <ImageIcon className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />
+                                                                                ) : (
+                                                                                    <Boxes className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />
+                                                                                )}
                                                                                 <span className={clsx(
                                                                                     "flex-1 text-xs whitespace-normal break-words",
                                                                                     // Match font styling to other tools even if read-only
