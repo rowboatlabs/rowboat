@@ -6,7 +6,7 @@ import interviewScheduler from './interview-scheduler.json';
 import meetingPrepAssistant from './meeting-prep-assistant.json';
 import redditOnSlack from './reddit-on-slack.json';
 import twitterSentiment from './twitter-sentiment.json';
-import tweetWithGeneratedImage from './tweet-with-generated-image.json';
+import tweetAssistant from './tweet-assistant.json';        
 import customerSupport from './customer-support.json';
 import githubIssueToSlack from './github-issue-to-slack.json';
 import githubPrToSlack from './github-pr-to-slack.json';
@@ -19,7 +19,7 @@ export const prebuiltTemplates = {
   'Meeting Prep Assistant': meetingPrepAssistant,
   'Reddit on Slack': redditOnSlack,
   'Twitter Sentiment': twitterSentiment,
-  'Tweet with generated image': tweetWithGeneratedImage,
+  'Tweet Assistant': tweetAssistant,
   'Customer Support': customerSupport,
   'GitHub Issue to Slack': githubIssueToSlack,
   'GitHub PR to Slack': githubPrToSlack,
