@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { TextareaWithSend } from "@/app/components/ui/textarea-with-send";
 import { Workflow } from '../../lib/types/workflow_types';
-import { loadSharedWorkflow } from '@/app/actions/shared-workflow.actions';
+import { loadSharedWorkflow, createSharedWorkflowFromJson } from '@/app/actions/shared-workflow.actions';
 import { PictureImg } from '@/components/ui/picture-img';
 import { Tabs, Tab } from "@/components/ui/tabs";
 import { Project } from "@/src/entities/models/project";
@@ -220,18 +220,43 @@ export function BuildAssistantSection() {
     // Handle template share (for both library and community)
     const handleTemplateShare = async (template: any) => {
         try {
-            // Fetch workflow for the template and create a shared snapshot
-            const data = await getAssistantTemplate(template.id);
+            // Robust copy helper: tries async clipboard first, then falls back to execCommand
+            const copyTextToClipboard = async (text: string): Promise<boolean> => {
+                try {
+                    if (navigator.clipboard && window.isSecureContext) {
+                        await navigator.clipboard.writeText(text);
+                        return true;
+                    }
+                } catch (_e) {
+                    // fall through to fallback
+                }
+                try {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    textarea.setAttribute('readonly', '');
+                    textarea.style.position = 'fixed';
+                    textarea.style.opacity = '0';
+                    textarea.style.left = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.focus();
+                    textarea.select();
+                    const successful = document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                    return successful;
+                } catch (_e) {
+                    return false;
+                }
+            };
 
-            const shareResp = await fetch('/api/shared-workflow', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ workflow: data.workflow }),
-            });
-            if (!shareResp.ok) throw new Error('Failed to create shared workflow');
-            const shareData = await shareResp.json();
-            const url = `${window.location.origin}/projects?shared=${shareData.id}`;
-            await navigator.clipboard.writeText(url);
+            // Fetch workflow for the template and create a shared snapshot via server action
+            const data = await getAssistantTemplate(template.id);
+            const { id } = await createSharedWorkflowFromJson(JSON.stringify(data.workflow));
+            const url = `${window.location.origin}/projects?shared=${id}`;
+            const copied = await copyTextToClipboard(url);
+            if (!copied) {
+                throw new Error('Clipboard write failed');
+            }
+            // Optional debug log
             console.log('URL copied to clipboard');
         } catch (err) {
             console.error('Failed to copy shared URL:', err);
