@@ -38,6 +38,7 @@ import { Panel } from "@/components/common/panel-common";
 import { Button as CustomButton } from "@/components/ui/button";
 
 import { InputField } from "@/app/lib/components/input-field";
+import { getDefaultTools } from "@/app/lib/default_tools";
 import { VoiceSection } from "../config/components/voice";
 import { TopBar } from "./components/TopBar";
 
@@ -2207,7 +2208,14 @@ export function WorkflowEditor({
                                         usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
                                         usedPipelineNames={new Set((state.present.workflow.pipelines || []).map((pipeline) => pipeline.name))}
                                         agents={state.present.workflow.agents}
-                                        tools={state.present.workflow.tools}
+                                        tools={(() => {
+                                            const { tools } = state.present.workflow;
+                                            const defaults = getDefaultTools();
+                                            const map = new Map<string, any>();
+                                            for (const t of tools) map.set(t.name, t);
+                                            for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t);
+                                            return Array.from(map.values());
+                                        })()}
                                         prompts={state.present.workflow.prompts}
                                         dataSources={dataSources}
                                         handleUpdate={(update) => { dispatchGuarded({ type: "update_agent", name: state.present.selection!.name, agent: update }); }}
@@ -2235,7 +2243,14 @@ export function WorkflowEditor({
                                         key={`overlay-${state.present.selection.name}-${configKey}`}
                                         prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
                                         agents={state.present.workflow.agents}
-                                        tools={state.present.workflow.tools}
+                                        tools={(() => {
+                                            const { tools } = state.present.workflow;
+                                            const defaults = getDefaultTools();
+                                            const map = new Map<string, any>();
+                                            for (const t of tools) map.set(t.name, t);
+                                            for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t);
+                                            return Array.from(map.values());
+                                        })()}
                                         prompts={state.present.workflow.prompts}
                                         usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
                                         handleUpdate={(update) => { dispatchGuarded({ type: "update_prompt", name: state.present.selection!.name, prompt: update }); }}
@@ -2313,7 +2328,14 @@ export function WorkflowEditor({
                                         usedAgentNames={new Set(state.present.workflow.agents.filter((agent) => agent.name !== state.present.selection!.name).map((agent) => agent.name))}
                                         usedPipelineNames={new Set((state.present.workflow.pipelines || []).map((pipeline) => pipeline.name))}
                                         agents={state.present.workflow.agents}
-                                        tools={state.present.workflow.tools}
+                                        tools={(() => {
+                                            const { tools } = state.present.workflow;
+                                            const defaults = getDefaultTools();
+                                            const map = new Map<string, any>();
+                                            for (const t of tools) map.set(t.name, t);
+                                            for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t);
+                                            return Array.from(map.values());
+                                        })()}
                                         prompts={state.present.workflow.prompts}
                                         dataSources={dataSources}
                                         handleUpdate={(update) => { dispatchGuarded({ type: "update_agent", name: state.present.selection!.name, agent: update }); }}
@@ -2341,7 +2363,14 @@ export function WorkflowEditor({
                                         key={`overlay2-${state.present.selection.name}-${configKey}`}
                                         prompt={state.present.workflow.prompts.find((prompt) => prompt.name === state.present.selection!.name)!}
                                         agents={state.present.workflow.agents}
-                                        tools={state.present.workflow.tools}
+                                        tools={(() => {
+                                            const { tools } = state.present.workflow;
+                                            const defaults = getDefaultTools();
+                                            const map = new Map<string, any>();
+                                            for (const t of tools) map.set(t.name, t);
+                                            for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t);
+                                            return Array.from(map.values());
+                                        })()}
                                         prompts={state.present.workflow.prompts}
                                         usedPromptNames={new Set(state.present.workflow.prompts.filter((prompt) => prompt.name !== state.present.selection!.name).map((prompt) => prompt.name))}
                                         handleUpdate={(update) => { dispatchGuarded({ type: "update_prompt", name: state.present.selection!.name, prompt: update }); }}

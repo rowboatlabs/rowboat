@@ -95,29 +95,7 @@ export class CreateProjectUseCase implements ICreateProjectUseCase {
             }
         }
 
-        // Conditionally include Gemini Image tool by default if GOOGLE_API_KEY is present
-        const hasGoogleKey = !!process.env.GOOGLE_API_KEY;
-        const hasImageTool = (workflow.tools || []).some(t => t.isGeminiImage || t.name === 'Generate Image');
-        if (hasGoogleKey && !hasImageTool) {
-            const imageTool = {
-                name: 'Generate Image',
-                description: 'Generate an image using Google Gemini given a text prompt. Returns base64-encoded image data and any text parts.',
-                isGeminiImage: true,
-                parameters: {
-                    type: 'object' as const,
-                    properties: {
-                        prompt: { type: 'string', description: 'Text prompt describing the image to generate' },
-                        modelName: { type: 'string', description: 'Optional Gemini model override' },
-                    },
-                    required: ['prompt'],
-                    additionalProperties: true,
-                },
-            };
-            workflow = {
-                ...workflow,
-                tools: [...(workflow.tools || []), imageTool] as any,
-            };
-        }
+        // Do not auto-attach image generation tool; it is available as a default library tool in the editor/runtime
 
         // create project secret
         const secret = crypto.randomBytes(32).toString('hex');
