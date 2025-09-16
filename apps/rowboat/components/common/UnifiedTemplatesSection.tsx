@@ -67,8 +67,8 @@ export function UnifiedTemplatesSection({
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [pendingDeleteItem, setPendingDeleteItem] = useState<TemplateItem | null>(null);
 
-    // Row-based pagination state
-    const [columns, setColumns] = useState<number>(1);
+    // Row-based pagination state (lock to 3 columns per row)
+    const [columns, setColumns] = useState<number>(3);
     const [rowsShown, setRowsShown] = useState<number>(4);
     
     // Track if user has interacted with likes to prevent ALL re-sorting
@@ -175,19 +175,9 @@ export function UnifiedTemplatesSection({
         return filtered;
     }, [allTemplates, searchQuery, selectedType, selectedCategories, sortBy, hasUserInteractedWithLikes, originalOrder]);
 
-    // Determine columns based on Tailwind breakpoints used by the grid
+    // Lock columns to 3 at all times to ensure consistent rows and pagination
     useEffect(() => {
-        const computeColumns = () => {
-            if (typeof window === 'undefined') return 1;
-            // Tailwind: grid-cols-1 sm:grid-cols-2 lg:grid-cols-3
-            const isLg = window.matchMedia('(min-width: 1024px)').matches;
-            const isSm = window.matchMedia('(min-width: 640px)').matches;
-            return isLg ? 3 : (isSm ? 2 : 1);
-        };
-        const update = () => setColumns(computeColumns());
-        update();
-        window.addEventListener('resize', update);
-        return () => window.removeEventListener('resize', update);
+        setColumns(3);
     }, []);
 
     // Reset rowsShown and allow re-sorting when filters/sort change
@@ -415,7 +405,7 @@ export function UnifiedTemplatesSection({
                         <div className="text-sm text-gray-600 dark:text-gray-400">
                             Showing {Math.min(visibleCount, filteredTemplates.length)} of {filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''} ({rowsShown} row{rowsShown !== 1 ? 's' : ''})
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-3 gap-4">
                             {visibleTemplates.map((item) => (
                                 <AssistantCard
                                     key={`${item.type}-${item.id}`}
