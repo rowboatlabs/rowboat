@@ -21,7 +21,7 @@ import { PipelineStateManager } from "./pipeline-state-manager";
 // Provider configuration
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const PROVIDER_BASE_URL = process.env.PROVIDER_BASE_URL || undefined;
-const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
+const MODEL = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4.1';
 
 // Feature flags
 const USE_NATIVE_HANDOFFS = process.env.USE_NATIVE_HANDOFFS === 'true';

@@ -29,7 +29,7 @@ export function validateConfigChanges(configType: string, configChanges: Record<
                 instructions: 'test',
                 prompts: [],
                 tools: [],
-                model: 'gpt-4o',
+                model: 'gpt-4.1',
                 ragReturnType: 'chunks',
                 ragK: 10,
                 connectedAgents: [],
