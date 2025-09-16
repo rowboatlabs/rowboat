@@ -5,7 +5,7 @@ import { authCheck } from "./auth.actions";
 import { MongoDBAssistantTemplatesRepository } from '@/src/infrastructure/repositories/mongodb.assistant-templates.repository';
 import { prebuiltTemplates } from '@/app/lib/prebuilt-cards';
 import { USE_AUTH } from '@/app/lib/feature_flags';
-import { ensureLibraryTemplatesSeeded } from '@/app/lib/assistant_templates_seed';
+// import { ensureLibraryTemplatesSeeded } from '@/app/lib/assistant_templates_seed';
 
 const repo = new MongoDBAssistantTemplatesRepository();
 
@@ -38,101 +38,114 @@ const CreateTemplateSchema = z.object({
     thumbnailUrl: z.string().url().optional(),
 });
 
-export async function listAssistantTemplates(request: z.infer<typeof ListTemplatesSchema>) {
+type ListResponse = { items: any[]; nextCursor: string | null };
+
+function buildPrebuiltList(params: z.infer<typeof ListTemplatesSchema>): ListResponse {
+    const allPrebuilt = Object.entries(prebuiltTemplates).map(([key, tpl]) => ({
+        id: `prebuilt:${key}`,
+        name: (tpl as any).name || key,
+        description: (tpl as any).description || '',
+        category: (tpl as any).category || 'Other',
+        tools: (tpl as any).tools || [],
+        createdAt: (tpl as any).lastUpdatedAt || undefined,
+        source: 'library' as const,
+    }));
+
+    let filtered = allPrebuilt;
+    if (params.category) {
+        filtered = filtered.filter(t => t.category === params.category);
+    }
+    if (params.search) {
+        const q = params.search.toLowerCase();
+        filtered = filtered.filter(t =>
+            t.name.toLowerCase().includes(q) ||
+            t.description.toLowerCase().includes(q) ||
+            t.category.toLowerCase().includes(q)
+        );
+    }
+
+    const startIndex = params.cursor ? parseInt(params.cursor, 10) || 0 : 0;
+    const endIndex = Math.min(startIndex + params.limit, filtered.length);
+    const pageItems = filtered.slice(startIndex, endIndex);
+    const nextCursor = endIndex < filtered.length ? String(endIndex) : null;
+
+    return { items: pageItems, nextCursor };
+}
+
+export async function listAssistantTemplates(request: z.infer<typeof ListTemplatesSchema>): Promise<ListResponse> {
     const user = await authCheck();
     
-    // Throttle best-effort library reconcile/seed to avoid repeated bursts
-    try {
-        const last = (globalThis as any).__lastLibrarySeedAt as number | undefined;
-        const now = Date.now();
-        if (!last || now - last > 60_000) { // at most once per minute
-            (globalThis as any).__lastLibrarySeedAt = now;
-            void ensureLibraryTemplatesSeeded();
-        }
-    } catch {}
+    // Prebuilt templates should never be seeded to DB
     
     const params = ListTemplatesSchema.parse(request);
 
-    // If source specified, query that subset; otherwise return combined from the unified collection
-    if (params.source === 'library' || params.source === 'community') {
+    // If source specified, return that subset; for 'library' use in-memory prebuilt from code
+    if (params.source === 'library') {
+        const { items, nextCursor } = buildPrebuiltList(params);
+        return { items: serializeTemplates(items), nextCursor };
+    }
+
+    if (params.source === 'community') {
         const result = await repo.list({
             category: params.category,
             search: params.search,
             featured: params.featured,
             isPublic: true,
-            source: params.source,
+            source: 'community',
         }, params.cursor, params.limit);
-        
-        // Add isLiked status to each template
+
         const itemsWithLikeStatus = await addLikeStatusToTemplates(result.items, user.id);
-        
-        return {
-            ...result,
-            items: serializeTemplates(itemsWithLikeStatus)
-        };
+        return { ...result, items: serializeTemplates(itemsWithLikeStatus) };
     }
 
-    // No source: combine both subsets from the unified collection
-    const [lib, com] = await Promise.all([
-        repo.list({ category: params.category, search: params.search, featured: params.featured, isPublic: true, source: 'library' }, undefined, params.limit),
-        repo.list({ category: params.category, search: params.search, featured: params.featured, isPublic: true, source: 'community' }, undefined, params.limit),
-    ]);
-    
-    // Add isLiked status to all templates
-    const allTemplates = [...lib.items, ...com.items];
-    const itemsWithLikeStatus = await addLikeStatusToTemplates(allTemplates, user.id);
-    
-    return { 
-        items: serializeTemplates(itemsWithLikeStatus), 
-        nextCursor: null 
-    };
+    // No source: return prebuilt from code + first page of community from DB
+    const prebuilt = buildPrebuiltList({ ...params, source: 'library' } as any).items;
+    const communityPage = await repo.list({
+        category: params.category,
+        search: params.search,
+        featured: params.featured,
+        isPublic: true,
+        source: 'community',
+    }, undefined, params.limit);
+    const items = [...prebuilt, ...communityPage.items];
+    return { items: serializeTemplates(items), nextCursor: null };
 }
 
 // Get a specific template by ID with model transformation
 export async function getAssistantTemplate(templateId: string) {
     const user = await authCheck();
     
-    const template = await repo.fetch(templateId);
-    if (!template) {
-        throw new Error('Template not found');
-    }
-    
-    // Check if this is a prebuilt template by looking at tags
-    const isPrebuiltTemplate = template.tags.some(tag => tag.startsWith('prebuilt:') || tag === '__library__');
-    
-    if (isPrebuiltTemplate) {
-        // For prebuilt templates, get the original JSON and apply fresh transformation
-        const prebuiltTag = template.tags.find(tag => tag.startsWith('prebuilt:'));
-        if (prebuiltTag) {
-            const prebuiltKey = prebuiltTag.replace('prebuilt:', '');
-            const originalTemplate = prebuiltTemplates[prebuiltKey as keyof typeof prebuiltTemplates];
-            
-            if (originalTemplate) {
-                // Apply model transformation to the original template
-                const defaultModel = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4.1';
-                const transformedWorkflow = JSON.parse(JSON.stringify(originalTemplate));
-                
-                // Transform blank agent models to use the default model
-                if (transformedWorkflow.agents && Array.isArray(transformedWorkflow.agents)) {
-                    transformedWorkflow.agents.forEach((agent: any) => {
-                        if (agent.model === '') {
-                            agent.model = defaultModel;
-                            console.log(`[PrebuiltTemplate] Applied model ${defaultModel} to agent ${agent.name} in template ${prebuiltKey}`);
-                        }
-                    });
+    // Prebuilt: load directly from code
+    if (templateId.startsWith('prebuilt:')) {
+        const key = templateId.replace('prebuilt:', '');
+        const originalTemplate = prebuiltTemplates[key as keyof typeof prebuiltTemplates];
+        if (!originalTemplate) throw new Error('Template not found');
+
+        const defaultModel = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4.1';
+        const transformedWorkflow = JSON.parse(JSON.stringify(originalTemplate));
+        if (transformedWorkflow.agents && Array.isArray(transformedWorkflow.agents)) {
+            transformedWorkflow.agents.forEach((agent: any) => {
+                if (agent.model === '') {
+                    agent.model = defaultModel;
                 }
-                
-                // Return the transformed template with database metadata but fresh workflow
-                const result = {
-                    ...template,
-                    workflow: transformedWorkflow
-                };
-                
-                return serializeTemplate(result);
-            }
+            });
         }
+
+        // Return minimal shape expected by callers
+        const result = {
+            id: templateId,
+            name: (originalTemplate as any).name || key,
+            description: (originalTemplate as any).description || '',
+            category: (originalTemplate as any).category || 'Other',
+            workflow: transformedWorkflow,
+            source: 'library' as const,
+        };
+        return serializeTemplate(result);
     }
-    
+
+    // Community template from DB
+    const template = await repo.fetch(templateId);
+    if (!template) throw new Error('Template not found');
     return serializeTemplate(template);
 }
 

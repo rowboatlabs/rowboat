@@ -69,6 +69,8 @@ interface AssistantCardProps {
     loading?: boolean;
     disabled?: boolean;
     getUniqueTools?: (item: any) => Array<{ name: string; logo?: string }>;
+    // UI flags
+    hideLikes?: boolean;
 }
 
 export function AssistantCard({
@@ -89,7 +91,8 @@ export function AssistantCard({
     onClick,
     loading = false,
     disabled = false,
-    getUniqueTools
+    getUniqueTools,
+    hideLikes = false
 }: AssistantCardProps) {
     const displayTools = getUniqueTools ? getUniqueTools({ tools }) : tools;
     const [isDescriptionExpanded, setIsDescriptionExpanded] = React.useState(false);
@@ -271,20 +274,22 @@ export function AssistantCard({
                         )}
                     </div>
                     <div className="flex items-center gap-3">
-                        <button
-                            onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                onLike?.();
-                            }}
-                            className={clsx(
-                                "flex items-center gap-1 hover:text-red-500 transition-colors",
-                                isLiked && "text-red-500"
-                            )}
-                        >
-                            <Heart size={14} className={isLiked ? "fill-current" : ""} />
-                            <span>{likeCount || 0}</span>
-                        </button>
+                        {!hideLikes && (
+                            <button
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onLike?.();
+                                }}
+                                className={clsx(
+                                    "flex items-center gap-1 hover:text-red-500 transition-colors",
+                                    isLiked && "text-red-500"
+                                )}
+                            >
+                                <Heart size={14} className={isLiked ? "fill-current" : ""} />
+                                <span>{likeCount || 0}</span>
+                            </button>
+                        )}
                         <button
                             onClick={(e) => {
                                 e.preventDefault();

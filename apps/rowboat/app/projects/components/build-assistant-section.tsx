@@ -195,6 +195,7 @@ export function BuildAssistantSection() {
 
     // Handle template like (unified for library and community) - now uses proper authentication
     const handleTemplateLike = async (template: any) => {
+        if (template.type === 'prebuilt') return;
         try {
             const data = await toggleTemplateLike(template.id);
             

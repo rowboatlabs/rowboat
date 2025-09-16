@@ -62,7 +62,7 @@ export function UnifiedTemplatesSection({
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedType, setSelectedType] = useState<'prebuilt' | 'community'>('prebuilt');
     const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
-    const [sortBy, setSortBy] = useState<'popular' | 'newest' | 'alphabetical'>('popular');
+    const [sortBy, setSortBy] = useState<'popular' | 'newest' | 'alphabetical'>('alphabetical');
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [pendingDeleteItem, setPendingDeleteItem] = useState<TemplateItem | null>(null);
@@ -152,14 +152,15 @@ export function UnifiedTemplatesSection({
                     case 'alphabetical':
                         return a.name.localeCompare(b.name);
                     case 'popular':
-                    default:
-                        // Normal sorting by like count when no user interaction
-                        const aLikes = Number(a.likeCount) || 0;
-                        const bLikes = Number(b.likeCount) || 0;
-                        if (bLikes !== aLikes) return bLikes - aLikes;
-                        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-                        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-                        if (bTime !== aTime) return bTime - aTime;
+                        // Only meaningful for community templates
+                        if (selectedType === 'community') {
+                            const aLikes = Number(a.likeCount) || 0;
+                            const bLikes = Number(b.likeCount) || 0;
+                            if (bLikes !== aLikes) return bLikes - aLikes;
+                            const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                            const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                            if (bTime !== aTime) return bTime - aTime;
+                        }
                         return a.name.localeCompare(b.name);
                 }
             });
@@ -213,7 +214,7 @@ export function UnifiedTemplatesSection({
         setSearchQuery('');
         setSelectedType('prebuilt');
         setSelectedCategories(new Set());
-        setSortBy('popular');
+        setSortBy('alphabetical');
     };
 
     // Check if any filters are active
@@ -326,14 +327,16 @@ export function UnifiedTemplatesSection({
                             ))}
                         </div>
 
-                        {/* Sort Dropdown */}
+                        {/* Sort Dropdown (Popularity only for Community) */}
                         <div className="relative">
                             <select
                                 value={sortBy}
                                 onChange={(e) => setSortBy(e.target.value as any)}
                                 className="w-44 h-8 px-4 pr-10 border border-gray-300 dark:border-gray-700 rounded-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 appearance-none text-sm hover:bg-gray-50 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                             >
-                                <option value="popular">Most Popular</option>
+                                {selectedType === 'community' && (
+                                    <option value="popular">Most Popular</option>
+                                )}
                                 <option value="newest">Newest First</option>
                                 <option value="alphabetical">A-Z</option>
                             </select>
@@ -428,6 +431,7 @@ export function UnifiedTemplatesSection({
                                     } : undefined}
                                     isLiked={item.isLiked}
                                     templateType={item.type}
+                                    hideLikes={item.type === 'prebuilt'}
                                 />
                             ))}
                         </div>
