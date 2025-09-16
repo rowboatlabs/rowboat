@@ -6,9 +6,11 @@ import { z } from 'zod';
 // Note: avoid importing WorkflowTool here to prevent circular deps.
 // Return a structurally compatible object instead.
 export function getDefaultTools(): Array<any> {
-  // Always expose built-in library tools in the editor so users can
-  // discover them. Runtime invocation will still validate required
-  // environment variables and return an error if missing.
+  // Show built-in tools only when a public, non-secret flag is set.
+  // Avoids exposing real secrets in client bundles.
+  const hasGoogleKeyFlag = (process.env.NEXT_PUBLIC_HAS_GOOGLE_API_KEY || '').toLowerCase() === 'true';
+
+  if (!hasGoogleKeyFlag) return [];
 
   return [
     {
