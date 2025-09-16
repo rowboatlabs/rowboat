@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { authCheck } from "./auth.actions";
 import { MongoDBAssistantTemplatesRepository } from '@/src/infrastructure/repositories/mongodb.assistant-templates.repository';
-import { ensureLibraryTemplatesSeeded } from '@/app/lib/assistant_templates_seed';
+import { prebuiltTemplates } from '@/app/lib/prebuilt-cards';
 import { auth0 } from '@/app/lib/auth0';
 import { USE_AUTH } from '@/app/lib/feature_flags';
 
@@ -41,8 +41,7 @@ const CreateTemplateSchema = z.object({
 export async function listAssistantTemplates(request: z.infer<typeof ListTemplatesSchema>) {
     const user = await authCheck();
     
-    // Ensure library JSONs are seeded into the unified collection (idempotent)
-    await ensureLibraryTemplatesSeeded();
+    // No longer seeding all templates upfront - using lazy seeding instead
     
     const params = ListTemplatesSchema.parse(request);
 
@@ -81,6 +80,54 @@ export async function listAssistantTemplates(request: z.infer<typeof ListTemplat
     };
 }
 
+// Get a specific template by ID with model transformation
+export async function getAssistantTemplate(templateId: string) {
+    const user = await authCheck();
+    
+    const template = await repo.fetch(templateId);
+    if (!template) {
+        throw new Error('Template not found');
+    }
+    
+    // Check if this is a prebuilt template by looking at tags
+    const isPrebuiltTemplate = template.tags.some(tag => tag.startsWith('prebuilt:') || tag === '__library__');
+    
+    if (isPrebuiltTemplate) {
+        // For prebuilt templates, get the original JSON and apply fresh transformation
+        const prebuiltTag = template.tags.find(tag => tag.startsWith('prebuilt:'));
+        if (prebuiltTag) {
+            const prebuiltKey = prebuiltTag.replace('prebuilt:', '');
+            const originalTemplate = prebuiltTemplates[prebuiltKey as keyof typeof prebuiltTemplates];
+            
+            if (originalTemplate) {
+                // Apply model transformation to the original template
+                const defaultModel = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4.1';
+                const transformedWorkflow = JSON.parse(JSON.stringify(originalTemplate));
+                
+                // Transform blank agent models to use the default model
+                if (transformedWorkflow.agents && Array.isArray(transformedWorkflow.agents)) {
+                    transformedWorkflow.agents.forEach((agent: any) => {
+                        if (agent.model === '') {
+                            agent.model = defaultModel;
+                            console.log(`[PrebuiltTemplate] Applied model ${defaultModel} to agent ${agent.name} in template ${prebuiltKey}`);
+                        }
+                    });
+                }
+                
+                // Return the transformed template with database metadata but fresh workflow
+                const result = {
+                    ...template,
+                    workflow: transformedWorkflow
+                };
+                
+                return serializeTemplate(result);
+            }
+        }
+    }
+    
+    return serializeTemplate(template);
+}
+
 export async function getAssistantTemplateCategories() {
     const user = await authCheck();
     
@@ -88,15 +135,6 @@ export async function getAssistantTemplateCategories() {
     return { items: categories };
 }
 
-export async function getAssistantTemplate(id: string) {
-    const user = await authCheck();
-    
-    const item = await repo.fetch(id);
-    if (!item) {
-        throw new Error('Template not found');
-    }
-    return serializeTemplate(item);
-}
 
 export async function createAssistantTemplate(data: z.infer<typeof CreateTemplateSchema>) {
     const user = await authCheck();
