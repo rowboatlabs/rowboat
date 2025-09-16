@@ -16,6 +16,7 @@ import { Panel } from "@/components/common/panel-common";
 import { Button as CustomButton } from "@/components/ui/button";
 import clsx from "clsx";
 import { InputField } from "@/app/lib/components/input-field";
+import { getDefaultTools } from "@/app/lib/default_tools";
 import { USE_TRANSFER_CONTROL_OPTIONS } from "@/app/lib/feature_flags";
 import { Info as InfoIcon } from "lucide-react";
 import { useCopilot } from "../copilot/use-copilot";
@@ -236,7 +237,13 @@ export function AgentConfig({
     const atMentions = createAtMentions({
         agents: agents,
         prompts,
-        tools,
+        tools: (() => {
+            const defaults = getDefaultTools();
+            const map = new Map<string, z.infer<typeof WorkflowTool>>();
+            for (const t of tools) map.set(t.name, t);
+            for (const t of defaults) if (!map.has(t.name)) map.set(t.name, t as any);
+            return Array.from(map.values());
+        })(),
         pipelines: agent.type === "pipeline" ? [] : (workflow.pipelines || []), // Pipeline agents can't reference pipelines
         currentAgentName: agent.name,
         currentAgent: agent
