@@ -41,8 +41,8 @@
       "toggleAble": true,
       "ragReturnType": "chunks",
       "ragK": 3,
-      "controlType": "relinquish_to_parent",
       "outputVisibility": "internal",
+      "controlType": "relinquish_to_parent",
       "maxCallsPerParentAgent": 3
     }
   ],
@@ -54,6 +54,11 @@
     },
     {
       "name": "LookbackInHours",
+      "type": "base_prompt",
+      "prompt": "<needs to be added>"
+    },
+    {
+      "name": "ResultCount",
       "type": "base_prompt",
       "prompt": "<needs to be added>"
     }
@@ -372,7 +377,7 @@
     }
   ],
   "startAgent": "Twitter Sentiment Pipeline",
-  "lastUpdatedAt": "2025-09-11T17:26:48.865Z",
+  "lastUpdatedAt": "2025-09-16T09:24:45.848Z",
   "name": "Twitter Sentiment",
   "description": "Searches Twitter for tweets about a company and analyzes their sentiment.",
   "category": "News & Social",
