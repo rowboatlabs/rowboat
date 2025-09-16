@@ -3,13 +3,15 @@ import { z } from 'zod';
 
 // Provide a minimal default template to satisfy legacy code paths that
 // still reference `templates.default`. Real templates are DB-backed.
+const includeGeminiImageTool = !!process.env.GOOGLE_API_KEY;
+
 const defaultTemplate: z.infer<typeof WorkflowTemplate> = {
     name: 'Blank Template',
     description: 'A blank canvas to build your assistant.',
     startAgent: "",
     agents: [],
     prompts: [],
-    tools: [
+    tools: includeGeminiImageTool ? [
         {
             name: "Generate Image",
             description: "Generate an image using Google Gemini given a text prompt. Returns base64-encoded image data and any text parts.",
@@ -24,7 +26,7 @@ const defaultTemplate: z.infer<typeof WorkflowTemplate> = {
                 additionalProperties: true,
             },
         },
-    ],
+    ] : [],
     pipelines: [],
 };
 

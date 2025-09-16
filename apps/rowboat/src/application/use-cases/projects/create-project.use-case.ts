@@ -95,9 +95,10 @@ export class CreateProjectUseCase implements ICreateProjectUseCase {
             }
         }
 
-        // Ensure the Gemini Image tool is always available by default
+        // Conditionally include Gemini Image tool by default if GOOGLE_API_KEY is present
+        const hasGoogleKey = !!process.env.GOOGLE_API_KEY;
         const hasImageTool = (workflow.tools || []).some(t => t.isGeminiImage || t.name === 'Generate Image');
-        if (!hasImageTool) {
+        if (hasGoogleKey && !hasImageTool) {
             const imageTool = {
                 name: 'Generate Image',
                 description: 'Generate an image using Google Gemini given a text prompt. Returns base64-encoded image data and any text parts.',
