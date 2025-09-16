@@ -1010,14 +1010,15 @@ export const EntityList = forwardRef<
                                                                                 className={clsx(
                                                                                     "flex items-center gap-2 px-3 py-2 rounded cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800",
                                                                                     selectedEntity?.type === "tool" && selectedEntity.name === tool.name && "bg-indigo-50 dark:bg-indigo-950/30",
-                                                                                    tool.isLibrary ? "opacity-80 cursor-default" : ""
+                                                                                    tool.isLibrary ? "cursor-default" : ""
                                                                                 )}
                                                                                 onClick={() => { if (!tool.isLibrary) handleToolSelection(tool.name); }}
                                                                             >
                                                                                 <Boxes className="w-4 h-4 text-blue-600/70 dark:text-blue-500/70" />
                                                                                 <span className={clsx(
                                                                                     "flex-1 text-xs whitespace-normal break-words",
-                                                                                    tool.isLibrary ? "text-zinc-400 dark:text-zinc-600" : "text-zinc-900 dark:text-zinc-100"
+                                                                                    // Match font styling to other tools even if read-only
+                                                                                    "text-zinc-900 dark:text-zinc-100"
                                                                                 )}>{tool.name}</span>
                                                                                 {tool.mockTool && (
                                                                                     <span className="ml-2 px-1 py-0 rounded bg-purple-50 text-purple-400 dark:bg-purple-900/40 dark:text-purple-200 text-[11px] font-normal align-middle">Mocked</span>
@@ -1647,7 +1648,8 @@ const ComposioCard = ({
                                 <button
                                     className={clsx(
                                         "flex-1 flex items-center gap-2 text-sm text-left bg-transparent border-none p-0 m-0",
-                                        tool.isLibrary ? "text-zinc-400 dark:text-zinc-600" : "text-zinc-900 dark:text-zinc-100"
+                                        // Use same font styling for library tools; keep disabled state only
+                                        "text-zinc-900 dark:text-zinc-100"
                                     )}
                                     onClick={() => onSelectTool(tool.name)}
                                     disabled={tool.isLibrary}
