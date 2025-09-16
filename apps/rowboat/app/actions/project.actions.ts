@@ -97,12 +97,24 @@ export async function createProjectFromWorkflowJson(formData: FormData): Promise
     const workflowJson = formData.get('workflowJson') as string;
 
     try {
+        // Parse workflow and apply default model to blank agent models
+        const workflow = JSON.parse(workflowJson);
+        const defaultModel = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
+        
+        if (workflow.agents && Array.isArray(workflow.agents)) {
+            workflow.agents.forEach((agent: any) => {
+                if (agent.model === '') {
+                    agent.model = defaultModel;
+                }
+            });
+        }
+
         const project = await createProjectController.execute({
             userId: user.id,
             data: {
                 name: name || '',
                 mode: {
-                    workflowJson,
+                    workflowJson: JSON.stringify(workflow),
                 },
             },
         });
