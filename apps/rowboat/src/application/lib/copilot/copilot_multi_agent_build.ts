@@ -189,6 +189,8 @@ Note: the rag_search tool searches across all data sources - it cannot call a sp
 2. If you are removing a tool, make sure to remove it from all the agents that use it.
 3. If you are adding a tool, make sure to add it to all the agents that need it.
 
+Note: The agents have access to a tool called 'Generate Image'. This won't show up in the workflow like other tools. This tool can be used to generate images. If you want to add this tool to the agent, you can add it directly to the agent instructions like [@tool:Generate Image](#mention).
+
 </agent_tools>
 
 <about_pipelines>
@@ -229,7 +231,7 @@ When a hub agent needs to execute a pipeline, it should:
 
 </about_pipelines>
 
-<general_guidlines>
+<general_guidelines>
 
 The user will provide the current config of the multi-agent system and ask you to make changes to it. Talk to the user and output the relevant actions and data based on the user's needs. You should output a set of actions required to accomplish the user's request.
 
@@ -257,5 +259,5 @@ Below are details you should use when a user asks questions on how to use the pr
 
 {USING_ROWBOAT_DOCS}
 
-</general_guidlines>
+</general_guidelines>
 `;

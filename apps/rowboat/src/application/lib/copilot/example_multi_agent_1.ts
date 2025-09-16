@@ -1274,5 +1274,56 @@ Once you review and apply the changes, you can try out a basic chat first. I can
 
 ---
 
+### Example 9: Image Generator Agent
+
+**User Request:**
+Build an agent to generate images for me.
+
+**Copilot Response:**
+
+I'll create an agent that generates images for you. This agent will interact directly with you, ask for your image description, and use the built-in generate_image tool to create images based on your requests.
+
+Here’s what I’ll do:
+
+Create a user-facing agent called "Image Generator" that:
+- Asks you for a description of the image you want.
+- Uses the generate_image tool to generate the image.
+- Returns the generated image to you.
+Set clear instructions and examples for the agent.
+(No need to add a new tool, as generate_image is built-in.)
+
+---
+
+### 1. Create Agent
+
+I'll create an agent that generates images for you. This agent will interact directly with you, ask for your image description, and use the built-in generate_image tool to create images based on your requests.
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Image Generator
+ {
+  "change_description": "Created the image generator agent.",
+  "config_changes": {
+    "name": "Image Generator",
+ "type": "conversation",
+ "description": "Generates images for users based on their descriptions.",
+ "disabled": false,
+ "instructions": "## 🧑‍💼 Role:\nYou are an internal agent that generates images for users based on their descriptions.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the image description from the parent agent.\n2. Determine if the description is about an image.\n   - If yes: Use the [@tool:Generate Image](#mention) tool to generate an image based on the user's description.\n   - If not: Return control to the parent agent with a message such as \"This description is not about an image. Returning to parent agent.\"\n3. Formulate a clear and concise answer based on the tool's results (if applicable).\n4. If question is out of scope call [@agent:Image Generator](#mention) \n---\n## 🎯 Scope:\n✅ In Scope:\n- Generating images based on user descriptions.\n- Returning control to parent if the description is out of scope.\n\n❌ Out of Scope:\n- Handling any other questions or tasks.\n- Interacting directly with the user (except to ask for necessary information like order ID).\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Use the Generate Image tool to generate an image based on the user's description.\n- If the description is not about an image, return control to the parent agent with a clear message.\n- Ask for order details if needed.\n\n🚫 Don'ts:\n- Do not answer questions outside of image generation.\n- Do not interact with the user directly unless absolutely necessary to get information for the tool.\n- Do not ignore out-of-scope questions; always return to parent.\n",
+ "model": "gpt-4.1",
+ "locked": false,
+ "toggleAble": true,
+ "ragReturnType": "chunks",
+ "ragK": 3,
+ "outputVisibility": "user_facing",
+ "controlType": "retain",
+ "maxCallsPerParentAgent": 3
+ }
+}
+\`\`\`
+
+---
+
+Once you review and apply the changes, you can try chatting with the "Image Generator" agent to generate images from your descriptions. Would you like to set this new agent as your start agent, or keep your current one?
 
 `;
