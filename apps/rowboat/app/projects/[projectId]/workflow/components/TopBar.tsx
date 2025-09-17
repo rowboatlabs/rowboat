@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ProgressBar, ProgressStep } from "@/components/ui/progress-bar";
 import { useUser } from '@auth0/nextjs-auth0';
 import { useState, useEffect } from "react";
+import { SHOW_COMMUNITY_PUBLISH } from "@/app/lib/feature_flags";
 
 interface TopBarProps {
     localProjectName: string;
@@ -708,126 +709,130 @@ export function TopBar({
                         </div>
 
                         {/* Divider */}
-                        <div className="relative">
-                            <div className="absolute inset-0 flex items-center">
-                                <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
+                        {SHOW_COMMUNITY_PUBLISH && (
+                            <div className="relative">
+                                <div className="absolute inset-0 flex items-center">
+                                    <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
+                                </div>
+                                <div className="relative flex justify-center">
+                                    <span className="px-4 bg-white dark:bg-gray-900 text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">or</span>
+                                </div>
                             </div>
-                            <div className="relative flex justify-center">
-                                <span className="px-4 bg-white dark:bg-gray-900 text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">or</span>
-                            </div>
-                        </div>
+                        )}
 
                         {/* Community Publishing Section */}
-                        <div className="space-y-6">
-                            <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                                    <MessageCircleIcon size={16} className="text-purple-600 dark:text-purple-400" />
-                                </div>
-                                <div>
-                                    <h3 className="text-base font-medium text-gray-900 dark:text-gray-100">Publish to Community</h3>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">Make it discoverable by others</p>
-                                </div>
-                            </div>
-                            
-                            <div className="space-y-5">
-                                {/* Assistant Name */}
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        Assistant Name <span className="text-red-500">*</span>
-                                    </label>
-                                    <Input
-                                        placeholder="Enter assistant name"
-                                        value={communityData.name}
-                                        onChange={(e) => setCommunityData({ ...communityData, name: e.target.value })}
-                                        classNames={{
-                                            input: "text-sm focus:outline-none !focus:ring-0 !focus:ring-offset-0 !ring-0 !ring-offset-0",
-                                            inputWrapper: "border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 focus-within:border-gray-300 dark:focus-within:border-gray-500 !focus-within:ring-0 !focus-within:ring-offset-0 !ring-0 !ring-offset-0"
-                                        }}
-                                    />
-                                </div>
-
-                                {/* Description */}
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        Description <span className="text-red-500">*</span>
-                                    </label>
-                                    <Textarea
-                                        placeholder="Describe what this assistant does..."
-                                        value={communityData.description}
-                                        onChange={(e) => setCommunityData({ ...communityData, description: e.target.value })}
-                                        minRows={3}
-                                        classNames={{
-                                            input: "text-sm focus:outline-none !focus:ring-0 !focus:ring-offset-0 !ring-0 !ring-offset-0",
-                                            inputWrapper: "border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 focus-within:border-gray-300 dark:focus-within:border-gray-500 !focus-within:ring-0 !focus-within:ring-offset-0 !ring-0 !ring-offset-0"
-                                        }}
-                                    />
-                                </div>
-
-                                {/* Category */}
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        Category <span className="text-red-500">*</span>
-                                    </label>
-                                    <Select
-                                        placeholder="Select a category"
-                                        selectedKeys={communityData.category ? [communityData.category] : []}
-                                        onSelectionChange={(keys) => {
-                                            const selected = Array.from(keys)[0] as string;
-                                            setCommunityData({ ...communityData, category: selected });
-                                        }}
-                                        classNames={{
-                                            trigger: "border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 focus:outline-none !focus:ring-0 !focus:ring-offset-0 !ring-0 !ring-offset-0 focus-within:border-gray-300 dark:focus-within:border-gray-500 !focus-within:ring-0 !focus-within:ring-offset-0",
-                                            value: "text-sm"
-                                        }}
-                                    >
-                                        <SelectItem key="Work Productivity">Work Productivity</SelectItem>
-                                        <SelectItem key="Developer Productivity">Developer Productivity</SelectItem>
-                                        <SelectItem key="News & Social">News & Social</SelectItem>
-                                        <SelectItem key="Customer Support">Customer Support</SelectItem>
-                                        <SelectItem key="Education">Education</SelectItem>
-                                        <SelectItem key="Entertainment">Entertainment</SelectItem>
-                                        <SelectItem key="Other">Other</SelectItem>
-                                    </Select>
-                                </div>
-
-                                {/* Privacy Toggle */}
-                                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-200 dark:border-gray-700">
-                                    <div className="flex-1">
-                                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
-                                            {communityData.isAnonymous ? 'Publish anonymously' : `Publish as ${getUserDisplayName()}`}
-                                        </div>
-                                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                                            {communityData.isAnonymous ? 'Your name will be hidden from the community' : 'Your name will be visible to the community'}
-                                        </div>
+                        {SHOW_COMMUNITY_PUBLISH && (
+                            <div className="space-y-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                                        <MessageCircleIcon size={16} className="text-purple-600 dark:text-purple-400" />
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setCommunityData({ ...communityData, isAnonymous: !communityData.isAnonymous })}
-                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                                            communityData.isAnonymous ? 'bg-gray-300 dark:bg-gray-600' : 'bg-blue-600'
-                                        }`}
-                                    >
-                                        <span
-                                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                                communityData.isAnonymous ? 'translate-x-1' : 'translate-x-6'
-                                            }`}
+                                    <div>
+                                        <h3 className="text-base font-medium text-gray-900 dark:text-gray-100">Publish to Community</h3>
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">Make it discoverable by others</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="space-y-5">
+                                    {/* Assistant Name */}
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            Assistant Name <span className="text-red-500">*</span>
+                                        </label>
+                                        <Input
+                                            placeholder="Enter assistant name"
+                                            value={communityData.name}
+                                            onChange={(e) => setCommunityData({ ...communityData, name: e.target.value })}
+                                            classNames={{
+                                                input: "text-sm focus:outline-none !focus:ring-0 !focus:ring-offset-0 !ring-0 !ring-offset-0",
+                                                inputWrapper: "border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 focus-within:border-gray-300 dark:focus-within:border-gray-500 !focus-within:ring-0 !focus-within:ring-offset-0 !ring-0 !ring-offset-0"
+                                            }}
                                         />
-                                    </button>
-                                </div>
-
-                                {/* Success Message */}
-                                {communityPublishSuccess && (
-                                    <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
-                                        <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center">
-                                            <span className="text-green-600 dark:text-green-400 text-xs">✓</span>
-                                        </div>
-                                        <p className="text-green-700 dark:text-green-300 text-sm font-medium">
-                                            Successfully published to community!
-                                        </p>
                                     </div>
-                                )}
+
+                                    {/* Description */}
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            Description <span className="text-red-500">*</span>
+                                        </label>
+                                        <Textarea
+                                            placeholder="Describe what this assistant does..."
+                                            value={communityData.description}
+                                            onChange={(e) => setCommunityData({ ...communityData, description: e.target.value })}
+                                            minRows={3}
+                                            classNames={{
+                                                input: "text-sm focus:outline-none !focus:ring-0 !focus:ring-offset-0 !ring-0 !ring-offset-0",
+                                                inputWrapper: "border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 focus-within:border-gray-300 dark:focus-within:border-gray-500 !focus-within:ring-0 !focus-within:ring-offset-0 !ring-0 !ring-offset-0"
+                                            }}
+                                        />
+                                    </div>
+
+                                    {/* Category */}
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            Category <span className="text-red-500">*</span>
+                                        </label>
+                                        <Select
+                                            placeholder="Select a category"
+                                            selectedKeys={communityData.category ? [communityData.category] : []}
+                                            onSelectionChange={(keys) => {
+                                                const selected = Array.from(keys)[0] as string;
+                                                setCommunityData({ ...communityData, category: selected });
+                                            }}
+                                            classNames={{
+                                                trigger: "border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 focus:outline-none !focus:ring-0 !focus:ring-offset-0 !ring-0 !ring-offset-0 focus-within:border-gray-300 dark:focus-within:border-gray-500 !focus-within:ring-0 !focus-within:ring-offset-0",
+                                                value: "text-sm"
+                                            }}
+                                        >
+                                            <SelectItem key="Work Productivity">Work Productivity</SelectItem>
+                                            <SelectItem key="Developer Productivity">Developer Productivity</SelectItem>
+                                            <SelectItem key="News & Social">News & Social</SelectItem>
+                                            <SelectItem key="Customer Support">Customer Support</SelectItem>
+                                            <SelectItem key="Education">Education</SelectItem>
+                                            <SelectItem key="Entertainment">Entertainment</SelectItem>
+                                            <SelectItem key="Other">Other</SelectItem>
+                                        </Select>
+                                    </div>
+
+                                    {/* Privacy Toggle */}
+                                    <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-200 dark:border-gray-700">
+                                        <div className="flex-1">
+                                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
+                                                {communityData.isAnonymous ? 'Publish anonymously' : `Publish as ${getUserDisplayName()}`}
+                                            </div>
+                                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                {communityData.isAnonymous ? 'Your name will be hidden from the community' : 'Your name will be visible to the community'}
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setCommunityData({ ...communityData, isAnonymous: !communityData.isAnonymous })}
+                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                                                communityData.isAnonymous ? 'bg-gray-300 dark:bg-gray-600' : 'bg-blue-600'
+                                            }`}
+                                        >
+                                            <span
+                                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                                    communityData.isAnonymous ? 'translate-x-1' : 'translate-x-6'
+                                                }`}
+                                            />
+                                        </button>
+                                    </div>
+
+                                    {/* Success Message */}
+                                    {communityPublishSuccess && (
+                                        <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                                            <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center">
+                                                <span className="text-green-600 dark:text-green-400 text-xs">✓</span>
+                                            </div>
+                                            <p className="text-green-700 dark:text-green-300 text-sm font-medium">
+                                                Successfully published to community!
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 </ModalBody>
                 <ModalFooter className="gap-3">
@@ -836,76 +841,80 @@ export function TopBar({
                         onPress={onShareModalClose}
                         className="px-6 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
                     >
-                        Cancel
+                        Close
                     </Button>
-                    <Button
-                        color={communityPublishSuccess ? "success" : "primary"}
-                        onPress={() => {
-                            // Open confirmation first
-                            onConfirmOpen();
-                        }}
-                        isLoading={communityPublishing}
-                        isDisabled={communityPublishSuccess || !communityData.name.trim() || !communityData.description.trim() || !communityData.category}
-                        className={`${communityPublishSuccess ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} px-6 py-2 text-white font-medium`}
-                    >
-                        {communityPublishSuccess ? 'Published' : (communityPublishing ? 'Publishing...' : 'Publish to Community')}
-                    </Button>
+                    {SHOW_COMMUNITY_PUBLISH && (
+                        <Button
+                            color={communityPublishSuccess ? "success" : "primary"}
+                            onPress={() => {
+                                // Open confirmation first
+                                onConfirmOpen();
+                            }}
+                            isLoading={communityPublishing}
+                            isDisabled={communityPublishSuccess || !communityData.name.trim() || !communityData.description.trim() || !communityData.category}
+                            className={`${communityPublishSuccess ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} px-6 py-2 text-white font-medium`}
+                        >
+                            {communityPublishSuccess ? 'Published' : (communityPublishing ? 'Publishing...' : 'Publish to Community')}
+                        </Button>
+                    )}
                 </ModalFooter>
             </ModalContent>
         </Modal>
 
         {/* Confirmation Modal for Community Publish */}
-        <Modal 
-            isOpen={isConfirmOpen} 
-            onClose={() => { setAcknowledged(false); onConfirmClose(); }}
-            size="md"
-            classNames={{
-                base: "bg-white dark:bg-gray-900",
-                header: "border-b border-gray-200 dark:border-gray-700 pb-3",
-                body: "py-5",
-                footer: "border-t border-gray-200 dark:border-gray-700 pt-3"
-            }}
-        >
-            <ModalContent>
-                <ModalHeader>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Confirm publish to community</h3>
-                </ModalHeader>
-                <ModalBody>
-                    <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
-                        <p>Publishing to community will make this assistant and its description publicly visible to other users.</p>
-                        <ul className="list-disc pl-5 space-y-1">
-                            <li>Your assistant may appear in the community templates library.</li>
-                            <li>Others can import and use this assistant in their own projects.</li>
-                            <li>Do not include secrets or private data in the description or workflow.</li>
-                        </ul>
-                        <div className="mt-3 flex items-start gap-2">
-                            <input
-                                id="ack-publish"
-                                type="checkbox"
-                                checked={acknowledged}
-                                onChange={(e) => setAcknowledged(e.target.checked)}
-                                className="mt-1 h-4 w-4"
-                            />
-                            <label htmlFor="ack-publish" className="text-sm">I understand this will be publicly available.</label>
+        {SHOW_COMMUNITY_PUBLISH && (
+            <Modal 
+                isOpen={isConfirmOpen} 
+                onClose={() => { setAcknowledged(false); onConfirmClose(); }}
+                size="md"
+                classNames={{
+                    base: "bg-white dark:bg-gray-900",
+                    header: "border-b border-gray-200 dark:border-gray-700 pb-3",
+                    body: "py-5",
+                    footer: "border-t border-gray-200 dark:border-gray-700 pt-3"
+                }}
+            >
+                <ModalContent>
+                    <ModalHeader>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Confirm publish to community</h3>
+                    </ModalHeader>
+                    <ModalBody>
+                        <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
+                            <p>Publishing to community will make this assistant and its description publicly visible to other users.</p>
+                            <ul className="list-disc pl-5 space-y-1">
+                                <li>Your assistant may appear in the community templates library.</li>
+                                <li>Others can import and use this assistant in their own projects.</li>
+                                <li>Do not include secrets or private data in the description or workflow.</li>
+                            </ul>
+                            <div className="mt-3 flex items-start gap-2">
+                                <input
+                                    id="ack-publish"
+                                    type="checkbox"
+                                    checked={acknowledged}
+                                    onChange={(e) => setAcknowledged(e.target.checked)}
+                                    className="mt-1 h-4 w-4"
+                                />
+                                <label htmlFor="ack-publish" className="text-sm">I understand this will be publicly available.</label>
+                            </div>
                         </div>
-                    </div>
-                </ModalBody>
-                <ModalFooter>
-                    <Button variant="light" onPress={() => { setAcknowledged(false); onConfirmClose(); }}>Cancel</Button>
-                    <Button
-                        color="primary"
-                        isDisabled={!acknowledged}
-                        onPress={() => {
-                            onConfirmClose();
-                            setAcknowledged(false);
-                            onCommunityPublish();
-                        }}
-                    >
-                        Confirm & Publish
-                    </Button>
-                </ModalFooter>
-            </ModalContent>
-        </Modal>
+                    </ModalBody>
+                    <ModalFooter>
+                        <Button variant="light" onPress={() => { setAcknowledged(false); onConfirmClose(); }}>Cancel</Button>
+                        <Button
+                            color="primary"
+                            isDisabled={!acknowledged}
+                            onPress={() => {
+                                onConfirmClose();
+                                setAcknowledged(false);
+                                onCommunityPublish();
+                            }}
+                        >
+                            Confirm & Publish
+                        </Button>
+                    </ModalFooter>
+                </ModalContent>
+            </Modal>
+        )}
         </>
     );
 }

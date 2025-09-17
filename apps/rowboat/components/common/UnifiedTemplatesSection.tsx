@@ -6,6 +6,7 @@ import { Search, Filter } from 'lucide-react';
 import { AssistantCard } from './AssistantCard';
 import { Button } from "@/components/ui/button";
 import { getCurrentUser } from '@/app/actions/assistant-templates.actions';
+import { SHOW_COMMUNITY_PUBLISH } from '@/app/lib/feature_flags';
 
 interface TemplateItem {
     id: string;
@@ -60,7 +61,7 @@ export function UnifiedTemplatesSection({
     onTypeChange,
 }: UnifiedTemplatesSectionProps) {
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedType, setSelectedType] = useState<'prebuilt' | 'community'>('prebuilt');
+    const [selectedType, setSelectedType] = useState<'prebuilt' | 'community'>(SHOW_COMMUNITY_PUBLISH ? 'prebuilt' : 'prebuilt');
     const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
     const [sortBy, setSortBy] = useState<'popular' | 'newest' | 'alphabetical'>('alphabetical');
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -105,7 +106,7 @@ export function UnifiedTemplatesSection({
     const allTemplates = useMemo(() => {
         const combined = [
             ...prebuiltTemplates.map(t => ({ ...t, type: 'prebuilt' as const })),
-            ...communityTemplates.map(t => ({ ...t, type: 'community' as const }))
+            ...(SHOW_COMMUNITY_PUBLISH ? communityTemplates.map(t => ({ ...t, type: 'community' as const })) : [])
         ];
         return combined;
     }, [prebuiltTemplates, communityTemplates]);
@@ -300,32 +301,34 @@ export function UnifiedTemplatesSection({
                     
                     <div className="flex gap-2">
                         {/* Type Filter Segmented Control (Library | Community) */}
-                        <div className="flex gap-0.5 items-center h-8 rounded-full border border-gray-200 dark:border-gray-700 p-0 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
-                            {[
-                                { key: 'prebuilt', label: 'Library' },
-                                { key: 'community', label: 'Community' }
-                            ].map(({ key, label }) => (
-                                <button
-                                    key={key}
-                                    onClick={async () => {
-                                        const newType = key as 'prebuilt' | 'community';
-                                        const target = rowsShown * itemsPerRow;
-                                        if (onTypeChange) {
-                                            await onTypeChange(newType, target);
-                                        }
-                                        setSelectedType(newType);
-                                    }}
-                                    aria-pressed={selectedType === key}
-                                    className={`inline-flex items-center h-8 px-2.5 rounded-full text-[13px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
-                                        selectedType === key
-                                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                                            : 'bg-transparent text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700'
-                                    }`}
-                                >
-                                    {label}
-                                </button>
-                            ))}
-                        </div>
+                        {SHOW_COMMUNITY_PUBLISH && (
+                            <div className="flex gap-0.5 items-center h-8 rounded-full border border-gray-200 dark:border-gray-700 p-0 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                                {[
+                                    { key: 'prebuilt', label: 'Library' },
+                                    { key: 'community', label: 'Community' }
+                                ].map(({ key, label }) => (
+                                    <button
+                                        key={key}
+                                        onClick={async () => {
+                                            const newType = key as 'prebuilt' | 'community';
+                                            const target = rowsShown * itemsPerRow;
+                                            if (onTypeChange) {
+                                                await onTypeChange(newType, target);
+                                            }
+                                            setSelectedType(newType);
+                                        }}
+                                        aria-pressed={selectedType === key}
+                                        className={`inline-flex items-center h-8 px-2.5 rounded-full text-[13px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                                            selectedType === key
+                                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                                : 'bg-transparent text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700'
+                                        }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
 
                         {/* Sort Dropdown (Popularity only for Community) */}
                         <div className="relative">
