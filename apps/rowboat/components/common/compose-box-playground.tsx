@@ -37,6 +37,9 @@ export function ComposeBoxPlayground({
     }, [messages.length, shouldAutoFocus]);
 
     function handleInput() {
+        // Mirror send-button disable rules to block Enter submits
+        if (disabled || loading || uploading) return;
+        if (pendingImage?.url && pendingImage.description === undefined) return;
         const text = input.trim();
         if (!text && !pendingImage) {
             return;
@@ -181,7 +184,14 @@ export function ComposeBoxPlayground({
                 <Button
                     size="sm"
                     isIconOnly
-                    disabled={disabled || uploading || (loading ? false : (!input.trim() && !pendingImage))}
+                    disabled={
+                        disabled
+                        || uploading
+                        // If an image is selected but description isn't ready yet, keep disabled
+                        || (pendingImage?.url && pendingImage.description === undefined)
+                        // When not loading a response, require either text or a ready image
+                        || (loading ? false : (!input.trim() && !pendingImage))
+                    }
                     onPress={loading ? onCancel : handleInput}
                     className={`
                         transition-all duration-200
