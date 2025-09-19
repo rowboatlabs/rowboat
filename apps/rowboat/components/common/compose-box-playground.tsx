@@ -23,6 +23,7 @@ export function ComposeBoxPlayground({
 }: ComposeBoxPlaygroundProps) {
     const [input, setInput] = useState('');
     const [uploading, setUploading] = useState(false);
+    const [pendingImage, setPendingImage] = useState<{ url: string; mimeType?: string } | null>(null);
     const [isFocused, setIsFocused] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const previousMessagesLength = useRef(messages.length);
@@ -36,11 +37,18 @@ export function ComposeBoxPlayground({
     }, [messages.length, shouldAutoFocus]);
 
     function handleInput() {
-        const prompt = input.trim();
-        if (!prompt) {
+        const text = input.trim();
+        if (!text && !pendingImage) {
             return;
         }
+        const parts: string[] = [];
+        if (text) parts.push(text);
+        if (pendingImage?.url) {
+            parts.push(`The user uploaded an image. URL: ${pendingImage.url}`);
+        }
+        const prompt = parts.join('\n\n');
         setInput('');
+        setPendingImage(null);
         handleUserMessage(prompt);
     }
 
@@ -72,7 +80,7 @@ export function ComposeBoxPlayground({
             const data = await res.json();
             const url: string | undefined = data?.url;
             if (!url) throw new Error('No URL returned');
-            handleUserMessage(`The user uploaded an image. URL: ${url}`);
+            setPendingImage({ url, mimeType: data?.mimeType });
         } catch (e) {
             console.error('Image upload failed', e);
             alert('Image upload failed. Please try again.');
@@ -113,6 +121,22 @@ export function ComposeBoxPlayground({
                 </label>
                 {/* Textarea */}
                 <div className="flex-1">
+                    {pendingImage && (
+                        <div className="mb-2 flex items-center gap-2">
+                            <img
+                                src={pendingImage.url}
+                                alt="Uploaded image preview"
+                                className="w-16 h-16 object-cover rounded border border-gray-200 dark:border-gray-700"
+                            />
+                            <button
+                                type="button"
+                                className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700"
+                                onClick={() => setPendingImage(null)}
+                            >
+                                Dismiss
+                            </button>
+                        </div>
+                    )}
                     <Textarea
                         ref={textareaRef}
                         value={input}
@@ -144,7 +168,7 @@ export function ComposeBoxPlayground({
                 <Button
                     size="sm"
                     isIconOnly
-                    disabled={disabled || uploading || (loading ? false : !input.trim())}
+                    disabled={disabled || uploading || (loading ? false : (!input.trim() && !pendingImage))}
                     onPress={loading ? onCancel : handleInput}
                     className={`
                         transition-all duration-200
