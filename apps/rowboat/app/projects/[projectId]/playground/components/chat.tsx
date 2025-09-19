@@ -152,11 +152,24 @@ export function Chat({
         }
     }, []);
 
-    function handleUserMessage(prompt: string) {
-        const updatedMessages: z.infer<typeof Message>[] = [...messages, {
-            role: 'user',
-            content: prompt,
-        }];
+    function handleUserMessage(prompt: string, imageDebug?: { url: string; description?: string | null }) {
+        // Insert an internal-only debug message with image URL/markdown (if provided),
+        // then the actual user message last so streaming triggers correctly.
+        const debugMessages: z.infer<typeof Message>[] = imageDebug ? [{
+            role: 'assistant',
+            content: `Image Description\n\nURL: ${imageDebug.url}\n\n${imageDebug.description ? imageDebug.description : ''}`.trim(),
+            agentName: 'Image Description',
+            responseType: 'internal',
+        } as any] : [];
+
+        const updatedMessages: z.infer<typeof Message>[] = [
+            ...messages,
+            ...debugMessages,
+            {
+                role: 'user',
+                content: prompt,
+            } as any,
+        ];
         setMessages(updatedMessages);
         setError(null);
         setIsLastInteracted(true);
@@ -229,9 +242,46 @@ export function Chat({
                 }
 
                 // set up a cached turn
+                // Merge-at-send: if the immediately preceding message is our internal
+                // Image Description debug message, append its details (URL/markdown)
+                // to the outgoing user message content, without changing the UI.
+                const last = messages[messages.length - 1];
+                let mergedContent = (typeof last?.content === 'string' ? last.content : '') || '';
+                if (messages.length >= 2) {
+                    const prev = messages[messages.length - 2] as any;
+                    const isImageDebug = prev && prev.role === 'assistant' && prev.responseType === 'internal' && prev.agentName === 'Image Description' && typeof prev.content === 'string';
+                    if (isImageDebug) {
+                        // Expect prev.content to have: "Image Description\n\nURL: <url>\n\n<markdown>"
+                        // Extract URL and markdown blocks for a clean append
+                        const content = prev.content as string;
+                        let url: string | undefined;
+                        let markdown: string | undefined;
+                        const urlMatch = content.match(/URL:\s*(\S+)/i);
+                        if (urlMatch) url = urlMatch[1];
+                        // markdown is whatever comes after the blank line following URL
+                        const parts = content.split(/\n\n/);
+                        if (parts.length >= 3) {
+                            markdown = parts.slice(2).join('\n\n').trim();
+                        }
+                        const appendSections: string[] = [];
+                        if (url) appendSections.push(`The user uploaded an image. URL: ${url}`);
+                        if (markdown) appendSections.push(`Image description (markdown):\n\n${markdown}`);
+                        if (appendSections.length > 0) {
+                            mergedContent = [mergedContent, appendSections.join('\n\n')]
+                                .filter(Boolean)
+                                .join('\n\n');
+                        }
+                    }
+                }
+
+                const messagesToSend: z.infer<typeof Message>[] = [{
+                    role: 'user',
+                    content: mergedContent,
+                } as any];
+
                 const response = await createCachedTurn({
                     conversationId: conversationId.current,
-                    messages: messages.slice(-1), // only send the last message
+                    messages: messagesToSend, // send merged content only
                 });
                 if (ignore) {
                     return;
