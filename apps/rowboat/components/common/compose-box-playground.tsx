@@ -3,7 +3,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button, Spinner } from "@heroui/react";
 
 interface ComposeBoxPlaygroundProps {
-    handleUserMessage: (message: string) => void;
+    handleUserMessage: (message: string, imageDebug?: { url: string; description?: string | null }) => void;
     messages: any[];
     loading: boolean;
     disabled?: boolean;
@@ -41,21 +41,20 @@ export function ComposeBoxPlayground({
         if (!text && !pendingImage) {
             return;
         }
+        // Only include the user's typed text; omit image URL/markdown from user message
         const parts: string[] = [];
         if (text) parts.push(text);
-        if (pendingImage?.url) {
-            parts.push(`The user uploaded an image. URL: ${pendingImage.url}`);
-            if (pendingImage.description) {
-                parts.push(`Image description (markdown):\n\n${pendingImage.description}`);
-            }
-        }
         const prompt = parts.join('\n\n');
+        // Build optional debug payload to render as internal-only message in debug view
+        const imageDebug = pendingImage?.url
+            ? { url: pendingImage.url, description: pendingImage.description ?? null }
+            : undefined;
         setInput('');
         if (pendingImage?.previewSrc) {
             try { URL.revokeObjectURL(pendingImage.previewSrc); } catch {}
         }
         setPendingImage(null);
-        handleUserMessage(prompt);
+        handleUserMessage(prompt, imageDebug);
     }
 
     const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
