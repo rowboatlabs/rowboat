@@ -27,6 +27,7 @@ export function ComposeBoxPlayground({
     const [isFocused, setIsFocused] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const previousMessagesLength = useRef(messages.length);
+    const uploadAbortRef = useRef<AbortController | null>(null);
 
     // Handle auto-focus when new messages arrive
     useEffect(() => {
@@ -79,11 +80,19 @@ export function ComposeBoxPlayground({
             const previewSrc = URL.createObjectURL(file);
             setPendingImage({ previewSrc });
             setUploading(true);
+            // Cancel any in-flight request
+            if (uploadAbortRef.current) {
+                try { uploadAbortRef.current.abort(); } catch {}
+                uploadAbortRef.current = null;
+            }
+            const controller = new AbortController();
+            uploadAbortRef.current = controller;
             const form = new FormData();
             form.append('file', file);
             const res = await fetch('/api/uploaded-images', {
                 method: 'POST',
                 body: form,
+                signal: controller.signal,
             });
             if (!res.ok) {
                 throw new Error(`Upload failed: ${res.status}`);
@@ -91,12 +100,27 @@ export function ComposeBoxPlayground({
             const data = await res.json();
             const url: string | undefined = data?.url;
             if (!url) throw new Error('No URL returned');
-            setPendingImage({ url, previewSrc, mimeType: data?.mimeType, description: data?.description });
-        } catch (e) {
-            console.error('Image upload failed', e);
-            alert('Image upload failed. Please try again.');
+            // Only apply state if request wasn't aborted/dismissed
+            if (uploadAbortRef.current === controller) {
+                setPendingImage({ url, previewSrc, mimeType: data?.mimeType, description: data?.description ?? null });
+            }
+        } catch (e: any) {
+            if (e?.name === 'AbortError') {
+                // Swallow aborts
+                console.log('Image upload/description aborted');
+            } else {
+                console.error('Image upload failed', e);
+                alert('Image upload failed. Please try again.');
+            }
         } finally {
-            setUploading(false);
+            if (uploadAbortRef.current === null) {
+                // Dismissed earlier; ensure uploading is false
+                setUploading(false);
+            } else {
+                // If this is still the active controller, clear uploading and ref
+                setUploading(false);
+                uploadAbortRef.current = null;
+            }
         }
     }
 
@@ -147,6 +171,11 @@ export function ComposeBoxPlayground({
                                     if (pendingImage?.previewSrc) {
                                         try { URL.revokeObjectURL(pendingImage.previewSrc); } catch {}
                                     }
+                                    if (uploadAbortRef.current) {
+                                        try { uploadAbortRef.current.abort(); } catch {}
+                                        uploadAbortRef.current = null;
+                                    }
+                                    setUploading(false);
                                     setPendingImage(null);
                                 }}
                             >
