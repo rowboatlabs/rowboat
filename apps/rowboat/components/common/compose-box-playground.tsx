@@ -135,25 +135,6 @@ export function ComposeBoxPlayground({
             {/* Outer container with padding */}
             <div className="rounded-2xl border-[1.5px] border-gray-200 dark:border-[#2a2d31] p-3 relative 
                           bg-white dark:bg-[#1e2023] flex items-end gap-2">
-                {/* Upload button */}
-                <label className={`
-                          flex items-center justify-center w-9 h-9 rounded-lg cursor-pointer
-                          ${uploading ? 'bg-gray-100 dark:bg-gray-800 text-gray-400' : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300'}
-                          transition-colors
-                        `}>
-                    <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        disabled={disabled || loading || uploading}
-                        onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) handleImagePicked(f);
-                            e.currentTarget.value = '';
-                        }}
-                    />
-                    {uploading ? <Spinner size="sm" /> : <ImageIcon size={16} />}
-                </label>
                 {/* Textarea */}
                 <div className="flex-1">
                     {pendingImage && (
@@ -210,6 +191,25 @@ export function ComposeBoxPlayground({
                     />
                 </div>
 
+                {/* Image upload button (moved to the right) */}
+                <label className={`
+                          flex items-center justify-center w-9 h-9 rounded-lg cursor-pointer
+                          ${uploading ? 'bg-gray-100 dark:bg-gray-800 text-gray-400' : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300'}
+                          transition-colors
+                        `}>
+                    <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={disabled || loading || uploading}
+                        onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleImagePicked(f);
+                            e.currentTarget.value = '';
+                        }}
+                    />
+                    {uploading ? <Spinner size="sm" /> : <ImageIcon size={16} />}
+                </label>
                 {/* Send/Stop button */}
                 <Button
                     size="sm"
