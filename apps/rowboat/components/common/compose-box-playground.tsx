@@ -133,7 +133,7 @@ export function ComposeBoxPlayground({
                 {/* Textarea */}
                 <div className="flex-1">
                     {pendingImage && (
-                        <div className="mb-2 flex items-center gap-2">
+                        <div className="mb-2 inline-block relative">
                             <img
                                 src={pendingImage.previewSrc || pendingImage.url}
                                 alt="Uploaded image preview"
@@ -141,7 +141,8 @@ export function ComposeBoxPlayground({
                             />
                             <button
                                 type="button"
-                                className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700"
+                                aria-label="Remove image"
+                                className="absolute -top-1 -right-1 p-1 rounded-full bg-white dark:bg-zinc-900 border border-gray-200 dark:border-gray-700 shadow hover:bg-gray-50 dark:hover:bg-zinc-800"
                                 onClick={() => {
                                     if (pendingImage?.previewSrc) {
                                         try { URL.revokeObjectURL(pendingImage.previewSrc); } catch {}
@@ -149,7 +150,7 @@ export function ComposeBoxPlayground({
                                     setPendingImage(null);
                                 }}
                             >
-                                Dismiss
+                                <XIcon size={12} />
                             </button>
                         </div>
                     )}
@@ -273,6 +274,25 @@ function ImageIcon({ size, className }: { size: number, className?: string }) {
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
             <circle cx="8.5" cy="8.5" r="1.5" />
             <path d="M21 15l-5-5L5 21" />
+        </svg>
+    );
+}
+
+function XIcon({ size, className }: { size: number, className?: string }) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
     );
 }
