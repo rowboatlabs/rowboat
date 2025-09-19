@@ -22,6 +22,7 @@ export function ComposeBoxPlayground({
     onCancel,
 }: ComposeBoxPlaygroundProps) {
     const [input, setInput] = useState('');
+    const [uploading, setUploading] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const previousMessagesLength = useRef(messages.length);
@@ -55,6 +56,31 @@ export function ComposeBoxPlayground({
         onFocus?.();
     };
 
+    async function handleImagePicked(file: File) {
+        if (!file) return;
+        try {
+            setUploading(true);
+            const form = new FormData();
+            form.append('file', file);
+            const res = await fetch('/api/uploaded-images', {
+                method: 'POST',
+                body: form,
+            });
+            if (!res.ok) {
+                throw new Error(`Upload failed: ${res.status}`);
+            }
+            const data = await res.json();
+            const url: string | undefined = data?.url;
+            if (!url) throw new Error('No URL returned');
+            handleUserMessage(`The user uploaded an image. URL: ${url}`);
+        } catch (e) {
+            console.error('Image upload failed', e);
+            alert('Image upload failed. Please try again.');
+        } finally {
+            setUploading(false);
+        }
+    }
+
     return (
         <div className="relative group">
             {/* Keyboard shortcut hint */}
@@ -66,6 +92,25 @@ export function ComposeBoxPlayground({
             {/* Outer container with padding */}
             <div className="rounded-2xl border-[1.5px] border-gray-200 dark:border-[#2a2d31] p-3 relative 
                           bg-white dark:bg-[#1e2023] flex items-end gap-2">
+                {/* Upload button */}
+                <label className={`
+                          flex items-center justify-center w-9 h-9 rounded-lg cursor-pointer
+                          ${uploading ? 'bg-gray-100 dark:bg-gray-800 text-gray-400' : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300'}
+                          transition-colors
+                        `}>
+                    <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={disabled || loading || uploading}
+                        onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleImagePicked(f);
+                            e.currentTarget.value = '';
+                        }}
+                    />
+                    {uploading ? <Spinner size="sm" /> : <ImageIcon size={16} />}
+                </label>
                 {/* Textarea */}
                 <div className="flex-1">
                     <Textarea
@@ -99,7 +144,7 @@ export function ComposeBoxPlayground({
                 <Button
                     size="sm"
                     isIconOnly
-                    disabled={disabled || (loading ? false : !input.trim())}
+                    disabled={disabled || uploading || (loading ? false : !input.trim())}
                     onPress={loading ? onCancel : handleInput}
                     className={`
                         transition-all duration-200
@@ -163,4 +208,24 @@ function StopIcon({ size, className }: { size: number, className?: string }) {
             <rect x="6" y="6" width="12" height="12" rx="1" />
         </svg>
     );
-} 
+}
+
+function ImageIcon({ size, className }: { size: number, className?: string }) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <path d="M21 15l-5-5L5 21" />
+        </svg>
+    );
+}
