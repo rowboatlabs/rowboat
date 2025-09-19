@@ -136,7 +136,7 @@ export function ComposeBoxPlayground({
                         setPendingImage({ url: imageUrl, previewSrc, mimeType: file.type, description: null });
                     }
                 }
-            } catch (err) {
+            } catch (err: any) {
                 // On local, S3 may be unconfigured. Fallback to legacy temp upload endpoint.
                 if (err?.name === 'AbortError') throw err;
                 usedFallback = true;
