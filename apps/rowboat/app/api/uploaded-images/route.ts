@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { tempBinaryCache } from '@/src/application/services/temp-binary-cache';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // POST /api/uploaded-images
 // Accepts an image file (multipart/form-data, field name: "file")
@@ -23,6 +24,24 @@ export async function POST(request: NextRequest) {
     const arrayBuf = await file.arrayBuffer();
     const buf = Buffer.from(arrayBuf);
     const mime = file.type || 'application/octet-stream';
+
+    // Optionally describe image with Gemini
+    let descriptionMarkdown: string | null = null;
+    try {
+      const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
+      if (apiKey) {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const prompt = 'Describe this image in concise, high-quality Markdown. Focus on key objects, text, layout, style, colors, and any notable details. Do not include extra commentary or instructions.';
+        const result = await model.generateContent([
+          { inlineData: { data: buf.toString('base64'), mimeType: mime } },
+          prompt,
+        ]);
+        descriptionMarkdown = result.response?.text?.() || null;
+      }
+    } catch (e) {
+      console.warn('Gemini description failed', e);
+    }
 
     // If S3 configured, upload there
     const s3Bucket = process.env.RAG_UPLOADS_S3_BUCKET || '';
@@ -51,17 +70,16 @@ export async function POST(request: NextRequest) {
       }));
 
       const url = `/api/uploaded-images/${imageId}`;
-      return NextResponse.json({ url, storage: 's3', id: imageId, mimeType: mime });
+      return NextResponse.json({ url, storage: 's3', id: imageId, mimeType: mime, description: descriptionMarkdown });
     }
 
     // Otherwise store in temp cache and return temp URL
     const ttlSec = 10 * 60; // 10 minutes
     const id = tempBinaryCache.put(buf, mime, ttlSec * 1000);
     const url = `/api/tmp-images/${id}`;
-    return NextResponse.json({ url, storage: 'temp', id, mimeType: mime, expiresInSec: ttlSec });
+    return NextResponse.json({ url, storage: 'temp', id, mimeType: mime, expiresInSec: ttlSec, description: descriptionMarkdown });
   } catch (e) {
     console.error('upload image error', e);
     return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
   }
 }
-

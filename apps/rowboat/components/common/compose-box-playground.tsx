@@ -23,7 +23,7 @@ export function ComposeBoxPlayground({
 }: ComposeBoxPlaygroundProps) {
     const [input, setInput] = useState('');
     const [uploading, setUploading] = useState(false);
-    const [pendingImage, setPendingImage] = useState<{ url: string; mimeType?: string } | null>(null);
+    const [pendingImage, setPendingImage] = useState<{ url?: string; previewSrc?: string; mimeType?: string; description?: string | null } | null>(null);
     const [isFocused, setIsFocused] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const previousMessagesLength = useRef(messages.length);
@@ -45,9 +45,15 @@ export function ComposeBoxPlayground({
         if (text) parts.push(text);
         if (pendingImage?.url) {
             parts.push(`The user uploaded an image. URL: ${pendingImage.url}`);
+            if (pendingImage.description) {
+                parts.push(`Image description (markdown):\n\n${pendingImage.description}`);
+            }
         }
         const prompt = parts.join('\n\n');
         setInput('');
+        if (pendingImage?.previewSrc) {
+            try { URL.revokeObjectURL(pendingImage.previewSrc); } catch {}
+        }
         setPendingImage(null);
         handleUserMessage(prompt);
     }
@@ -67,6 +73,9 @@ export function ComposeBoxPlayground({
     async function handleImagePicked(file: File) {
         if (!file) return;
         try {
+            // Show immediate local preview
+            const previewSrc = URL.createObjectURL(file);
+            setPendingImage({ previewSrc });
             setUploading(true);
             const form = new FormData();
             form.append('file', file);
@@ -80,7 +89,7 @@ export function ComposeBoxPlayground({
             const data = await res.json();
             const url: string | undefined = data?.url;
             if (!url) throw new Error('No URL returned');
-            setPendingImage({ url, mimeType: data?.mimeType });
+            setPendingImage({ url, previewSrc, mimeType: data?.mimeType, description: data?.description });
         } catch (e) {
             console.error('Image upload failed', e);
             alert('Image upload failed. Please try again.');
@@ -124,14 +133,19 @@ export function ComposeBoxPlayground({
                     {pendingImage && (
                         <div className="mb-2 flex items-center gap-2">
                             <img
-                                src={pendingImage.url}
+                                src={pendingImage.previewSrc || pendingImage.url}
                                 alt="Uploaded image preview"
                                 className="w-16 h-16 object-cover rounded border border-gray-200 dark:border-gray-700"
                             />
                             <button
                                 type="button"
                                 className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700"
-                                onClick={() => setPendingImage(null)}
+                                onClick={() => {
+                                    if (pendingImage?.previewSrc) {
+                                        try { URL.revokeObjectURL(pendingImage.previewSrc); } catch {}
+                                    }
+                                    setPendingImage(null);
+                                }}
                             >
                                 Dismiss
                             </button>
