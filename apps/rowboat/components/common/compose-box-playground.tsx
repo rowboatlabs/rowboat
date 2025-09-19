@@ -87,22 +87,73 @@ export function ComposeBoxPlayground({
             }
             const controller = new AbortController();
             uploadAbortRef.current = controller;
-            const form = new FormData();
-            form.append('file', file);
-            const res = await fetch('/api/uploaded-images', {
-                method: 'POST',
-                body: form,
-                signal: controller.signal,
-            });
-            if (!res.ok) {
-                throw new Error(`Upload failed: ${res.status}`);
-            }
-            const data = await res.json();
-            const url: string | undefined = data?.url;
-            if (!url) throw new Error('No URL returned');
-            // Only apply state if request wasn't aborted/dismissed
-            if (uploadAbortRef.current === controller) {
-                setPendingImage({ url, previewSrc, mimeType: data?.mimeType, description: data?.description ?? null });
+            let usedFallback = false;
+            try {
+                // 1) Request a presigned S3 upload URL
+                const urlRes = await fetch('/api/uploaded-images/upload-url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mimeType: file.type }),
+                    signal: controller.signal,
+                });
+                if (!urlRes.ok) throw new Error(`Failed to get upload URL: ${urlRes.status}`);
+                const urlData = await urlRes.json();
+                const uploadUrl: string | undefined = urlData?.uploadUrl;
+                const imageId: string | undefined = urlData?.id;
+                const imageUrl: string | undefined = urlData?.url;
+                if (!uploadUrl || !imageId || !imageUrl) throw new Error('Invalid upload URL response');
+
+                // 2) Upload the file directly to S3
+                const putRes = await fetch(uploadUrl, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': file.type },
+                    body: file,
+                    signal: controller.signal,
+                });
+                if (!putRes.ok) throw new Error(`Failed to upload image: ${putRes.status}`);
+
+                // 3) Update local state with URL (description pending)
+                if (uploadAbortRef.current === controller) {
+                    setPendingImage({ url: imageUrl, previewSrc, mimeType: file.type, description: undefined });
+                }
+
+                // 4) Ask server to generate description from S3 image
+                const descRes = await fetch('/api/uploaded-images/describe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: imageId }),
+                    signal: controller.signal,
+                });
+                if (descRes.ok) {
+                    const descData = await descRes.json();
+                    const description: string | null = descData?.description ?? null;
+                    if (uploadAbortRef.current === controller) {
+                        setPendingImage({ url: imageUrl, previewSrc, mimeType: file.type, description });
+                    }
+                } else {
+                    // If description fails, still allow sending
+                    if (uploadAbortRef.current === controller) {
+                        setPendingImage({ url: imageUrl, previewSrc, mimeType: file.type, description: null });
+                    }
+                }
+            } catch (err) {
+                // On local, S3 may be unconfigured. Fallback to legacy temp upload endpoint.
+                if (err?.name === 'AbortError') throw err;
+                usedFallback = true;
+                const form = new FormData();
+                form.append('file', file);
+                const res = await fetch('/api/uploaded-images', {
+                    method: 'POST',
+                    body: form,
+                    signal: controller.signal,
+                });
+                if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+                const data = await res.json();
+                const url: string | undefined = data?.url;
+                if (!url) throw new Error('No URL returned');
+                if (uploadAbortRef.current === controller) {
+                    setPendingImage({ url, previewSrc, mimeType: data?.mimeType || file.type, description: data?.description ?? null });
+                }
             }
         } catch (e: any) {
             if (e?.name === 'AbortError') {
