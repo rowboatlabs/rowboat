@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { UsageTracker } from '@/app/lib/billing';
+import { logUsage } from '@/app/actions/billing.actions';
 
 export async function POST(request: NextRequest) {
   try {
@@ -52,6 +54,7 @@ export async function POST(request: NextRequest) {
     const buf = Buffer.concat(chunks);
 
     let descriptionMarkdown: string | null = null;
+    const usageTracker = new UsageTracker();
     try {
       const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
       if (apiKey) {
@@ -62,10 +65,36 @@ export async function POST(request: NextRequest) {
           { inlineData: { data: buf.toString('base64'), mimeType: contentType } },
           prompt,
         ]);
-        descriptionMarkdown = result.response?.text?.() || null;
+        const response: any = result.response as any;
+        descriptionMarkdown = response?.text?.() || null;
+
+        // Track usage similar to agents-runtime
+        try {
+          const inputTokens = response?.usageMetadata?.promptTokenCount || 0;
+          const outputTokens = response?.usageMetadata?.candidatesTokenCount || 0;
+          usageTracker.track({
+            type: 'LLM_USAGE',
+            modelName: 'gemini-2.5-flash',
+            inputTokens,
+            outputTokens,
+            context: 'uploaded_images.describe',
+          });
+        } catch (_) {
+          // ignore usage tracking errors
+        }
       }
     } catch (e) {
       console.warn('Gemini description failed', e);
+    }
+
+    // Log usage to billing if available
+    try {
+      const items = usageTracker.flush();
+      if (items.length > 0) {
+        await logUsage({ items });
+      }
+    } catch (_) {
+      // ignore billing logging errors
     }
 
     return NextResponse.json({ id, description: descriptionMarkdown });
@@ -74,4 +103,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to describe' }, { status: 500 });
   }
 }
-

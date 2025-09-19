@@ -3,6 +3,8 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { tempBinaryCache } from '@/src/application/services/temp-binary-cache';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { UsageTracker } from '@/app/lib/billing';
+import { logUsage } from '@/app/actions/billing.actions';
 
 // POST /api/uploaded-images
 // Accepts an image file (multipart/form-data, field name: "file")
@@ -27,6 +29,7 @@ export async function POST(request: NextRequest) {
 
     // Optionally describe image with Gemini
     let descriptionMarkdown: string | null = null;
+    const usageTracker = new UsageTracker();
     try {
       const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
       if (apiKey) {
@@ -37,7 +40,23 @@ export async function POST(request: NextRequest) {
           { inlineData: { data: buf.toString('base64'), mimeType: mime } },
           prompt,
         ]);
-        descriptionMarkdown = result.response?.text?.() || null;
+        const response: any = result.response as any;
+        descriptionMarkdown = response?.text?.() || null;
+
+        // Track usage similar to agents-runtime
+        try {
+          const inputTokens = response?.usageMetadata?.promptTokenCount || 0;
+          const outputTokens = response?.usageMetadata?.candidatesTokenCount || 0;
+          usageTracker.track({
+            type: 'LLM_USAGE',
+            modelName: 'gemini-2.5-flash',
+            inputTokens,
+            outputTokens,
+            context: 'uploaded_images.upload_with_description',
+          });
+        } catch (_) {
+          // ignore usage tracking errors
+        }
       }
     } catch (e) {
       console.warn('Gemini description failed', e);
@@ -70,6 +89,17 @@ export async function POST(request: NextRequest) {
       }));
 
       const url = `/api/uploaded-images/${imageId}`;
+
+      // Log usage to billing if available
+      try {
+        const items = usageTracker.flush();
+        if (items.length > 0) {
+          await logUsage({ items });
+        }
+      } catch (_) {
+        // ignore billing logging errors
+      }
+
       return NextResponse.json({ url, storage: 's3', id: imageId, mimeType: mime, description: descriptionMarkdown });
     }
 
@@ -77,6 +107,16 @@ export async function POST(request: NextRequest) {
     const ttlSec = 10 * 60; // 10 minutes
     const id = tempBinaryCache.put(buf, mime, ttlSec * 1000);
     const url = `/api/tmp-images/${id}`;
+    // Log usage to billing if available
+    try {
+      const items = usageTracker.flush();
+      if (items.length > 0) {
+        await logUsage({ items });
+      }
+    } catch (_) {
+      // ignore billing logging errors
+    }
+
     return NextResponse.json({ url, storage: 'temp', id, mimeType: mime, expiresInSec: ttlSec, description: descriptionMarkdown });
   } catch (e) {
     console.error('upload image error', e);
