@@ -35,23 +35,19 @@
 
 
 </h5>
+<p align="center">
+⚡ Build AI agents instantly with natural language | 🔌 Connect tools with one-click integrations | 📂 Power with knowledge by adding documents for RAG | 🔄 Automate workflows by setting up triggers and actions | 🚀 Deploy anywhere via API or SDK<br><br>
+☁️ Prefer a hosted version? Use our <b><a href="https://rowboatlabs.com">cloud</a></b> to starting building agents right away!
+</p>
 
-- ✨ **Start from an idea -> copilot builds your multi-agent workflows**
-   - E.g. "Build me an assistant for a food delivery company to handle delivery status and missing items. Include the necessary tools."
-- 🌐 **Connect MCP servers**
-   - Add the MCP servers in settings -> import the tools into Rowboat.     
-- 📞 **Integrate into your app using the HTTP API or Python SDK**
-   - Grab the project ID and generated API key from settings and use the API.
-
-Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents!
 
 ## Quick start
 1. Set your OpenAI key
-      ```bash
-   export OPENAI_API_KEY=your-openai-api-key
+   ```bash
+   export OPENAI_API_KEY=your-openai-api-key  
    ```
       
-2. Clone the repository and start Rowboat
+2. Clone the repository and start Rowboat (requires Docker)
    ```bash
    git clone git@github.com:rowboatlabs/rowboat.git
    cd rowboat
@@ -60,71 +56,30 @@ Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents
 
 3. Access the app at [http://localhost:3000](http://localhost:3000).
 
-Note: We have added native RAG support including file-uploads and URL scraping. See the [RAG](https://docs.rowboatlabs.com/using_rag) section of our docs for this.
+To add tools, RAG, more LLMs, and  triggers checkout the [Advanced](#advanced) section below.
 
-Note: See the [Using custom LLM providers](https://docs.rowboatlabs.com/setup/#using-custom-llm-providers) section of our docs for using custom providers like OpenRouter and LiteLLM.
+## Demos
+#### Meeting-prep assistant
+Chat with the copilot to build a meeting-prep workflow, then add a calendar invite as a trigger. Watch the full demo [here](https://youtu.be/KZTP4xZM2DY).
+[![meeting-prep](https://github.com/user-attachments/assets/27755ef5-6549-476f-b9c0-50bef8770384)](https://youtu.be/KZTP4xZM2DY)
 
-## Demo
+#### Customer support assistant
+Chat with the copilot to build a customer support assistant, then connect your MCP server, and data for RAG. Watch the full demo [here](https://youtu.be/Xfo-OfgOl8w).
+[![output](https://github.com/user-attachments/assets/97485fd7-64c3-4d60-a627-f756a89dee64)](https://youtu.be/Xfo-OfgOl8w)
 
-#### Create a multi-agent assistant with MCP tools by chatting with Rowboat
-[![Screenshot 2025-04-23 at 00 25 31](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/YRTCw9UHRbU)
+#### Personal assistant
+Chat with the copilot to build a personal assistant. Watch the full demo [here](https://youtu.be/6r7P4Vlcn2g).
+[![personal-assistant](https://github.com/user-attachments/assets/0f1c0ffd-23ba-4b49-8bfb-ec7a846f1332)](https://youtu.be/6r7P4Vlcn2g)
 
-## Integrate with Rowboat agents
+## Advanced
+1. Native RAG Support: Enable file uploads and URL scraping with Rowboat's built-in RAG capabilities – see [RAG Guide](https://docs.rowboatlabs.com/docs/using-rowboat/rag).
 
-There are 2 ways to integrate with the agents you create in Rowboat
+2. Custom LLM Providers: Use any LLM provider, including aggregators like OpenRouter and LiteLLM - see [Using more LLM providers](https://docs.rowboatlabs.com/docs/using-rowboat/customise/custom-llms).
 
-1. HTTP API
-   - You can use the API directly at [http://localhost:3000/api/v1/](http://localhost:3000/api/v1/)
-   - See [API Docs](https://docs.rowboatlabs.com/using_the_api/) for details
-   ```bash
-   curl --location 'http://localhost:3000/api/v1/<PROJECT_ID>/chat' \
-   --header 'Content-Type: application/json' \
-   --header 'Authorization: Bearer <API_KEY>' \
-   --data '{
-       "messages": [
-           {
-               "role": "user",
-               "content": "tell me the weather in london in metric units"
-           }
-       ],
-       "state": null
-   }'
-   ```
-   
+3. Tools & Triggers: Add tools and event triggers (e.g., Gmail, Slack) for automation – see [Tools](https://docs.rowboatlabs.com/docs/using-rowboat/tools) & [Triggers](https://docs.rowboatlabs.com/docs/using-rowboat/triggers).
 
-2. Python SDK
-   You can use the included Python SDK to interact with the Agents
-   ```
-   pip install rowboat
-   ```
+4. API & SDK: Integrate Rowboat agents directly into your app – see [API](https://docs.rowboatlabs.com/docs/api-sdk/using_the_api) & [SDK](https://docs.rowboatlabs.com/docs/api-sdk/using_the_sdk) docs.
 
-   See [SDK Docs](https://docs.rowboatlabs.com/using_the_sdk/) for details. Here is a quick example:
-   ```python
-   from rowboat import Client, StatefulChat
-   from rowboat.schema import UserMessage, SystemMessage
-
-   # Initialize the client
-   client = Client(
-       host="http://localhost:3000",
-       project_id="<PROJECT_ID>",
-       api_key="<API_KEY>"
-   )
-
-   # Create a stateful chat session (recommended)
-   chat = StatefulChat(client)
-   response = chat.run("What's the weather in London?")
-   print(response)
-
-   # Or use the low-level client API
-   messages = [
-       SystemMessage(role='system', content="You are a helpful assistant"),
-       UserMessage(role='user', content="Hello, how are you?")
-   ]
-   
-   # Get response
-   response = client.chat(messages=messages)
-   print(response.messages[-1].content)
-   ```
-
+##
 
 Refer to [Docs](https://docs.rowboatlabs.com/) to learn how to start building agents with Rowboat.

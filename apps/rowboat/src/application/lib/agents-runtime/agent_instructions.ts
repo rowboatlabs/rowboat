@@ -140,7 +140,7 @@ export const PIPELINE_TYPE_INSTRUCTIONS = (): string => `
 - Provide clear, actionable output that the next pipeline step can easily understand and work with.
 - Do NOT attempt to handle tasks outside your specific pipeline role.
 - Do NOT mention other agents or the pipeline structure to users.
-- Your response should be self-contained and ready to be consumed by the next pipeline step.
+- Your response should be self-contained and ready to be consumed by the next pipeline step. Add a prefix 'Internal message' to your response.
 - Reading the message history will show you the pipeline execution flow up to your step.
 - These are high level instructions only. The user will provide more specific instructions which will be below.
 `;

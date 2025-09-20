@@ -6,7 +6,7 @@ import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot } from "
 import { PrefixLogger } from "@/app/lib/utils";
 import zodToJsonSchema from "zod-to-json-schema";
 import { COPILOT_INSTRUCTIONS_EDIT_AGENT } from "./copilot_edit_agent";
-import { COPILOT_INSTRUCTIONS_MULTI_AGENT } from "./copilot_multi_agent";
+import { COPILOT_INSTRUCTIONS_MULTI_AGENT_WITH_DOCS as COPILOT_INSTRUCTIONS_MULTI_AGENT } from "./copilot_multi_agent";
 import { COPILOT_MULTI_AGENT_EXAMPLE_1 } from "./example_multi_agent_1";
 import { CURRENT_WORKFLOW_PROMPT } from "./current_workflow";
 import { USE_COMPOSIO_TOOLS } from "@/app/lib/feature_flags";

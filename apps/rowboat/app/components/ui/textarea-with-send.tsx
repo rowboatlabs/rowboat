@@ -2,7 +2,8 @@
 
 import { forwardRef, TextareaHTMLAttributes } from 'react';
 import { Textarea } from '@/components/ui/textarea';
-import { Send } from 'lucide-react';
+import { Send, Plus } from 'lucide-react';
+import { Dropdown, DropdownItem, DropdownMenu, DropdownTrigger } from '@heroui/react';
 import clsx from 'clsx';
 
 interface TextareaWithSendProps extends Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'onChange'> {
@@ -11,6 +12,9 @@ interface TextareaWithSendProps extends Omit<TextareaHTMLAttributes<HTMLTextArea
   onSubmit: () => void;
   isSubmitting?: boolean;
   submitDisabled?: boolean;
+  onImportJson?: () => void;
+  importDisabled?: boolean;
+  isImporting?: boolean;
   placeholder?: string;
   className?: string;
   rows?: number;
@@ -25,6 +29,9 @@ export const TextareaWithSend = forwardRef<HTMLTextAreaElement, TextareaWithSend
     onSubmit, 
     isSubmitting = false, 
     submitDisabled = false,
+    onImportJson,
+    importDisabled = false,
+    isImporting = false,
     placeholder,
     className,
     rows = 3,
@@ -32,6 +39,7 @@ export const TextareaWithSend = forwardRef<HTMLTextAreaElement, TextareaWithSend
     autoResize = false,
     ...props 
   }, ref) => {
+    const hasMore = Boolean(onImportJson);
     return (
       <div className="relative">
         <Textarea
@@ -39,7 +47,11 @@ export const TextareaWithSend = forwardRef<HTMLTextAreaElement, TextareaWithSend
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className={clsx("pr-14", className)}
+          className={clsx(
+            // Extra right padding for kebab + send controls
+            hasMore ? "pr-24" : "pr-14",
+            className
+          )}
           rows={rows}
           autoFocus={autoFocus}
           autoResize={autoResize}
@@ -51,7 +63,35 @@ export const TextareaWithSend = forwardRef<HTMLTextAreaElement, TextareaWithSend
           }}
           {...props}
         />
-        <div className="absolute right-3 bottom-3">
+        <div className="absolute right-3 bottom-3 flex items-center gap-2">
+          {hasMore && (
+            <Dropdown>
+              <DropdownTrigger>
+                <button
+                  className={clsx(
+                    "rounded-full p-2 transition-all duration-200",
+                    "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:scale-105 active:scale-95 hover:bg-gray-200 dark:hover:bg-gray-700"
+                  )}
+                  aria-label="Add"
+                  title="Add"
+                >
+                  <Plus size={18} />
+                </button>
+              </DropdownTrigger>
+              <DropdownMenu
+                aria-label="More actions"
+                onAction={(key) => {
+                  if (key === 'import-json' && onImportJson) {
+                    onImportJson();
+                  }
+                }}
+              >
+                <DropdownItem key="import-json" isDisabled={importDisabled || isImporting}>
+                  {isImporting ? 'Importing Assistant (JSON)…' : 'Import Assistant (JSON)'}
+                </DropdownItem>
+              </DropdownMenu>
+            </Dropdown>
+          )}
           <button
             onClick={onSubmit}
             disabled={isSubmitting || submitDisabled || !value.trim()}
@@ -62,6 +102,8 @@ export const TextareaWithSend = forwardRef<HTMLTextAreaElement, TextareaWithSend
                 : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500",
               isSubmitting ? "opacity-50" : "hover:scale-105 active:scale-95"
             )}
+            aria-label="Send"
+            title="Send"
           >
             {isSubmitting ? (
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
