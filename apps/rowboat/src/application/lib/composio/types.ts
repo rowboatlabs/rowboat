@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+// NOTE: Some API responses may use the alias 'SERVICE_ACCOUNT'.
+// Include it here for compatibility alongside the canonical 'GOOGLE_SERVICE_ACCOUNT'.
 export const ZAuthScheme = z.enum([
     'API_KEY',
     'BASIC',
@@ -8,6 +10,7 @@ export const ZAuthScheme = z.enum([
     'BILLCOM_AUTH',
     'CALCOM_AUTH',
     'COMPOSIO_LINK',
+    'SERVICE_ACCOUNT',
     'GOOGLE_SERVICE_ACCOUNT',
     'NO_AUTH',
     'OAUTH1',
