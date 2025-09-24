@@ -21,7 +21,7 @@ export const CopilotAssistantMessageTextPart = z.object({
 export const CopilotAssistantMessageActionPart = z.object({
     type: z.literal("action"),
     content: z.object({
-        config_type: z.enum(['tool', 'agent', 'prompt', 'pipeline', 'start_agent']),
+        config_type: z.enum(['tool', 'agent', 'prompt', 'pipeline', 'start_agent', 'one_time_trigger', 'recurring_trigger']),
         action: z.enum(['create_new', 'edit', 'delete']),
         name: z.string(),
         change_description: z.string(),

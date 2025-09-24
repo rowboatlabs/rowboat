@@ -211,7 +211,7 @@ export function Action({
                     {action.config_type === 'tool' && toolkitLogo ? (
                         <PictureImg src={toolkitLogo} alt={"Toolkit logo"} className="h-5 w-5 object-contain" />
                     ) : (
-                        action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : action.config_type === 'start_agent' ? '🏁' : action.config_type === 'prompt' ? '💬' : '💬'
+                        action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : action.config_type === 'start_agent' ? '🏁' : action.config_type === 'prompt' ? '💬' : action.config_type === 'one_time_trigger' ? '⏰' : action.config_type === 'recurring_trigger' ? '🔄' : '💬'
                     )}
                 </span>
                 <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 truncate flex-1">
@@ -379,7 +379,7 @@ export function StreamingAction({
 }: {
     action: {
         action?: 'create_new' | 'edit' | 'delete';
-        config_type?: 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent';
+        config_type?: 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent' | 'one_time_trigger' | 'recurring_trigger';
         name?: string;
     };
     loading: boolean;
@@ -418,7 +418,7 @@ export function StreamingAction({
                         'bg-gray-200 text-gray-600': !action.action,
                     }
                 )}>
-                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : action.config_type === 'start_agent' ? '🏁' : '💬'}
+                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : action.config_type === 'start_agent' ? '🏁' : action.config_type === 'one_time_trigger' ? '⏰' : action.config_type === 'recurring_trigger' ? '🔄' : '💬'}
                 </span>
                 <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 truncate flex-1">
                     {action.action === 'create_new' ? 'Add' : action.action === 'edit' ? 'Edit' : 'Delete'} {action.config_type}: {action.name}

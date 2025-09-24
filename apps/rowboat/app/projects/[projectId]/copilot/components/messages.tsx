@@ -71,7 +71,7 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
                     type: 'action',
                     action: {
                         action: metadata.action as 'create_new' | 'edit' | 'delete',
-                        config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent',
+                        config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent' | 'one_time_trigger' | 'recurring_trigger',
                         name: metadata.name,
                         change_description: jsonData.change_description || '',
                         config_changes: {},
@@ -84,7 +84,7 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
                 type: 'action',
                 action: {
                     action: metadata.action as 'create_new' | 'edit' | 'delete',
-                    config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent',
+                    config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent' | 'one_time_trigger' | 'recurring_trigger',
                     name: metadata.name,
                     change_description: jsonData.change_description || '',
                     config_changes: result.changes
@@ -100,7 +100,7 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
         type: 'streaming_action',
         action: {
             action: (metadata.action as 'create_new' | 'edit' | 'delete') || undefined,
-            config_type: (metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent') || undefined,
+            config_type: (metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent' | 'one_time_trigger' | 'recurring_trigger') || undefined,
             name: metadata.name
         }
     };
@@ -256,6 +256,26 @@ function AssistantMessage({
                     dispatch({
                         type: 'add_pipeline',
                         pipeline: {
+                            name: action.name,
+                            ...action.config_changes
+                        },
+                        fromCopilot: true
+                    });
+                    break;
+                case 'one_time_trigger':
+                    dispatch({
+                        type: 'add_one_time_trigger',
+                        trigger: {
+                            name: action.name,
+                            ...action.config_changes
+                        },
+                        fromCopilot: true
+                    });
+                    break;
+                case 'recurring_trigger':
+                    dispatch({
+                        type: 'add_recurring_trigger',
+                        trigger: {
                             name: action.name,
                             ...action.config_changes
                         },
