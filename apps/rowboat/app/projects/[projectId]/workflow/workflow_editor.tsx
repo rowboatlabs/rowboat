@@ -103,15 +103,6 @@ interface StateItem {
     lastUpdatedAt: string;
     isLive: boolean;
     agentInstructionsChanged: boolean;
-    pendingTriggers?: Array<{
-        type: 'one_time' | 'recurring';
-        name: string;
-        scheduledTime?: string;
-        cron?: string;
-        input: {
-            messages: z.infer<typeof Message>[];
-        };
-    }>;
 }
 
 interface State {
@@ -153,28 +144,6 @@ export type Action = {
     pipeline: Partial<z.infer<typeof WorkflowPipeline>>;
     defaultModel?: string;
     fromCopilot?: boolean;
-} | {
-    type: "add_one_time_trigger";
-    trigger: {
-        name: string;
-        scheduledTime: string;
-        input: {
-            messages: z.infer<typeof Message>[];
-        };
-    };
-    fromCopilot?: boolean;
-} | {
-    type: "add_recurring_trigger";
-    trigger: {
-        name: string;
-        cron: string;
-        input: {
-            messages: z.infer<typeof Message>[];
-        };
-    };
-    fromCopilot?: boolean;
-} | {
-    type: "clear_pending_triggers";
 } | {
     type: "select_agent";
     name: string;
@@ -616,30 +585,6 @@ function reducer(state: State, action: Action): State {
                             
                             draft.pendingChanges = true;
                             draft.chatKey++;
-                            break;
-                        }
-                        case "add_one_time_trigger": {
-                            // Mark that we need to create a trigger - the actual API call will be handled outside the reducer
-                            draft.pendingTriggers = draft.pendingTriggers || [];
-                            draft.pendingTriggers.push({
-                                type: 'one_time',
-                                ...action.trigger
-                            });
-                            draft.pendingChanges = true;
-                            break;
-                        }
-                        case "add_recurring_trigger": {
-                            // Mark that we need to create a trigger - the actual API call will be handled outside the reducer
-                            draft.pendingTriggers = draft.pendingTriggers || [];
-                            draft.pendingTriggers.push({
-                                type: 'recurring',
-                                ...action.trigger
-                            });
-                            draft.pendingChanges = true;
-                            break;
-                        }
-                        case "clear_pending_triggers": {
-                            draft.pendingTriggers = [];
                             break;
                         }
                         case "delete_agent":
@@ -1369,38 +1314,6 @@ export function WorkflowEditor({
             markAgentInstructionsChanged();
         }
     }, [state.present.agentInstructionsChanged, markAgentInstructionsChanged]);
-
-    // Handle pending trigger creation
-    useEffect(() => {
-        if (state.present.pendingTriggers && state.present.pendingTriggers.length > 0) {
-            const processTriggers = async () => {
-                for (const trigger of state.present.pendingTriggers!) {
-                    try {
-                        if (trigger.type === 'one_time') {
-                            const { createScheduledJobRule } = await import('@/app/actions/scheduled-job-rules.actions');
-                            await createScheduledJobRule({
-                                projectId,
-                                input: trigger.input,
-                                scheduledTime: trigger.scheduledTime!
-                            });
-                        } else if (trigger.type === 'recurring') {
-                            const { createRecurringJobRule } = await import('@/app/actions/recurring-job-rules.actions');
-                            await createRecurringJobRule({
-                                projectId,
-                                input: trigger.input,
-                                cron: trigger.cron!
-                            });
-                        }
-                    } catch (error) {
-                        console.error(`Failed to create ${trigger.type} trigger:`, error);
-                    }
-                }
-                // Clear pending triggers after processing
-                dispatch({ type: "clear_pending_triggers" });
-            };
-            processTriggers();
-        }
-    }, [state.present.pendingTriggers, projectId]);
 
     function handleSelectAgent(name: string) {
         dispatch({ type: "select_agent", name });
