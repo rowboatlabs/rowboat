@@ -11,6 +11,26 @@ import { useParsedBlocks } from "../use-parsed-blocks";
 import { validateConfigChanges } from "@/app/lib/client_utils";
 import { PreviewModalProvider } from '../../workflow/preview-modal';
 
+type ScheduledJobActionsModule = typeof import('@/app/actions/scheduled-job-rules.actions');
+type RecurringJobActionsModule = typeof import('@/app/actions/recurring-job-rules.actions');
+
+let scheduledJobActionsPromise: Promise<ScheduledJobActionsModule> | null = null;
+let recurringJobActionsPromise: Promise<RecurringJobActionsModule> | null = null;
+
+function loadScheduledJobActions(): Promise<ScheduledJobActionsModule> {
+    if (!scheduledJobActionsPromise) {
+        scheduledJobActionsPromise = import('@/app/actions/scheduled-job-rules.actions');
+    }
+    return scheduledJobActionsPromise;
+}
+
+function loadRecurringJobActions(): Promise<RecurringJobActionsModule> {
+    if (!recurringJobActionsPromise) {
+        recurringJobActionsPromise = import('@/app/actions/recurring-job-rules.actions');
+    }
+    return recurringJobActionsPromise;
+}
+
 const CopilotResponsePart = z.union([
     z.object({
         type: z.literal('text'),
@@ -210,11 +230,10 @@ function AssistantMessage({
     const allApplied = pendingCount === 0 && totalActions > 0;
 
     // Memoized applyAction for useCallback dependencies
-    const applyAction = useCallback(async (action: any, actionIndex: number): Promise<boolean> => {
+    const applyAction = useCallback((action: any): boolean => {
         if (action.action === 'create_new') {
             switch (action.config_type) {
                 case 'agent': {
-                    // Prevent duplicate agent names
                     if (workflow.agents.some((agent: any) => agent.name === action.name)) {
                         return false;
                     }
@@ -229,7 +248,6 @@ function AssistantMessage({
                     return true;
                 }
                 case 'tool': {
-                    // Prevent duplicate tool names
                     if (workflow.tools.some((tool: any) => tool.name === action.name)) {
                         return false;
                     }
@@ -263,44 +281,6 @@ function AssistantMessage({
                         fromCopilot: true
                     });
                     return true;
-                case 'one_time_trigger': {
-                    const { scheduledTime, input } = action.config_changes || {};
-                    if (!scheduledTime || !input) {
-                        console.error('Missing scheduledTime or input for one-time trigger', action);
-                        return false;
-                    }
-                    try {
-                        const { createScheduledJobRule } = await import('@/app/actions/scheduled-job-rules.actions');
-                        await createScheduledJobRule({
-                            projectId,
-                            scheduledTime,
-                            input,
-                        });
-                        return true;
-                    } catch (error) {
-                        console.error('Failed to create one-time trigger', error);
-                        return false;
-                    }
-                }
-                case 'recurring_trigger': {
-                    const { cron, input } = action.config_changes || {};
-                    if (!cron || !input) {
-                        console.error('Missing cron or input for recurring trigger', action);
-                        return false;
-                    }
-                    try {
-                        const { createRecurringJobRule } = await import('@/app/actions/recurring-job-rules.actions');
-                        await createRecurringJobRule({
-                            projectId,
-                            cron,
-                            input,
-                        });
-                        return true;
-                    } catch (error) {
-                        console.error('Failed to create recurring trigger', error);
-                        return false;
-                    }
-                }
             }
         } else if (action.action === 'edit') {
             switch (action.config_type) {
@@ -368,26 +348,77 @@ function AssistantMessage({
             }
         }
 
-        console.warn('Unhandled action from Copilot applyAction', action, actionIndex);
+        console.warn('Unhandled action from Copilot applyAction', action);
         return false;
-    }, [dispatch, projectId, workflow.agents, workflow.tools]);
+    }, [dispatch, workflow.agents, workflow.tools]);
+
+    const handleTriggerAction = useCallback(async (action: any): Promise<boolean> => {
+        if (action.action !== 'create_new') {
+            return false;
+        }
+
+        if (action.config_type === 'one_time_trigger') {
+            const { scheduledTime, input } = action.config_changes || {};
+            if (!scheduledTime || !input) {
+                console.error('Missing scheduledTime or input for one-time trigger', action);
+                return false;
+            }
+            try {
+                const { createScheduledJobRule } = await loadScheduledJobActions();
+                await createScheduledJobRule({
+                    projectId,
+                    scheduledTime,
+                    input,
+                });
+                return true;
+            } catch (error) {
+                console.error('Failed to create one-time trigger', error);
+                return false;
+            }
+        }
+
+        if (action.config_type === 'recurring_trigger') {
+            const { cron, input } = action.config_changes || {};
+            if (!cron || !input) {
+                console.error('Missing cron or input for recurring trigger', action);
+                return false;
+            }
+            try {
+                const { createRecurringJobRule } = await loadRecurringJobActions();
+                await createRecurringJobRule({
+                    projectId,
+                    cron,
+                    input,
+                });
+                return true;
+            } catch (error) {
+                console.error('Failed to create recurring trigger', error);
+                return false;
+            }
+        }
+
+        console.warn('Unhandled trigger action from Copilot applyAction', action);
+        return false;
+    }, [projectId]);
 
     // Memoized handleApplyAll for useEffect dependencies
     const handleApplyAll = useCallback(async () => {
-        const unapplied = parsed
-            .map((part, idx) => ({ part, actionIndex: idx }))
-            .filter(({ part, actionIndex }) => part.type === 'action' && !appliedActions.has(actionIndex))
-            .map(({ part, actionIndex }) => ({
-                action: part.type === 'action' ? part.action : null,
-                actionIndex,
-            }))
-            .filter(({ action }) => action !== null);
+        const unapplied = parsed.reduce<Array<{ action: z.infer<typeof CopilotAssistantMessageActionPart>['content']; actionIndex: number }>>((acc, part, idx) => {
+            if (part.type === 'action' && !appliedActions.has(idx)) {
+                acc.push({ action: part.action, actionIndex: idx });
+            }
+            return acc;
+        }, []);
 
         const newlyApplied: number[] = [];
 
         for (const { action, actionIndex } of unapplied) {
             try {
-                const success = await applyAction(action, actionIndex);
+                const isTrigger = action.config_type === 'one_time_trigger' || action.config_type === 'recurring_trigger';
+                const success = isTrigger
+                    ? await handleTriggerAction(action)
+                    : applyAction(action);
+
                 if (success) {
                     newlyApplied.push(actionIndex);
                 }
@@ -403,23 +434,27 @@ function AssistantMessage({
                 return next;
             });
         }
-    }, [parsed, appliedActions, applyAction]);
+    }, [parsed, appliedActions, applyAction, handleTriggerAction]);
 
     // Manual single apply (from card)
-    const handleSingleApply = useCallback(async (action: any, actionIndex: number) => {
+    const handleSingleApply = useCallback(async (action: z.infer<typeof CopilotAssistantMessageActionPart>['content'], actionIndex: number) => {
         if (appliedActions.has(actionIndex)) {
             return;
         }
 
         try {
-            const success = await applyAction(action, actionIndex);
+            const isTrigger = action.config_type === 'one_time_trigger' || action.config_type === 'recurring_trigger';
+            const success = isTrigger
+                ? await handleTriggerAction(action)
+                : applyAction(action);
+
             if (success) {
                 setAppliedActions(prev => new Set([...prev, actionIndex]));
             }
         } catch (error) {
             console.error('Failed to apply Copilot action', action, error);
         }
-    }, [appliedActions, applyAction]);
+    }, [appliedActions, applyAction, handleTriggerAction]);
 
     useEffect(() => {
         if (loading) {
