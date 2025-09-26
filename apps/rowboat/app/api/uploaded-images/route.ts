@@ -3,10 +3,9 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { tempBinaryCache } from '@/src/application/services/temp-binary-cache';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { UsageTracker } from '@/app/lib/billing';
-import { logUsage } from '@/app/actions/billing.actions';
+import { UsageTracker, getCustomerForUserId, logUsage as libLogUsage } from '@/app/lib/billing';
 import { authCheck } from '@/app/actions/auth.actions';
-import { USE_AUTH } from '@/app/lib/feature_flags';
+import { USE_AUTH, USE_BILLING } from '@/app/lib/feature_flags';
 
 // POST /api/uploaded-images
 // Accepts an image file (multipart/form-data, field name: "file")
@@ -15,9 +14,10 @@ import { USE_AUTH } from '@/app/lib/feature_flags';
 export async function POST(request: NextRequest) {
   try {
     // Require authentication if enabled
+    let currentUser: any | null = null;
     try {
       if (USE_AUTH) {
-        await authCheck();
+        currentUser = await authCheck();
       }
     } catch (_) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -101,11 +101,16 @@ export async function POST(request: NextRequest) {
 
       const url = `/api/uploaded-images/${imageId}`;
 
-      // Log usage to billing if available
+      // Log usage to billing similar to rag-worker
       try {
-        const items = usageTracker.flush();
-        if (items.length > 0) {
-          await logUsage({ items });
+        if (USE_BILLING && currentUser) {
+          const customer = await getCustomerForUserId(currentUser.id);
+          if (customer) {
+            const items = usageTracker.flush();
+            if (items.length > 0) {
+              await libLogUsage(customer.id, { items });
+            }
+          }
         }
       } catch (_) {
         // ignore billing logging errors
@@ -118,11 +123,16 @@ export async function POST(request: NextRequest) {
     const ttlSec = 10 * 60; // 10 minutes
     const id = tempBinaryCache.put(buf, mime, ttlSec * 1000);
     const url = `/api/tmp-images/${id}`;
-    // Log usage to billing if available
+    // Log usage to billing similar to rag-worker
     try {
-      const items = usageTracker.flush();
-      if (items.length > 0) {
-        await logUsage({ items });
+      if (USE_BILLING && currentUser) {
+        const customer = await getCustomerForUserId(currentUser.id);
+        if (customer) {
+          const items = usageTracker.flush();
+          if (items.length > 0) {
+            await libLogUsage(customer.id, { items });
+          }
+        }
       }
     } catch (_) {
       // ignore billing logging errors
