@@ -29,31 +29,16 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     } as any : undefined,
   });
 
-  // Reconstruct directory sharding from last two characters of UUID
-  const last2 = id.slice(-2).padStart(2, '0');
+  // Expect id to include extension (e.g., "<uuid>.png")
+  const lastDot = id.lastIndexOf('.');
+  const idWithoutExt = lastDot > 0 ? id.slice(0, lastDot) : id;
+  const filename = id;
+
+  // Reconstruct directory sharding from last two characters of UUID (without extension)
+  const last2 = idWithoutExt.slice(-2).padStart(2, '0');
   const dirA = last2.charAt(0);
   const dirB = last2.charAt(1);
-  const baseKey = `uploaded_images/${dirA}/${dirB}/${id}`;
-
-  // Try known extensions in order
-  const exts = ['.png', '.jpg', '.webp', '.bin'];
-  let foundExt: string | null = null;
-  for (const ext of exts) {
-    try {
-      await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: `${baseKey}${ext}` }));
-      foundExt = ext;
-      break;
-    } catch {
-      // continue
-    }
-  }
-
-  if (!foundExt) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
-
-  const key = `${baseKey}${foundExt}`;
-  const filename = `${id}${foundExt}`;
+  const key = `uploaded_images/${dirA}/${dirB}/${id}`;
   try {
     const resp = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
     const contentType = resp.ContentType || 'application/octet-stream';
