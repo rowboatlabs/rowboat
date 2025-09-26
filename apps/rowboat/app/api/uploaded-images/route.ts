@@ -5,6 +5,8 @@ import { tempBinaryCache } from '@/src/application/services/temp-binary-cache';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { UsageTracker } from '@/app/lib/billing';
 import { logUsage } from '@/app/actions/billing.actions';
+import { authCheck } from '@/app/actions/auth.actions';
+import { USE_AUTH } from '@/app/lib/feature_flags';
 
 // POST /api/uploaded-images
 // Accepts an image file (multipart/form-data, field name: "file")
@@ -12,6 +14,15 @@ import { logUsage } from '@/app/actions/billing.actions';
 // or in the in-memory temp cache. Returns a JSON with a URL that the agent can fetch.
 export async function POST(request: NextRequest) {
   try {
+    // Require authentication if enabled
+    try {
+      if (USE_AUTH) {
+        await authCheck();
+      }
+    } catch (_) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const contentType = request.headers.get('content-type') || '';
     if (!contentType.includes('multipart/form-data')) {
       return NextResponse.json({ error: 'Expected multipart/form-data' }, { status: 400 });

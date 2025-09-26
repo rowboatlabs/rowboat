@@ -2,9 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import crypto from 'crypto';
+import { authCheck } from '@/app/actions/auth.actions';
+import { USE_AUTH } from '@/app/lib/feature_flags';
 
 export async function POST(request: NextRequest) {
   try {
+    // Require authentication if enabled
+    try {
+      if (USE_AUTH) {
+        await authCheck();
+      }
+    } catch (_) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const bucket = process.env.RAG_UPLOADS_S3_BUCKET || '';
     if (!bucket) {
       return NextResponse.json({ error: 'S3 bucket not configured' }, { status: 500 });
@@ -44,4 +55,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to create upload URL' }, { status: 500 });
   }
 }
-

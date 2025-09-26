@@ -3,9 +3,20 @@ import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { UsageTracker } from '@/app/lib/billing';
 import { logUsage } from '@/app/actions/billing.actions';
+import { authCheck } from '@/app/actions/auth.actions';
+import { USE_AUTH } from '@/app/lib/feature_flags';
 
 export async function POST(request: NextRequest) {
   try {
+    // Require authentication if enabled
+    try {
+      if (USE_AUTH) {
+        await authCheck();
+      }
+    } catch (_) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await request.json();
     if (!id || typeof id !== 'string') {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
