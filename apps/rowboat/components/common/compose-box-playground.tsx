@@ -112,19 +112,14 @@ export function ComposeBoxPlayground({
                 }
 
                 // 4) Ask server to generate description from S3 image
-                const descRes = await fetch('/api/uploaded-images/describe', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: imageId }),
-                    signal: controller.signal,
-                });
-                if (descRes.ok) {
-                    const descData = await descRes.json();
+                try {
+                    const { describeUploadedImage } = await import('@/app/actions/uploaded-images.actions');
+                    const descData = await describeUploadedImage(imageId);
                     const description: string | null = descData?.description ?? null;
                     if (uploadAbortRef.current === controller) {
                         setPendingImage({ url: imageUrl, previewSrc, mimeType: file.type, description });
                     }
-                } else {
+                } catch {
                     // If description fails, still allow sending
                     if (uploadAbortRef.current === controller) {
                         setPendingImage({ url: imageUrl, previewSrc, mimeType: file.type, description: null });
