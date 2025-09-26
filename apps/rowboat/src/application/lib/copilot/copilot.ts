@@ -96,6 +96,10 @@ ${JSON.stringify(simplifiedDataSources)}
     return prompt;
 }
 
+function getCurrentTimePrompt(): string {
+    return `**CURRENT TIME**: ${new Date().toISOString()}`;
+}
+
 async function searchRelevantTools(usageTracker: UsageTracker, query: string): Promise<string> {
     const logger = new PrefixLogger("copilot-search-tools");
     console.log("🔧 TOOL CALL: searchRelevantTools", { query });
@@ -184,10 +188,11 @@ function updateLastUserMessage(
     currentWorkflowPrompt: string,
     contextPrompt: string,
     dataSourcesPrompt: string = '',
+    timePrompt: string = '',
 ): void {
     const lastMessage = messages[messages.length - 1];
     if (lastMessage.role === 'user') {
-        lastMessage.content = `${currentWorkflowPrompt}\n\n${contextPrompt}\n\n${dataSourcesPrompt}\n\nUser: ${JSON.stringify(lastMessage.content)}`;
+        lastMessage.content = `${currentWorkflowPrompt}\n\n${contextPrompt}\n\n${dataSourcesPrompt}\n\n${timePrompt}\n\nUser: ${JSON.stringify(lastMessage.content)}`;
     }
 }
 
@@ -208,8 +213,11 @@ export async function getEditAgentInstructionsResponse(
     // set context prompt
     let contextPrompt = getContextPrompt(context);
 
+    // set time prompt
+    let timePrompt = getCurrentTimePrompt();
+
     // add the above prompts to the last user message
-    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt);
+    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, '', timePrompt);
 
     // call model
     console.log("calling model", JSON.stringify({
@@ -271,8 +279,11 @@ export async function* streamMultiAgentResponse(
     // set data sources prompt
     let dataSourcesPrompt = getDataSourcesPrompt(dataSources);
 
+    // set time prompt
+    let timePrompt = getCurrentTimePrompt();
+
     // add the above prompts to the last user message
-    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, dataSourcesPrompt);
+    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, dataSourcesPrompt, timePrompt);
 
     // call model
     console.log("🤖 AI MODEL CALL STARTED", {
