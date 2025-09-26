@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import crypto from 'crypto';
+import { requireAuth } from '@/app/lib/auth';
 import { tempBinaryCache } from '@/src/application/services/temp-binary-cache';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { UsageTracker, getCustomerForUserId, logUsage as libLogUsage } from '@/app/lib/billing';
-import { requireAuth } from '@/app/lib/auth';
 import { USE_AUTH, USE_BILLING } from '@/app/lib/feature_flags';
 
-// POST /api/uploaded-images
+// POST /api/tmp-images/upload
 // Accepts an image file (multipart/form-data, field name: "file")
-// Stores it either in S3 (if configured) under uploaded_images/<a>/<b>/<uuid>.<ext>
-// or in the in-memory temp cache. Returns a JSON with a URL that the agent can fetch.
+// Stores it in the in-memory temp cache and returns a temporary URL.
 export async function POST(request: NextRequest) {
   try {
     // Require authentication if enabled
@@ -18,7 +15,7 @@ export async function POST(request: NextRequest) {
     if (USE_AUTH) {
       try {
         currentUser = await requireAuth();
-      } catch (_) {
+      } catch {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
     }
@@ -54,7 +51,7 @@ export async function POST(request: NextRequest) {
         const response: any = result.response as any;
         descriptionMarkdown = response?.text?.() || null;
 
-        // Track usage similar to agents-runtime
+        // Track usage similar to rag-worker
         try {
           const inputTokens = response?.usageMetadata?.promptTokenCount || 0;
           const outputTokens = response?.usageMetadata?.candidatesTokenCount || 0;
@@ -63,9 +60,9 @@ export async function POST(request: NextRequest) {
             modelName: 'gemini-2.5-flash',
             inputTokens,
             outputTokens,
-            context: 'uploaded_images.upload_with_description',
+            context: 'tmp_images.upload_with_description',
           });
-        } catch (_) {
+        } catch {
           // ignore usage tracking errors
         }
       }
@@ -73,56 +70,11 @@ export async function POST(request: NextRequest) {
       console.warn('Gemini description failed', e);
     }
 
-    // If S3 configured, upload there
-    const s3Bucket = process.env.RAG_UPLOADS_S3_BUCKET || '';
-    if (s3Bucket) {
-      const s3Region = process.env.RAG_UPLOADS_S3_REGION || 'us-east-1';
-      const s3 = new S3Client({
-        region: s3Region,
-        credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? {
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID as string,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY as string,
-        } : undefined,
-      });
-
-      const ext = mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : mime === 'image/png' ? '.png' : '.bin';
-      const imageId = crypto.randomUUID();
-      const last2 = imageId.slice(-2).padStart(2, '0');
-      const dirA = last2.charAt(0);
-      const dirB = last2.charAt(1);
-      const key = `uploaded_images/${dirA}/${dirB}/${imageId}${ext}`;
-
-      await s3.send(new PutObjectCommand({
-        Bucket: s3Bucket,
-        Key: key,
-        Body: buf,
-        ContentType: mime,
-      }));
-
-      const url = `/api/uploaded-images/${imageId}${ext}`;
-
-      // Log usage to billing similar to rag-worker
-      try {
-        if (USE_BILLING && currentUser) {
-          const customer = await getCustomerForUserId(currentUser.id);
-          if (customer) {
-            const items = usageTracker.flush();
-            if (items.length > 0) {
-              await libLogUsage(customer.id, { items });
-            }
-          }
-        }
-      } catch (_) {
-        // ignore billing logging errors
-      }
-
-      return NextResponse.json({ url, storage: 's3', id: `${imageId}${ext}`, mimeType: mime, description: descriptionMarkdown });
-    }
-
-    // Otherwise store in temp cache and return temp URL
+    // Store in temp cache and return temp URL
     const ttlSec = 10 * 60; // 10 minutes
     const id = tempBinaryCache.put(buf, mime, ttlSec * 1000);
     const url = `/api/tmp-images/${id}`;
+
     // Log usage to billing similar to rag-worker
     try {
       if (USE_BILLING && currentUser) {
@@ -134,13 +86,14 @@ export async function POST(request: NextRequest) {
           }
         }
       }
-    } catch (_) {
+    } catch {
       // ignore billing logging errors
     }
 
     return NextResponse.json({ url, storage: 'temp', id, mimeType: mime, expiresInSec: ttlSec, description: descriptionMarkdown });
   } catch (e) {
-    console.error('upload image error', e);
+    console.error('tmp image upload error', e);
     return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
   }
 }
+

@@ -87,7 +87,6 @@ export function ComposeBoxPlayground({
             }
             const controller = new AbortController();
             uploadAbortRef.current = controller;
-            let usedFallback = false;
             try {
                 // 1) Request a presigned S3 upload URL via server action
                 const { getUploadUrlForImage } = await import('@/app/actions/uploaded-images.actions');
@@ -126,12 +125,11 @@ export function ComposeBoxPlayground({
                     }
                 }
             } catch (err: any) {
-                // On local, S3 may be unconfigured. Fallback to legacy temp upload endpoint.
                 if (err?.name === 'AbortError') throw err;
-                usedFallback = true;
+                // Fallback to temp in-memory upload for local/dev without S3
                 const form = new FormData();
                 form.append('file', file);
-                const res = await fetch('/api/uploaded-images', {
+                const res = await fetch('/api/tmp-images/upload', {
                     method: 'POST',
                     body: form,
                     signal: controller.signal,

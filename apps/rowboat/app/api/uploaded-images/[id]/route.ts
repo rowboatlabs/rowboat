@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
 import { requireAuth } from '@/app/lib/auth';
 
-// Serves uploaded images from S3 by UUID-only path: /api/uploaded-images/{id}
+// Serves uploaded images from S3 at path: /api/uploaded-images/{uuid}.{ext}
 // Reconstructs the S3 key using the same sharding logic as image upload.
 export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   // Require authentication (handles guest mode internally when USE_AUTH is disabled)
