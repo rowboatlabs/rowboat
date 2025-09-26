@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
-import { authCheck } from '@/app/actions/auth.actions';
-import { USE_AUTH } from '@/app/lib/feature_flags';
+import { requireAuth } from '@/app/lib/auth';
 
 // Serves uploaded images from S3 by UUID-only path: /api/uploaded-images/{id}
 // Reconstructs the S3 key using the same sharding logic as image upload.
 export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
-  // Require authentication if enabled
-  try {
-    if (USE_AUTH) {
-      await authCheck();
-    }
-  } catch (_) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  // Require authentication (handles guest mode internally when USE_AUTH is disabled)
+  await requireAuth();
 
   const params = await props.params;
   const id = params.id;
