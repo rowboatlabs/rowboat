@@ -1,21 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { UsageTracker } from '@/app/lib/billing';
 import { logUsage } from '@/app/actions/billing.actions';
-import { authCheck } from '@/app/actions/auth.actions';
-import { USE_AUTH } from '@/app/lib/feature_flags';
+import { requireAuth } from '@/app/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
-    // Require authentication if enabled
-    try {
-      if (USE_AUTH) {
-        await authCheck();
-      }
-    } catch (_) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    // Require authentication (handles guest mode internally when auth disabled)
+    await requireAuth();
 
     const { id } = await request.json();
     if (!id || typeof id !== 'string') {
@@ -36,23 +29,13 @@ export async function POST(request: NextRequest) {
       } : undefined,
     });
 
-    const last2 = id.slice(-2).padStart(2, '0');
+    // `id` includes extension (e.g., "<uuid>.png"). Shard using the UUID part.
+    const lastDot = id.lastIndexOf('.');
+    const idWithoutExt = lastDot > 0 ? id.slice(0, lastDot) : id;
+    const last2 = idWithoutExt.slice(-2).padStart(2, '0');
     const dirA = last2.charAt(0);
     const dirB = last2.charAt(1);
-    const baseKey = `uploaded_images/${dirA}/${dirB}/${id}`;
-    const exts = ['.png', '.jpg', '.webp', '.bin'];
-    let foundExt: string | null = null;
-    for (const ext of exts) {
-      try {
-        await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: `${baseKey}${ext}` }));
-        foundExt = ext; break;
-      } catch {}
-    }
-    if (!foundExt) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    }
-
-    const key = `${baseKey}${foundExt}`;
+    const key = `uploaded_images/${dirA}/${dirB}/${id}`;
     const resp = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
     const contentType = resp.ContentType || 'application/octet-stream';
     const body = resp.Body as any;

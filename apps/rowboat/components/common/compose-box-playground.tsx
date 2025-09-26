@@ -89,18 +89,12 @@ export function ComposeBoxPlayground({
             uploadAbortRef.current = controller;
             let usedFallback = false;
             try {
-                // 1) Request a presigned S3 upload URL
-                const urlRes = await fetch('/api/uploaded-images/upload-url', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mimeType: file.type }),
-                    signal: controller.signal,
-                });
-                if (!urlRes.ok) throw new Error(`Failed to get upload URL: ${urlRes.status}`);
-                const urlData = await urlRes.json();
+                // 1) Request a presigned S3 upload URL via server action
+                const { getUploadUrlForImage } = await import('@/app/actions/uploaded-images.actions');
+                const urlData = await getUploadUrlForImage(file.type);
                 const uploadUrl: string | undefined = urlData?.uploadUrl;
-                const imageId: string | undefined = urlData?.id;
-                const imageUrl: string | undefined = urlData?.url;
+                const imageId: string | undefined = urlData?.id; // includes extension
+                const imageUrl: string | undefined = urlData?.url; // points to /api/uploaded-images/<idWithExt>
                 if (!uploadUrl || !imageId || !imageUrl) throw new Error('Invalid upload URL response');
 
                 // 2) Upload the file directly to S3

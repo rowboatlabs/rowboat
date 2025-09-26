@@ -90,34 +90,26 @@ export async function invokeGenerateImageTool(
                             secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
                         } as any : undefined,
                     });
-                    const id = inputImageUrl.split('/api/uploaded-images/')[1];
-                    const last2 = id.slice(-2).padStart(2, '0');
+                    const idWithExt = inputImageUrl.split('/api/uploaded-images/')[1];
+                    // Shard by the UUID portion (before extension)
+                    const lastDot = idWithExt.lastIndexOf('.');
+                    const idWithoutExt = lastDot > 0 ? idWithExt.slice(0, lastDot) : idWithExt;
+                    const last2 = idWithoutExt.slice(-2).padStart(2, '0');
                     const dirA = last2.charAt(0);
                     const dirB = last2.charAt(1);
-                    const baseKey = `uploaded_images/${dirA}/${dirB}/${id}`;
-                    const exts = ['.png', '.jpg', '.webp', '.bin'];
-                    let foundExt: string | null = null;
-                    for (const ext of exts) {
-                        try {
-                            await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: `${baseKey}${ext}` }));
-                            foundExt = ext; break;
-                        } catch {}
-                    }
-                    if (foundExt) {
-                        const key = `${baseKey}${foundExt}`;
-                        const resp = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-                        const chunks: Buffer[] = [];
-                        const body = resp.Body as any;
-                        const nodeStream = typeof body?.pipe === 'function' ? body : undefined;
-                        if (nodeStream) {
-                            imageMime = resp.ContentType || imageMime;
-                            await new Promise<void>((resolve, reject) => {
-                                nodeStream.on('data', (c: Buffer) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
-                                nodeStream.on('end', () => resolve());
-                                nodeStream.on('error', reject);
-                            });
-                            imageBuf = Buffer.concat(chunks);
-                        }
+                    const key = `uploaded_images/${dirA}/${dirB}/${idWithExt}`;
+                    const resp = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+                    const chunks: Buffer[] = [];
+                    const body = resp.Body as any;
+                    const nodeStream = typeof body?.pipe === 'function' ? body : undefined;
+                    if (nodeStream) {
+                        imageMime = resp.ContentType || imageMime;
+                        await new Promise<void>((resolve, reject) => {
+                            nodeStream.on('data', (c: Buffer) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+                            nodeStream.on('end', () => resolve());
+                            nodeStream.on('error', reject);
+                        });
+                        imageBuf = Buffer.concat(chunks);
                     }
                 }
             } else if (inputImageUrl.startsWith('/api/generated-images/')) {

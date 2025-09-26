@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { tempBinaryCache } from '@/src/application/services/temp-binary-cache';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { UsageTracker, getCustomerForUserId, logUsage as libLogUsage } from '@/app/lib/billing';
-import { authCheck } from '@/app/actions/auth.actions';
+import { requireAuth } from '@/app/lib/auth';
 import { USE_AUTH, USE_BILLING } from '@/app/lib/feature_flags';
 
 // POST /api/uploaded-images
@@ -15,12 +15,12 @@ export async function POST(request: NextRequest) {
   try {
     // Require authentication if enabled
     let currentUser: any | null = null;
-    try {
-      if (USE_AUTH) {
-        currentUser = await authCheck();
+    if (USE_AUTH) {
+      try {
+        currentUser = await requireAuth();
+      } catch (_) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
-    } catch (_) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const contentType = request.headers.get('content-type') || '';
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
         ContentType: mime,
       }));
 
-      const url = `/api/uploaded-images/${imageId}`;
+      const url = `/api/uploaded-images/${imageId}${ext}`;
 
       // Log usage to billing similar to rag-worker
       try {
@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
         // ignore billing logging errors
       }
 
-      return NextResponse.json({ url, storage: 's3', id: imageId, mimeType: mime, description: descriptionMarkdown });
+      return NextResponse.json({ url, storage: 's3', id: `${imageId}${ext}`, mimeType: mime, description: descriptionMarkdown });
     }
 
     // Otherwise store in temp cache and return temp URL
