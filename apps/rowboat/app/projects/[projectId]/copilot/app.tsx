@@ -255,6 +255,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         </div>
                     )}
                     <Messages
+                        projectId={projectId}
                         messages={messages}
                         streamingResponse={streamingResponse}
                         loadingResponse={loadingResponse}

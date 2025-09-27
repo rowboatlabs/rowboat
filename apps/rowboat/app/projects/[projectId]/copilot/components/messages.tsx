@@ -11,6 +11,26 @@ import { useParsedBlocks } from "../use-parsed-blocks";
 import { validateConfigChanges } from "@/app/lib/client_utils";
 import { PreviewModalProvider } from '../../workflow/preview-modal';
 
+type ScheduledJobActionsModule = typeof import('@/app/actions/scheduled-job-rules.actions');
+type RecurringJobActionsModule = typeof import('@/app/actions/recurring-job-rules.actions');
+
+let scheduledJobActionsPromise: Promise<ScheduledJobActionsModule> | null = null;
+let recurringJobActionsPromise: Promise<RecurringJobActionsModule> | null = null;
+
+function loadScheduledJobActions(): Promise<ScheduledJobActionsModule> {
+    if (!scheduledJobActionsPromise) {
+        scheduledJobActionsPromise = import('@/app/actions/scheduled-job-rules.actions');
+    }
+    return scheduledJobActionsPromise;
+}
+
+function loadRecurringJobActions(): Promise<RecurringJobActionsModule> {
+    if (!recurringJobActionsPromise) {
+        recurringJobActionsPromise = import('@/app/actions/recurring-job-rules.actions');
+    }
+    return recurringJobActionsPromise;
+}
+
 const CopilotResponsePart = z.union([
     z.object({
         type: z.literal('text'),
@@ -71,7 +91,7 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
                     type: 'action',
                     action: {
                         action: metadata.action as 'create_new' | 'edit' | 'delete',
-                        config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent',
+                        config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent' | 'one_time_trigger' | 'recurring_trigger',
                         name: metadata.name,
                         change_description: jsonData.change_description || '',
                         config_changes: {},
@@ -84,7 +104,7 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
                 type: 'action',
                 action: {
                     action: metadata.action as 'create_new' | 'edit' | 'delete',
-                    config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent',
+                    config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent' | 'one_time_trigger' | 'recurring_trigger',
                     name: metadata.name,
                     change_description: jsonData.change_description || '',
                     config_changes: result.changes
@@ -100,7 +120,7 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
         type: 'streaming_action',
         action: {
             action: (metadata.action as 'create_new' | 'edit' | 'delete') || undefined,
-            config_type: (metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent') || undefined,
+            config_type: (metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent' | 'one_time_trigger' | 'recurring_trigger') || undefined,
             name: metadata.name
         }
     };
@@ -171,14 +191,16 @@ function AssistantMessage({
     dispatch,
     messageIndex,
     loading,
-    onStatusBarChange
+    onStatusBarChange,
+    projectId,
 }: {
     content: z.infer<typeof CopilotAssistantMessage>['content'],
     workflow: z.infer<typeof Workflow>,
     dispatch: (action: any) => void,
     messageIndex: number,
     loading: boolean,
-    onStatusBarChange?: (status: any) => void
+    onStatusBarChange?: (status: any) => void;
+    projectId: string;
 }) {
     const blocks = useParsedBlocks(content);
     const [appliedActions, setAppliedActions] = useState<Set<number>>(new Set());
@@ -208,14 +230,12 @@ function AssistantMessage({
     const allApplied = pendingCount === 0 && totalActions > 0;
 
     // Memoized applyAction for useCallback dependencies
-    const applyAction = useCallback((action: any, actionIndex: number) => {
-        // Only apply, do not update appliedActions here
+    const applyAction = useCallback((action: any): boolean => {
         if (action.action === 'create_new') {
             switch (action.config_type) {
                 case 'agent': {
-                    // Prevent duplicate agent names
                     if (workflow.agents.some((agent: any) => agent.name === action.name)) {
-                        return;
+                        return false;
                     }
                     dispatch({
                         type: 'add_agent',
@@ -225,12 +245,11 @@ function AssistantMessage({
                         },
                         fromCopilot: true
                     });
-                    break;
+                    return true;
                 }
                 case 'tool': {
-                    // Prevent duplicate tool names
                     if (workflow.tools.some((tool: any) => tool.name === action.name)) {
-                        return;
+                        return false;
                     }
                     dispatch({
                         type: 'add_tool',
@@ -240,7 +259,7 @@ function AssistantMessage({
                         },
                         fromCopilot: true
                     });
-                    break;
+                    return true;
                 }
                 case 'prompt':
                     dispatch({
@@ -251,7 +270,7 @@ function AssistantMessage({
                         },
                         fromCopilot: true
                     });
-                    break;
+                    return true;
                 case 'pipeline':
                     dispatch({
                         type: 'add_pipeline',
@@ -261,7 +280,7 @@ function AssistantMessage({
                         },
                         fromCopilot: true
                     });
-                    break;
+                    return true;
             }
         } else if (action.action === 'edit') {
             switch (action.config_type) {
@@ -271,34 +290,34 @@ function AssistantMessage({
                         name: action.name,
                         agent: action.config_changes
                     });
-                    break;
+                    return true;
                 case 'tool':
                     dispatch({
                         type: 'update_tool_no_select',
                         name: action.name,
                         tool: action.config_changes
                     });
-                    break;
+                    return true;
                 case 'prompt':
                     dispatch({
                         type: 'update_prompt',
                         name: action.name,
                         prompt: action.config_changes
                     });
-                    break;
+                    return true;
                 case 'pipeline':
                     dispatch({
                         type: 'update_pipeline',
                         name: action.name,
                         pipeline: action.config_changes
                     });
-                    break;
+                    return true;
                 case 'start_agent':
                     dispatch({
                         type: 'set_main_agent',
                         name: action.name,
-                    })
-                    break;
+                    });
+                    return true;
             }
         } else if (action.action === 'delete') {
             switch (action.config_type) {
@@ -307,61 +326,135 @@ function AssistantMessage({
                         type: 'delete_agent',
                         name: action.name
                     });
-                    break;
+                    return true;
                 case 'tool':
                     dispatch({
                         type: 'delete_tool',
                         name: action.name
                     });
-                    break;
+                    return true;
                 case 'prompt':
                     dispatch({
                         type: 'delete_prompt',
                         name: action.name
                     });
-                    break;
+                    return true;
                 case 'pipeline':
                     dispatch({
                         type: 'delete_pipeline',
                         name: action.name
                     });
-                    break;
+                    return true;
             }
         }
+
+        console.warn('Unhandled action from Copilot applyAction', action);
+        return false;
     }, [dispatch, workflow.agents, workflow.tools]);
 
+    const handleTriggerAction = useCallback(async (action: any): Promise<boolean> => {
+        if (action.action !== 'create_new') {
+            return false;
+        }
+
+        if (action.config_type === 'one_time_trigger') {
+            const { scheduledTime, input } = action.config_changes || {};
+            if (!scheduledTime || !input) {
+                console.error('Missing scheduledTime or input for one-time trigger', action);
+                return false;
+            }
+            try {
+                const { createScheduledJobRule } = await loadScheduledJobActions();
+                await createScheduledJobRule({
+                    projectId,
+                    scheduledTime,
+                    input,
+                });
+                return true;
+            } catch (error) {
+                console.error('Failed to create one-time trigger', error);
+                return false;
+            }
+        }
+
+        if (action.config_type === 'recurring_trigger') {
+            const { cron, input } = action.config_changes || {};
+            if (!cron || !input) {
+                console.error('Missing cron or input for recurring trigger', action);
+                return false;
+            }
+            try {
+                const { createRecurringJobRule } = await loadRecurringJobActions();
+                await createRecurringJobRule({
+                    projectId,
+                    cron,
+                    input,
+                });
+                return true;
+            } catch (error) {
+                console.error('Failed to create recurring trigger', error);
+                return false;
+            }
+        }
+
+        console.warn('Unhandled trigger action from Copilot applyAction', action);
+        return false;
+    }, [projectId]);
+
     // Memoized handleApplyAll for useEffect dependencies
-    const handleApplyAll = useCallback(() => {
-        // Find all unapplied action indices
-        const unapplied = parsed
-            .map((part, idx) => ({ part, actionIndex: idx }))
-            .filter(({ part, actionIndex }) => part.type === 'action' && !appliedActions.has(actionIndex))
-            .map(({ part, actionIndex }) => ({ 
-                action: part.type === 'action' ? part.action : null, 
-                actionIndex 
-            }))
-            .filter(({ action }) => action !== null);
+    const handleApplyAll = useCallback(async () => {
+        const unapplied = parsed.reduce<Array<{ action: z.infer<typeof CopilotAssistantMessageActionPart>['content']; actionIndex: number }>>((acc, part, idx) => {
+            if (part.type === 'action' && !appliedActions.has(idx)) {
+                acc.push({ action: part.action, actionIndex: idx });
+            }
+            return acc;
+        }, []);
 
-        // Synchronously apply all unapplied actions
-        unapplied.forEach(({ action, actionIndex }) => {
-            applyAction(action, actionIndex);
-        });
+        const newlyApplied: number[] = [];
 
-        // After all are applied, update the state in one go
-        setAppliedActions(prev => {
-            const next = new Set(prev);
-            unapplied.forEach(({ actionIndex }) => next.add(actionIndex));
-            return next;
-        });
-    }, [parsed, appliedActions, setAppliedActions, applyAction]);
+        for (const { action, actionIndex } of unapplied) {
+            try {
+                const isTrigger = action.config_type === 'one_time_trigger' || action.config_type === 'recurring_trigger';
+                const success = isTrigger
+                    ? await handleTriggerAction(action)
+                    : applyAction(action);
+
+                if (success) {
+                    newlyApplied.push(actionIndex);
+                }
+            } catch (error) {
+                console.error('Failed to apply Copilot action', action, error);
+            }
+        }
+
+        if (newlyApplied.length > 0) {
+            setAppliedActions(prev => {
+                const next = new Set(prev);
+                newlyApplied.forEach(index => next.add(index));
+                return next;
+            });
+        }
+    }, [parsed, appliedActions, applyAction, handleTriggerAction]);
 
     // Manual single apply (from card)
-    const handleSingleApply = (action: any, actionIndex: number) => {
-        if (!appliedActions.has(actionIndex)) {
-            applyAction(action, actionIndex);
-            setAppliedActions(prev => new Set([...prev, actionIndex]));
+    const handleSingleApply = useCallback(async (action: z.infer<typeof CopilotAssistantMessageActionPart>['content'], actionIndex: number) => {
+        if (appliedActions.has(actionIndex)) {
+            return;
         }
-    };
+
+        try {
+            const isTrigger = action.config_type === 'one_time_trigger' || action.config_type === 'recurring_trigger';
+            const success = isTrigger
+                ? await handleTriggerAction(action)
+                : applyAction(action);
+
+            if (success) {
+                setAppliedActions(prev => new Set([...prev, actionIndex]));
+            }
+        } catch (error) {
+            console.error('Failed to apply Copilot action', action, error);
+        }
+    }, [appliedActions, applyAction, handleTriggerAction]);
 
     useEffect(() => {
         if (loading) {
@@ -461,7 +554,7 @@ function AssistantMessage({
                                     workflow={workflow}
                                     dispatch={dispatch}
                                     stale={false}
-                                    onApplied={() => handleSingleApply(part.action, idx)}
+                                    onApplied={() => { void handleSingleApply(part.action, idx); }}
                                     externallyApplied={appliedActions.has(idx)}
                                     defaultExpanded={true}
                                 />
@@ -506,6 +599,7 @@ function AssistantMessageLoading({ currentStatus }: { currentStatus: 'thinking' 
 }
 
 export function Messages({
+    projectId,
     messages,
     streamingResponse,
     loadingResponse,
@@ -515,6 +609,7 @@ export function Messages({
     toolCalling,
     toolQuery
 }: {
+    projectId: string;
     messages: z.infer<typeof CopilotMessage>[];
     streamingResponse: string;
     loadingResponse: boolean;
@@ -564,6 +659,7 @@ export function Messages({
                     dispatch={dispatch}
                     messageIndex={messageIndex}
                     loading={loadingResponse}
+                    projectId={projectId}
                     onStatusBarChange={status => {
                         // Only update for the last assistant message
                         if (messageIndex === displayMessages.length - 1) {

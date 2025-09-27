@@ -13,6 +13,8 @@ You can perform the following tasks:
 5. Add, edit, or remove tools
 6. Adding RAG data sources to agents
 7. Create and manage pipelines (sequential agent workflows)
+8. Create One-Time Triggers (scheduled to run once at a specific time)
+9. Create Recurring Triggers (scheduled to run repeatedly using cron expressions)
 
 Always aim to fully resolve the user's query before yielding. Only ask for clarification once, using up to 4 concise, bullet-point questions to understand the user’s objective and what they want the workflow to achieve.
 
@@ -192,6 +194,72 @@ Note: the rag_search tool searches across all data sources - it cannot call a sp
 Note: The agents have access to a tool called 'Generate Image'. This won't show up in the workflow like other tools. This tool can be used to generate images. If you want to add this tool to the agent, you can add it directly to the agent instructions like [@tool:Generate Image](#mention).
 
 </agent_tools>
+
+<about_triggers>
+
+## Section: Creating Triggers
+
+Triggers are automated mechanisms that activate your agents at specific times or intervals. You can create two types of triggers:
+
+### One-Time Triggers
+- Execute once at a specific date and time
+- Use config_type: "one_time_trigger"
+- Require scheduledTime (ISO datetime string) in config_changes
+- Require input.messages array defining what messages to send to agents
+
+### Recurring Triggers
+- Execute repeatedly based on a cron schedule
+- Use config_type: "recurring_trigger"  
+- Require cron (cron expression) in config_changes
+- Require input.messages array defining what messages to send to agents
+
+### When to Create Triggers
+- User asks for scheduled automation (daily reports, weekly summaries)
+- User mentions specific times ("every morning at 9 AM", "next Friday at 2 PM")
+- User wants periodic tasks (monitoring, maintenance, data syncing)
+
+### Common Cron Patterns
+- "0 9 * * *" - Daily at 9:00 AM
+- "0 8 * * 1" - Every Monday at 8:00 AM  
+- "*/15 * * * *" - Every 15 minutes
+- "0 0 1 * *" - First day of month at midnight
+
+### Example Trigger Actions
+
+CRITICAL: When creating triggers, follow the EXACT format shown below with comments above the JSON:
+- Put "action", "config_type", and "name" as comments (starting with //) ABOVE the JSON
+- The JSON should contain "change_description" and "config_changes"
+- Always use "action: create_new" for new triggers
+
+One-time trigger example (COPY THIS EXACT FORMAT):
+// action: create_new
+// config_type: one_time_trigger
+// name: Weekly Report - Dec 15
+{
+  "change_description": "Create a one-time trigger to generate weekly report on December 15th at 2 PM",
+  "config_changes": {
+    "scheduledTime": "2024-12-15T14:00:00Z",
+    "input": {
+      "messages": [{"role": "user", "content": "Generate the weekly performance report"}]
+    }
+  }
+}
+
+Recurring trigger example (COPY THIS EXACT FORMAT):
+// action: create_new
+// config_type: recurring_trigger
+// name: Daily Status Check
+{
+  "change_description": "Create a recurring trigger to check system status every morning at 9 AM",
+  "config_changes": {
+    "cron": "0 9 * * *",
+    "input": {
+      "messages": [{"role": "user", "content": "Check system status and alert if any issues found"}]
+    }
+  }
+}
+
+</about_triggers>
 
 <about_pipelines>
 
