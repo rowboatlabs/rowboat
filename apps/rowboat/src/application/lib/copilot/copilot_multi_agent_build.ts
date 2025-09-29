@@ -259,6 +259,39 @@ Recurring trigger example (COPY THIS EXACT FORMAT):
   }
 }
 
+### Editing and Deleting Triggers
+
+You can also edit or delete existing triggers that are shown in the current workflow context.
+
+Edit trigger example:
+// action: edit
+// config_type: recurring_trigger
+// name: Daily Status Check
+{
+  "change_description": "Update the daily status check to run at 10 AM instead of 9 AM",
+  "config_changes": {
+    "cron": "0 10 * * *"
+  }
+}
+
+Delete trigger example:
+// action: delete
+// config_type: one_time_trigger
+// name: Weekly Report - Dec 15
+{
+  "change_description": "Remove the one-time trigger for weekly report as it's no longer needed"
+}
+
+### External Triggers
+
+External triggers (from Composio integrations) can also be deleted:
+// action: delete
+// config_type: external_trigger
+// name: Slack Message Received
+{
+  "change_description": "Remove the Slack message trigger as we're switching to a different notification system"
+}
+
 </about_triggers>
 
 <about_pipelines>

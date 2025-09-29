@@ -2,7 +2,7 @@ import z from "zod";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject, streamText, tool } from "ai";
 import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
-import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot } from "../../../entities/models/copilot";
+import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot, TriggerSchemaForCopilot } from "../../../entities/models/copilot";
 import { PrefixLogger } from "@/app/lib/utils";
 import zodToJsonSchema from "zod-to-json-schema";
 import { COPILOT_INSTRUCTIONS_EDIT_AGENT } from "./copilot_edit_agent";
@@ -100,6 +100,51 @@ function getCurrentTimePrompt(): string {
     return `**CURRENT TIME**: ${new Date().toISOString()}`;
 }
 
+function getTriggersPrompt(triggers: z.infer<typeof TriggerSchemaForCopilot>[]): string {
+    if (!triggers || triggers.length === 0) {
+        return '';
+    }
+
+    const simplifiedTriggers = triggers.map(trigger => {
+        if (trigger.type === 'one_time') {
+            return {
+                id: trigger.id,
+                type: 'one_time',
+                name: trigger.name,
+                scheduledTime: trigger.nextRunAt,
+                input: trigger.input,
+                status: trigger.status,
+            };
+        } else if (trigger.type === 'recurring') {
+            return {
+                id: trigger.id,
+                type: 'recurring', 
+                name: trigger.name,
+                cron: trigger.cron,
+                nextRunAt: trigger.nextRunAt,
+                disabled: trigger.disabled,
+                input: trigger.input,
+            };
+        } else {
+            return {
+                id: trigger.id,
+                type: 'external',
+                name: trigger.triggerTypeName,
+                toolkit: trigger.toolkitSlug,
+                triggerType: trigger.triggerTypeSlug,
+                config: trigger.triggerConfig,
+            };
+        }
+    });
+
+    return `**NOTE**:
+The following triggers are currently configured:
+\`\`\`json
+${JSON.stringify(simplifiedTriggers)}
+\`\`\`
+`;
+}
+
 async function searchRelevantTools(usageTracker: UsageTracker, query: string): Promise<string> {
     const logger = new PrefixLogger("copilot-search-tools");
     console.log("🔧 TOOL CALL: searchRelevantTools", { query });
@@ -189,10 +234,11 @@ function updateLastUserMessage(
     contextPrompt: string,
     dataSourcesPrompt: string = '',
     timePrompt: string = '',
+    triggersPrompt: string = '',
 ): void {
     const lastMessage = messages[messages.length - 1];
     if (lastMessage.role === 'user') {
-        lastMessage.content = `${currentWorkflowPrompt}\n\n${contextPrompt}\n\n${dataSourcesPrompt}\n\n${timePrompt}\n\nUser: ${JSON.stringify(lastMessage.content)}`;
+        lastMessage.content = `${currentWorkflowPrompt}\n\n${contextPrompt}\n\n${dataSourcesPrompt}\n\n${timePrompt}\n\n${triggersPrompt}\n\nUser: ${JSON.stringify(lastMessage.content)}`;
     }
 }
 
@@ -202,6 +248,7 @@ export async function getEditAgentInstructionsResponse(
     context: z.infer<typeof CopilotChatContext> | null,
     messages: z.infer<typeof CopilotMessage>[],
     workflow: z.infer<typeof Workflow>,
+    triggers: z.infer<typeof TriggerSchemaForCopilot>[] = [],
 ): Promise<string> {
     const logger = new PrefixLogger('copilot /getUpdatedAgentInstructions');
     logger.log('context', context);
@@ -216,8 +263,11 @@ export async function getEditAgentInstructionsResponse(
     // set time prompt
     let timePrompt = getCurrentTimePrompt();
 
+    // set triggers prompt
+    let triggersPrompt = getTriggersPrompt(triggers);
+
     // add the above prompts to the last user message
-    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, '', timePrompt);
+    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, '', timePrompt, triggersPrompt);
 
     // call model
     console.log("calling model", JSON.stringify({
@@ -257,7 +307,8 @@ export async function* streamMultiAgentResponse(
     context: z.infer<typeof CopilotChatContext> | null,
     messages: z.infer<typeof CopilotMessage>[],
     workflow: z.infer<typeof Workflow>,
-    dataSources: z.infer<typeof DataSourceSchemaForCopilot>[]
+    dataSources: z.infer<typeof DataSourceSchemaForCopilot>[],
+    triggers: z.infer<typeof TriggerSchemaForCopilot>[] = []
 ): AsyncIterable<z.infer<typeof CopilotStreamEvent>> {
     const logger = new PrefixLogger('copilot /stream');
     logger.log('context', context);
@@ -282,8 +333,11 @@ export async function* streamMultiAgentResponse(
     // set time prompt
     let timePrompt = getCurrentTimePrompt();
 
+    // set triggers prompt
+    let triggersPrompt = getTriggersPrompt(triggers);
+
     // add the above prompts to the last user message
-    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, dataSourcesPrompt, timePrompt);
+    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, dataSourcesPrompt, timePrompt, triggersPrompt);
 
     // call model
     console.log("🤖 AI MODEL CALL STARTED", {

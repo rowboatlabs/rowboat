@@ -2,6 +2,9 @@ import { z } from "zod";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { Message } from "@/app/lib/types/types";
 import { DataSource } from "@/src/entities/models/data-source";
+import { ScheduledJobRule } from "@/src/entities/models/scheduled-job-rule";
+import { RecurringJobRule } from "@/src/entities/models/recurring-job-rule";
+import { ComposioTriggerDeployment } from "@/src/entities/models/composio-trigger-deployment";
 
 export const DataSourceSchemaForCopilot = DataSource.pick({
     id: true,
@@ -9,6 +12,43 @@ export const DataSourceSchemaForCopilot = DataSource.pick({
     description: true,
     data: true,
 });
+
+export const ScheduledJobRuleSchemaForCopilot = ScheduledJobRule.pick({
+    id: true,
+    nextRunAt: true,
+    status: true,
+    input: true,
+}).extend({
+    type: z.literal('one_time'),
+    name: z.string(),
+});
+
+export const RecurringJobRuleSchemaForCopilot = RecurringJobRule.pick({
+    id: true,
+    cron: true,
+    nextRunAt: true,
+    disabled: true,
+    input: true,
+}).extend({
+    type: z.literal('recurring'),
+    name: z.string(),
+});
+
+export const ComposioTriggerDeploymentSchemaForCopilot = ComposioTriggerDeployment.pick({
+    id: true,
+    triggerTypeName: true,
+    toolkitSlug: true,
+    triggerTypeSlug: true,
+    triggerConfig: true,
+}).extend({
+    type: z.literal('external'),
+});
+
+export const TriggerSchemaForCopilot = z.union([
+    ScheduledJobRuleSchemaForCopilot,
+    RecurringJobRuleSchemaForCopilot,
+    ComposioTriggerDeploymentSchemaForCopilot,
+]);
 
 export const CopilotUserMessage = z.object({
     role: z.literal('user'),
@@ -21,7 +61,7 @@ export const CopilotAssistantMessageTextPart = z.object({
 export const CopilotAssistantMessageActionPart = z.object({
     type: z.literal("action"),
     content: z.object({
-        config_type: z.enum(['tool', 'agent', 'prompt', 'pipeline', 'start_agent', 'one_time_trigger', 'recurring_trigger']),
+        config_type: z.enum(['tool', 'agent', 'prompt', 'pipeline', 'start_agent', 'one_time_trigger', 'recurring_trigger', 'external_trigger']),
         action: z.enum(['create_new', 'edit', 'delete']),
         name: z.string(),
         change_description: z.string(),
@@ -60,6 +100,7 @@ export const CopilotAPIRequest = z.object({
     workflow: Workflow,
     context: CopilotChatContext.nullable(),
     dataSources: z.array(DataSourceSchemaForCopilot).optional(),
+    triggers: z.array(TriggerSchemaForCopilot).optional(),
 });
 export const CopilotAPIResponse = z.union([
     z.object({

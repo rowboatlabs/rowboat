@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { ICacheService } from '@/src/application/services/cache.service.interface';
 import { IUsageQuotaPolicy } from '@/src/application/policies/usage-quota.policy.interface';
 import { IProjectActionAuthorizationPolicy } from '@/src/application/policies/project-action-authorization.policy';
-import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot } from '@/src/entities/models/copilot';
+import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot, TriggerSchemaForCopilot } from '@/src/entities/models/copilot';
 import { Workflow } from '@/app/lib/types/workflow_types';
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { authorize, getCustomerIdForProject } from "@/app/lib/billing";
@@ -19,6 +19,7 @@ const inputSchema = z.object({
         workflow: Workflow,
         context: CopilotChatContext.nullable(),
         dataSources: z.array(DataSourceSchemaForCopilot).optional(),
+        triggers: z.array(TriggerSchemaForCopilot).optional(),
     }),
 });
 

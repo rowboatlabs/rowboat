@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot } from '@/src/entities/models/copilot';
+import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot, TriggerSchemaForCopilot } from '@/src/entities/models/copilot';
 import { Workflow } from '@/app/lib/types/workflow_types';
 import { ICreateCopilotCachedTurnUseCase } from "@/src/application/use-cases/copilot/create-copilot-cached-turn.use-case";
 import { BadRequestError } from "@/src/entities/errors/common";
@@ -14,6 +14,7 @@ const inputSchema = z.object({
         workflow: Workflow,
         context: CopilotChatContext.nullable(),
         dataSources: z.array(DataSourceSchemaForCopilot).optional(),
+        triggers: z.array(TriggerSchemaForCopilot).optional(),
     }),
 });
 
