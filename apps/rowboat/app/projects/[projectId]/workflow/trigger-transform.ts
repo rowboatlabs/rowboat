@@ -67,6 +67,7 @@ export function transformTriggersForCopilot({
     const external = composio.map((trigger) => ({
         type: "external" as const,
         id: trigger.id,
+        name: trigger.triggerTypeName,
         triggerTypeName: trigger.triggerTypeName,
         toolkitSlug: trigger.toolkitSlug,
         triggerTypeSlug: trigger.triggerTypeSlug,

@@ -529,11 +529,19 @@ function AssistantMessage({
                 }
             }
 
-            if (configType === 'external_trigger' && actionType === 'delete') {
-                const target = triggerList.find(
-                    (trigger): trigger is Extract<z.infer<typeof TriggerSchemaForCopilot>, { type: 'external' }> =>
-                        trigger.type === 'external' && trigger.triggerTypeName === action.name
-                );
+            if ((configType === 'external_trigger' || configType === 'external') && actionType === 'delete') {
+                const target = triggerList.find((trigger): trigger is Extract<CopilotTriggerType, { type: 'external' }> => {
+                    if (trigger.type !== 'external') {
+                        return false;
+                    }
+                    const maybeName = (trigger as unknown as { name?: string }).name;
+                    return (
+                        trigger.triggerTypeName === action.name ||
+                        trigger.triggerTypeSlug === action.name ||
+                        trigger.id === action.name ||
+                        maybeName === action.name
+                    );
+                });
 
                 if (!target) {
                     console.warn('Unable to resolve external trigger for action', action.name);
