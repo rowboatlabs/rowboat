@@ -84,6 +84,7 @@ export class CreateProjectUseCase implements ICreateProjectUseCase {
                 agents: template.agents,
                 prompts: template.prompts,
                 tools: template.tools,
+                pipelines: template.pipelines || [],
                 startAgent: template.startAgent,
             }
         } else {
@@ -93,6 +94,8 @@ export class CreateProjectUseCase implements ICreateProjectUseCase {
                 throw new BadRequestError('Invalid workflow JSON');
             }
         }
+
+        // Do not auto-attach image generation tool; it is available as a default library tool in the editor/runtime
 
         // create project secret
         const secret = crypto.randomBytes(32).toString('hex');

@@ -25,7 +25,15 @@ const commonCronExamples = [
     { label: "Monthly on the 1st at midnight", value: "0 0 1 * *" },
 ];
 
-export function CreateRecurringJobRuleForm({ projectId }: { projectId: string }) {
+export function CreateRecurringJobRuleForm({ 
+    projectId, 
+    onBack,
+    hasExistingTriggers = true
+}: { 
+    projectId: string;
+    onBack?: () => void;
+    hasExistingTriggers?: boolean;
+}) {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [messages, setMessages] = useState<FormMessage[]>([
@@ -89,7 +97,11 @@ export function CreateRecurringJobRuleForm({ projectId }: { projectId: string })
                 input: { messages: convertedMessages },
                 cron: cronExpression,
             });
-            router.push(`/projects/${projectId}/manage-triggers?tab=recurring`);
+            if (onBack) {
+                onBack();
+            } else {
+                router.push(`/projects/${projectId}/manage-triggers?tab=recurring`);
+            }
         } catch (error) {
             console.error("Failed to create recurring job rule:", error);
             alert("Failed to create recurring job rule");
@@ -102,13 +114,30 @@ export function CreateRecurringJobRuleForm({ projectId }: { projectId: string })
         <Panel
             title={
                 <div className="flex items-center gap-3">
-                    <Link href={`/projects/${projectId}/manage-triggers?tab=recurring`}>
-                        <Button variant="secondary" size="sm" startContent={<ArrowLeftIcon className="w-4 h-4" />} className="whitespace-nowrap">
+                    {hasExistingTriggers && onBack ? (
+                        <Button 
+                            variant="secondary" 
+                            size="sm" 
+                            startContent={<ArrowLeftIcon className="w-4 h-4" />} 
+                            className="whitespace-nowrap"
+                            onClick={onBack}
+                        >
                             Back
                         </Button>
-                    </Link>
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        CREATE RECURRING JOB RULE
+                    ) : hasExistingTriggers ? (
+                        <Link href={`/projects/${projectId}/manage-triggers?tab=recurring`}>
+                            <Button variant="secondary" size="sm" startContent={<ArrowLeftIcon className="w-4 h-4" />} className="whitespace-nowrap">
+                                Back
+                            </Button>
+                        </Link>
+                    ) : null}
+                    <div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            CREATE RECURRING JOB RULE
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Note: Triggers run only on the published version of your workflow. Publish any changes to make them active.
+                        </p>
                     </div>
                 </div>
             }

@@ -222,7 +222,8 @@ function AssistantMessage({
                         agent: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
                 }
@@ -236,7 +237,8 @@ function AssistantMessage({
                         tool: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
                 }
@@ -246,7 +248,8 @@ function AssistantMessage({
                         prompt: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
                 case 'pipeline':
@@ -255,7 +258,8 @@ function AssistantMessage({
                         pipeline: {
                             name: action.name,
                             ...action.config_changes
-                        }
+                        },
+                        fromCopilot: true
                     });
                     break;
             }
@@ -263,14 +267,14 @@ function AssistantMessage({
             switch (action.config_type) {
                 case 'agent':
                     dispatch({
-                        type: 'update_agent',
+                        type: 'update_agent_no_select',
                         name: action.name,
                         agent: action.config_changes
                     });
                     break;
                 case 'tool':
                     dispatch({
-                        type: 'update_tool',
+                        type: 'update_tool_no_select',
                         name: action.name,
                         tool: action.config_changes
                     });
@@ -507,7 +511,9 @@ export function Messages({
     loadingResponse,
     workflow,
     dispatch,
-    onStatusBarChange
+    onStatusBarChange,
+    toolCalling,
+    toolQuery
 }: {
     messages: z.infer<typeof CopilotMessage>[];
     streamingResponse: string;
@@ -515,6 +521,8 @@ export function Messages({
     workflow: z.infer<typeof Workflow>;
     dispatch: (action: any) => void;
     onStatusBarChange?: (status: any) => void;
+    toolCalling?: boolean;
+    toolQuery?: string | null;
 }) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [displayMessages, setDisplayMessages] = useState(messages);
@@ -582,11 +590,15 @@ export function Messages({
                         {renderMessage(message, index)}
                     </div>
                 ))}
-                {loadingResponse && (
-                    <div className="text-xs text-gray-500">
-                        <Spinner size="sm" className="ml-2" />
+                {!streamingResponse && (toolCalling ? (
+                    <div className="text-sm text-gray-600 dark:text-gray-400 mb-2 px-4">
+                        <span className="animate-pulse [animation-duration:2s]">Searching for tools{toolQuery ? ` to ${toolQuery}` : ''}...</span>
                     </div>
-                )}
+                ) : loadingResponse ? (
+                    <div className="text-sm text-gray-600 dark:text-gray-400 mb-2 px-4">
+                        <span className="animate-pulse [animation-duration:2s]">Thinking...</span>
+                    </div>
+                ) : null)}
             </div>
             <div ref={messagesEndRef} />
         </div>

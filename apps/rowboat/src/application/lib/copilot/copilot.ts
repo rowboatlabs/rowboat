@@ -6,7 +6,7 @@ import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot } from "
 import { PrefixLogger } from "@/app/lib/utils";
 import zodToJsonSchema from "zod-to-json-schema";
 import { COPILOT_INSTRUCTIONS_EDIT_AGENT } from "./copilot_edit_agent";
-import { COPILOT_INSTRUCTIONS_MULTI_AGENT } from "./copilot_multi_agent";
+import { COPILOT_INSTRUCTIONS_MULTI_AGENT_WITH_DOCS as COPILOT_INSTRUCTIONS_MULTI_AGENT } from "./copilot_multi_agent";
 import { COPILOT_MULTI_AGENT_EXAMPLE_1 } from "./example_multi_agent_1";
 import { CURRENT_WORKFLOW_PROMPT } from "./current_workflow";
 import { USE_COMPOSIO_TOOLS } from "@/app/lib/feature_flags";
@@ -41,10 +41,12 @@ const composioToolSearchToolSuggestion = z.object({
     tool_slug: z.string(),
     description: z.string(),
 });
+
 const composioToolSearchResponseSchema = z.object({
-    results: z.array(composioToolSearchToolSuggestion),
-    related_tools: z.array(composioToolSearchToolSuggestion),
-});
+    main_tools: z.array(composioToolSearchToolSuggestion).optional(),
+    related_tools: z.array(composioToolSearchToolSuggestion).optional(),
+    results: z.array(composioToolSearchToolSuggestion).optional(), // Keep for backward compatibility
+}).passthrough();
 
 function getContextPrompt(context: z.infer<typeof CopilotChatContext> | null): string {
     let prompt = '';
@@ -127,17 +129,21 @@ async function searchRelevantTools(usageTracker: UsageTracker, query: string): P
     });
 
     // parse results
+    logger.log(`raw search result data: ${JSON.stringify(searchResult.data)}`);
     const result = composioToolSearchResponseSchema.safeParse(searchResult.data);
     if (!result.success) {
-        logger.log(`tool search response is invalid: ${result.error}`);
+        logger.log(`tool search response is invalid: ${JSON.stringify(result.error)}`);
+        logger.log(`expected schema: results (array), got: ${JSON.stringify(Object.keys(searchResult.data || {}))}`);
         return 'No tools found!';
     }
-    if (!result.data.results.length) {
+    const tools = result.data.main_tools || result.data.results || [];
+    
+    if (!tools.length) {
         logger.log(`tool search yielded no results`);
         return 'No tools found!';
     }
 
-    const toolSlugs = result.data.results.map((item) => item.tool_slug);
+    const toolSlugs = tools.map((item) => item.tool_slug);
     logger.log(`found tool slugs: ${toolSlugs.join(', ')}`);
     console.log("✅ TOOL CALL SUCCESS: COMPOSIO_SEARCH_TOOLS", { 
         toolSlugs, 

@@ -35,6 +35,11 @@ export async function createProjectWithOptions(options: CreateProjectOptions): P
       if (options.prompt?.trim()) {
         localStorage.setItem(`project_prompt_${response.id}`, options.prompt);
       }
+      // If the project was created from a template (pre-built agent),
+      // mark the Build step as completed in localStorage for the progress bar.
+      if (options.template) {
+        localStorage.setItem(`agent_instructions_changed_${response.id}`, 'true');
+      }
       
       // Call success callback if provided
       if (options.onSuccess) {
@@ -77,6 +82,8 @@ export async function createProjectFromJsonWithOptions(options: CreateProjectFro
       if (options.onSuccess) {
         options.onSuccess(response.id);
       }
+      // Project created from imported JSON: mark Build step as completed
+      localStorage.setItem(`agent_instructions_changed_${response.id}`, 'true');
       
       // Navigate to workflow page
       options.router.push(`/projects/${response.id}/workflow`);
