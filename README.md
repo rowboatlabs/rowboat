@@ -1,6 +1,6 @@
 ![ui](/assets/banner.png)
 
-<h2 align="center">Let AI build you coworkers</h2>
+<h2 align="center">AI that builds and manages your agent swarms</h2>
 <h5 align="center">
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
