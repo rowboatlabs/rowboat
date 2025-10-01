@@ -36,7 +36,7 @@
 
 </h5>
 <p align="center">
-⚡ Build AI agents instantly with natural language | 🔌 Connect tools with one-click integrations | 📂 Power with knowledge by adding documents for RAG | 🔄 Automate workflows by setting up triggers and actions | 🚀 Deploy anywhere via API or SDK<br><br>
+⚡ Build agent swarms instantly with natural language | 🔌 Connect tools with one-click integrations | 📂 Power with knowledge by adding documents for RAG | 🔄 Automate workflows by setting up triggers and actions | 🚀 Deploy anywhere via API or SDK<br><br>
 ☁️ Prefer a hosted version? Use our <b><a href="https://rowboatlabs.com">cloud</a></b> to starting building agents right away!
 </p>
 
