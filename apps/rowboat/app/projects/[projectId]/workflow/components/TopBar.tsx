@@ -280,80 +280,7 @@ export function TopBar({
                         </CustomButton>
                     </div>}
                     
-                    {/* View controls (hidden in live mode) */}
-                    {!isLive && (<div className="flex items-center gap-2 mr-2">
-                        {(() => {
-                            // Current visibility booleans
-                            const showAgents = viewMode !== "two_chat_skipper";
-                            const showChat = viewMode !== "two_agents_skipper";
-                            const showSkipper = viewMode !== "two_agents_chat";
-
-                            // Determine selected radio option
-                            type RadioKey = 'show-all' | 'hide-agents' | 'hide-chat' | 'hide-skipper';
-                            let selectedKey: RadioKey = 'show-all';
-                            if (!(showAgents && showChat && showSkipper)) {
-                                if (!showAgents) selectedKey = 'hide-agents';
-                                else if (!showChat) selectedKey = 'hide-chat';
-                                else if (!showSkipper) selectedKey = 'hide-skipper';
-                            }
-
-                            // Map radio selection to viewMode
-                            const setByKey = (key: RadioKey) => {
-                                switch (key) {
-                                    case 'show-all':
-                                        onSetViewMode('three_all');
-                                        break;
-                                    case 'hide-agents':
-                                        onSetViewMode('two_chat_skipper');
-                                        break;
-                                    case 'hide-chat':
-                                        onSetViewMode('two_agents_skipper');
-                                        break;
-                                    case 'hide-skipper':
-                                        onSetViewMode('two_agents_chat');
-                                        break;
-                                }
-                            };
-
-                            // Disable rules
-                            // When there are zero agents, allow only Show All and Hide Chat
-                            const zeroAgents = !hasAgents;
-                            const disableShowAll = false; // always allow switching to 3-pane view
-                            const disableHideAgents = zeroAgents; // cannot hide agents if none exist
-                            const disableHideChat = false; // allow hide chat even with zero agents (default)
-                            const disableHideSkipper = zeroAgents; // keep skipper visible when no agents
-
-                            return (
-                        <Dropdown>
-                            <DropdownTrigger>
-                                <Button variant="light" size="sm" aria-label="Layout options" className="h-8 min-w-0 bg-transparent text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/50 border border-transparent gap-1 px-2">
-                                    {/* 3-pane layout icon */}
-                                    <svg width="26" height="18" viewBox="0 0 18 12" aria-hidden="true">
-                                        <rect x="0.5" y="0.5" width="17" height="11" rx="1" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.6" />
-                                        <rect x="2" y="2" width="4" height="8" rx="0.5" fill="currentColor" opacity="0.8" />
-                                        <rect x="7" y="2" width="4" height="8" rx="0.5" fill="currentColor" opacity="0.6" />
-                                        <rect x="12" y="2" width="4" height="8" rx="0.5" fill="currentColor" opacity="0.4" />
-                                    </svg>
-                                    <ChevronDownIcon size={14} />
-                                </Button>
-                            </DropdownTrigger>
-                            <DropdownMenu aria-label="Choose layout" selectionMode="single" selectedKeys={[selectedKey]} closeOnSelect={true} onSelectionChange={(keys) => {
-                                const key = Array.from(keys as Set<string>)[0] as RadioKey;
-                                const zeroAgents = !hasAgents;
-                                // Allow only permitted options when zero agents
-                                if (zeroAgents && key !== 'show-all' && key !== 'hide-chat') return;
-                                if (key === 'hide-chat' && disableHideChat) return;
-                                setByKey(key);
-                            }}>
-                                <DropdownItem key="show-all" isDisabled={disableShowAll} className={selectedKey==='show-all' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='show-all'} className="accent-zinc-600 dark:accent-zinc-300" />}>Show All</DropdownItem>
-                                <DropdownItem key="hide-agents" isDisabled={disableHideAgents} className={selectedKey==='hide-agents' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='hide-agents'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Agents</DropdownItem>
-                                <DropdownItem key="hide-chat" isDisabled={disableHideChat} className={selectedKey==='hide-chat' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='hide-chat'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Chat</DropdownItem>
-                                <DropdownItem key="hide-skipper" isDisabled={disableHideSkipper} className={selectedKey==='hide-skipper' ? 'bg-zinc-100 dark:bg-zinc-800' : ''} startContent={<input type="radio" readOnly checked={selectedKey==='hide-skipper'} className="accent-zinc-600 dark:accent-zinc-300" />}>Hide Skipper</DropdownItem>
-                            </DropdownMenu>
-                        </Dropdown>
-                            );
-                        })()}
-                    </div>)}
+                    {/* Layout dropdown removed per design */}
 
                     {/* Deploy CTA - conditional based on auto-publish mode */}
                     <div className="flex items-center gap-3">
@@ -376,6 +303,7 @@ export function TopBar({
                                     <DropdownMenu aria-label="Assistant access options">
                                         <DropdownItem
                                             key="chat"
+                                            className={!isLive ? 'hidden' : ''}
                                             startContent={<MessageCircleIcon size={16} />}
                                             onPress={() => { 
                                                 onUseAssistantClick();

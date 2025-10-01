@@ -11,7 +11,7 @@ import { Action as WorkflowDispatch } from "@/app/projects/[projectId]/workflow/
 import { Panel } from "@/components/common/panel-common";
 import { ComposeBoxCopilot } from "@/components/common/compose-box-copilot";
 import { Messages } from "./components/messages";
-import { CopyIcon, CheckIcon, PlusIcon, XIcon, InfoIcon, Sparkles } from "lucide-react";
+import { CopyIcon, CheckIcon, PlusIcon, XIcon, InfoIcon, Sparkles, MessageCircle } from "lucide-react";
 import { useCopilot } from "./use-copilot";
 import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { SHOW_COPILOT_MARQUEE } from "@/app/lib/feature_flags";
@@ -376,6 +376,19 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
                 subtitle="Build your assistant"
                 rightActions={
                     <div className="flex items-center gap-2">
+                        {/* Draft-only: switch to Playground */}
+                        {onTogglePanel && (
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={onTogglePanel}
+                                className="bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                showHoverContent={true}
+                                hoverContent="Chat with assistant"
+                            >
+                                <MessageCircle className="w-4 h-4" />
+                            </Button>
+                        )}
                         <Button
                             variant="primary"
                             size="sm"

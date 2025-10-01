@@ -7,7 +7,7 @@ import { Chat } from "./components/chat";
 import { Panel } from "@/components/common/panel-common";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@heroui/react";
-import { CheckIcon, CopyIcon, PlusIcon, InfoIcon, BugIcon, BugOffIcon, MessageCircle } from "lucide-react";
+import { CheckIcon, CopyIcon, PlusIcon, InfoIcon, BugIcon, BugOffIcon, MessageCircle, Sparkles } from "lucide-react";
 
 export function App({
     hidden = false,
@@ -73,6 +73,17 @@ export function App({
                 subtitle={hasAgents ? "Chat with your assistant" : "Create an agent to start chatting"}
                 rightActions={hasAgents ? (
                     <div className="flex items-center gap-2">
+                        {/* Draft-only: switch to Copilot */}
+                        {onTogglePanel && !isLiveWorkflow && (
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                className="bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                onClick={onTogglePanel}
+                            >
+                                <Sparkles className="w-4 h-4" />
+                            </Button>
+                        )}
                         <Button
                             variant="primary"
                             size="sm"
