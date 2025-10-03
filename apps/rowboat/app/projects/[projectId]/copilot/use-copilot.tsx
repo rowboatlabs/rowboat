@@ -3,6 +3,7 @@ import { getCopilotResponseStream } from "@/app/actions/copilot.actions";
 import { CopilotMessage } from "@/src/entities/models/copilot";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { DataSource } from "@/src/entities/models/data-source";
+import { TriggerSchemaForCopilot } from "@/src/entities/models/copilot";
 import { z } from "zod";
 import { WithStringId } from "@/app/lib/types/types";
 
@@ -11,6 +12,7 @@ interface UseCopilotParams {
     workflow: z.infer<typeof Workflow>;
     context: any;
     dataSources?: z.infer<typeof DataSource>[];
+    triggers?: z.infer<typeof TriggerSchemaForCopilot>[];
 }
 
 interface UseCopilotResult {
@@ -29,7 +31,7 @@ interface UseCopilotResult {
     cancel: () => void;
 }
 
-export function useCopilot({ projectId, workflow, context, dataSources }: UseCopilotParams): UseCopilotResult {
+export function useCopilot({ projectId, workflow, context, dataSources, triggers }: UseCopilotParams): UseCopilotResult {
     const [streamingResponse, setStreamingResponse] = useState('');
     const [loading, setLoading] = useState(false);
     const [toolCalling, setToolCalling] = useState(false);
@@ -77,7 +79,7 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
             // Wait 2 rAF frames to let layout stabilize (avoids StrictMode/remount race on initial load)
             await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
             
-            const res = await getCopilotResponseStream(projectId, messages, workflow, context || null, dataSources);
+            const res = await getCopilotResponseStream(projectId, messages, workflow, context || null, dataSources, triggers);
             
             
             // Check for billing error
@@ -139,7 +141,7 @@ export function useCopilot({ projectId, workflow, context, dataSources }: UseCop
             setLoading(false);
             inFlightRef.current = false;
         }
-    }, [projectId, workflow, context, dataSources]);
+    }, [projectId, workflow, context, dataSources, triggers]);
 
     const cancel = useCallback(() => {
         cancelRef.current?.();

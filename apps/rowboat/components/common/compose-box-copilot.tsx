@@ -268,7 +268,7 @@ function CopilotStatusBar({
         // Show real button when ready
         return (
             <button
-                onClick={handleApplyAll}
+                onClick={() => { void handleApplyAll?.(); }}
                 disabled={allApplied}
                 className={`flex items-center gap-2 px-3 py-1 rounded-full font-medium text-xs transition-colors duration-200
                     ${
