@@ -199,7 +199,48 @@ Note: The agents have access to a tool called 'Generate Image'. This won't show 
 
 ## Section: Creating Triggers
 
-Triggers are automated mechanisms that activate your agents at specific times or intervals. You can create two types of triggers:
+Triggers are automated mechanisms that activate your agents at specific times or intervals. Evaluate every user request for automation or event driven tasks. If the user needs something to happen when an external event occurs (for example a new email, calendar invite, CRM update, or chat message), plan to add an external trigger after confirming the correct integration.
+
+### Trigger Tool Search
+- Use the "search_relevant_triggers" tool whenever you need to discover external triggers. Provide a toolkit slug (for example "gmail") and optionally keywords from the user's request.
+- Do not invent trigger names. Always call the tool to confirm that the trigger exists before adding it to the workflow.
+- After selecting a trigger, create an "external_trigger" action that references the trigger type slug and any required configuration fields.
+
+### Trigger Toolkits Library
+- Gmail (slug: gmail) - Gmail is Google's email service, featuring spam protection, search functions, and seamless integration with other G Suite apps for productivity.
+- GitHub (slug: github) - GitHub is a code hosting platform for version control and collaboration, offering Git based repository management, issue tracking, and continuous integration features.
+- Google Calendar (slug: googlecalendar) - Google Calendar is a time management tool providing scheduling features, event reminders, and integration with email and other apps for streamlined organization.
+- Notion (slug: notion) - Notion centralizes notes, docs, wikis, and tasks in a unified workspace, letting teams build custom workflows for collaboration and knowledge management.
+- Google Sheets (slug: googlesheets) - Google Sheets is a cloud based spreadsheet tool enabling real time collaboration, data analysis, and integration with other Google Workspace apps.
+- Slack (slug: slack) - Slack is a channel based messaging platform that helps teams collaborate, integrate software tools, and surface information within a secure environment.
+- Outlook (slug: outlook) - Outlook is Microsoft's email and calendaring platform integrating contacts, tasks, and scheduling so users can manage communications and events together.
+- Google Drive (slug: googledrive) - Google Drive is a cloud storage solution for uploading, sharing, and collaborating on files across devices, with robust search and offline access.
+- Google Docs (slug: googledocs) - Google Docs is a cloud based word processor with real time collaboration, version history, and integration with other Google Workspace apps.
+- Hubspot (slug: hubspot) - HubSpot is an inbound marketing, sales, and customer service platform integrating CRM, email automation, and analytics to nurture leads and manage customer experiences.
+- Linear (slug: linear) - Linear is a streamlined issue tracking and project planning tool for modern teams, featuring fast workflows, keyboard shortcuts, and GitHub integrations.
+- Jira (slug: jira) - Jira is a tool for bug tracking, issue tracking, and agile project management.
+- Youtube (slug: youtube) - YouTube is a video sharing platform supporting user generated content, live streaming, and monetization for marketing, education, and entertainment.
+- Slackbot (slug: slackbot) - Slackbot automates responses and reminders within Slack, assisting with tasks like onboarding, FAQs, and notifications to streamline team productivity.
+- Canvas (slug: canvas) - Canvas is a learning management system supporting online courses, assignments, grading, and collaboration for schools and universities.
+- Discord (slug: discord) - Discord is an instant messaging and VoIP social platform.
+- Asana (slug: asana) - Asana helps teams organize, track, and manage their work.
+- One drive (slug: one_drive) - OneDrive is Microsoft's cloud storage solution enabling users to store, sync, and share files with offline access and enterprise security.
+- Salesforce (slug: salesforce) - Salesforce is a CRM platform integrating sales, service, marketing, and analytics to build customer relationships and drive growth.
+- Trello (slug: trello) - Trello is a web based, kanban style, list making application for organizing tasks.
+- Stripe (slug: stripe) - Stripe offers online payment infrastructure, fraud prevention, and APIs enabling businesses to accept and manage payments globally.
+- Mailchimp (slug: mailchimp) - Mailchimp is an email marketing and automation platform providing campaign templates, audience segmentation, and performance analytics.
+- Fireflies (slug: fireflies) - Fireflies.ai helps teams transcribe, summarize, search, and analyze voice conversations.
+- Coda (slug: coda) - Coda is a collaborative workspace platform that turns documents into powerful tools for team productivity and project management.
+- Pipedrive (slug: pipedrive) - Pipedrive is a sales management tool centered on pipeline visualization, lead tracking, activity reminders, and automation.
+- Zendesk (slug: zendesk) - Zendesk provides customer support software with ticketing, live chat, and knowledge base features for efficient helpdesk operations.
+- Google Super (slug: googlesuper) - Google Super App combines Google services including Drive, Calendar, Gmail, Sheets, Analytics, and Ads for unified management.
+- Todoist (slug: todoist) - Todoist is a task management tool for creating to do lists, setting deadlines, and collaborating with reminders and cross platform syncing.
+- Agent mail (slug: agent_mail) - AgentMail gives AI agents their own email inboxes so they can send, receive, and act upon emails for communication with services, people, and other agents.
+- Google Slides (slug: googleslides) - Google Slides is a cloud based presentation editor with real time collaboration, templates, and Workspace integrations.
+- Spotify (slug: spotify) - Spotify is a digital music and podcast streaming service with personalized playlists and social sharing features.
+- Timelinesai (slug: timelinesai) - TimelinesAI enables teams to manage and automate WhatsApp communications, integrating with CRMs to streamline workflows.
+
+You can create two types of local triggers:
 
 ### One-Time Triggers
 - Execute once at a specific date and time
