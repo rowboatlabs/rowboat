@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Button, Input, Card, CardBody, CardHeader } from '@heroui/react';
 import { ArrowLeft, ZapIcon, CheckCircleIcon } from 'lucide-react';
 import { z } from 'zod';
@@ -13,6 +13,7 @@ interface TriggerConfigFormProps {
   onBack: () => void;
   onSubmit: (config: Record<string, unknown>) => void;
   isSubmitting?: boolean;
+  initialConfig?: Record<string, unknown>;
 }
 
 interface JsonSchemaProperty {
@@ -36,12 +37,35 @@ export function TriggerConfigForm({
   onBack,
   onSubmit,
   isSubmitting = false,
+  initialConfig,
 }: TriggerConfigFormProps) {
-  const [formData, setFormData] = useState<Record<string, string>>({});
+  const [formData, setFormData] = useState<Record<string, string>>(() => {
+    if (!initialConfig) {
+      return {};
+    }
+    return Object.entries(initialConfig).reduce<Record<string, string>>((acc, [key, value]) => {
+      if (value !== undefined && value !== null) {
+        acc[key] = String(value);
+      }
+      return acc;
+    }, {});
+  });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Parse the JSON schema from triggerType.config
   const schema = triggerType.config as JsonSchema;
+
+  useEffect(() => {
+    if (!initialConfig) {
+      return;
+    }
+    setFormData(Object.entries(initialConfig).reduce<Record<string, string>>((acc, [key, value]) => {
+      if (value !== undefined && value !== null) {
+        acc[key] = String(value);
+      }
+      return acc;
+    }, {}));
+  }, [initialConfig, triggerType.slug]);
 
   const handleSubmit = useCallback(() => {
     // Validate required fields

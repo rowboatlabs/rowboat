@@ -93,6 +93,10 @@ export function validateConfigChanges(configType: string, configChanges: Record<
             }).passthrough();
             break;
         }
+        case 'external_trigger': {
+            // External triggers have flexible schemas per provider; do not strip any config.
+            return { changes: configChanges };
+        }
         default:
             return { error: `Unknown config type: ${configType}` };
     }

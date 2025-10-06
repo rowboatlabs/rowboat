@@ -7,6 +7,7 @@ import MarkdownContent from "@/app/lib/components/markdown-content";
 import { MessageSquareIcon, EllipsisIcon, XIcon, CheckCheckIcon, ChevronDown, ChevronUp } from "lucide-react";
 import { CopilotMessage, CopilotAssistantMessage, CopilotAssistantMessageActionPart, TriggerSchemaForCopilot } from "@/src/entities/models/copilot";
 import { Action, StreamingAction } from './actions';
+import { TriggerSetupModal } from './TriggerSetupModal';
 import { useParsedBlocks } from "../use-parsed-blocks";
 import { validateConfigChanges } from "@/app/lib/client_utils";
 import { PreviewModalProvider } from '../../workflow/preview-modal';
@@ -224,6 +225,14 @@ function AssistantMessage({
     const triggersRef = useRef<CopilotTriggerType[] | undefined>(triggers);
     const pendingTriggerEditsRef = useRef<Map<string, CopilotTriggerType>>(new Map());
     const triggerUpdateCallbackRef = useRef<typeof onTriggersUpdated>(onTriggersUpdated);
+    const [triggerSetupModal, setTriggerSetupModal] = useState<{
+        action: z.infer<typeof CopilotAssistantMessageActionPart>['content'];
+        actionIndex: number;
+        messageIndex: number;
+        initialToolkitSlug: string | null;
+        initialTriggerTypeSlug: string | null;
+        initialConfig?: Record<string, unknown>;
+    } | null>(null);
 
     useEffect(() => {
         triggersRef.current = triggers;
@@ -233,6 +242,82 @@ function AssistantMessage({
     useEffect(() => {
         triggerUpdateCallbackRef.current = onTriggersUpdated;
     }, [onTriggersUpdated]);
+
+    const refreshTriggers = useCallback(async () => {
+        const callback = triggerUpdateCallbackRef.current;
+        if (!callback) {
+            return;
+        }
+        try {
+            await callback();
+        } catch (error) {
+            console.error('Failed to refresh triggers after Copilot action', error);
+        }
+    }, []);
+
+    const requestTriggerSetup = useCallback((params: {
+        action: z.infer<typeof CopilotAssistantMessageActionPart>['content'];
+        actionIndex: number;
+        messageIndex: number;
+    }) => {
+        const { action, actionIndex, messageIndex: msgIndex } = params;
+        const changes = (action?.config_changes ?? {}) as Record<string, unknown>;
+        const toStringOrNull = (value: unknown): string | null => {
+            if (typeof value === 'string' && value.trim().length > 0) {
+                return value;
+            }
+            return null;
+        };
+        const deriveSlug = (primary: unknown, secondary: unknown, tertiary: unknown): string | null => {
+            return toStringOrNull(primary) ?? toStringOrNull(secondary) ?? toStringOrNull(tertiary);
+        };
+        const toolkitSlug = deriveSlug(
+            changes.toolkitSlug,
+            changes.toolkit_slug,
+            typeof changes.toolkit === 'object' && changes.toolkit !== null ? (changes.toolkit as any).slug : changes.toolkit
+        );
+        const triggerTypeSlug = deriveSlug(
+            changes.triggerTypeSlug,
+            changes.trigger_type_slug,
+            typeof changes.triggerType === 'object' && changes.triggerType !== null ? (changes.triggerType as any).slug : changes.triggerType
+        );
+        const triggerConfigCandidate = (changes.triggerConfig ?? changes.trigger_config ?? changes.config) as unknown;
+        const triggerConfig = typeof triggerConfigCandidate === 'object' && triggerConfigCandidate !== null
+            ? (triggerConfigCandidate as Record<string, unknown>)
+            : undefined;
+
+        setTriggerSetupModal(prev => {
+            if (prev && prev.actionIndex === actionIndex && prev.messageIndex === msgIndex) {
+                return prev;
+            }
+            return {
+                action,
+                actionIndex,
+                messageIndex: msgIndex,
+                initialToolkitSlug: toolkitSlug,
+                initialTriggerTypeSlug: triggerTypeSlug,
+                initialConfig: triggerConfig,
+            };
+        });
+    }, []);
+
+    const handleTriggerSetupCreated = useCallback(async () => {
+        if (!triggerSetupModal) {
+            return;
+        }
+        const index = triggerSetupModal.actionIndex;
+        setAppliedActions(prev => {
+            const next = new Set(prev);
+            next.add(index);
+            return next;
+        });
+        await refreshTriggers();
+        setTriggerSetupModal(null);
+    }, [refreshTriggers, triggerSetupModal]);
+
+    const handleTriggerSetupClosed = useCallback(() => {
+        setTriggerSetupModal(null);
+    }, []);
 
     // parse actions from parts
     const parsed = useMemo(() => {
@@ -616,6 +701,15 @@ function AssistantMessage({
                 }
             }
 
+            if (configType === 'external_trigger') {
+                if (actionType === 'create_new') {
+                    if (typeof actionIndex === 'number') {
+                        requestTriggerSetup({ action, actionIndex, messageIndex });
+                    }
+                    return false;
+                }
+            }
+
             if ((configType === 'external_trigger' || configType === 'external') && actionType === 'delete') {
                 const target = triggerList.find((trigger): trigger is Extract<CopilotTriggerType, { type: 'external' }> => {
                     if (trigger.type !== 'external') {
@@ -646,19 +740,7 @@ function AssistantMessage({
 
         console.warn('Unhandled trigger action from Copilot applyAction', action);
         return false;
-    }, [projectId, parsed]);
-
-    const refreshTriggers = useCallback(async () => {
-        const callback = triggerUpdateCallbackRef.current;
-        if (!callback) {
-            return;
-        }
-        try {
-            await callback();
-        } catch (error) {
-            console.error('Failed to refresh triggers after Copilot action', error);
-        }
-    }, []);
+    }, [projectId, parsed, requestTriggerSetup, messageIndex]);
 
     // Memoized handleApplyAll for useEffect dependencies
     const handleApplyAll = useCallback(async () => {
@@ -805,6 +887,7 @@ function AssistantMessage({
 
     // Render all cards inline, not in a panel
     return (
+        <>
         <div className="w-full">
             <div className="px-4 py-2.5 text-sm leading-relaxed text-gray-700 dark:text-gray-200">
                 <div className="flex flex-col gap-2">
@@ -827,6 +910,9 @@ function AssistantMessage({
                                     onApplied={() => { void handleSingleApply(part.action, idx); }}
                                     externallyApplied={appliedActions.has(idx)}
                                     defaultExpanded={true}
+                                    onRequestTriggerSetup={({ action, actionIndex }) =>
+                                        requestTriggerSetup({ action, actionIndex, messageIndex })
+                                    }
                                 />
                             );
                         }
@@ -845,6 +931,16 @@ function AssistantMessage({
                 </div>
             </div>
         </div>
+        <TriggerSetupModal
+            isOpen={Boolean(triggerSetupModal)}
+            onClose={handleTriggerSetupClosed}
+            projectId={projectId}
+            initialToolkitSlug={triggerSetupModal?.initialToolkitSlug ?? null}
+            initialTriggerTypeSlug={triggerSetupModal?.initialTriggerTypeSlug ?? null}
+            initialTriggerConfig={triggerSetupModal?.initialConfig}
+            onCreated={handleTriggerSetupCreated}
+        />
+        </>
     );
 }
 
