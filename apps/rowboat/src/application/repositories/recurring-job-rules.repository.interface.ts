@@ -18,6 +18,15 @@ export const ListedRecurringRuleItem = RecurringJobRule.omit({
 });
 
 /**
+ * Schema for updating a recurring job rule.
+ */
+export const UpdateRecurringRuleSchema = RecurringJobRule
+    .pick({
+        input: true,
+        cron: true,
+    });
+
+/**
  * Repository interface for managing recurring job rules in the system.
  * 
  * This interface defines the contract for recurring job rule management operations including
@@ -81,6 +90,16 @@ export interface IRecurringJobRulesRepository {
      * @returns Promise resolving to the updated recurring job rule
      */
     toggle(id: string, disabled: boolean): Promise<z.infer<typeof RecurringJobRule>>;
+
+    /**
+     * Updates a recurring job rule with new input and cron expression.
+     * 
+     * @param id - The unique identifier of the recurring job rule to update
+     * @param data - The update data containing input messages and cron expression
+     * @returns Promise resolving to the updated recurring job rule
+     * @throws {NotFoundError} if the recurring job rule doesn't exist
+     */
+    update(id: string, data: z.infer<typeof UpdateRecurringRuleSchema>): Promise<z.infer<typeof RecurringJobRule>>;
 
     /**
      * Deletes a recurring job rule by its unique identifier.

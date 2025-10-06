@@ -222,10 +222,12 @@ function AssistantMessage({
     // Remove autoApplyEnabled and useEffect for auto-apply
 
     const triggersRef = useRef<CopilotTriggerType[] | undefined>(triggers);
+    const pendingTriggerEditsRef = useRef<Map<string, CopilotTriggerType>>(new Map());
     const triggerUpdateCallbackRef = useRef<typeof onTriggersUpdated>(onTriggersUpdated);
 
     useEffect(() => {
         triggersRef.current = triggers;
+        pendingTriggerEditsRef.current.clear();
     }, [triggers]);
 
     useEffect(() => {
@@ -378,14 +380,46 @@ function AssistantMessage({
         return false;
     }, [dispatch, workflow.agents, workflow.tools]);
 
-    const handleTriggerAction = useCallback(async (action: any): Promise<boolean> => {
+    const handleTriggerAction = useCallback(async (action: any, actionIndex?: number): Promise<boolean> => {
         const configType = action.config_type;
         const actionType = action.action;
         const triggerList = triggersRef.current ?? [];
+        const key = `${configType}:${action.name}`;
+
+        const hasUpcomingReplacement = () => parsed.some((part, idx) =>
+            idx > (actionIndex ?? -1) &&
+            part.type === 'action' &&
+            part.action.config_type === configType &&
+            part.action.name === action.name &&
+            part.action.action === 'create_new'
+        );
 
         try {
             if (configType === 'one_time_trigger') {
                 if (actionType === 'create_new') {
+                    const pending = pendingTriggerEditsRef.current.get(key);
+
+                    if (pending && pending.type === 'one_time') {
+                        const scheduledTime = action.config_changes?.scheduledTime ?? pending.nextRunAt;
+                        const input = action.config_changes?.input ?? pending.input;
+
+                        if (!scheduledTime || !input) {
+                            console.error('Missing data for one-time trigger update via replacement', action);
+                            return false;
+                        }
+
+                        const { updateScheduledJobRule } = await loadScheduledJobActions();
+                        await updateScheduledJobRule({
+                            projectId,
+                            ruleId: pending.id,
+                            scheduledTime,
+                            input,
+                        });
+
+                        pendingTriggerEditsRef.current.delete(key);
+                        return true;
+                    }
+
                     const { scheduledTime, input } = action.config_changes || {};
                     if (!scheduledTime || !input) {
                         console.error('Missing scheduledTime or input for one-time trigger', action);
@@ -410,9 +444,20 @@ function AssistantMessage({
                     return false;
                 }
 
-                const { fetchScheduledJobRule, deleteScheduledJobRule, createScheduledJobRule } = await loadScheduledJobActions();
+                const {
+                    fetchScheduledJobRule,
+                    deleteScheduledJobRule,
+                    updateScheduledJobRule,
+                } = await loadScheduledJobActions();
 
                 if (actionType === 'delete') {
+                    if (hasUpcomingReplacement()) {
+                        pendingTriggerEditsRef.current.set(key, target);
+                        return true;
+                    }
+
+                    pendingTriggerEditsRef.current.delete(key);
+
                     await deleteScheduledJobRule({ projectId, ruleId: target.id });
                     return true;
                 }
@@ -432,27 +477,63 @@ function AssistantMessage({
                         return false;
                     }
 
-                    const created = await createScheduledJobRule({
+                    await updateScheduledJobRule({
                         projectId,
+                        ruleId: target.id,
                         scheduledTime,
                         input,
                     });
 
-                    // Remove the previous rule only after successfully creating the updated one
-                    await deleteScheduledJobRule({ projectId, ruleId: target.id });
-
-                    return Boolean(created?.id);
+                    return true;
                 }
             }
 
             if (configType === 'recurring_trigger') {
                 if (actionType === 'create_new') {
+                    const pending = pendingTriggerEditsRef.current.get(key);
+
+                    const {
+                        createRecurringJobRule,
+                        updateRecurringJobRule,
+                        toggleRecurringJobRule,
+                    } = await loadRecurringJobActions();
+
+                    if (pending && pending.type === 'recurring') {
+                        const cron = action.config_changes?.cron ?? pending.cron;
+                        const input = action.config_changes?.input ?? pending.input;
+
+                        if (!cron || !input) {
+                            console.error('Missing data for recurring trigger update via replacement', action);
+                            return false;
+                        }
+
+                        const updatedRule = await updateRecurringJobRule({
+                            projectId,
+                            ruleId: pending.id,
+                            cron,
+                            input,
+                        });
+
+                        const hasDisabledToggle = Object.prototype.hasOwnProperty.call(action.config_changes ?? {}, 'disabled');
+                        if (hasDisabledToggle) {
+                            const desiredDisabled = typeof action.config_changes?.disabled === 'boolean'
+                                ? action.config_changes.disabled
+                                : pending.disabled;
+                            if (typeof desiredDisabled === 'boolean' && desiredDisabled !== pending.disabled) {
+                                await toggleRecurringJobRule({ ruleId: pending.id, disabled: desiredDisabled });
+                            }
+                        }
+
+                        pendingTriggerEditsRef.current.delete(key);
+                        return Boolean(updatedRule?.id);
+                    }
+
                     const { cron, input } = action.config_changes || {};
                     if (!cron || !input) {
                         console.error('Missing cron or input for recurring trigger', action);
                         return false;
                     }
-                    const { createRecurringJobRule } = await loadRecurringJobActions();
+
                     await createRecurringJobRule({
                         projectId,
                         cron,
@@ -474,11 +555,18 @@ function AssistantMessage({
                 const {
                     fetchRecurringJobRule,
                     deleteRecurringJobRule,
-                    createRecurringJobRule,
                     toggleRecurringJobRule,
+                    updateRecurringJobRule,
                 } = await loadRecurringJobActions();
 
                 if (actionType === 'delete') {
+                    if (hasUpcomingReplacement()) {
+                        pendingTriggerEditsRef.current.set(key, target);
+                        return true;
+                    }
+
+                    pendingTriggerEditsRef.current.delete(key);
+
                     await deleteRecurringJobRule({ projectId, ruleId: target.id });
                     return true;
                 }
@@ -513,16 +601,15 @@ function AssistantMessage({
                         return false;
                     }
 
-                    const created = await createRecurringJobRule({
+                    const updatedRule = await updateRecurringJobRule({
                         projectId,
+                        ruleId: target.id,
                         cron,
                         input,
                     });
 
-                    await deleteRecurringJobRule({ projectId, ruleId: target.id });
-
-                    if (desiredDisabled !== created.disabled) {
-                        await toggleRecurringJobRule({ ruleId: created.id, disabled: desiredDisabled });
+                    if (hasDisabledToggle && desiredDisabled !== updatedRule.disabled) {
+                        await toggleRecurringJobRule({ ruleId: target.id, disabled: desiredDisabled });
                     }
 
                     return true;
@@ -559,7 +646,7 @@ function AssistantMessage({
 
         console.warn('Unhandled trigger action from Copilot applyAction', action);
         return false;
-    }, [projectId]);
+    }, [projectId, parsed]);
 
     const refreshTriggers = useCallback(async () => {
         const callback = triggerUpdateCallbackRef.current;
@@ -589,7 +676,7 @@ function AssistantMessage({
             try {
                 const isTrigger = action.config_type === 'one_time_trigger' || action.config_type === 'recurring_trigger' || action.config_type === 'external_trigger';
                 const success = isTrigger
-                    ? await handleTriggerAction(action)
+                    ? await handleTriggerAction(action, actionIndex)
                     : applyAction(action);
 
                 if (success) {
@@ -625,7 +712,7 @@ function AssistantMessage({
         try {
             const isTrigger = action.config_type === 'one_time_trigger' || action.config_type === 'recurring_trigger' || action.config_type === 'external_trigger';
             const success = isTrigger
-                ? await handleTriggerAction(action)
+                ? await handleTriggerAction(action, actionIndex)
                 : applyAction(action);
 
             if (success) {

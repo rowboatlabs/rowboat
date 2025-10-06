@@ -6,6 +6,7 @@ import { IListRecurringJobRulesController } from "@/src/interface-adapters/contr
 import { IFetchRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/fetch-recurring-job-rule.controller";
 import { IToggleRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/toggle-recurring-job-rule.controller";
 import { IDeleteRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/delete-recurring-job-rule.controller";
+import { IUpdateRecurringJobRuleController } from "@/src/interface-adapters/controllers/recurring-job-rules/update-recurring-job-rule.controller";
 import { authCheck } from "./auth.actions";
 import { z } from "zod";
 import { Message } from "@/app/lib/types/types";
@@ -15,6 +16,7 @@ const listRecurringJobRulesController = container.resolve<IListRecurringJobRules
 const fetchRecurringJobRuleController = container.resolve<IFetchRecurringJobRuleController>('fetchRecurringJobRuleController');
 const toggleRecurringJobRuleController = container.resolve<IToggleRecurringJobRuleController>('toggleRecurringJobRuleController');
 const deleteRecurringJobRuleController = container.resolve<IDeleteRecurringJobRuleController>('deleteRecurringJobRuleController');
+const updateRecurringJobRuleController = container.resolve<IUpdateRecurringJobRuleController>('updateRecurringJobRuleController');
 
 export async function createRecurringJobRule(request: {
     projectId: string,
@@ -87,5 +89,25 @@ export async function deleteRecurringJobRule(request: {
         userId: user.id,
         projectId: request.projectId,
         ruleId: request.ruleId,
+    });
+}
+
+export async function updateRecurringJobRule(request: {
+    projectId: string,
+    ruleId: string,
+    input: {
+        messages: z.infer<typeof Message>[],
+    },
+    cron: string,
+}) {
+    const user = await authCheck();
+
+    return await updateRecurringJobRuleController.execute({
+        caller: 'user',
+        userId: user.id,
+        projectId: request.projectId,
+        ruleId: request.ruleId,
+        input: request.input,
+        cron: request.cron,
     });
 }
