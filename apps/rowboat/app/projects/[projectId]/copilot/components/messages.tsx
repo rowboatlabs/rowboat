@@ -112,15 +112,27 @@ function enrich(response: string): z.infer<typeof CopilotResponsePart> {
                 };
             }
 
+            const actionPayload = {
+                action: metadata.action as 'create_new' | 'edit' | 'delete',
+                config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent' | 'one_time_trigger' | 'recurring_trigger' | 'external_trigger',
+                name: metadata.name,
+                change_description: jsonData.change_description || '',
+                config_changes: result.changes
+            };
+
+            if (actionPayload.config_type === 'external_trigger' && actionPayload.action === 'edit') {
+                return {
+                    type: 'action',
+                    action: {
+                        ...actionPayload,
+                        error: "Editing external triggers isn't supported. Delete the trigger and create a new one with the updated settings—I can take care of that for you if you'd like."
+                    }
+                };
+            }
+
             return {
                 type: 'action',
-                action: {
-                    action: metadata.action as 'create_new' | 'edit' | 'delete',
-                    config_type: metadata.config_type as 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent' | 'one_time_trigger' | 'recurring_trigger' | 'external_trigger',
-                    name: metadata.name,
-                    change_description: jsonData.change_description || '',
-                    config_changes: result.changes
-                }
+                action: actionPayload
             };
         }
     } catch (e) {
