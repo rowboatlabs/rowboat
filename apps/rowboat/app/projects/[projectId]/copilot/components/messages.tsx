@@ -8,40 +8,12 @@ import { MessageSquareIcon, EllipsisIcon, XIcon, CheckCheckIcon, ChevronDown, Ch
 import { CopilotMessage, CopilotAssistantMessage, CopilotAssistantMessageActionPart, TriggerSchemaForCopilot } from "@/src/entities/models/copilot";
 import { Action, StreamingAction } from './actions';
 import { TriggerSetupModal } from './TriggerSetupModal';
+import { useCopilotTriggerActions } from './use-trigger-actions';
 import { useParsedBlocks } from "../use-parsed-blocks";
 import { validateConfigChanges } from "@/app/lib/client_utils";
 import { PreviewModalProvider } from '../../workflow/preview-modal';
 
-type ScheduledJobActionsModule = typeof import('@/app/actions/scheduled-job-rules.actions');
-type RecurringJobActionsModule = typeof import('@/app/actions/recurring-job-rules.actions');
-type ComposioActionsModule = typeof import('@/app/actions/composio.actions');
-
 type CopilotTriggerType = z.infer<typeof TriggerSchemaForCopilot>;
-
-let scheduledJobActionsPromise: Promise<ScheduledJobActionsModule> | null = null;
-let recurringJobActionsPromise: Promise<RecurringJobActionsModule> | null = null;
-let composioActionsPromise: Promise<ComposioActionsModule> | null = null;
-
-function loadScheduledJobActions(): Promise<ScheduledJobActionsModule> {
-    if (!scheduledJobActionsPromise) {
-        scheduledJobActionsPromise = import('@/app/actions/scheduled-job-rules.actions');
-    }
-    return scheduledJobActionsPromise;
-}
-
-function loadRecurringJobActions(): Promise<RecurringJobActionsModule> {
-    if (!recurringJobActionsPromise) {
-        recurringJobActionsPromise = import('@/app/actions/recurring-job-rules.actions');
-    }
-    return recurringJobActionsPromise;
-}
-
-function loadComposioActions(): Promise<ComposioActionsModule> {
-    if (!composioActionsPromise) {
-        composioActionsPromise = import('@/app/actions/composio.actions');
-    }
-    return composioActionsPromise;
-}
 
 const CopilotResponsePart = z.union([
     z.object({
@@ -232,104 +204,6 @@ function AssistantMessage({
 }) {
     const blocks = useParsedBlocks(content);
     const [appliedActions, setAppliedActions] = useState<Set<number>>(new Set());
-    // Remove autoApplyEnabled and useEffect for auto-apply
-
-    const triggersRef = useRef<CopilotTriggerType[] | undefined>(triggers);
-    const pendingTriggerEditsRef = useRef<Map<string, CopilotTriggerType>>(new Map());
-    const triggerUpdateCallbackRef = useRef<typeof onTriggersUpdated>(onTriggersUpdated);
-    const [triggerSetupModal, setTriggerSetupModal] = useState<{
-        action: z.infer<typeof CopilotAssistantMessageActionPart>['content'];
-        actionIndex: number;
-        messageIndex: number;
-        initialToolkitSlug: string | null;
-        initialTriggerTypeSlug: string | null;
-        initialConfig?: Record<string, unknown>;
-    } | null>(null);
-
-    useEffect(() => {
-        triggersRef.current = triggers;
-        pendingTriggerEditsRef.current.clear();
-    }, [triggers]);
-
-    useEffect(() => {
-        triggerUpdateCallbackRef.current = onTriggersUpdated;
-    }, [onTriggersUpdated]);
-
-    const refreshTriggers = useCallback(async () => {
-        const callback = triggerUpdateCallbackRef.current;
-        if (!callback) {
-            return;
-        }
-        try {
-            await callback();
-        } catch (error) {
-            console.error('Failed to refresh triggers after Copilot action', error);
-        }
-    }, []);
-
-    const requestTriggerSetup = useCallback((params: {
-        action: z.infer<typeof CopilotAssistantMessageActionPart>['content'];
-        actionIndex: number;
-        messageIndex: number;
-    }) => {
-        const { action, actionIndex, messageIndex: msgIndex } = params;
-        const changes = (action?.config_changes ?? {}) as Record<string, unknown>;
-        const toStringOrNull = (value: unknown): string | null => {
-            if (typeof value === 'string' && value.trim().length > 0) {
-                return value;
-            }
-            return null;
-        };
-        const deriveSlug = (primary: unknown, secondary: unknown, tertiary: unknown): string | null => {
-            return toStringOrNull(primary) ?? toStringOrNull(secondary) ?? toStringOrNull(tertiary);
-        };
-        const toolkitSlug = deriveSlug(
-            changes.toolkitSlug,
-            changes.toolkit_slug,
-            typeof changes.toolkit === 'object' && changes.toolkit !== null ? (changes.toolkit as any).slug : changes.toolkit
-        );
-        const triggerTypeSlug = deriveSlug(
-            changes.triggerTypeSlug,
-            changes.trigger_type_slug,
-            typeof changes.triggerType === 'object' && changes.triggerType !== null ? (changes.triggerType as any).slug : changes.triggerType
-        );
-        const triggerConfigCandidate = (changes.triggerConfig ?? changes.trigger_config ?? changes.config) as unknown;
-        const triggerConfig = typeof triggerConfigCandidate === 'object' && triggerConfigCandidate !== null
-            ? (triggerConfigCandidate as Record<string, unknown>)
-            : undefined;
-
-        setTriggerSetupModal(prev => {
-            if (prev && prev.actionIndex === actionIndex && prev.messageIndex === msgIndex) {
-                return prev;
-            }
-            return {
-                action,
-                actionIndex,
-                messageIndex: msgIndex,
-                initialToolkitSlug: toolkitSlug,
-                initialTriggerTypeSlug: triggerTypeSlug,
-                initialConfig: triggerConfig,
-            };
-        });
-    }, []);
-
-    const handleTriggerSetupCreated = useCallback(async () => {
-        if (!triggerSetupModal) {
-            return;
-        }
-        const index = triggerSetupModal.actionIndex;
-        setAppliedActions(prev => {
-            const next = new Set(prev);
-            next.add(index);
-            return next;
-        });
-        await refreshTriggers();
-        setTriggerSetupModal(null);
-    }, [refreshTriggers, triggerSetupModal]);
-
-    const handleTriggerSetupClosed = useCallback(() => {
-        setTriggerSetupModal(null);
-    }, []);
 
     // parse actions from parts
     const parsed = useMemo(() => {
@@ -346,6 +220,46 @@ function AssistantMessage({
         }
         return result;
     }, [blocks]);
+
+    const hasUpcomingReplacement = useCallback((candidate: z.infer<typeof CopilotAssistantMessageActionPart>['content'], currentIndex: number = -1) => {
+        return parsed.some((part, idx) =>
+            idx > currentIndex &&
+            part.type === 'action' &&
+            part.action.config_type === candidate.config_type &&
+            part.action.name === candidate.name &&
+            part.action.action === 'create_new'
+        );
+    }, [parsed]);
+
+    const {
+        triggerSetupModal,
+        requestTriggerSetup,
+        closeTriggerSetup,
+        handleTriggerCreatedViaModal,
+        handleTriggerAction,
+    } = useCopilotTriggerActions({
+        projectId,
+        triggers,
+        onTriggersUpdated,
+        hasUpcomingReplacement,
+    });
+
+    const handleTriggerSetupCreated = useCallback(async () => {
+        if (!triggerSetupModal) {
+            return;
+        }
+        const index = triggerSetupModal.actionIndex;
+        setAppliedActions(prev => {
+            const next = new Set(prev);
+            next.add(index);
+            return next;
+        });
+        await handleTriggerCreatedViaModal();
+    }, [handleTriggerCreatedViaModal, triggerSetupModal]);
+
+    const handleTriggerSetupClosed = useCallback(() => {
+        closeTriggerSetup();
+    }, [closeTriggerSetup]);
 
     // Count action cards for tracking
     const actionParts = parsed.filter(part => part.type === 'action' || part.type === 'streaming_action');
@@ -477,283 +391,6 @@ function AssistantMessage({
         return false;
     }, [dispatch, workflow.agents, workflow.tools]);
 
-    const handleTriggerAction = useCallback(async (action: any, actionIndex?: number): Promise<boolean> => {
-        const configType = action.config_type;
-        const actionType = action.action;
-        const triggerList = triggersRef.current ?? [];
-        const key = `${configType}:${action.name}`;
-
-        const hasUpcomingReplacement = () => parsed.some((part, idx) =>
-            idx > (actionIndex ?? -1) &&
-            part.type === 'action' &&
-            part.action.config_type === configType &&
-            part.action.name === action.name &&
-            part.action.action === 'create_new'
-        );
-
-        try {
-            if (configType === 'one_time_trigger') {
-                if (actionType === 'create_new') {
-                    const pending = pendingTriggerEditsRef.current.get(key);
-
-                    if (pending && pending.type === 'one_time') {
-                        const scheduledTime = action.config_changes?.scheduledTime ?? pending.nextRunAt;
-                        const input = action.config_changes?.input ?? pending.input;
-
-                        if (!scheduledTime || !input) {
-                            console.error('Missing data for one-time trigger update via replacement', action);
-                            return false;
-                        }
-
-                        const { updateScheduledJobRule } = await loadScheduledJobActions();
-                        await updateScheduledJobRule({
-                            projectId,
-                            ruleId: pending.id,
-                            scheduledTime,
-                            input,
-                        });
-
-                        pendingTriggerEditsRef.current.delete(key);
-                        return true;
-                    }
-
-                    const { scheduledTime, input } = action.config_changes || {};
-                    if (!scheduledTime || !input) {
-                        console.error('Missing scheduledTime or input for one-time trigger', action);
-                        return false;
-                    }
-                    const { createScheduledJobRule } = await loadScheduledJobActions();
-                    await createScheduledJobRule({
-                        projectId,
-                        scheduledTime,
-                        input,
-                    });
-                    return true;
-                }
-
-                const target = triggerList.find(
-                    (trigger): trigger is Extract<z.infer<typeof TriggerSchemaForCopilot>, { type: 'one_time' }> =>
-                        trigger.type === 'one_time' && trigger.name === action.name
-                );
-
-                if (!target) {
-                    console.warn('Unable to resolve one-time trigger for action', action.name);
-                    return false;
-                }
-
-                const {
-                    fetchScheduledJobRule,
-                    deleteScheduledJobRule,
-                    updateScheduledJobRule,
-                } = await loadScheduledJobActions();
-
-                if (actionType === 'delete') {
-                    if (hasUpcomingReplacement()) {
-                        pendingTriggerEditsRef.current.set(key, target);
-                        return true;
-                    }
-
-                    pendingTriggerEditsRef.current.delete(key);
-
-                    await deleteScheduledJobRule({ projectId, ruleId: target.id });
-                    return true;
-                }
-
-                if (actionType === 'edit') {
-                    const existing = await fetchScheduledJobRule({ ruleId: target.id });
-                    if (!existing) {
-                        console.error('Failed to load existing one-time trigger for edit', action.name);
-                        return false;
-                    }
-
-                    const scheduledTime = action.config_changes?.scheduledTime ?? existing.nextRunAt;
-                    const input = action.config_changes?.input ?? existing.input;
-
-                    if (!scheduledTime || !input) {
-                        console.error('Missing data for one-time trigger edit', action);
-                        return false;
-                    }
-
-                    await updateScheduledJobRule({
-                        projectId,
-                        ruleId: target.id,
-                        scheduledTime,
-                        input,
-                    });
-
-                    return true;
-                }
-            }
-
-            if (configType === 'recurring_trigger') {
-                if (actionType === 'create_new') {
-                    const pending = pendingTriggerEditsRef.current.get(key);
-
-                    const {
-                        createRecurringJobRule,
-                        updateRecurringJobRule,
-                        toggleRecurringJobRule,
-                    } = await loadRecurringJobActions();
-
-                    if (pending && pending.type === 'recurring') {
-                        const cron = action.config_changes?.cron ?? pending.cron;
-                        const input = action.config_changes?.input ?? pending.input;
-
-                        if (!cron || !input) {
-                            console.error('Missing data for recurring trigger update via replacement', action);
-                            return false;
-                        }
-
-                        const updatedRule = await updateRecurringJobRule({
-                            projectId,
-                            ruleId: pending.id,
-                            cron,
-                            input,
-                        });
-
-                        const hasDisabledToggle = Object.prototype.hasOwnProperty.call(action.config_changes ?? {}, 'disabled');
-                        if (hasDisabledToggle) {
-                            const desiredDisabled = typeof action.config_changes?.disabled === 'boolean'
-                                ? action.config_changes.disabled
-                                : pending.disabled;
-                            if (typeof desiredDisabled === 'boolean' && desiredDisabled !== pending.disabled) {
-                                await toggleRecurringJobRule({ ruleId: pending.id, disabled: desiredDisabled });
-                            }
-                        }
-
-                        pendingTriggerEditsRef.current.delete(key);
-                        return Boolean(updatedRule?.id);
-                    }
-
-                    const { cron, input } = action.config_changes || {};
-                    if (!cron || !input) {
-                        console.error('Missing cron or input for recurring trigger', action);
-                        return false;
-                    }
-
-                    await createRecurringJobRule({
-                        projectId,
-                        cron,
-                        input,
-                    });
-                    return true;
-                }
-
-                const target = triggerList.find(
-                    (trigger): trigger is Extract<z.infer<typeof TriggerSchemaForCopilot>, { type: 'recurring' }> =>
-                        trigger.type === 'recurring' && trigger.name === action.name
-                );
-
-                if (!target) {
-                    console.warn('Unable to resolve recurring trigger for action', action.name);
-                    return false;
-                }
-
-                const {
-                    fetchRecurringJobRule,
-                    deleteRecurringJobRule,
-                    toggleRecurringJobRule,
-                    updateRecurringJobRule,
-                } = await loadRecurringJobActions();
-
-                if (actionType === 'delete') {
-                    if (hasUpcomingReplacement()) {
-                        pendingTriggerEditsRef.current.set(key, target);
-                        return true;
-                    }
-
-                    pendingTriggerEditsRef.current.delete(key);
-
-                    await deleteRecurringJobRule({ projectId, ruleId: target.id });
-                    return true;
-                }
-
-                if (actionType === 'edit') {
-                    const existing = await fetchRecurringJobRule({ ruleId: target.id });
-                    if (!existing) {
-                        console.error('Failed to load existing recurring trigger for edit', action.name);
-                        return false;
-                    }
-
-                    const desiredDisabled = typeof action.config_changes?.disabled === 'boolean'
-                        ? action.config_changes.disabled
-                        : existing.disabled;
-
-                    const hasCronChange = Object.prototype.hasOwnProperty.call(action.config_changes ?? {}, 'cron');
-                    const hasInputChange = Object.prototype.hasOwnProperty.call(action.config_changes ?? {}, 'input');
-                    const hasDisabledToggle = Object.prototype.hasOwnProperty.call(action.config_changes ?? {}, 'disabled');
-
-                    if (!hasCronChange && !hasInputChange && hasDisabledToggle) {
-                        if (desiredDisabled !== existing.disabled) {
-                            await toggleRecurringJobRule({ ruleId: target.id, disabled: desiredDisabled });
-                        }
-                        return true;
-                    }
-
-                    const cron = action.config_changes?.cron ?? existing.cron;
-                    const input = action.config_changes?.input ?? existing.input;
-
-                    if (!cron || !input) {
-                        console.error('Missing data for recurring trigger edit', action);
-                        return false;
-                    }
-
-                    const updatedRule = await updateRecurringJobRule({
-                        projectId,
-                        ruleId: target.id,
-                        cron,
-                        input,
-                    });
-
-                    if (hasDisabledToggle && desiredDisabled !== updatedRule.disabled) {
-                        await toggleRecurringJobRule({ ruleId: target.id, disabled: desiredDisabled });
-                    }
-
-                    return true;
-                }
-            }
-
-            if (configType === 'external_trigger') {
-                if (actionType === 'create_new') {
-                    if (typeof actionIndex === 'number') {
-                        requestTriggerSetup({ action, actionIndex, messageIndex });
-                    }
-                    return false;
-                }
-            }
-
-            if ((configType === 'external_trigger' || configType === 'external') && actionType === 'delete') {
-                const target = triggerList.find((trigger): trigger is Extract<CopilotTriggerType, { type: 'external' }> => {
-                    if (trigger.type !== 'external') {
-                        return false;
-                    }
-                    const maybeName = (trigger as unknown as { name?: string }).name;
-                    return (
-                        trigger.triggerTypeName === action.name ||
-                        trigger.triggerTypeSlug === action.name ||
-                        trigger.id === action.name ||
-                        maybeName === action.name
-                    );
-                });
-
-                if (!target) {
-                    console.warn('Unable to resolve external trigger for action', action.name);
-                    return false;
-                }
-
-                const { deleteComposioTriggerDeployment } = await loadComposioActions();
-                await deleteComposioTriggerDeployment({ projectId, deploymentId: target.id });
-                return true;
-            }
-        } catch (error) {
-            console.error('Failed to handle trigger action', action, error);
-            return false;
-        }
-
-        console.warn('Unhandled trigger action from Copilot applyAction', action);
-        return false;
-    }, [projectId, parsed, requestTriggerSetup, messageIndex]);
-
     // Memoized handleApplyAll for useEffect dependencies
     const handleApplyAll = useCallback(async () => {
         const unapplied = parsed.reduce<Array<{ action: z.infer<typeof CopilotAssistantMessageActionPart>['content']; actionIndex: number }>>((acc, part, idx) => {
@@ -764,20 +401,16 @@ function AssistantMessage({
         }, []);
 
         const newlyApplied: number[] = [];
-        let triggerMutated = false;
 
         for (const { action, actionIndex } of unapplied) {
             try {
                 const isTrigger = action.config_type === 'one_time_trigger' || action.config_type === 'recurring_trigger' || action.config_type === 'external_trigger';
                 const success = isTrigger
-                    ? await handleTriggerAction(action, actionIndex)
+                    ? await handleTriggerAction(action, { actionIndex, messageIndex })
                     : applyAction(action);
 
                 if (success) {
                     newlyApplied.push(actionIndex);
-                    if (isTrigger) {
-                        triggerMutated = true;
-                    }
                 }
             } catch (error) {
                 console.error('Failed to apply Copilot action', action, error);
@@ -791,11 +424,7 @@ function AssistantMessage({
                 return next;
             });
         }
-
-        if (triggerMutated) {
-            await refreshTriggers();
-        }
-    }, [parsed, appliedActions, applyAction, handleTriggerAction, refreshTriggers]);
+    }, [parsed, appliedActions, applyAction, handleTriggerAction, messageIndex]);
 
     // Manual single apply (from card)
     const handleSingleApply = useCallback(async (action: z.infer<typeof CopilotAssistantMessageActionPart>['content'], actionIndex: number) => {
@@ -806,29 +435,22 @@ function AssistantMessage({
         try {
             const isTrigger = action.config_type === 'one_time_trigger' || action.config_type === 'recurring_trigger' || action.config_type === 'external_trigger';
             const success = isTrigger
-                ? await handleTriggerAction(action, actionIndex)
+                ? await handleTriggerAction(action, { actionIndex, messageIndex })
                 : applyAction(action);
 
             if (success) {
                 setAppliedActions(prev => new Set([...prev, actionIndex]));
-                if (isTrigger) {
-                    await refreshTriggers();
-                }
             }
         } catch (error) {
             console.error('Failed to apply Copilot action', action, error);
         }
-    }, [appliedActions, applyAction, handleTriggerAction, refreshTriggers]);
+    }, [appliedActions, applyAction, handleTriggerAction, messageIndex]);
 
     useEffect(() => {
         if (loading) {
-            // setAutoApplyEnabled(false); // Removed
             setAppliedActions(new Set());
-            // setPanelOpen(false); // Removed
         }
     }, [loading]);
-
-    // Removed useEffect for auto-apply
 
     // Find streaming/ongoing card and extract name
     const streamingPart = parsed.find(part => part.type === 'streaming_action');
@@ -846,8 +468,8 @@ function AssistantMessage({
         const createCount = parsed.filter(part => part.type === 'action' && part.action.action === 'create_new').length;
         const editCount = parsed.filter(part => part.type === 'action' && part.action.action === 'edit').length;
         const parts = [];
-        if (createCount > 0) parts.push(`${createCount} agent${createCount > 1 ? 's' : ''} created`);
-        if (editCount > 0) parts.push(`${editCount} agent${editCount > 1 ? 's' : ''} updated`);
+        if (createCount > 0) parts.push(`${createCount} item${createCount > 1 ? 's' : ''} created`);
+        if (editCount > 0) parts.push(`${editCount} item${editCount > 1 ? 's' : ''} updated`);
         completedSummary = parts.join(', ');
     }
 
@@ -869,9 +491,6 @@ function AssistantMessage({
     }
 
     // At the end of the render, call onStatusBarChange with the current status bar props
-    // Track the latest status bar info
-    const latestStatusBar = useRef<any>(null);
-
     // Only call onStatusBarChange if the serializable status actually changes
     const lastStatusRef = useRef<any>(null);
     useEffect(() => {
@@ -1028,9 +647,6 @@ export function Messages({
         return () => clearTimeout(timeoutId);
     }, [messages, loadingResponse]);
 
-    // Track the latest status bar info
-    const latestStatusBar = useRef<any>(null);
-
     const renderMessage = (message: z.infer<typeof CopilotMessage>, messageIndex: number) => {
         if (message.role === 'assistant') {
             return (
@@ -1047,7 +663,6 @@ export function Messages({
                     onStatusBarChange={status => {
                         // Only update for the last assistant message
                         if (messageIndex === displayMessages.length - 1) {
-                            latestStatusBar.current = status;
                             onStatusBarChange?.(status);
                         }
                     }}
