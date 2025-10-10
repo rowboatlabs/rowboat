@@ -299,7 +299,16 @@ async function searchRelevantTriggers(
         return `No triggers are currently available for toolkit "${trimmedSlug}".`;
     }
 
-    const filteredTriggers = triggers;
+    let filteredTriggers = triggers;
+    if (trimmedQuery) {
+        const queryLc = trimmedQuery.toLowerCase();
+        filteredTriggers = triggers.filter(trigger => {
+            const baseText = `${trigger.name} ${trigger.slug} ${trigger.description}`.toLowerCase();
+            const propertyNames = Object.keys(trigger.config?.properties || {}).join(' ').toLowerCase();
+            return baseText.includes(queryLc) || propertyNames.includes(queryLc);
+        });
+        logger.log(`filtered triggers to ${filteredTriggers.length} results using query`);
+    }
 
     if (!filteredTriggers.length) {
         return `No triggers found for toolkit "${trimmedSlug}"${trimmedQuery ? ` matching "${trimmedQuery}"` : ''}.`;
@@ -318,11 +327,11 @@ async function searchRelevantTriggers(
     }).join('\n\n');
 
     const header = trimmedQuery
-        ? `Showing triggers for toolkit "${trimmedSlug}" (you searched for "${trimmedQuery}"):\n`
+        ? `The following triggers match "${trimmedQuery}" in toolkit "${trimmedSlug}":`
         : `Available triggers for toolkit "${trimmedSlug}":`;
 
     const note = truncated
-        ? `\n\nOnly showing the first ${MAX_RESULTS} results out of ${filteredTriggers.length}.`
+        ? `\n\nOnly showing the first ${MAX_RESULTS} results out of ${filteredTriggers.length}. Refine your query for more specific results.`
         : '';
 
     const response = `${header}\n\n${formattedTriggers}${note}`;
