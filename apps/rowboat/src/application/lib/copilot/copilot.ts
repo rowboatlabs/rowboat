@@ -2,7 +2,7 @@ import z from "zod";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject, streamText, tool } from "ai";
 import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
-import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot } from "../../../entities/models/copilot";
+import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot, TriggerSchemaForCopilot } from "../../../entities/models/copilot";
 import { PrefixLogger } from "@/app/lib/utils";
 import zodToJsonSchema from "zod-to-json-schema";
 import { COPILOT_INSTRUCTIONS_EDIT_AGENT } from "./copilot_edit_agent";
@@ -10,7 +10,7 @@ import { COPILOT_INSTRUCTIONS_MULTI_AGENT_WITH_DOCS as COPILOT_INSTRUCTIONS_MULT
 import { COPILOT_MULTI_AGENT_EXAMPLE_1 } from "./example_multi_agent_1";
 import { CURRENT_WORKFLOW_PROMPT } from "./current_workflow";
 import { USE_COMPOSIO_TOOLS } from "@/app/lib/feature_flags";
-import { composio, getTool } from "../composio/composio";
+import { composio, getTool, listTriggersTypes } from "../composio/composio";
 import { UsageTracker } from "@/app/lib/billing";
 import { CopilotStreamEvent } from "@/src/entities/models/copilot";
 
@@ -96,6 +96,55 @@ ${JSON.stringify(simplifiedDataSources)}
 `;
     }
     return prompt;
+}
+
+function getCurrentTimePrompt(): string {
+    return `**CURRENT TIME**: ${new Date().toISOString()}`;
+}
+
+function getTriggersPrompt(triggers: z.infer<typeof TriggerSchemaForCopilot>[]): string {
+    if (!triggers || triggers.length === 0) {
+        return '';
+    }
+
+    const simplifiedTriggers = triggers.map(trigger => {
+        if (trigger.type === 'one_time') {
+            return {
+                id: trigger.id,
+                type: 'one_time',
+                name: trigger.name,
+                scheduledTime: trigger.nextRunAt,
+                input: trigger.input,
+                status: trigger.status,
+            };
+        } else if (trigger.type === 'recurring') {
+            return {
+                id: trigger.id,
+                type: 'recurring', 
+                name: trigger.name,
+                cron: trigger.cron,
+                nextRunAt: trigger.nextRunAt,
+                disabled: trigger.disabled,
+                input: trigger.input,
+            };
+        } else {
+            return {
+                id: trigger.id,
+                type: 'external',
+                name: trigger.triggerTypeName,
+                toolkit: trigger.toolkitSlug,
+                triggerType: trigger.triggerTypeSlug,
+                config: trigger.triggerConfig,
+            };
+        }
+    });
+
+    return `**NOTE**:
+The following triggers are currently configured:
+\`\`\`json
+${JSON.stringify(simplifiedTriggers)}
+\`\`\`
+`;
 }
 
 async function searchRelevantTools(usageTracker: UsageTracker, query: string): Promise<string> {
@@ -185,15 +234,107 @@ async function searchRelevantTools(usageTracker: UsageTracker, query: string): P
     return response;
 }
 
+async function searchRelevantTriggers(
+    usageTracker: UsageTracker,
+    toolkitSlug: string,
+    query?: string,
+): Promise<string> {
+    const logger = new PrefixLogger("copilot-search-triggers");
+    const trimmedSlug = toolkitSlug.trim();
+    const trimmedQuery = query?.trim() || '';
+    console.log("🔧 TOOL CALL: searchRelevantTriggers", { toolkitSlug: trimmedSlug, query: trimmedQuery });
+
+    if (!trimmedSlug) {
+        logger.log('no toolkit slug provided');
+        return 'Please provide a toolkit slug (for example "gmail" or "slack") when searching for triggers.';
+    }
+
+    if (!USE_COMPOSIO_TOOLS) {
+        logger.log('dynamic trigger search is disabled');
+        console.log("❌ TOOL CALL SKIPPED: searchRelevantTriggers - Composio tools disabled");
+        return 'Trigger search is currently unavailable.';
+    }
+
+    const MAX_PAGES = 5;
+    type TriggerListResponse = Awaited<ReturnType<typeof listTriggersTypes>>;
+    type TriggerType = TriggerListResponse['items'][number];
+
+    const triggers: TriggerType[] = [];
+    let cursor: string | undefined;
+
+    try {
+        for (let page = 0; page < MAX_PAGES; page++) {
+            logger.log(`fetching trigger page ${page + 1} for toolkit ${trimmedSlug}`);
+            console.log("🔍 TOOL CALL: COMPOSIO_LIST_TRIGGERS", { toolkitSlug: trimmedSlug, cursor });
+            const response = await listTriggersTypes(trimmedSlug, cursor);
+            triggers.push(...response.items);
+            console.log("✅ TOOL CALL SUCCESS: COMPOSIO_LIST_TRIGGERS", {
+                toolkitSlug: trimmedSlug,
+                fetchedCount: response.items.length,
+                totalCollected: triggers.length,
+                hasNext: Boolean(response.next_cursor),
+            });
+            if (!response.next_cursor) {
+                break;
+            }
+            cursor = response.next_cursor || undefined;
+        }
+    } catch (error: any) {
+        logger.log(`trigger search failed: ${error?.message || error}`);
+        console.log("❌ TOOL CALL FAILED: COMPOSIO_LIST_TRIGGERS", {
+            toolkitSlug: trimmedSlug,
+            error: error?.message || error,
+        });
+        return `Trigger search failed for toolkit "${trimmedSlug}".`;
+    }
+
+    usageTracker.track({
+        type: "COMPOSIO_TOOL_USAGE",
+        toolSlug: `COMPOSIO_LIST_TRIGGER_TYPES:${trimmedSlug}`,
+        context: "copilot.search_relevant_triggers",
+    });
+
+    if (!triggers.length) {
+        logger.log('no triggers found for toolkit');
+        return `No triggers are currently available for toolkit "${trimmedSlug}".`;
+    }
+
+    const MAX_RESULTS = 8;
+    const limitedTriggers = triggers.slice(0, MAX_RESULTS);
+    const truncated = triggers.length > limitedTriggers.length;
+
+    const formattedTriggers = limitedTriggers.map(trigger => {
+        const requiredFields = trigger.config.required && trigger.config.required.length
+            ? trigger.config.required.join(', ')
+            : 'None';
+        const configJson = JSON.stringify(trigger.config, null, 2);
+        return `**${trigger.name}** (slug: ${trigger.slug})\nToolkit: ${trigger.toolkit.name} (${trigger.toolkit.slug})\nDescription: ${trigger.description}\nRequired config fields: ${requiredFields}\n\`\`\`json\n${configJson}\n\`\`\``;
+    }).join('\n\n');
+
+    const header = trimmedQuery
+        ? `Available triggers for toolkit "${trimmedSlug}" (user query: "${trimmedQuery}"):`
+        : `Available triggers for toolkit "${trimmedSlug}":`;
+
+    const note = truncated
+        ? `\n\nOnly showing the first ${MAX_RESULTS} results out of ${triggers.length}. The toolkit has more triggers available.`
+        : '';
+
+    const response = `${header}\n\n${formattedTriggers}${note}`;
+    logger.log('returning trigger search response');
+    return response;
+}
+
 function updateLastUserMessage(
     messages: z.infer<typeof CopilotMessage>[],
     currentWorkflowPrompt: string,
     contextPrompt: string,
     dataSourcesPrompt: string = '',
+    timePrompt: string = '',
+    triggersPrompt: string = '',
 ): void {
     const lastMessage = messages[messages.length - 1];
     if (lastMessage.role === 'user') {
-        lastMessage.content = `${currentWorkflowPrompt}\n\n${contextPrompt}\n\n${dataSourcesPrompt}\n\nUser: ${JSON.stringify(lastMessage.content)}`;
+        lastMessage.content = `${currentWorkflowPrompt}\n\n${contextPrompt}\n\n${dataSourcesPrompt}\n\n${timePrompt}\n\n${triggersPrompt}\n\nUser: ${JSON.stringify(lastMessage.content)}`;
     }
 }
 
@@ -203,6 +344,7 @@ export async function getEditAgentInstructionsResponse(
     context: z.infer<typeof CopilotChatContext> | null,
     messages: z.infer<typeof CopilotMessage>[],
     workflow: z.infer<typeof Workflow>,
+    triggers: z.infer<typeof TriggerSchemaForCopilot>[] = [],
 ): Promise<string> {
     const logger = new PrefixLogger('copilot /getUpdatedAgentInstructions');
     logger.log('context', context);
@@ -214,8 +356,14 @@ export async function getEditAgentInstructionsResponse(
     // set context prompt
     let contextPrompt = getContextPrompt(context);
 
+    // set time prompt
+    let timePrompt = getCurrentTimePrompt();
+
+    // set triggers prompt
+    let triggersPrompt = getTriggersPrompt(triggers);
+
     // add the above prompts to the last user message
-    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt);
+    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, '', timePrompt, triggersPrompt);
 
     // call model
     console.log("calling model", JSON.stringify({
@@ -255,7 +403,8 @@ export async function* streamMultiAgentResponse(
     context: z.infer<typeof CopilotChatContext> | null,
     messages: z.infer<typeof CopilotMessage>[],
     workflow: z.infer<typeof Workflow>,
-    dataSources: z.infer<typeof DataSourceSchemaForCopilot>[]
+    dataSources: z.infer<typeof DataSourceSchemaForCopilot>[],
+    triggers: z.infer<typeof TriggerSchemaForCopilot>[] = []
 ): AsyncIterable<z.infer<typeof CopilotStreamEvent>> {
     const logger = new PrefixLogger('copilot /stream');
     logger.log('context', context);
@@ -277,14 +426,20 @@ export async function* streamMultiAgentResponse(
     // set data sources prompt
     let dataSourcesPrompt = getDataSourcesPrompt(dataSources);
 
+    // set time prompt
+    let timePrompt = getCurrentTimePrompt();
+
+    // set triggers prompt
+    let triggersPrompt = getTriggersPrompt(triggers);
+
     // add the above prompts to the last user message
-    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, dataSourcesPrompt);
+    updateLastUserMessage(messages, currentWorkflowPrompt, contextPrompt, dataSourcesPrompt, timePrompt, triggersPrompt);
 
     // call model
     console.log("🤖 AI MODEL CALL STARTED", {
         model: COPILOT_MODEL,
         maxSteps: 20,
-        availableTools: ["search_relevant_tools"]
+        availableTools: ["search_relevant_tools", "search_relevant_triggers"]
     });
     
     const { fullStream } = streamText({
@@ -302,6 +457,23 @@ export async function* streamMultiAgentResponse(
                     console.log("✅ AI TOOL CALL COMPLETED: search_relevant_tools", { 
                         query, 
                         resultLength: result.length 
+                    });
+                    return result;
+                },
+            }),
+            "search_relevant_triggers": tool({
+                description: "Use this tool to discover external triggers provided by Composio toolkits. Supply the toolkit slug (for example 'gmail', 'slack', or 'salesforce') and optionally keywords from the user's request to narrow down results. Always call this before adding an external trigger to ensure the trigger exists and to understand its configuration schema.",
+                parameters: z.object({
+                    toolkitSlug: z.string().describe("Slug of the Composio toolkit to search, such as 'gmail', 'slack', 'salesforce', 'googlecalendar'."),
+                    query: z.string().min(1).describe("Optional keywords pulled from the user's request to filter trigger names, descriptions, or config fields.").optional(),
+                }),
+                execute: async ({ toolkitSlug, query }: { toolkitSlug: string; query?: string }) => {
+                    console.log("🎯 AI TOOL CALL: search_relevant_triggers", { toolkitSlug, query });
+                    const result = await searchRelevantTriggers(usageTracker, toolkitSlug, query);
+                    console.log("✅ AI TOOL CALL COMPLETED: search_relevant_triggers", {
+                        toolkitSlug,
+                        query,
+                        resultLength: result.length,
                     });
                     return result;
                 },

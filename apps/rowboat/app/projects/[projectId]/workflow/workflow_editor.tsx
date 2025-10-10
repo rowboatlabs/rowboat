@@ -3,6 +3,7 @@ import React, { useReducer, Reducer, useState, useCallback, useEffect, useRef, c
 import { MCPServer, Message, WithStringId } from "../../../lib/types/types";
 import { Workflow, WorkflowTool, WorkflowPrompt, WorkflowAgent, WorkflowPipeline } from "../../../lib/types/workflow_types";
 import { DataSource } from "@/src/entities/models/data-source";
+import { TriggerSchemaForCopilot } from "@/src/entities/models/copilot";
 import { Project } from "@/src/entities/models/project";
 import { produce, applyPatches, enablePatches, produceWithPatches, Patch } from 'immer';
 import { AgentConfig } from "../entities/agent_config";
@@ -962,6 +963,7 @@ export function useEntitySelection() {
 export function WorkflowEditor({
     projectId,
     dataSources,
+    triggers,
     workflow,
     useRag,
     useRagUploads,
@@ -978,10 +980,12 @@ export function WorkflowEditor({
     onProjectToolsUpdated,
     onDataSourcesUpdated,
     onProjectConfigUpdated,
+    onTriggersUpdated,
     chatWidgetHost,
 }: {
     projectId: string;
     dataSources: z.infer<typeof DataSource>[];
+    triggers: z.infer<typeof TriggerSchemaForCopilot>[];
     workflow: z.infer<typeof Workflow>;
     useRag: boolean;
     useRagUploads: boolean;
@@ -998,6 +1002,7 @@ export function WorkflowEditor({
     onProjectToolsUpdated?: () => void;
     onDataSourcesUpdated?: () => void;
     onProjectConfigUpdated?: () => void;
+    onTriggersUpdated?: () => Promise<void> | void;
     chatWidgetHost: string;
 }) {
 
@@ -2313,8 +2318,10 @@ export function WorkflowEditor({
                             }
                             isInitialState={isInitialState}
                             dataSources={dataSources}
+                            triggers={triggers}
                             activePanel={activePanel}
                             onTogglePanel={handleTogglePanel}
+                            onTriggersUpdated={onTriggersUpdated}
                         />
                         {/* Config overlay above Copilot when agents + skipper layout is active */}
                         {state.present.selection && viewMode === 'two_agents_skipper' && (

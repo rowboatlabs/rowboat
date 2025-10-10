@@ -29,6 +29,7 @@ export function Action({
     onApplied,
     externallyApplied = false,
     defaultExpanded = false,
+    onRequestTriggerSetup,
 }: {
     msgIndex: number;
     actionIndex: number;
@@ -39,10 +40,12 @@ export function Action({
     onApplied?: () => void;
     externallyApplied?: boolean;
     defaultExpanded?: boolean;
+    onRequestTriggerSetup?: (params: { action: z.infer<typeof CopilotAssistantMessageActionPart>['content']; msgIndex: number; actionIndex: number }) => void;
 }) {
     const { showPreview } = usePreviewModal();
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [appliedChanges, setAppliedChanges] = useState<Record<string, boolean>>({});
+    const isExternalTriggerCreate = action.config_type === 'external_trigger' && action.action === 'create_new';
 
     if (!action || typeof action !== 'object') {
         console.warn('Invalid action object:', action);
@@ -108,6 +111,10 @@ export function Action({
 
     // Handle applying all changes - delegate to parent
     const handleApplyAll = () => {
+        if (isExternalTriggerCreate) {
+            onRequestTriggerSetup?.({ action, msgIndex, actionIndex });
+            return;
+        }
         // Mark all fields as applied locally for UI state
         const appliedKeys = Object.keys(action.config_changes).reduce((acc, key) => {
             acc[getAppliedChangeKey(msgIndex, actionIndex, key)] = true;
@@ -211,7 +218,7 @@ export function Action({
                     {action.config_type === 'tool' && toolkitLogo ? (
                         <PictureImg src={toolkitLogo} alt={"Toolkit logo"} className="h-5 w-5 object-contain" />
                     ) : (
-                        action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : action.config_type === 'start_agent' ? '🏁' : action.config_type === 'prompt' ? '💬' : '💬'
+                        action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : action.config_type === 'start_agent' ? '🏁' : action.config_type === 'prompt' ? '💬' : action.config_type === 'one_time_trigger' ? '⏰' : action.config_type === 'recurring_trigger' ? '🔄' : action.config_type === 'external_trigger' ? '🔗' : '💬'
                     )}
                 </span>
                 <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 truncate flex-1">
@@ -230,9 +237,9 @@ export function Action({
                         onClick={() => handleApplyAll()}
                     >
                         <CheckIcon size={13} className={allApplied ? 'text-zinc-400' : 'text-green-600 group-hover:text-green-700'} />
-                        <span>{allApplied ? 'Applied' : 'Apply'}</span>
+                        <span>{allApplied ? 'Applied' : isExternalTriggerCreate ? 'Open setup' : 'Apply'}</span>
                     </button>
-                    {action.action !== 'delete' && <button
+                    {action.action !== 'delete' && !isExternalTriggerCreate && <button
                         className="flex items-center gap-1 rounded-full px-2 h-7 text-xs font-medium bg-transparent text-indigo-600 hover:text-indigo-700 transition-colors"
                         onClick={handleViewDiff}
                     >
@@ -379,7 +386,7 @@ export function StreamingAction({
 }: {
     action: {
         action?: 'create_new' | 'edit' | 'delete';
-        config_type?: 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent';
+        config_type?: 'tool' | 'agent' | 'prompt' | 'pipeline' | 'start_agent' | 'one_time_trigger' | 'recurring_trigger' | 'external_trigger';
         name?: string;
     };
     loading: boolean;
@@ -418,7 +425,7 @@ export function StreamingAction({
                         'bg-gray-200 text-gray-600': !action.action,
                     }
                 )}>
-                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : action.config_type === 'start_agent' ? '🏁' : '💬'}
+                    {action.config_type === 'agent' ? '🧑‍💼' : action.config_type === 'tool' ? '🛠️' : action.config_type === 'pipeline' ? '⚙️' : action.config_type === 'start_agent' ? '🏁' : action.config_type === 'one_time_trigger' ? '⏰' : action.config_type === 'recurring_trigger' ? '🔄' : action.config_type === 'external_trigger' ? '🔗' : '💬'}
                 </span>
                 <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 truncate flex-1">
                     {action.action === 'create_new' ? 'Add' : action.action === 'edit' ? 'Edit' : 'Delete'} {action.config_type}: {action.name}

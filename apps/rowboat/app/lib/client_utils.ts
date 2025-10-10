@@ -1,4 +1,5 @@
 import { WorkflowTool, WorkflowAgent, WorkflowPrompt, WorkflowPipeline } from "./types/workflow_types";
+import { Message } from "./types/types";
 import { z } from "zod";
 
 const ZFallbackSchema = z.object({}).passthrough();
@@ -61,6 +62,40 @@ export function validateConfigChanges(configType: string, configChanges: Record<
         case 'start_agent': {
             testObject = {};
             break;
+        }
+        case 'one_time_trigger': {
+            testObject = {
+                scheduledTime: new Date(0).toISOString(),
+                input: {
+                    messages: [],
+                },
+            };
+            schema = z.object({
+                scheduledTime: z.string().min(1),
+                input: z.object({
+                    messages: z.array(Message),
+                }),
+            }).passthrough();
+            break;
+        }
+        case 'recurring_trigger': {
+            testObject = {
+                cron: '* * * * *',
+                input: {
+                    messages: [],
+                },
+            };
+            schema = z.object({
+                cron: z.string().min(1),
+                input: z.object({
+                    messages: z.array(Message),
+                }),
+            }).passthrough();
+            break;
+        }
+        case 'external_trigger': {
+            // External triggers have flexible schemas per provider; do not strip any config.
+            return { changes: configChanges };
         }
         default:
             return { error: `Unknown config type: ${configType}` };

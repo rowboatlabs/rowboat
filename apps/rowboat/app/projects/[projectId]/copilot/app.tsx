@@ -2,7 +2,7 @@
 import { Button } from "@/components/ui/button";
 import { Dropdown, DropdownItem, DropdownMenu, DropdownSection, DropdownTrigger, Spinner, Tooltip } from "@heroui/react";
 import { useRef, useState, createContext, useContext, useCallback, forwardRef, useImperativeHandle, useEffect, Ref } from "react";
-import { CopilotChatContext } from "../../../../src/entities/models/copilot";
+import { CopilotChatContext, TriggerSchemaForCopilot } from "../../../../src/entities/models/copilot";
 import { CopilotMessage } from "../../../../src/entities/models/copilot";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { DataSource } from "@/src/entities/models/data-source";
@@ -36,6 +36,8 @@ interface AppProps {
     onMessagesChange?: (messages: z.infer<typeof CopilotMessage>[]) => void;
     isInitialState?: boolean;
     dataSources?: z.infer<typeof DataSource>[];
+    triggers?: z.infer<typeof TriggerSchemaForCopilot>[];
+    onTriggersUpdated?: () => Promise<void> | void;
 }
 
 const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message: string) => void }, AppProps>(function App({
@@ -47,6 +49,8 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
     onMessagesChange,
     isInitialState = false,
     dataSources,
+    triggers,
+    onTriggersUpdated,
 }, ref) {
     
 
@@ -85,7 +89,8 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
         projectId,
         workflow: workflowRef.current,
         context: effectiveContext,
-        dataSources: dataSources
+        dataSources: dataSources,
+        triggers: triggers
     });
 
     // Store latest start/cancel functions in refs
@@ -255,6 +260,7 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         </div>
                     )}
                     <Messages
+                        projectId={projectId}
                         messages={messages}
                         streamingResponse={streamingResponse}
                         loadingResponse={loadingResponse}
@@ -263,6 +269,8 @@ const App = forwardRef<{ handleCopyChat: () => void; handleUserMessage: (message
                         onStatusBarChange={handleStatusBarChange}
                         toolCalling={toolCalling}
                         toolQuery={toolQuery}
+                        triggers={triggers}
+                        onTriggersUpdated={onTriggersUpdated}
                     />
                 </div>
                 <div className="shrink-0 px-0 pb-10">
@@ -318,8 +326,10 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     dispatch: (action: WorkflowDispatch) => void;
     isInitialState?: boolean;
     dataSources?: z.infer<typeof DataSource>[];
+    triggers?: z.infer<typeof TriggerSchemaForCopilot>[];
     activePanel?: 'playground' | 'copilot';
     onTogglePanel?: () => void;
+    onTriggersUpdated?: () => Promise<void> | void;
 }>(({
     projectId,
     workflow,
@@ -327,8 +337,10 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
     dispatch,
     isInitialState = false,
     dataSources,
+    triggers,
     activePanel,
     onTogglePanel,
+    onTriggersUpdated,
 }, ref) => {
     console.log('🎪 Copilot wrapper component mounted:', {
         projectId,
@@ -414,6 +426,8 @@ export const Copilot = forwardRef<{ handleUserMessage: (message: string) => void
                         onMessagesChange={setMessages}
                         isInitialState={isInitialState}
                         dataSources={dataSources}
+                        triggers={triggers}
+                        onTriggersUpdated={onTriggersUpdated}
                     />
                 </div>
             </Panel>
