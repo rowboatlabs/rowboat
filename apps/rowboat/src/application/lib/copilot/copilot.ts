@@ -299,24 +299,9 @@ async function searchRelevantTriggers(
         return `No triggers are currently available for toolkit "${trimmedSlug}".`;
     }
 
-    let filteredTriggers = triggers;
-    if (trimmedQuery) {
-        const queryLc = trimmedQuery.toLowerCase();
-        filteredTriggers = triggers.filter(trigger => {
-            const baseText = `${trigger.name} ${trigger.slug} ${trigger.description}`.toLowerCase();
-            const propertyNames = Object.keys(trigger.config?.properties || {}).join(' ').toLowerCase();
-            return baseText.includes(queryLc) || propertyNames.includes(queryLc);
-        });
-        logger.log(`filtered triggers to ${filteredTriggers.length} results using query`);
-    }
-
-    if (!filteredTriggers.length) {
-        return `No triggers found for toolkit "${trimmedSlug}"${trimmedQuery ? ` matching "${trimmedQuery}"` : ''}.`;
-    }
-
     const MAX_RESULTS = 8;
-    const limitedTriggers = filteredTriggers.slice(0, MAX_RESULTS);
-    const truncated = filteredTriggers.length > limitedTriggers.length;
+    const limitedTriggers = triggers.slice(0, MAX_RESULTS);
+    const truncated = triggers.length > limitedTriggers.length;
 
     const formattedTriggers = limitedTriggers.map(trigger => {
         const requiredFields = trigger.config.required && trigger.config.required.length
@@ -327,11 +312,11 @@ async function searchRelevantTriggers(
     }).join('\n\n');
 
     const header = trimmedQuery
-        ? `The following triggers match "${trimmedQuery}" in toolkit "${trimmedSlug}":`
+        ? `Available triggers for toolkit "${trimmedSlug}" (user query: "${trimmedQuery}"):`
         : `Available triggers for toolkit "${trimmedSlug}":`;
 
     const note = truncated
-        ? `\n\nOnly showing the first ${MAX_RESULTS} results out of ${filteredTriggers.length}. Refine your query for more specific results.`
+        ? `\n\nOnly showing the first ${MAX_RESULTS} results out of ${triggers.length}. The toolkit has more triggers available.`
         : '';
 
     const response = `${header}\n\n${formattedTriggers}${note}`;
