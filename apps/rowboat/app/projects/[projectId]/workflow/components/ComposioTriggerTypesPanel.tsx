@@ -13,6 +13,7 @@ interface ComposioTriggerTypesPanelProps {
   toolkit: z.infer<typeof ZToolkit>;
   onBack: () => void;
   onSelectTriggerType: (triggerType: z.infer<typeof ComposioTriggerType>) => void;
+  initialTriggerTypeSlug?: string | null;
 }
 
 type TriggerType = z.infer<typeof ComposioTriggerType>;
@@ -21,6 +22,7 @@ export function ComposioTriggerTypesPanel({
   toolkit,
   onBack,
   onSelectTriggerType,
+  initialTriggerTypeSlug,
 }: ComposioTriggerTypesPanelProps) {
   const [triggerTypes, setTriggerTypes] = useState<TriggerType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +30,7 @@ export function ComposioTriggerTypesPanel({
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [autoSelected, setAutoSelected] = useState(false);
 
   const loadTriggerTypes = useCallback(async (resetList = false, nextCursor?: string) => {
     try {
@@ -70,7 +73,19 @@ export function ComposioTriggerTypesPanel({
 
   useEffect(() => {
     loadTriggerTypes(true);
+    setAutoSelected(false);
   }, [loadTriggerTypes]);
+
+  useEffect(() => {
+    if (!initialTriggerTypeSlug || autoSelected || triggerTypes.length === 0) {
+      return;
+    }
+    const match = triggerTypes.find(triggerType => triggerType.slug === initialTriggerTypeSlug);
+    if (match) {
+      setAutoSelected(true);
+      onSelectTriggerType(match);
+    }
+  }, [initialTriggerTypeSlug, triggerTypes, onSelectTriggerType, autoSelected]);
 
   if (loading) {
     return (

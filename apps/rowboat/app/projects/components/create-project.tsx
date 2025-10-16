@@ -12,6 +12,7 @@ import { HorizontalDivider } from "@/components/ui/horizontal-divider";
 import { Tooltip } from "@heroui/react";
 import { BillingUpgradeModal } from "@/components/common/billing-upgrade-modal";
 import { Workflow } from '@/app/lib/types/workflow_types';
+import { loadSharedWorkflow } from '@/app/actions/shared-workflow.actions';
 import { Modal } from '@/components/ui/modal';
 import { Upload, Send, X } from "lucide-react";
 
@@ -149,6 +150,7 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
     const searchParams = useSearchParams();
     const urlPrompt = searchParams.get('prompt');
     const urlTemplate = searchParams.get('template');
+    const sharedId = searchParams.get('shared');
 
     // Add this effect to update name when defaultName changes
     useEffect(() => {
@@ -165,29 +167,42 @@ export function CreateProject({ defaultName, onOpenProjectPane, isProjectPaneOpe
     // Add effect to handle URL parameters for auto-creation
     useEffect(() => {
         const handleAutoCreate = async () => {
-            // Only auto-create if we have either a prompt or template, and we're not already loading
-            if ((urlPrompt || urlTemplate) && !importLoading && !autoCreateLoading) {
+            // Auto-create from template/prompt, or import from shared id
+            if ((urlPrompt || urlTemplate || sharedId) && !importLoading && !autoCreateLoading) {
                 setAutoCreateLoading(true);
                 try {
-                    await createProjectWithOptions({
-                        template: urlTemplate || undefined,
-                        prompt: urlPrompt || undefined,
-                        router,
-                        onError: (error) => {
-                            // Auto-creation failed, show the form instead
-                            setBillingError(error instanceof Error ? error.message : String(error));
-                            setAutoCreateLoading(false);
-                        }
-                    });
+                    if (sharedId) {
+                        // Load workflow via server action (by id)
+                        const workflowObj = await loadSharedWorkflow(sharedId);
+                        await createProjectFromJsonWithOptions({
+                            workflowJson: JSON.stringify(workflowObj),
+                            router,
+                            onError: (error) => {
+                                setBillingError(error instanceof Error ? error.message : String(error));
+                            }
+                        });
+                    } else {
+                        await createProjectWithOptions({
+                            template: urlTemplate || undefined,
+                            prompt: urlPrompt || undefined,
+                            router,
+                            onError: (error) => {
+                                // Auto-creation failed, show the form instead
+                                setBillingError(error instanceof Error ? error.message : String(error));
+                                setAutoCreateLoading(false);
+                            }
+                        });
+                    }
                 } catch (error) {
                     console.error('Error auto-creating project:', error);
+                    setBillingError(error instanceof Error ? error.message : String(error));
                     setAutoCreateLoading(false);
                 }
             }
         };
 
         handleAutoCreate();
-    }, [urlPrompt, urlTemplate, importLoading, autoCreateLoading, router]);
+    }, [urlPrompt, urlTemplate, sharedId, importLoading, autoCreateLoading, router]);
 
     // Inject glow animation styles
     useEffect(() => {

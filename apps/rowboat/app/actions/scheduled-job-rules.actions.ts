@@ -5,6 +5,7 @@ import { ICreateScheduledJobRuleController } from "@/src/interface-adapters/cont
 import { IListScheduledJobRulesController } from "@/src/interface-adapters/controllers/scheduled-job-rules/list-scheduled-job-rules.controller";
 import { IFetchScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/fetch-scheduled-job-rule.controller";
 import { IDeleteScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/delete-scheduled-job-rule.controller";
+import { IUpdateScheduledJobRuleController } from "@/src/interface-adapters/controllers/scheduled-job-rules/update-scheduled-job-rule.controller";
 import { authCheck } from "./auth.actions";
 import { z } from "zod";
 import { Message } from "@/app/lib/types/types";
@@ -13,6 +14,7 @@ const createScheduledJobRuleController = container.resolve<ICreateScheduledJobRu
 const listScheduledJobRulesController = container.resolve<IListScheduledJobRulesController>('listScheduledJobRulesController');
 const fetchScheduledJobRuleController = container.resolve<IFetchScheduledJobRuleController>('fetchScheduledJobRuleController');
 const deleteScheduledJobRuleController = container.resolve<IDeleteScheduledJobRuleController>('deleteScheduledJobRuleController');
+const updateScheduledJobRuleController = container.resolve<IUpdateScheduledJobRuleController>('updateScheduledJobRuleController');
 
 export async function createScheduledJobRule(request: {
     projectId: string,
@@ -71,5 +73,25 @@ export async function deleteScheduledJobRule(request: {
         userId: user.id,
         projectId: request.projectId,
         ruleId: request.ruleId,
+    });
+}
+
+export async function updateScheduledJobRule(request: {
+    projectId: string,
+    ruleId: string,
+    input: {
+        messages: z.infer<typeof Message>[],
+    },
+    scheduledTime: string,
+}) {
+    const user = await authCheck();
+
+    return await updateScheduledJobRuleController.execute({
+        caller: 'user',
+        userId: user.id,
+        projectId: request.projectId,
+        ruleId: request.ruleId,
+        input: request.input,
+        scheduledTime: request.scheduledTime,
     });
 }

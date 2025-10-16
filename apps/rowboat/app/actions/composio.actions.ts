@@ -157,6 +157,7 @@ export async function createComposioTriggerDeployment(request: {
 export async function listComposioTriggerDeployments(request: {
     projectId: string,
     cursor?: string,
+    limit?: number,
 }) {
     const user = await authCheck();
 
@@ -166,6 +167,7 @@ export async function listComposioTriggerDeployments(request: {
         userId: user.id,
         projectId: request.projectId,
         cursor: request.cursor,
+        limit: request.limit,
     });
 }
 

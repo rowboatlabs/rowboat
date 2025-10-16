@@ -105,8 +105,6 @@ export default function MarkdownContent({
                             return (
                                 <span
                                     className="inline-block bg-[#e0f2fe] text-[red] px-1.5 py-0.5 rounded whitespace-nowrap cursor-pointer"
-                                    onClick={handleMentionClick}
-                                    title={onMentionNavigate ? 'Click to open' : undefined}
                                 >
                                     {displayLabel} (!)
                                 </span>

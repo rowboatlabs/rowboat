@@ -2,7 +2,8 @@
 import { z } from 'zod';
 import { container } from "@/di/container";
 import { redirect } from "next/navigation";
-import { templates } from "../lib/project_templates";
+// Fetch library templates from the unified assistant templates repository
+import { MongoDBAssistantTemplatesRepository } from "@/src/infrastructure/repositories/mongodb.assistant-templates.repository";
 import { authCheck } from "./auth.actions";
 import { ApiKey } from "@/src/entities/models/api-key";
 import { Project } from "@/src/entities/models/project";
@@ -40,14 +41,17 @@ const updateLiveWorkflowController = container.resolve<IUpdateLiveWorkflowContro
 const revertToLiveWorkflowController = container.resolve<IRevertToLiveWorkflowController>('revertToLiveWorkflowController');
 
 export async function listTemplates() {
-    const templatesArray = Object.entries(templates)
-        .filter(([key]) => key !== 'default') // Exclude the default template
-        .map(([key, template]) => ({
-            id: key,
-            ...template
-        }));
-    
-    return templatesArray;
+    const repo = new MongoDBAssistantTemplatesRepository();
+    const result = await repo.list({ source: 'library', isPublic: true }, undefined, 100);
+    // Map to the shape expected by callers (tools at top-level)
+    return result.items.map((item) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        category: item.category,
+        tools: (item as any).workflow?.tools || [],
+        copilotPrompt: item.copilotPrompt,
+    }));
 }
 
 export async function projectAuthCheck(projectId: string) {
@@ -93,12 +97,24 @@ export async function createProjectFromWorkflowJson(formData: FormData): Promise
     const workflowJson = formData.get('workflowJson') as string;
 
     try {
+        // Parse workflow and apply default model to blank agent models
+        const workflow = JSON.parse(workflowJson);
+        const defaultModel = process.env.PROVIDER_DEFAULT_MODEL || 'gpt-4o';
+        
+        if (workflow.agents && Array.isArray(workflow.agents)) {
+            workflow.agents.forEach((agent: any) => {
+                if (agent.model === '') {
+                    agent.model = defaultModel;
+                }
+            });
+        }
+
         const project = await createProjectController.execute({
             userId: user.id,
             data: {
                 name: name || '',
                 mode: {
-                    workflowJson,
+                    workflowJson: JSON.stringify(workflow),
                 },
             },
         });

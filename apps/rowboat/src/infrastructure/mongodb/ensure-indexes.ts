@@ -10,6 +10,8 @@ import { RECURRING_JOB_RULES_COLLECTION, RECURRING_JOB_RULES_INDEXES } from "../
 import { SCHEDULED_JOB_RULES_COLLECTION, SCHEDULED_JOB_RULES_INDEXES } from "../repositories/mongodb.scheduled-job-rules.indexes";
 import { COMPOSIO_TRIGGER_DEPLOYMENTS_COLLECTION, COMPOSIO_TRIGGER_DEPLOYMENTS_INDEXES } from "../repositories/mongodb.composio-trigger-deployments.indexes";
 import { USERS_COLLECTION, USERS_INDEXES } from "../repositories/mongodb.users.indexes";
+import { SHARED_WORKFLOWS_COLLECTION, SHARED_WORKFLOWS_INDEXES } from "../repositories/mongodb.shared-workflows.indexes";
+import { COMMUNITY_ASSISTANTS_COLLECTION, COMMUNITY_ASSISTANTS_INDEXES, COMMUNITY_ASSISTANT_LIKES_COLLECTION, COMMUNITY_ASSISTANT_LIKES_INDEXES } from "../repositories/mongodb.community-assistants.indexes";
 
 export async function ensureAllIndexes(database: Db): Promise<void> {
     await database.collection(API_KEYS_COLLECTION).createIndexes(API_KEYS_INDEXES);
@@ -23,4 +25,7 @@ export async function ensureAllIndexes(database: Db): Promise<void> {
     await database.collection(SCHEDULED_JOB_RULES_COLLECTION).createIndexes(SCHEDULED_JOB_RULES_INDEXES);
     await database.collection(COMPOSIO_TRIGGER_DEPLOYMENTS_COLLECTION).createIndexes(COMPOSIO_TRIGGER_DEPLOYMENTS_INDEXES);
     await database.collection(USERS_COLLECTION).createIndexes(USERS_INDEXES);
+    await database.collection(SHARED_WORKFLOWS_COLLECTION).createIndexes(SHARED_WORKFLOWS_INDEXES);
+    await database.collection(COMMUNITY_ASSISTANTS_COLLECTION).createIndexes(COMMUNITY_ASSISTANTS_INDEXES);
+    await database.collection(COMMUNITY_ASSISTANT_LIKES_COLLECTION).createIndexes(COMMUNITY_ASSISTANT_LIKES_INDEXES);
 }
