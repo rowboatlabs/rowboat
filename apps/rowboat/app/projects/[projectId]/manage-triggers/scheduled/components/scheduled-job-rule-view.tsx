@@ -9,8 +9,9 @@ import { ScheduledJobRule } from "@/src/entities/models/scheduled-job-rule";
 import { z } from "zod";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { ArrowLeftIcon, Trash2Icon } from "lucide-react";
+import { ArrowLeftIcon, Trash2Icon, PencilIcon } from "lucide-react";
 import { MessageDisplay } from "@/app/lib/components/message-display";
+import { EditScheduledJobRuleForm } from "./create-scheduled-job-rule-form";
 
 export function ScheduledJobRuleView({ projectId, ruleId }: { projectId: string; ruleId: string; }) {
     const router = useRouter();
@@ -18,6 +19,7 @@ export function ScheduledJobRuleView({ projectId, ruleId }: { projectId: string;
     const [loading, setLoading] = useState<boolean>(true);
     const [deleting, setDeleting] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [editing, setEditing] = useState(false);
 
     useEffect(() => {
         let ignore = false;
@@ -92,15 +94,37 @@ export function ScheduledJobRuleView({ projectId, ruleId }: { projectId: string;
                 }
                 rightActions={
                     <div className="flex items-center gap-3">
-                        <Button
-                            onClick={() => setShowDeleteConfirm(true)}
-                            variant="secondary"
-                            size="sm"
-                            startContent={<Trash2Icon className="w-4 h-4" />}
-                            className="bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-950 dark:hover:bg-red-900 dark:text-red-400 border border-red-200 dark:border-red-800 whitespace-nowrap"
-                        >
-                            Delete
-                        </Button>
+                        {editing ? (
+                            <Button
+                                onClick={() => setEditing(false)}
+                                variant="secondary"
+                                size="sm"
+                                className="whitespace-nowrap"
+                            >
+                                Cancel Edit
+                            </Button>
+                        ) : (
+                            <>
+                                <Button
+                                    onClick={() => setEditing(true)}
+                                    variant="secondary"
+                                    size="sm"
+                                    startContent={<PencilIcon className="w-4 h-4" />}
+                                    className="whitespace-nowrap"
+                                >
+                                    Edit
+                                </Button>
+                                <Button
+                                    onClick={() => setShowDeleteConfirm(true)}
+                                    variant="secondary"
+                                    size="sm"
+                                    startContent={<Trash2Icon className="w-4 h-4" />}
+                                    className="bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-950 dark:hover:bg-red-900 dark:text-red-400 border border-red-200 dark:border-red-800 whitespace-nowrap"
+                                >
+                                    Delete
+                                </Button>
+                            </>
+                        )}
                     </div>
                 }
             >
@@ -114,74 +138,85 @@ export function ScheduledJobRuleView({ projectId, ruleId }: { projectId: string;
                         )}
                         {!loading && rule && (
                             <div className="flex flex-col gap-6">
-                                {/* Rule Metadata */}
-                                <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                                    <div className="grid grid-cols-2 gap-4 text-sm">
-                                        <div>
-                                            <span className="font-semibold text-gray-700 dark:text-gray-300">Rule ID:</span>
-                                            <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">{rule.id}</span>
-                                        </div>
-                                        <div>
-                                            <span className="font-semibold text-gray-700 dark:text-gray-300">Status:</span>
-                                            <span className={`ml-2 font-mono ${getStatusColor(rule.status, rule.processedAt || null)}`}>
-                                                {getStatusText(rule.status, rule.processedAt || null)}
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span className="font-semibold text-gray-700 dark:text-gray-300">Next Run:</span>
-                                            <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">
-                                                {formatDateTime(rule.nextRunAt)}
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span className="font-semibold text-gray-700 dark:text-gray-300">Created:</span>
-                                            <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">
-                                                {formatDateTime(rule.createdAt)}
-                                            </span>
-                                        </div>
-                                        {rule.processedAt && (
-                                            <div>
-                                                <span className="font-semibold text-gray-700 dark:text-gray-300">Processed:</span>
-                                                <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">
-                                                    {formatDateTime(rule.processedAt)}
-                                                </span>
+                                {editing ? (
+                                    <EditScheduledJobRuleForm
+                                        projectId={projectId}
+                                        rule={rule}
+                                        onCancel={() => setEditing(false)}
+                                        onUpdated={(updatedRule) => setRule(updatedRule)}
+                                    />
+                                ) : (
+                                    <>
+                                        {/* Rule Metadata */}
+                                        <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                                <div>
+                                                <span className="font-semibold text-gray-700 dark:text-gray-300">Rule ID:</span>
+                                                <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">{rule.id}</span>
                                             </div>
-                                        )}
-                                        {rule.output?.jobId && (
-                                            <div>
-                                                <span className="font-semibold text-gray-700 dark:text-gray-300">Job ID:</span>
-                                                <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">
-                                                    <Link 
-                                                        href={`/projects/${projectId}/jobs/${rule.output.jobId}`}
-                                                        className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                                                    >
-                                                        {rule.output.jobId}
-                                                    </Link>
-                                                </span>
+                                                <div>
+                                                    <span className="font-semibold text-gray-700 dark:text-gray-300">Status:</span>
+                                                    <span className={`ml-2 font-mono ${getStatusColor(rule.status, rule.processedAt || null)}`}>
+                                                        {getStatusText(rule.status, rule.processedAt || null)}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="font-semibold text-gray-700 dark:text-gray-300">Next Run:</span>
+                                                    <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">
+                                                        {formatDateTime(rule.nextRunAt)}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="font-semibold text-gray-700 dark:text-gray-300">Created:</span>
+                                                    <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">
+                                                        {formatDateTime(rule.createdAt)}
+                                                    </span>
+                                                </div>
+                                                {rule.processedAt && (
+                                                    <div>
+                                                        <span className="font-semibold text-gray-700 dark:text-gray-300">Processed:</span>
+                                                        <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">
+                                                            {formatDateTime(rule.processedAt)}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {rule.output?.jobId && (
+                                                    <div>
+                                                        <span className="font-semibold text-gray-700 dark:text-gray-300">Job ID:</span>
+                                                        <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">
+                                                            <Link 
+                                                                href={`/projects/${projectId}/jobs/${rule.output.jobId}`}
+                                                                className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                                                            >
+                                                                {rule.output.jobId}
+                                                            </Link>
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {rule.workerId && (
+                                                    <div>
+                                                        <span className="font-semibold text-gray-700 dark:text-gray-300">Worker ID:</span>
+                                                        <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">{rule.workerId}</span>
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
-                                        {rule.workerId && (
-                                            <div>
-                                                <span className="font-semibold text-gray-700 dark:text-gray-300">Worker ID:</span>
-                                                <span className="ml-2 font-mono text-gray-600 dark:text-gray-400">{rule.workerId}</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
+                                        </div>
 
-                                {/* Messages */}
-                                <div className="space-y-4">
-                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                                        Messages
-                                    </h3>
-                                    <div className="space-y-4">
-                                        {rule.input.messages.map((message, index) => (
-                                            <div key={index} className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                                                <MessageDisplay message={message} index={index} />
+                                        {/* Messages */}
+                                        <div className="space-y-4">
+                                            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                                                Messages
+                                            </h3>
+                                            <div className="space-y-4">
+                                                {rule.input.messages.map((message, index) => (
+                                                    <div key={index} className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                                                        <MessageDisplay message={message} index={index} />
+                                                    </div>
+                                                ))}
                                             </div>
-                                        ))}
-                                    </div>
-                                </div>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         )}
                     </div>

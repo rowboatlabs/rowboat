@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Filter, ObjectId } from "mongodb";
 import { db } from "@/app/lib/mongodb";
-import { CreateRecurringRuleSchema, IRecurringJobRulesRepository, ListedRecurringRuleItem } from "@/src/application/repositories/recurring-job-rules.repository.interface";
+import { CreateRecurringRuleSchema, IRecurringJobRulesRepository, ListedRecurringRuleItem, UpdateRecurringRuleSchema } from "@/src/application/repositories/recurring-job-rules.repository.interface";
 import { RecurringJobRule } from "@/src/entities/models/recurring-job-rule";
 import { NotFoundError } from "@/src/entities/errors/common";
 import { PaginatedList } from "@/src/entities/common/paginated-list";
@@ -206,6 +206,31 @@ export class MongoDBRecurringJobRulesRepository implements IRecurringJobRulesRep
 
         // update next run and return
         return await this.updateNextRunAt(id, result.cron);
+    }
+
+    /**
+     * Updates a recurring job rule with new input and schedule.
+     */
+    async update(id: string, data: z.infer<typeof UpdateRecurringRuleSchema>): Promise<z.infer<typeof RecurringJobRule>> {
+        const now = new Date().toISOString();
+
+        const result = await this.collection.findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            {
+                $set: {
+                    input: data.input,
+                    cron: data.cron,
+                    updatedAt: now,
+                },
+            },
+            { returnDocument: "after" },
+        );
+
+        if (!result) {
+            throw new NotFoundError(`Recurring job rule ${id} not found`);
+        }
+
+        return await this.updateNextRunAt(id, data.cron);
     }
 
     /**

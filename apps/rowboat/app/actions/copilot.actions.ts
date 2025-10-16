@@ -3,6 +3,7 @@ import {
     CopilotAPIRequest,
     CopilotChatContext, CopilotMessage,
     DataSourceSchemaForCopilot,
+    TriggerSchemaForCopilot,
 } from "../../src/entities/models/copilot";
 import { 
     Workflow} from "../lib/types/workflow_types";
@@ -26,7 +27,8 @@ export async function getCopilotResponseStream(
     messages: z.infer<typeof CopilotMessage>[],
     current_workflow_config: z.infer<typeof Workflow>,
     context: z.infer<typeof CopilotChatContext> | null,
-    dataSources?: z.infer<typeof DataSourceSchemaForCopilot>[]
+    dataSources?: z.infer<typeof DataSourceSchemaForCopilot>[],
+    triggers?: z.infer<typeof TriggerSchemaForCopilot>[]
 ): Promise<{
     streamId: string;
 } | { billingError: string }> {
@@ -42,6 +44,7 @@ export async function getCopilotResponseStream(
                 workflow: current_workflow_config,
                 context,
                 dataSources,
+                triggers,
             }
         });
         return {

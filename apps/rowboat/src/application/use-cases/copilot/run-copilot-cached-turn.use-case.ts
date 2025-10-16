@@ -90,6 +90,7 @@ export class RunCopilotCachedTurnUseCase implements IRunCopilotCachedTurnUseCase
                 cachedTurn.messages,
                 cachedTurn.workflow,
                 cachedTurn.dataSources || [],
+                cachedTurn.triggers || [],
             )) {
                 yield event;
             }
