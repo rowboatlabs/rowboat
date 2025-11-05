@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "rm -rf dist && tsc"
+    "build": "rm -rf dist && tsc",
+    "copilot": "npm run build && node dist/x.js"
   },
   "keywords": [],
   "author": "",
