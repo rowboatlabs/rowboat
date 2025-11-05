@@ -1,6 +1,6 @@
 {
-  "name": "cli",
-  "version": "1.0.0",
+  "name": "@rowboatlabs/rowboatx",
+  "version": "0.2.0",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -8,9 +8,16 @@
     "build": "rm -rf dist && tsc",
     "copilot": "npm run build && node dist/x.js"
   },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "bin": {
+    "rowboatx": "bin/app.js"
+  },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Rowboat Labs",
+  "license": "MIT",
   "description": "",
   "devDependencies": {
     "@types/node": "^24.9.1",

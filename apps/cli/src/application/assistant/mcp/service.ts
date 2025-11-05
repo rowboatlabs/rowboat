@@ -2,12 +2,10 @@ import fs from "fs";
 import path from "path";
 import { z } from "zod";
 import { McpServerConfig } from "../../entities/mcp.js";
-import { ensureBaseDirs, getStoragePaths } from "../services/storage.js";
+import { WorkDir } from "../../config/config.js";
 
 export function mcpConfigPath(): string {
-  const base = getStoragePaths();
-  ensureBaseDirs(base);
-  return path.join(base.workDir, "mcp", "servers.json");
+  return path.join(WorkDir, "mcp", "servers.json");
 }
 
 export function readMcpConfig(): z.infer<typeof McpServerConfig> {

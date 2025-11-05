@@ -1,48 +1,22 @@
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import { WorkDir } from "../../config/config.js";
 
 export type DirKind = "workflows" | "agents" | "mcp";
 
-export interface StoragePaths {
-  appRoot: string;
-  workDir: string; // .rowboat
-}
-
-const defaultPaths: StoragePaths = (() => {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const appRoot = path.resolve(__dirname, "../../../../");
-  const workDir = path.join(appRoot, ".rowboat");
-  return { appRoot, workDir };
-})();
-
-export function getStoragePaths(): StoragePaths {
-  return defaultPaths;
-}
-
-export function ensureBaseDirs(base: StoragePaths = defaultPaths) {
-  const ensure = (p: string) => {
-    if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
-  };
-  ensure(base.workDir);
-  ensure(path.join(base.workDir, "workflows"));
-  ensure(path.join(base.workDir, "agents"));
-  ensure(path.join(base.workDir, "mcp"));
-}
-
-export function dirFor(kind: DirKind, base: StoragePaths = defaultPaths): string {
+export function dirFor(kind: DirKind): string {
   switch (kind) {
     case "workflows":
-      return path.join(base.workDir, "workflows");
+      return path.join(WorkDir, "workflows");
     case "agents":
-      return path.join(base.workDir, "agents");
+      return path.join(WorkDir, "agents");
     case "mcp":
-      return path.join(base.workDir, "mcp");
+      return path.join(WorkDir, "mcp");
   }
 }
 
-export function listJson(kind: DirKind, base: StoragePaths = defaultPaths): string[] {
-  const d = dirFor(kind, base);
+export function listJson(kind: DirKind): string[] {
+  const d = dirFor(kind);
   if (!fs.existsSync(d)) return [];
   return fs
     .readdirSync(d)
@@ -50,20 +24,20 @@ export function listJson(kind: DirKind, base: StoragePaths = defaultPaths): stri
     .map((f) => f.replace(/\.json$/, ""));
 }
 
-export function readJson<T>(kind: DirKind, id: string, base: StoragePaths = defaultPaths): T | undefined {
-  const p = path.join(dirFor(kind, base), `${id}.json`);
+export function readJson<T>(kind: DirKind, id: string): T | undefined {
+  const p = path.join(dirFor(kind), `${id}.json`);
   if (!fs.existsSync(p)) return undefined;
   const raw = fs.readFileSync(p, "utf8");
   return JSON.parse(raw) as T;
 }
 
-export function writeJson(kind: DirKind, id: string, value: unknown, base: StoragePaths = defaultPaths): void {
-  const p = path.join(dirFor(kind, base), `${id}.json`);
+export function writeJson(kind: DirKind, id: string, value: unknown): void {
+  const p = path.join(dirFor(kind), `${id}.json`);
   fs.writeFileSync(p, JSON.stringify(value, null, 2) + "\n", "utf8");
 }
 
-export function deleteJson(kind: DirKind, id: string, base: StoragePaths = defaultPaths): boolean {
-  const p = path.join(dirFor(kind, base), `${id}.json`);
+export function deleteJson(kind: DirKind, id: string): boolean {
+  const p = path.join(dirFor(kind), `${id}.json`);
   if (!fs.existsSync(p)) return false;
   fs.rmSync(p);
   return true;

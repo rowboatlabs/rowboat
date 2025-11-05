@@ -1,13 +1,11 @@
 import path from "path";
 import fs from "fs";
-import { fileURLToPath } from "url";
 import { McpServerConfig } from "../entities/mcp.js";
 import { z } from "zod";
+import { homedir } from "os";
 
 // Resolve app root relative to compiled file location (dist/...)
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const AppRoot = path.resolve(__dirname, "../../..");
-export const WorkDir = path.join(AppRoot, ".rowboat");
+export const WorkDir = path.join(homedir(), ".rowboat");
 
 function ensureDirs() {
     const ensure = (p: string) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
@@ -17,8 +15,9 @@ function ensureDirs() {
     ensure(path.join(WorkDir, "mcp"));
 }
 
+ensureDirs();
+
 function loadMcpServerConfig(): z.infer<typeof McpServerConfig> {
-    ensureDirs();
     const configPath = path.join(WorkDir, "mcp", "servers.json");
     if (!fs.existsSync(configPath)) return { mcpServers: [] };
     const config = fs.readFileSync(configPath, "utf8");
