@@ -1,0 +1,30 @@
+{
+    "name": "Row Boat Labs Dev Container Setup",
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+    "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+    },
+    "initializeCommand": "make ensure-dirs && make set-env",
+    "features": {
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-azuretools.vscode-docker",
+                "ms-vscode.makefile-tools"
+            ]
+        }
+    },
+    "remoteEnv": {
+        "USE_RAG": "true",
+        "USE_RAG_UPLOADS": "true",
+        "USE_KLAVIS_TOOLS": "true",
+        "USE_COMPOSIO_TOOLS": "${localEnv:COMPOSIO_API_KEY:false}"
+    },
+    "mounts": [
+        "type=bind,source=${localWorkspaceFolder}/data/uploads,target=/workspace/data/uploads,consistency=cached",
+        "type=bind,source=${localWorkspaceFolder}/data/qdrant,target=/workspace/data/qdrant,consistency=cached",
+        "type=bind,source=${localWorkspaceFolder}/data/mongo,target=/workspace/data/mongo,consistency=cached"
+    ]
+}
