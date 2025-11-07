@@ -152,7 +152,7 @@ export async function startCopilot(): Promise<void> {
   }
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  console.log("Rowboat Copilot (type 'exit' to quit)");
+  console.log("XRowboat Copilot (type 'exit' to quit)");
 
   const debugMode = process.argv.includes("--debug") || process.env.COPILOT_DEBUG === "1";
   const conversationHistory: ConversationMessage[] = [];

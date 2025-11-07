@@ -2,11 +2,44 @@ import { Message } from "../entities/message.js";
 import { z } from "zod";
 import { Node, NodeInputT, NodeOutputT } from "./node.js";
 import { openai } from "@ai-sdk/openai";
-import { generateText, ModelMessage, stepCountIs, streamText } from "ai";
-import { Agent } from "../entities/agent.js";
+import { google } from "@ai-sdk/google";
+import { generateText, ModelMessage, stepCountIs, streamText, tool, Tool, ToolSet, jsonSchema } from "ai";
+import { Agent, AgentTool } from "../entities/agent.js";
 import { WorkDir } from "../config/config.js";
 import fs from "fs";
 import path from "path";
+
+const BashTool = tool({
+    description: "Run a command in the shell",
+    inputSchema: z.object({
+        command: z.string(),
+    }),
+});
+
+const AskHumanTool = tool({
+    description: "Ask the human for input",
+    inputSchema: z.object({
+        question: z.string(),
+    }),
+});
+
+function mapAgentTool(t: z.infer<typeof AgentTool>): Tool {
+    switch (t.type) {
+        case "mcp":
+            return tool({
+                name: t.name,
+                description: t.description,
+                inputSchema: jsonSchema(t.inputSchema),
+            });
+        case "builtin":
+            switch (t.name) {
+                case "bash":
+                    return BashTool;
+                default:
+                    throw new Error(`Unknown builtin tool: ${t.name}`);
+            }
+    }
+}
 
 function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
     const result: ModelMessage[] = [];
@@ -71,14 +104,31 @@ export class AgentNode implements Node {
 
     async* execute(input: NodeInputT): NodeOutputT {
         const agent = this.loadAgent(this.id);
-        const { fullStream } = await streamText({
-            model: openai(agent.model),
+
+        const tools: ToolSet = {};
+        tools["ask-human"] = AskHumanTool;
+        for (const [name, tool] of Object.entries(agent.tools)) {
+            try {
+                tools[name] = mapAgentTool(tool);
+            } catch (error) {
+                console.error(`Error mapping tool ${name}:`, error);
+                continue;
+            }
+        }
+
+        console.log("\n\n\t>>>>\t\ttools", JSON.stringify(tools, null, 2));
+
+        const { fullStream } = streamText({
+            // model: openai(agent.model),
+            model: google("gemini-2.5-pro"),
             messages: convertFromMessages(input),
             system: agent.instructions,
             stopWhen: stepCountIs(1),
+            tools,
         });
 
         for await (const event of fullStream) {
+            // console.log("\n\n\t>>>>\t\tevent", JSON.stringify(event, null, 2));
             switch (event.type) {
                 case "reasoning-start":
                     yield {

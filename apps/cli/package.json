@@ -29,6 +29,7 @@
     "@ai-sdk/openai": "^2.0.53",
     "@modelcontextprotocol/sdk": "^1.20.2",
     "ai": "^5.0.78",
+    "json-schema-to-zod": "^2.6.1",
     "nanoid": "^5.1.6",
     "zod": "^4.1.12"
   }

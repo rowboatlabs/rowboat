@@ -9,7 +9,6 @@ import { z } from "zod";
 import { getMcpClient } from "./application/lib/mcp.js";
 import { streamText } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { google } from "@ai-sdk/google";
 import { StreamRenderer } from "./application/lib/stream-renderer.js";
 import { StreamEvent } from "./application/entities/stream-event.js";
 import { AssistantMessage, Message } from "./application/entities/message.js";
@@ -108,15 +107,15 @@ function loadFunction(id: string) {
     return func;
 }
 
-async function callMcpTool(serverName: string, toolName: string, args: Record<string, unknown>) {
-    const server = McpServers.find(server => server.name === serverName);
-    if (!server) {
-        throw new Error(`MCP server ${serverName} not found`);
-    }
-    const client = await getMcpClient(server.url, server.name);
-    const response = await client.callTool({ name: toolName, arguments: args });
-    return response;
-}
+// async function callMcpTool(serverName: string, toolName: string, args: Record<string, unknown>) {
+//     const server = McpServers.find(server => server.name === serverName);
+//     if (!server) {
+//         throw new Error(`MCP server ${serverName} not found`);
+//     }
+//     const client = await getMcpClient(server.url, server.name);
+//     const response = await client.callTool({ name: toolName, arguments: args });
+//     return response;
+// }
 
 async function executeWorkflow(id: string) {
     const workflow = loadWorkflow(id);
@@ -127,7 +126,7 @@ async function executeWorkflow(id: string) {
 
     const input: z.infer<typeof MessageList> = [{
         role: "user",
-        content: "What is the current date?"
+        content: "scrape the page coinbase.com, and also gimeme today's date?"
     }];
     const msgs: z.infer<typeof MessageList> = [...input];
 
