@@ -1,6 +1,6 @@
-import { Message } from "../entities/message.js";
+import { Message, MessageList } from "../entities/message.js";
 import { z } from "zod";
-import { Node, NodeInputT, NodeOutputT } from "./node.js";
+import { Step, StepInputT, StepOutputT } from "./step.js";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
 import { generateText, ModelMessage, stepCountIs, streamText, tool, Tool, ToolSet, jsonSchema } from "ai";
@@ -8,6 +8,7 @@ import { Agent, AgentTool } from "../entities/agent.js";
 import { WorkDir } from "../config/config.js";
 import fs from "fs";
 import path from "path";
+import { loadWorkflow } from "./utils.js";
 
 const BashTool = tool({
     description: "Run a command in the shell",
@@ -30,6 +31,18 @@ function mapAgentTool(t: z.infer<typeof AgentTool>): Tool {
                 name: t.name,
                 description: t.description,
                 inputSchema: jsonSchema(t.inputSchema),
+            });
+        case "workflow":
+            const workflow = loadWorkflow(t.name);
+            if (!workflow) {
+                throw new Error(`Workflow ${t.name} not found`);
+            }
+            return tool({
+                name: t.name,
+                description: workflow.description,
+                inputSchema: z.object({
+                    message: z.string().describe("The message to send to the workflow"),
+                }),
             });
         case "builtin":
             switch (t.name) {
@@ -89,25 +102,29 @@ function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[
     return result;
 }
 
-export class AgentNode implements Node {
+export class AgentNode implements Step {
     private id: string;
+    private background: boolean;
+    private agent: z.infer<typeof Agent>;
 
-    constructor(id: string) {
+    constructor(id: string, background: boolean) {
         this.id = id;
-    }
-
-    private loadAgent(id: string): z.infer<typeof Agent> {
+        this.background = background;
         const agentPath = path.join(WorkDir, "agents", `${id}.json`);
         const agent = fs.readFileSync(agentPath, "utf8");
-        return Agent.parse(JSON.parse(agent));
+        this.agent = Agent.parse(JSON.parse(agent));
+     }
+
+    tools(): Record<string, z.infer<typeof AgentTool>> {
+        return this.agent.tools;
     }
 
-    async* execute(input: NodeInputT): NodeOutputT {
-        const agent = this.loadAgent(this.id);
-
+    async* execute(input: StepInputT): StepOutputT {
         const tools: ToolSet = {};
-        tools["ask-human"] = AskHumanTool;
-        for (const [name, tool] of Object.entries(agent.tools)) {
+        if (!this.background) {
+            tools["ask-human"] = AskHumanTool;
+        }
+        for (const [name, tool] of Object.entries(this.agent.tools)) {
             try {
                 tools[name] = mapAgentTool(tool);
             } catch (error) {
@@ -116,13 +133,13 @@ export class AgentNode implements Node {
             }
         }
 
-        console.log("\n\n\t>>>>\t\ttools", JSON.stringify(tools, null, 2));
+        // console.log("\n\n\t>>>>\t\ttools", JSON.stringify(tools, null, 2));
 
         const { fullStream } = streamText({
             // model: openai(agent.model),
             model: google("gemini-2.5-pro"),
             messages: convertFromMessages(input),
-            system: agent.instructions,
+            system: this.agent.instructions,
             stopWhen: stepCountIs(1),
             tools,
         });

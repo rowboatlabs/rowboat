@@ -1,7 +1,9 @@
-import { Node, NodeOutputT } from "../nodes/node.js";
+import { z } from "zod";
+import { Step, StepOutputT } from "../lib/step.js";
+import { AgentTool } from "../entities/agent.js";
 
-export class GetDate implements Node {
-    async* execute(): NodeOutputT {
+export class GetDate implements Step {
+    async* execute(): StepOutputT {
         yield {
             type: "text-start",
         };
@@ -12,5 +14,9 @@ export class GetDate implements Node {
         yield {
             type: "text-end",
         };
+    }
+
+    tools(): Record<string, z.infer<typeof AgentTool>> {
+        return {};
     }
 }
