@@ -407,13 +407,23 @@ export async function executeCommand(cmd: ChatCommandT): Promise<CommandOutcome>
     }
     case "list_mcp_servers": {
       const config = readMcpConfig();
-      const servers = config.mcpServers;
+      const servers = Object.keys(config.mcpServers);
+
+      const list: string[] = [];
+      for (const server of servers) {
+        if ('url' in config.mcpServers[server]) {
+          list.push(`${server} → ${config.mcpServers[server].url}`);
+        } else {
+          list.push(`${server} → ${config.mcpServers[server].command}`);
+        }
+      }
+
       return asCommandOutcome({
         headline:
           servers.length === 0
             ? "No MCP servers configured."
             : `Found ${servers.length} MCP server${servers.length === 1 ? "" : "s"}.`,
-        list: servers.map((server) => `${server.name} → ${server.url}`),
+        list,
         data: servers,
       });
     }
@@ -427,16 +437,14 @@ export async function executeCommand(cmd: ChatCommandT): Promise<CommandOutcome>
         });
       }
       const config = readMcpConfig();
-      const withoutExisting = config.mcpServers.filter(
-        (server) => server.name !== serverConfig.name
-      );
-      const updated = {
-        mcpServers: [...withoutExisting, { ...serverConfig }],
+      config.mcpServers[serverConfig.name] = {
+        url: serverConfig.url,
+        headers: {},
       };
-      writeMcpConfig(updated);
+      writeMcpConfig(config);
       return asCommandOutcome({
         headline: `MCP server "${serverConfig.name}" saved.`,
-        data: updated.mcpServers,
+        data: config.mcpServers,
       });
     }
     case "remove_mcp_server": {
@@ -449,16 +457,14 @@ export async function executeCommand(cmd: ChatCommandT): Promise<CommandOutcome>
         });
       }
       const config = readMcpConfig();
-      const remaining = config.mcpServers.filter(
-        (server) => server.name !== name
-      );
-      const removed = remaining.length !== config.mcpServers.length;
-      writeMcpConfig({ mcpServers: remaining });
+      delete config.mcpServers[name];
+      writeMcpConfig(config);
+      const removed = name in config.mcpServers;
       return asCommandOutcome({
         headline: removed
           ? `MCP server "${name}" removed.`
           : `MCP server "${name}" was not registered.`,
-        data: remaining,
+        data: config.mcpServers,
       });
     }
     case "run_workflow": {

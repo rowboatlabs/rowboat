@@ -10,7 +10,7 @@ export function mcpConfigPath(): string {
 
 export function readMcpConfig(): z.infer<typeof McpServerConfig> {
   const p = mcpConfigPath();
-  if (!fs.existsSync(p)) return { mcpServers: [] };
+  if (!fs.existsSync(p)) return { mcpServers: {} };
   const raw = fs.readFileSync(p, "utf8");
   return McpServerConfig.parse(JSON.parse(raw));
 }

@@ -10,7 +10,7 @@ const FunctionStep = z.object({
     id: z.string(),
 });
 
-const Step = z.discriminatedUnion("type", [AgentStep, FunctionStep]);
+export const Step = z.discriminatedUnion("type", [AgentStep, FunctionStep]);
 
 export const Workflow = z.object({
     name: z.string(),

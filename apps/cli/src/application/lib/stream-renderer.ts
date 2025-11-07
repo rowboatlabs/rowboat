@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { StreamEvent } from "../entities/stream-event.js";
+import { WorkflowStreamEvent } from "../entities/workflow-event.js";
+import { LlmStepStreamEvent } from "../entities/llm-step-event.js";
 
 export interface StreamRendererOptions {
     showHeaders?: boolean;
@@ -23,7 +24,48 @@ export class StreamRenderer {
         };
     }
 
-    render(event: z.infer<typeof StreamEvent>) {
+    render(event: z.infer<typeof WorkflowStreamEvent>) {
+        switch (event.type) {
+            case "workflow-start": {
+                this.onWorkflowStart(event.workflowId, event.background);
+                break;
+            }
+            case "workflow-step-start": {
+                this.onStepStart(event.stepId, event.stepType);
+                break;
+            }
+            case "workflow-step-stream-event": {
+                this.renderLlmEvent(event.event);
+                break;
+            }
+            case "workflow-step-message": {
+                // this.onStepMessage(event.stepId, event.message);
+                break;
+            }
+            case "workflow-step-tool-invocation": {
+                this.onStepToolInvocation(event.stepId, event.toolName, event.input);
+                break;
+            }
+            case "workflow-step-tool-result": {
+                this.onStepToolResult(event.stepId, event.toolName, event.result);
+                break;
+            }
+            case "workflow-step-end": {
+                this.onStepEnd(event.stepId);
+                break;
+            }
+            case "workflow-end": {
+                this.onWorkflowEnd();
+                break;
+            }
+            case "workflow-error": {
+                this.onWorkflowError(event.error);
+                break;
+            }
+        }
+    }
+
+    private renderLlmEvent(event: z.infer<typeof LlmStepStreamEvent>) {
         switch (event.type) {
             case "reasoning-start":
                 this.onReasoningStart();
@@ -50,6 +92,58 @@ export class StreamRenderer {
                 this.onUsage(event.usage);
                 break;
         }
+    }
+
+    private onWorkflowStart(workflowId: string, background: boolean) {
+        this.write("\n");
+        this.write(this.bold(`▶ Workflow ${workflowId}`));
+        if (background) this.write(this.dim(" (background)"));
+        this.write("\n");
+    }
+
+    private onWorkflowEnd() {
+        this.write(this.bold("\n■ Workflow complete\n"));
+    }
+
+    private onWorkflowError(error: string) {
+        this.write(this.red(`\n✖ Workflow error: ${error}\n`));
+    }
+
+    private onStepStart(stepId: string, stepType: "agent" | "function") {
+        this.write("\n");
+        this.write(this.cyan(`─ Step ${stepId} [${stepType}]`));
+        this.write("\n");
+    }
+
+    private onStepEnd(stepId: string) {
+        this.write(this.dim(`✓ Step ${stepId} finished\n`));
+    }
+
+    private onStepMessage(stepId: string, message: any) {
+        const role = message?.role ?? "message";
+        const content = message?.content;
+        this.write(this.bold(`${role}: `));
+        if (typeof content === "string") {
+            this.write(content + "\n");
+        } else {
+            const pretty = this.truncate(JSON.stringify(message, null, this.options.jsonIndent));
+            this.write(this.dim("\n" + this.indent(pretty) + "\n"));
+        }
+    }
+
+    private onStepToolInvocation(stepId: string, toolName: string, input: string) {
+        this.write(this.cyan(`\n→ Tool invoke ${toolName}`));
+        if (input && input.length) {
+            this.write("\n" + this.dim(this.indent(this.truncate(input))) + "\n");
+        } else {
+            this.write("\n");
+        }
+    }
+
+    private onStepToolResult(stepId: string, toolName: string, result: unknown) {
+        const res = this.truncate(JSON.stringify(result, null, this.options.jsonIndent));
+        this.write(this.cyan(`\n← Tool result ${toolName}\n`));
+        this.write(this.dim(this.indent(res)) + "\n");
     }
 
     private onReasoningStart() {
@@ -145,6 +239,10 @@ export class StreamRenderer {
 
     private cyan(text: string): string {
         return "\x1b[36m" + text + "\x1b[0m";
+    }
+
+    private red(text: string): string {
+        return "\x1b[31m" + text + "\x1b[0m";
     }
 }
 

@@ -14,7 +14,7 @@ export const ToolCallPart = z.object({
     type: z.literal("tool-call"),
     toolCallId: z.string(),
     toolName: z.string(),
-    arguments: z.string(),
+    arguments: z.any(),
 });
 
 export const AssistantContentPart = z.union([

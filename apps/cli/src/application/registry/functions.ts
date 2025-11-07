@@ -1,6 +1,6 @@
 import { GetDate } from "../functions/get_date.js";
-import { Node } from "../nodes/node.js";
+import { Step } from "../lib/step.js";
 
-export const FunctionsRegistry: Record<string, Node> = {
+export const FunctionsRegistry: Record<string, Step> = {
     get_date: new GetDate(),
 } as const;
