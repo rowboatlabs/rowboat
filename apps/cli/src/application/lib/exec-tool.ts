@@ -51,6 +51,8 @@ async function execMcpTool(agentTool: z.infer<typeof AgentTool> & { type: "mcp" 
 
     // call tool
     const result = await client.callTool({ name: agentTool.name, arguments: input });
+    client.close();
+    transport.close();
     return result;
 }
 
