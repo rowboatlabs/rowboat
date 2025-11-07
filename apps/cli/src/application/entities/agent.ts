@@ -30,5 +30,5 @@ export const Agent = z.object({
     model: z.string(),
     description: z.string(),
     instructions: z.string(),
-    tools: z.record(z.string(), AgentTool),
+    tools: z.record(z.string(), AgentTool).optional(),
 });

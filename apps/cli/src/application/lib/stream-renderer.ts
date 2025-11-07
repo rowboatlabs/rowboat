@@ -39,7 +39,7 @@ export class StreamRenderer {
                 break;
             }
             case "workflow-step-message": {
-                this.onStepMessage(event.stepId, event.message);
+                // this.onStepMessage(event.stepId, event.message);
                 break;
             }
             case "workflow-step-tool-invocation": {

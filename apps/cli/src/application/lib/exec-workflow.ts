@@ -124,6 +124,8 @@ export async function* executeWorkflow(id: string, input: string, background: bo
                 const step = workflow.steps[stepIndex];
                 const node = step.type === "agent" ? new AgentNode(step.id, background) : loadFunction(step.id);
                 const messageBuilder = new StreamStepMessageBuilder();
+
+                // stream response from agent
                 for await (const event of node.execute(messages)) {
                     // console.log("       - event", JSON.stringify(event));
                     messageBuilder.ingest(event);
@@ -133,6 +135,8 @@ export async function* executeWorkflow(id: string, input: string, background: bo
                         event: event,
                     };
                 }
+
+                // build and emit final message from agent response
                 const msg = messageBuilder.get();
                 logger.log(msg);
                 messages.push(msg);
@@ -142,7 +146,7 @@ export async function* executeWorkflow(id: string, input: string, background: bo
                     message: msg,
                 };
 
-                // check for tools to execute
+                // if the agent response contains tool calls, execute them
                 const tools = node.tools();
                 let hasToolCalls = false;
                 if (msg.content instanceof Array) {
@@ -182,9 +186,13 @@ export async function* executeWorkflow(id: string, input: string, background: bo
                     }
                 }
 
-                if (!hasToolCalls) {
-                    stepIndex++;
+                // if the agent response had tool calls, replay this agent
+                if (hasToolCalls) {
+                    continue;
                 }
+
+                // otherwise, move to the next step
+                stepIndex++;
                 if (stepIndex >= workflow.steps.length) {
                     break;
                 }

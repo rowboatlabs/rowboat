@@ -10,6 +10,8 @@ import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { executeCommand } from "./command-executor.js";
 import { loadWorkflow } from "./utils.js";
+import { AssistantMessage } from "../entities/message.js";
+import { executeWorkflow } from "./exec-workflow.js";
 
 async function execMcpTool(agentTool: z.infer<typeof AgentTool> & { type: "mcp" }, input: any): Promise<any> {
     // load mcp configuration from the tool
@@ -61,11 +63,29 @@ async function execBashTool(agentTool: z.infer<typeof AgentTool>, input: any): P
     };
 }
 
-async function execWorkflowTool(agentTool: z.infer<typeof AgentTool>, input: any): Promise<any> {
-    const workflow = loadWorkflow(agentTool.name);
-    if (!workflow) {
-        throw new Error(`Workflow ${agentTool.name} not found`);
+async function execWorkflowTool(agentTool: z.infer<typeof AgentTool> & { type: "workflow" }, input: any): Promise<any> {
+    let lastMsg: z.infer<typeof AssistantMessage> | null = null;
+    for await (const event of executeWorkflow(agentTool.name, input.message)) {
+        if (event.type === "workflow-step-message" && event.message.role === "assistant") {
+            lastMsg = event.message;
+        }
+        if (event.type === "workflow-error") {
+            throw new Error(event.error);
+        }
     }
+
+    if (!lastMsg) {
+        throw new Error("No message received from workflow");
+    }
+    if (typeof lastMsg.content === "string") {
+        return lastMsg.content;
+    }
+    return lastMsg.content.reduce((acc, part) => {
+        if (part.type === "text") {
+            acc += part.text;
+        }
+        return acc;
+    }, "");
 }
 
 export async function execTool(agentTool: z.infer<typeof AgentTool>, input: any): Promise<any> {

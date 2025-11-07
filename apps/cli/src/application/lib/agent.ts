@@ -97,6 +97,22 @@ function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[
                     content: msg.content,
                 });
                 break;
+            case "tool":
+                result.push({
+                    role: "tool",
+                    content: [
+                        {
+                            type: "tool-result",
+                            toolCallId: msg.toolCallId,
+                            toolName: msg.toolName,
+                            output: {
+                                type: "text",
+                                value: msg.content,
+                            },
+                        },
+                    ],
+                });
+                break;
         }
     }
     return result;
@@ -116,15 +132,16 @@ export class AgentNode implements Step {
      }
 
     tools(): Record<string, z.infer<typeof AgentTool>> {
-        return this.agent.tools;
+        return this.agent.tools ?? {};
     }
 
     async* execute(input: StepInputT): StepOutputT {
+        // console.log("\n\n\t>>>>\t\tinput", JSON.stringify(input));
         const tools: ToolSet = {};
         if (!this.background) {
             tools["ask-human"] = AskHumanTool;
         }
-        for (const [name, tool] of Object.entries(this.agent.tools)) {
+        for (const [name, tool] of Object.entries(this.agent.tools ?? {})) {
             try {
                 tools[name] = mapAgentTool(tool);
             } catch (error) {
@@ -136,8 +153,8 @@ export class AgentNode implements Step {
         // console.log("\n\n\t>>>>\t\ttools", JSON.stringify(tools, null, 2));
 
         const { fullStream } = streamText({
-            // model: openai(agent.model),
-            model: google("gemini-2.5-pro"),
+            model: openai("gpt-4.1"),
+            // model: google("gemini-2.5-pro"),
             messages: convertFromMessages(input),
             system: this.agent.instructions,
             stopWhen: stepCountIs(1),
@@ -145,7 +162,7 @@ export class AgentNode implements Step {
         });
 
         for await (const event of fullStream) {
-            // console.log("\n\n\t>>>>\t\tevent", JSON.stringify(event, null, 2));
+            // console.log("\n\n\t>>>>\t\tstream event", JSON.stringify(event));
             switch (event.type) {
                 case "reasoning-start":
                     yield {
