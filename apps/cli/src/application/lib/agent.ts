@@ -138,9 +138,9 @@ export class AgentNode implements Step {
     async* execute(input: StepInputT): StepOutputT {
         // console.log("\n\n\t>>>>\t\tinput", JSON.stringify(input));
         const tools: ToolSet = {};
-        if (!this.background) {
-            tools["ask-human"] = AskHumanTool;
-        }
+        // if (!this.background) {
+        //     tools["ask-human"] = AskHumanTool;
+        // }
         for (const [name, tool] of Object.entries(this.agent.tools ?? {})) {
             try {
                 tools[name] = mapAgentTool(tool);
