@@ -48,6 +48,8 @@ function mapAgentTool(t: z.infer<typeof AgentTool>): Tool {
             switch (t.name) {
                 case "bash":
                     return BashTool;
+                case "ask-human":
+                    return AskHumanTool;
                 default:
                     throw new Error(`Unknown builtin tool: ${t.name}`);
             }
@@ -154,7 +156,7 @@ export class AgentNode implements Step {
 
         const { fullStream } = streamText({
             model: openai("gpt-4.1"),
-            // model: google("gemini-2.5-pro"),
+            // model: google("gemini-2.5-flash"),
             messages: convertFromMessages(input),
             system: this.agent.instructions,
             stopWhen: stepCountIs(1),

@@ -12,6 +12,7 @@ import { executeCommand } from "./command-executor.js";
 import { loadWorkflow } from "./utils.js";
 import { AssistantMessage } from "../entities/message.js";
 import { executeWorkflow } from "./exec-workflow.js";
+import readline from "readline";
 
 async function execMcpTool(agentTool: z.infer<typeof AgentTool> & { type: "mcp" }, input: any): Promise<any> {
     // load mcp configuration from the tool
@@ -65,6 +66,22 @@ async function execBashTool(agentTool: z.infer<typeof AgentTool>, input: any): P
     };
 }
 
+async function execAskHumanTool(agentTool: z.infer<typeof AgentTool>, input: any): Promise<any> {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+
+    let p = new Promise<string>((resolve, reject) => {
+        rl.question(`>> Provide answer to: ${input.question}:\n\n`, (answer) => {
+            resolve(answer);
+            rl.close();
+        });
+    });
+    const answer = await p;
+    return answer;
+}
+
 async function execWorkflowTool(agentTool: z.infer<typeof AgentTool> & { type: "workflow" }, input: any): Promise<any> {
     let lastMsg: z.infer<typeof AssistantMessage> | null = null;
     for await (const event of executeWorkflow(agentTool.name, input.message)) {
@@ -97,6 +114,13 @@ export async function execTool(agentTool: z.infer<typeof AgentTool>, input: any)
         case "workflow":
             return execWorkflowTool(agentTool, input);
         case "builtin":
-            return execBashTool(agentTool, input);
+            switch (agentTool.name) {
+                case "bash":
+                    return execBashTool(agentTool, input);
+                case "ask-human":
+                    return execAskHumanTool(agentTool, input);
+                default:
+                    throw new Error(`Unknown builtin tool: ${agentTool.name}`);
+            }
     }
 }
