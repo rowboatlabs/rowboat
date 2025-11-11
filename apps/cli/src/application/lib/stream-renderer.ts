@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { WorkflowStreamEvent } from "../entities/workflow-event.js";
+import { RunEvent } from "../entities/workflow-event.js";
 import { LlmStepStreamEvent } from "../entities/llm-step-event.js";
 
 export interface StreamRendererOptions {
@@ -24,41 +24,41 @@ export class StreamRenderer {
         };
     }
 
-    render(event: z.infer<typeof WorkflowStreamEvent>) {
+    render(event: z.infer<typeof RunEvent>) {
         switch (event.type) {
-            case "workflow-start": {
-                this.onWorkflowStart(event.workflowId, event.background);
+            case "start": {
+                this.onWorkflowStart(event.workflowId, event.runId, event.interactive);
                 break;
             }
-            case "workflow-step-start": {
-                this.onStepStart(event.stepId, event.stepType);
+            case "step-start": {
+                this.onStepStart(event.stepIndex, event.stepId, event.stepType);
                 break;
             }
-            case "workflow-step-stream-event": {
+            case "stream-event": {
                 this.renderLlmEvent(event.event);
                 break;
             }
-            case "workflow-step-message": {
+            case "message": {
                 // this.onStepMessage(event.stepId, event.message);
                 break;
             }
-            case "workflow-step-tool-invocation": {
+            case "tool-invocation": {
                 this.onStepToolInvocation(event.stepId, event.toolName, event.input);
                 break;
             }
-            case "workflow-step-tool-result": {
+            case "tool-result": {
                 this.onStepToolResult(event.stepId, event.toolName, event.result);
                 break;
             }
-            case "workflow-step-end": {
-                this.onStepEnd(event.stepId);
+            case "step-end": {
+                this.onStepEnd(event.stepIndex);
                 break;
             }
-            case "workflow-end": {
+            case "end": {
                 this.onWorkflowEnd();
                 break;
             }
-            case "workflow-error": {
+            case "error": {
                 this.onWorkflowError(event.error);
                 break;
             }
@@ -94,10 +94,10 @@ export class StreamRenderer {
         }
     }
 
-    private onWorkflowStart(workflowId: string, background: boolean) {
+    private onWorkflowStart(workflowId: string, runId: string, interactive: boolean) {
         this.write("\n");
-        this.write(this.bold(`▶ Workflow ${workflowId}`));
-        if (background) this.write(this.dim(" (background)"));
+        this.write(this.bold(`▶ Workflow ${workflowId} (run ${runId})`));
+        if (!interactive) this.write(this.dim(" (--no-interactive)"));
         this.write("\n");
     }
 
@@ -109,17 +109,17 @@ export class StreamRenderer {
         this.write(this.red(`\n✖ Workflow error: ${error}\n`));
     }
 
-    private onStepStart(stepId: string, stepType: "agent" | "function") {
+    private onStepStart(stepIndex: number, stepId: string, stepType: "agent" | "function") {
         this.write("\n");
-        this.write(this.cyan(`─ Step ${stepId} [${stepType}]`));
+        this.write(this.cyan(`─ Step ${stepIndex} [${stepType}]`));
         this.write("\n");
     }
 
-    private onStepEnd(stepId: string) {
-        this.write(this.dim(`✓ Step ${stepId} finished\n`));
+    private onStepEnd(stepIndex: number) {
+        this.write(this.dim(`✓ Step ${stepIndex} finished\n`));
     }
 
-    private onStepMessage(stepId: string, message: any) {
+    private onStepMessage(stepIndex: number, message: any) {
         const role = message?.role ?? "message";
         const content = message?.content;
         this.write(this.bold(`${role}: `));

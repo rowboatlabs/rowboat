@@ -66,14 +66,14 @@ async function execBashTool(agentTool: z.infer<typeof AgentTool>, input: any): P
     };
 }
 
-async function execAskHumanTool(agentTool: z.infer<typeof AgentTool>, input: any): Promise<any> {
+export async function execAskHumanTool(agentTool: z.infer<typeof AgentTool>, question: string): Promise<string> {
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout
     });
 
     let p = new Promise<string>((resolve, reject) => {
-        rl.question(`>> Provide answer to: ${input.question}:\n\n`, (answer) => {
+        rl.question(`>> Provide answer to: ${question}:\n\n`, (answer) => {
             resolve(answer);
             rl.close();
         });
@@ -85,10 +85,10 @@ async function execAskHumanTool(agentTool: z.infer<typeof AgentTool>, input: any
 async function execWorkflowTool(agentTool: z.infer<typeof AgentTool> & { type: "workflow" }, input: any): Promise<any> {
     let lastMsg: z.infer<typeof AssistantMessage> | null = null;
     for await (const event of executeWorkflow(agentTool.name, input.message)) {
-        if (event.type === "workflow-step-message" && event.message.role === "assistant") {
+        if (event.type === "message" && event.message.role === "assistant") {
             lastMsg = event.message;
         }
-        if (event.type === "workflow-error") {
+        if (event.type === "error") {
             throw new Error(event.error);
         }
     }
@@ -117,8 +117,6 @@ export async function execTool(agentTool: z.infer<typeof AgentTool>, input: any)
             switch (agentTool.name) {
                 case "bash":
                     return execBashTool(agentTool, input);
-                case "ask-human":
-                    return execAskHumanTool(agentTool, input);
                 default:
                     throw new Error(`Unknown builtin tool: ${agentTool.name}`);
             }

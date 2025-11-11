@@ -3,67 +3,84 @@ import { LlmStepStreamEvent } from "./llm-step-event.js";
 import { Workflow } from "./workflow.js";
 import { Message } from "./message.js";
 
-export const WorkflowStreamStartEvent = z.object({
-    type: z.literal("workflow-start"),
-    workflowId: z.string(),
-    workflow: Workflow,
-    background: z.boolean(),
+const BaseRunEvent = z.object({
+    ts: z.iso.datetime().optional(),
 });
 
-export const WorkflowStreamStepStartEvent = z.object({
-    type: z.literal("workflow-step-start"),
+export const RunStartEvent = BaseRunEvent.extend({
+    type: z.literal("start"),
+    runId: z.string(),
+    workflowId: z.string(),
+    workflow: Workflow,
+    interactive: z.boolean(),
+});
+
+export const RunStepStartEvent = BaseRunEvent.extend({
+    type: z.literal("step-start"),
+    stepIndex: z.number(),
     stepId: z.string(),
     stepType: z.enum(["agent", "function"]),
 });
 
-export const WorkflowStreamStepStreamEventEvent = z.object({
-    type: z.literal("workflow-step-stream-event"),
+export const RunStreamEvent = BaseRunEvent.extend({
+    type: z.literal("stream-event"),
     stepId: z.string(),
     event: LlmStepStreamEvent,
 });
 
-export const WorkflowStreamStepMessageEvent = z.object({
-    type: z.literal("workflow-step-message"),
+export const RunMessageEvent = BaseRunEvent.extend({
+    type: z.literal("message"),
     stepId: z.string(),
     message: Message,
 });
 
-export const WorkflowStreamStepToolInvocationEvent = z.object({
-    type: z.literal("workflow-step-tool-invocation"),
+export const RunToolInvocationEvent = BaseRunEvent.extend({
+    type: z.literal("tool-invocation"),
     stepId: z.string(),
     toolName: z.string(),
     input: z.string(),
 });
 
-export const WorkflowStreamStepToolResultEvent = z.object({
-    type: z.literal("workflow-step-tool-result"),
+export const RunToolResultEvent = BaseRunEvent.extend({
+    type: z.literal("tool-result"),
     stepId: z.string(),
     toolName: z.string(),
     result: z.any(),
 });
 
-export const WorkflowStreamStepEndEvent = z.object({
-    type: z.literal("workflow-step-end"),
-    stepId: z.string(),
+export const RunStepEndEvent = BaseRunEvent.extend({
+    type: z.literal("step-end"),
+    stepIndex: z.number(),
 });
 
-export const WorkflowStreamEndEvent = z.object({
-    type: z.literal("workflow-end"),
+export const RunEndEvent = BaseRunEvent.extend({
+    type: z.literal("end"),
 });
 
-export const WorkflowStreamErrorEvent = z.object({
-    type: z.literal("workflow-error"),
+export const RunPauseEvent = BaseRunEvent.extend({
+    type: z.literal("pause-for-human-input"),
+    toolCallId: z.string(),
+});
+
+export const RunResumeEvent = BaseRunEvent.extend({
+    type: z.literal("resume"),
+});
+
+export const RunErrorEvent = BaseRunEvent.extend({
+    type: z.literal("error"),
     error: z.string(),
 });
 
-export const WorkflowStreamEvent = z.union([
-    WorkflowStreamStartEvent,
-    WorkflowStreamStepStartEvent,
-    WorkflowStreamStepStreamEventEvent,
-    WorkflowStreamStepMessageEvent,
-    WorkflowStreamStepToolInvocationEvent,
-    WorkflowStreamStepToolResultEvent,
-    WorkflowStreamStepEndEvent,
-    WorkflowStreamEndEvent,
-    WorkflowStreamErrorEvent,
+export const RunEvent = z.union([
+    RunStartEvent,
+    RunStepStartEvent,
+    RunStreamEvent,
+    RunMessageEvent,
+    RunToolInvocationEvent,
+    RunToolResultEvent,
+    RunStepEndEvent,
+    RunEndEvent,
+    RunPauseEvent,
+    RunResumeEvent,
+    RunErrorEvent,
 ]);
