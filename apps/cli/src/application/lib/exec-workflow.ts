@@ -161,7 +161,7 @@ function loadFunction(id: string) {
     return func;
 }
 
-export async function* executeWorkflow(id: string, input: string, interactive: boolean = true): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
+export async function* executeWorkflow(id: string, input: string, interactive: boolean = true, asTool: boolean = false): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
     const runId = runIdGenerator.next();
     yield* runFromState({
         id,
@@ -176,6 +176,7 @@ export async function* executeWorkflow(id: string, input: string, interactive: b
             pendingToolCallId: null,
         },
         interactive,
+        asTool,
     });
 }
 
@@ -256,6 +257,7 @@ export async function* resumeWorkflow(runId: string, input: string, interactive:
             pendingToolCallId,
         },
         interactive,
+        asTool: false,
     });
 }
 
@@ -264,8 +266,9 @@ async function* runFromState(opts: {
     runId: string;
     state: z.infer<typeof State>;
     interactive: boolean;
+    asTool: boolean;
 }) {
-    const { id, runId, state, interactive } = opts;
+    const { id, runId, state, interactive, asTool } = opts;
     let stepIndex = state.stepIndex;
     let messages = [...state.messages];
     let workflow = state.workflow;
@@ -288,7 +291,7 @@ async function* runFromState(opts: {
 
         while (true) {
             const step = workflow.steps[stepIndex];
-            const node = step.type === "agent" ? new AgentNode(step.id, interactive) : loadFunction(step.id);
+            const node = step.type === "agent" ? new AgentNode(step.id, asTool) : loadFunction(step.id);
 
             yield* ly.logAndYield({
                 type: "step-start",

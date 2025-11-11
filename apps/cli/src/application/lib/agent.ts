@@ -122,12 +122,12 @@ function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[
 
 export class AgentNode implements Step {
     private id: string;
-    private background: boolean;
+    private asTool: boolean;
     private agent: z.infer<typeof Agent>;
 
-    constructor(id: string, background: boolean) {
+    constructor(id: string, asTool: boolean) {
         this.id = id;
-        this.background = background;
+        this.asTool = asTool;
         const agentPath = path.join(WorkDir, "agents", `${id}.json`);
         const agent = fs.readFileSync(agentPath, "utf8");
         this.agent = Agent.parse(JSON.parse(agent));
@@ -144,6 +144,9 @@ export class AgentNode implements Step {
         //     tools["ask-human"] = AskHumanTool;
         // }
         for (const [name, tool] of Object.entries(this.agent.tools ?? {})) {
+            if (this.asTool && name === "ask-human") {
+                continue;
+            }
             try {
                 tools[name] = mapAgentTool(tool);
             } catch (error) {
