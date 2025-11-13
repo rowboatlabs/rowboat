@@ -6,6 +6,10 @@ import { z } from "zod";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 const model = openai("gpt-4.1");
 const rl = readline.createInterface({ input, output });
@@ -69,8 +73,107 @@ WORKFLOW KNOWLEDGE:
 - Workflows are JSON files that orchestrate multiple agents
 - Agents are JSON files defining AI assistants with specific tools and instructions
 - Tools can be built-in functions or MCP (Model Context Protocol) integrations
-- Common structure for workflows: { "name": "workflow_name", "description": "...", "steps": [{"type": "agent", "id": "agent_id"}, ...] }
-- Common structure for agents: { "name": "agent_name", "description": "...", "model": "gpt-4o", "instructions": "...", "tools": {...} }
+
+NOTE: Comments with // in the formats below are for explanation only - do NOT include them in actual JSON files
+
+CORRECT WORKFLOW FORMAT:
+{
+  "name": "workflow_name",              // REQUIRED - must match filename
+  "description": "Description...",       // REQUIRED - must be a description of the workflow
+  "steps": [                            // REQUIRED - array of steps
+    {
+      "type": "agent",                  // REQUIRED - always "agent"
+      "id": "agent_name"                // REQUIRED - must match agent filename
+    },
+    {
+      "type": "agent", 
+      "id": "another_agent_name"
+    }
+  ]
+}
+
+CORRECT AGENT FORMAT (with detailed tool structure):
+{
+  "name": "agent_name",                 // REQUIRED - must match filename
+  "description": "What agent does",     // REQUIRED - must be a description of the agent
+  "model": "gpt-4.1",                   // REQUIRED - model to use
+  "instructions": "Instructions...",    // REQUIRED - agent instructions
+  "tools": {                            // OPTIONAL - can be empty {} or omitted
+    "descriptive_tool_name": {
+      "type": "mcp",                    // REQUIRED - always "mcp" for MCP tools
+      "name": "actual_mcp_tool_name",   // REQUIRED - exact tool name from MCP server
+      "description": "What tool does",  // REQUIRED - clear description
+      "mcpServerName": "server_name",   // REQUIRED - name from mcp.json config
+      "inputSchema": {                  // REQUIRED - full JSON schema
+        "type": "object",
+        "properties": {
+          "param1": {
+            "type": "string",
+            "description": "Description of param"  // description is optional but helpful
+          }
+        },
+        "required": ["param1"]          // OPTIONAL - only include if params are required
+      }
+    }
+  }
+}
+
+IMPORTANT NOTES:
+- Agent tools need: type, name, description, mcpServerName, and inputSchema (all REQUIRED)
+- Tool keys in agents should be descriptive (like "search", "fetch", "analyze") not the exact tool name
+- Agents can have empty tools {} if they don't need external tools
+- The "required" array in inputSchema is OPTIONAL - only include it if the tool has required parameters
+- If all parameters are optional, you can omit the "required" field entirely
+- Property descriptions in inputSchema are optional but helpful for clarity
+- All other fields marked REQUIRED must always be present
+
+EXAMPLE 1 - Firecrawl Search Tool (with required params):
+{
+  "tools": {
+    "search": {
+      "type": "mcp",
+      "name": "firecrawl_search",
+      "description": "Search the web",
+      "mcpServerName": "firecrawl",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "description": "Search query"},
+          "limit": {"type": "number", "description": "Number of results"},
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {"type": "string", "enum": ["web", "images", "news"]}
+              },
+              "required": ["type"]
+            }
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  }
+}
+
+EXAMPLE 2 - ElevenLabs Text-to-Speech (without required array):
+{
+  "tools": {
+    "text_to_speech": {
+      "type": "mcp",
+      "name": "text_to_speech",
+      "description": "Generate audio from text",
+      "mcpServerName": "elevenLabs",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {"type": "string"}
+        }
+      }
+    }
+  }
+}
 
 CRITICAL NAMING AND ORGANIZATION RULES:
 - Agent filenames MUST match the "name" field in their JSON (e.g., agent_name.json → "name": "agent_name")
@@ -88,6 +191,16 @@ YOUR CAPABILITIES:
 3. Update existing files intelligently
 4. Read and analyze file contents to maintain consistency
 5. Suggest improvements and ask clarifying questions when needed
+6. List and explore MCP (Model Context Protocol) servers and their available tools
+   - Use listMcpServers to see all configured MCP servers
+   - Use listMcpTools to see what tools are available in a specific MCP server
+   - This helps users understand what external integrations they can use in their workflows
+
+MCP INTEGRATION:
+- MCP servers provide external tools that agents can use (e.g., web scraping, database access, APIs)
+- MCP configuration is stored in config/mcp.json
+- When users ask about available integrations or tools, check MCP servers
+- Help users understand which MCP tools they can add to their agents
 
 DELETION RULES:
 - When a user asks to delete a WORKFLOW, you MUST:
@@ -363,6 +476,124 @@ Always use relative paths (no ${BASE_DIR} prefix) when calling tools.`,
                             return {
                                 success: false,
                                 message: `Failed to analyze workflow: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            };
+                        }
+                    },
+                }),
+                
+                listMcpServers: tool({
+                    description: 'List all available MCP servers from the configuration',
+                    inputSchema: z.object({}),
+                    execute: async () => {
+                        try {
+                            const configPath = path.join(BASE_DIR, 'config', 'mcp.json');
+                            
+                            // Check if config exists
+                            try {
+                                await fs.access(configPath);
+                            } catch {
+                                return {
+                                    success: true,
+                                    servers: [],
+                                    message: 'No MCP servers configured yet',
+                                };
+                            }
+                            
+                            const content = await fs.readFile(configPath, 'utf-8');
+                            const config = JSON.parse(content);
+                            
+                            const servers = Object.keys(config.mcpServers || {}).map(name => {
+                                const server = config.mcpServers[name];
+                                return {
+                                    name,
+                                    type: 'command' in server ? 'stdio' : 'http',
+                                    command: server.command,
+                                    url: server.url,
+                                };
+                            });
+                            
+                            return {
+                                success: true,
+                                servers,
+                                count: servers.length,
+                                message: `Found ${servers.length} MCP server(s)`,
+                            };
+                        } catch (error) {
+                            return {
+                                success: false,
+                                message: `Failed to list MCP servers: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            };
+                        }
+                    },
+                }),
+                
+                listMcpTools: tool({
+                    description: 'List all available tools from a specific MCP server',
+                    inputSchema: z.object({
+                        serverName: z.string().describe('Name of the MCP server to query'),
+                    }),
+                    execute: async ({ serverName }) => {
+                        try {
+                            const configPath = path.join(BASE_DIR, 'config', 'mcp.json');
+                            const content = await fs.readFile(configPath, 'utf-8');
+                            const config = JSON.parse(content);
+                            
+                            const mcpConfig = config.mcpServers[serverName];
+                            if (!mcpConfig) {
+                                return {
+                                    success: false,
+                                    message: `MCP server '${serverName}' not found in configuration`,
+                                };
+                            }
+                            
+                            // Create transport based on config type
+                            let transport;
+                            if ('command' in mcpConfig) {
+                                transport = new StdioClientTransport({
+                                    command: mcpConfig.command,
+                                    args: mcpConfig.args || [],
+                                    env: mcpConfig.env || {},
+                                });
+                            } else {
+                                try {
+                                    transport = new StreamableHTTPClientTransport(new URL(mcpConfig.url));
+                                } catch {
+                                    transport = new SSEClientTransport(new URL(mcpConfig.url));
+                                }
+                            }
+                            
+                            // Create and connect client
+                            const client = new Client({
+                                name: 'rowboat-copilot',
+                                version: '1.0.0',
+                            });
+                            
+                            await client.connect(transport);
+                            
+                            // List available tools
+                            const toolsList = await client.listTools();
+                            
+                            // Close connection
+                            client.close();
+                            transport.close();
+                            
+                            const tools = toolsList.tools.map((t: any) => ({
+                                name: t.name,
+                                description: t.description || 'No description',
+                                inputSchema: t.inputSchema,
+                            }));
+                            
+                            return {
+                                success: true,
+                                serverName,
+                                tools,
+                                count: tools.length,
+                                message: `Found ${tools.length} tool(s) in MCP server '${serverName}'`,
+                            };
+                        } catch (error) {
+                            return {
+                                success: false,
+                                message: `Failed to list MCP tools: ${error instanceof Error ? error.message : 'Unknown error'}`,
                             };
                         }
                     },
