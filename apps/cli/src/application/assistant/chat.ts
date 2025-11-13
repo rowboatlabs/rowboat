@@ -5,12 +5,13 @@ import { stdin as input, stdout as output } from "process";
 import { z } from "zod";
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as os from "os";
 
 const model = openai("gpt-4.1");
 const rl = readline.createInterface({ input, output });
 
-// Base directory for file operations
-const BASE_DIR = "/Users/tusharmagar/.rowboat";
+// Base directory for file operations - dynamically use user's home directory
+const BASE_DIR = path.join(os.homedir(), ".rowboat");
 
 // Ensure base directory exists
 async function ensureBaseDir() {
