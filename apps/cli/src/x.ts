@@ -6,3 +6,6 @@ export const start = () => {
     process.exitCode = 1;
   });
 }
+
+// Run the copilot when this file is executed directly
+start();
