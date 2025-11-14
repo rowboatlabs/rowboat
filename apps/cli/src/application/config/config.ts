@@ -1,7 +1,7 @@
 import path from "path";
 import fs from "fs";
 import { McpServerConfig } from "../entities/mcp.js";
-import { ModelConfig } from "../entities/models.js";
+import { ModelConfig as ModelConfigT } from "../entities/models.js";
 import { z } from "zod";
 import { homedir } from "os";
 
@@ -26,7 +26,7 @@ const baseMcpConfig: z.infer<typeof McpServerConfig> = {
     }
 };
 
-const baseModelConfig: z.infer<typeof ModelConfig> = {
+const baseModelConfig: z.infer<typeof ModelConfigT> = {
     providers: {
         openai: {
             flavor: "openai",
@@ -71,16 +71,13 @@ function loadMcpServerConfig(): z.infer<typeof McpServerConfig> {
     return McpServerConfig.parse(JSON.parse(config));
 }
 
-function loadModelConfig(): z.infer<typeof ModelConfig> {
+function loadModelConfig(): z.infer<typeof ModelConfigT> {
     const configPath = path.join(WorkDir, "config", "models.json");
     if (!fs.existsSync(configPath)) return baseModelConfig;
     const config = fs.readFileSync(configPath, "utf8");
-    return ModelConfig.parse(JSON.parse(config));
+    return ModelConfigT.parse(JSON.parse(config));
 }
 
 const { mcpServers } = loadMcpServerConfig();
-const { providers, defaults } = loadModelConfig();
 export const McpServers = mcpServers;
-export const Providers = providers;
-export const DefaultModel = defaults.model;
-export const DefaultProvider = defaults.provider;
+export const ModelConfig = loadModelConfig();

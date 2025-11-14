@@ -1,18 +1,18 @@
 import { createOpenAI, OpenAIProvider } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI, GoogleGenerativeAIProvider } from "@ai-sdk/google";
 import { AnthropicProvider, createAnthropic } from "@ai-sdk/anthropic";
-import { DefaultModel, DefaultProvider, Providers } from "../config/config.js";
+import { ModelConfig } from "../config/config.js";
 
 const providerMap: Record<string, OpenAIProvider | GoogleGenerativeAIProvider | AnthropicProvider> = {};
 
 export function getProvider(name: string = "") {
     if (!name) {
-        name = DefaultProvider;
+        name = ModelConfig.defaults.provider;
     }
     if (providerMap[name]) {
         return providerMap[name];
     }
-    const providerConfig = Providers[name];
+    const providerConfig = ModelConfig.providers[name];
     if (!providerConfig) {
         throw new Error(`Provider ${name} not found`);
     }

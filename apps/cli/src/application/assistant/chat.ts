@@ -10,7 +10,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getProvider } from "../lib/models.js";
-import { DefaultModel } from "../config/config.js";
+import { ModelConfig } from "../config/config.js";
 
 const rl = readline.createInterface({ input, output });
 
@@ -59,7 +59,7 @@ export async function startCopilot() {
         let currentStep = 0;
         const provider = getProvider();
         const result = streamText({
-            model: provider(DefaultModel),
+            model: provider(ModelConfig.defaults.model),
             messages: messages,
             system: `You are an intelligent workflow assistant helping users manage their workflows in ${BASE_DIR}.
 

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Step, StepInputT, StepOutputT } from "./step.js";
 import { ModelMessage, stepCountIs, streamText, tool, Tool, ToolSet, jsonSchema } from "ai";
 import { Agent, AgentTool } from "../entities/agent.js";
-import { DefaultModel, WorkDir } from "../config/config.js";
+import { ModelConfig, WorkDir } from "../config/config.js";
 import fs from "fs";
 import path from "path";
 import { loadWorkflow } from "./utils.js";
@@ -158,7 +158,7 @@ export class AgentNode implements Step {
 
         const provider = getProvider(this.agent.provider);
         const { fullStream } = streamText({
-            model: provider(this.agent.model || DefaultModel),
+            model: provider(this.agent.model || ModelConfig.defaults.model),
             messages: convertFromMessages(input),
             system: this.agent.instructions,
             stopWhen: stepCountIs(1),
