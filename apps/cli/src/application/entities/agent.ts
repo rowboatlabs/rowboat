@@ -1,28 +1,28 @@
 import { z } from "zod";
 
-export const BaseAgentTool = z.object({
+export const BaseTool = z.object({
     name: z.string(),
 });
 
-export const BuiltinAgentTool = BaseAgentTool.extend({
+export const BuiltinTool = BaseTool.extend({
     type: z.literal("builtin"),
 });
 
-export const McpAgentTool = BaseAgentTool.extend({
+export const McpTool = BaseTool.extend({
     type: z.literal("mcp"),
     description: z.string(),
     inputSchema: z.any(),
     mcpServerName: z.string(),
 });
 
-export const WorkflowAgentTool = BaseAgentTool.extend({
-    type: z.literal("workflow"),
+export const AgentAsATool = BaseTool.extend({
+    type: z.literal("agent"),
 });
 
-export const AgentTool = z.discriminatedUnion("type", [
-    BuiltinAgentTool,
-    McpAgentTool,
-    WorkflowAgentTool,
+export const ToolAttachment = z.discriminatedUnion("type", [
+    BuiltinTool,
+    McpTool,
+    AgentAsATool,
 ]);
 
 export const Agent = z.object({
@@ -31,5 +31,5 @@ export const Agent = z.object({
     model: z.string().optional(),
     description: z.string(),
     instructions: z.string(),
-    tools: z.record(z.string(), AgentTool).optional(),
+    tools: z.record(z.string(), ToolAttachment).optional(),
 });
