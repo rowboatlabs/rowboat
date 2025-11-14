@@ -27,7 +27,8 @@ export const AgentTool = z.discriminatedUnion("type", [
 
 export const Agent = z.object({
     name: z.string(),
-    model: z.string(),
+    provider: z.string().optional(),
+    model: z.string().optional(),
     description: z.string(),
     instructions: z.string(),
     tools: z.record(z.string(), AgentTool).optional(),

@@ -1,13 +1,14 @@
 import path from "path";
 import fs from "fs";
 import { McpServerConfig } from "../entities/mcp.js";
+import { ModelConfig } from "../entities/models.js";
 import { z } from "zod";
 import { homedir } from "os";
 
 // Resolve app root relative to compiled file location (dist/...)
 export const WorkDir = path.join(homedir(), ".rowboat");
 
-const baseMcpConfig = {
+const baseMcpConfig: z.infer<typeof McpServerConfig> = {
     mcpServers: {
         firecrawl: {
             command: "npx",
@@ -23,12 +24,31 @@ const baseMcpConfig = {
             },
         },
     }
-}
+};
+
+const baseModelConfig: z.infer<typeof ModelConfig> = {
+    providers: {
+        openai: {
+            flavor: "openai",
+        },
+    },
+    defaults: {
+        provider: "openai",
+        model: "gpt-4.1",
+    }
+};
 
 function ensureMcpConfig() {
     const configPath = path.join(WorkDir, "config", "mcp.json");
     if (!fs.existsSync(configPath)) {
         fs.writeFileSync(configPath, JSON.stringify(baseMcpConfig, null, 2));
+    }
+}
+
+function ensureModelConfig() {
+    const configPath = path.join(WorkDir, "config", "models.json");
+    if (!fs.existsSync(configPath)) {
+        fs.writeFileSync(configPath, JSON.stringify(baseModelConfig, null, 2));
     }
 }
 
@@ -39,6 +59,7 @@ function ensureDirs() {
     ensure(path.join(WorkDir, "agents"));
     ensure(path.join(WorkDir, "config"));
     ensureMcpConfig();
+    ensureModelConfig();
 }
 
 ensureDirs();
@@ -50,5 +71,16 @@ function loadMcpServerConfig(): z.infer<typeof McpServerConfig> {
     return McpServerConfig.parse(JSON.parse(config));
 }
 
+function loadModelConfig(): z.infer<typeof ModelConfig> {
+    const configPath = path.join(WorkDir, "config", "models.json");
+    if (!fs.existsSync(configPath)) return baseModelConfig;
+    const config = fs.readFileSync(configPath, "utf8");
+    return ModelConfig.parse(JSON.parse(config));
+}
+
 const { mcpServers } = loadMcpServerConfig();
+const { providers, defaults } = loadModelConfig();
 export const McpServers = mcpServers;
+export const Providers = providers;
+export const DefaultModel = defaults.model;
+export const DefaultProvider = defaults.provider;

@@ -1,5 +1,4 @@
 import { streamText, ModelMessage, tool, stepCountIs } from "ai";
-import { openai } from "@ai-sdk/openai";
 import * as readline from "readline/promises";
 import { stdin as input, stdout as output } from "process";
 import { z } from "zod";
@@ -10,8 +9,9 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { getProvider } from "../lib/models.js";
+import { DefaultModel } from "../config/config.js";
 
-const model = openai("gpt-4.1");
 const rl = readline.createInterface({ input, output });
 
 // Base directory for file operations - dynamically use user's home directory
@@ -57,8 +57,9 @@ export async function startCopilot() {
         process.stdout.write("\nCopilot: ");
         
         let currentStep = 0;
+        const provider = getProvider();
         const result = streamText({
-            model: model,
+            model: provider(DefaultModel),
             messages: messages,
             system: `You are an intelligent workflow assistant helping users manage their workflows in ${BASE_DIR}.
 
