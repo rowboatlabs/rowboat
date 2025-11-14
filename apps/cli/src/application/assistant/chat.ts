@@ -12,6 +12,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamRenderer } from "../lib/stream-renderer.js";
 import { getProvider } from "../lib/models.js";
 import { ModelConfig } from "../config/config.js";
+import { executeCommand } from "../lib/command-executor.js";
 
 const rl = readline.createInterface({ input, output });
 
@@ -186,7 +187,11 @@ YOUR CAPABILITIES:
 3. Update existing files intelligently
 4. Read and analyze file contents to maintain consistency
 5. Suggest improvements and ask clarifying questions when needed
-6. List and explore MCP (Model Context Protocol) servers and their available tools
+6. Execute shell commands to perform system operations
+   - Use executeCommand to run bash/shell commands
+   - Can list files, check system info, run scripts, etc.
+   - Commands execute in the .rowboat directory by default
+7. List and explore MCP (Model Context Protocol) servers and their available tools
    - Use listMcpServers to see all configured MCP servers
    - Use listMcpTools to see what tools are available in a specific MCP server
    - This helps users understand what external integrations they can use in their workflows
@@ -589,6 +594,35 @@ Always use relative paths (no ${BASE_DIR} prefix) when calling tools.`,
                             return {
                                 success: false,
                                 message: `Failed to list MCP tools: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            };
+                        }
+                    },
+                }),
+                
+                executeCommand: tool({
+                    description: 'Execute a shell command and return the output. Use this to run bash/shell commands.',
+                    inputSchema: z.object({
+                        command: z.string().describe('The shell command to execute (e.g., "ls -la", "cat file.txt")'),
+                        cwd: z.string().optional().describe('Working directory to execute the command in (defaults to .rowboat directory)'),
+                    }),
+                    execute: async ({ command, cwd }) => {
+                        try {
+                            const workingDir = cwd ? path.join(BASE_DIR, cwd) : BASE_DIR;
+                            const result = await executeCommand(command, { cwd: workingDir });
+                            
+                            return {
+                                success: result.exitCode === 0,
+                                stdout: result.stdout,
+                                stderr: result.stderr,
+                                exitCode: result.exitCode,
+                                command,
+                                workingDir,
+                            };
+                        } catch (error) {
+                            return {
+                                success: false,
+                                message: `Failed to execute command: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                                command,
                             };
                         }
                     },
