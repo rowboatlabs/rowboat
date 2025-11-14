@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { RunEvent } from "../entities/workflow-event.js";
-import { LlmStepStreamEvent } from "../entities/llm-step-event.js";
+import { RunEvent } from "../entities/run-events.js";
+import { LlmStepStreamEvent } from "../entities/llm-step-events.js";
 
 export interface StreamRendererOptions {
     showHeaders?: boolean;
@@ -27,11 +27,11 @@ export class StreamRenderer {
     render(event: z.infer<typeof RunEvent>) {
         switch (event.type) {
             case "start": {
-                this.onWorkflowStart(event.workflowId, event.runId, event.interactive);
+                this.onStart(event.agentId, event.runId, event.interactive);
                 break;
             }
             case "step-start": {
-                this.onStepStart(event.stepIndex, event.stepId, event.stepType);
+                this.onStepStart();
                 break;
             }
             case "stream-event": {
@@ -43,23 +43,23 @@ export class StreamRenderer {
                 break;
             }
             case "tool-invocation": {
-                this.onStepToolInvocation(event.stepId, event.toolName, event.input);
+                this.onStepToolInvocation(event.toolName, event.input);
                 break;
             }
             case "tool-result": {
-                this.onStepToolResult(event.stepId, event.toolName, event.result);
+                this.onStepToolResult(event.toolName, event.result);
                 break;
             }
             case "step-end": {
-                this.onStepEnd(event.stepIndex);
+                this.onStepEnd();
                 break;
             }
             case "end": {
-                this.onWorkflowEnd();
+                this.onEnd();
                 break;
             }
             case "error": {
-                this.onWorkflowError(event.error);
+                this.onError(event.error);
                 break;
             }
         }
@@ -94,29 +94,29 @@ export class StreamRenderer {
         }
     }
 
-    private onWorkflowStart(workflowId: string, runId: string, interactive: boolean) {
+    private onStart(workflowId: string, runId: string, interactive: boolean) {
         this.write("\n");
         this.write(this.bold(`▶ Workflow ${workflowId} (run ${runId})`));
         if (!interactive) this.write(this.dim(" (--no-interactive)"));
         this.write("\n");
     }
 
-    private onWorkflowEnd() {
+    private onEnd() {
         this.write(this.bold("\n■ Workflow complete\n"));
     }
 
-    private onWorkflowError(error: string) {
+    private onError(error: string) {
         this.write(this.red(`\n✖ Workflow error: ${error}\n`));
     }
 
-    private onStepStart(stepIndex: number, stepId: string, stepType: "agent" | "function") {
+    private onStepStart() {
         this.write("\n");
-        this.write(this.cyan(`─ Step ${stepIndex} [${stepType}]`));
+        this.write(this.cyan(`─ Step started`));
         this.write("\n");
     }
 
-    private onStepEnd(stepIndex: number) {
-        this.write(this.dim(`✓ Step ${stepIndex} finished\n`));
+    private onStepEnd() {
+        this.write(this.dim(`✓ Step finished\n`));
     }
 
     private onStepMessage(stepIndex: number, message: any) {
@@ -131,7 +131,7 @@ export class StreamRenderer {
         }
     }
 
-    private onStepToolInvocation(stepId: string, toolName: string, input: string) {
+    private onStepToolInvocation(toolName: string, input: string) {
         this.write(this.cyan(`\n→ Tool invoke ${toolName}`));
         if (input && input.length) {
             this.write("\n" + this.dim(this.indent(this.truncate(input))) + "\n");
@@ -140,7 +140,7 @@ export class StreamRenderer {
         }
     }
 
-    private onStepToolResult(stepId: string, toolName: string, result: unknown) {
+    private onStepToolResult(toolName: string, result: unknown) {
         const res = this.truncate(JSON.stringify(result, null, this.options.jsonIndent));
         this.write(this.cyan(`\n← Tool result ${toolName}\n`));
         this.write(this.dim(this.indent(res)) + "\n");

@@ -1,20 +1,16 @@
-import { tool, Tool } from "ai";
-import { AgentTool } from "../entities/agent.js";
+import { ToolAttachment } from "../entities/agent.js";
 import { z } from "zod";
 import { McpServers } from "../config/config.js";
-import { getMcpClient } from "./mcp.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Client } from "@modelcontextprotocol/sdk/client";
-import { executeCommand } from "./command-executor.js";
-import { loadWorkflow } from "./utils.js";
 import { AssistantMessage } from "../entities/message.js";
-import { executeWorkflow } from "./exec-workflow.js";
-import readline from "readline";
+import { BuiltinTools } from "./builtin-tools.js";
+import { streamAgent } from "./agent.js";
 
-async function execMcpTool(agentTool: z.infer<typeof AgentTool> & { type: "mcp" }, input: any): Promise<any> {
+async function execMcpTool(agentTool: z.infer<typeof ToolAttachment> & { type: "mcp" }, input: any): Promise<any> {
     // load mcp configuration from the tool
     const mcpConfig = McpServers[agentTool.mcpServerName];
     if (!mcpConfig) {
@@ -57,34 +53,12 @@ async function execMcpTool(agentTool: z.infer<typeof AgentTool> & { type: "mcp" 
     return result;
 }
 
-async function execBashTool(agentTool: z.infer<typeof AgentTool>, input: any): Promise<any> {
-    const result = await executeCommand(input.command as string);
-    return {
-        stdout: result.stdout,
-        stderr: result.stderr,
-        exitCode: result.exitCode,
-    };
-}
-
-export async function execAskHumanTool(agentTool: z.infer<typeof AgentTool>, question: string): Promise<string> {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-
-    let p = new Promise<string>((resolve, reject) => {
-        rl.question(`>> Provide answer to: ${question}:\n\n`, (answer) => {
-            resolve(answer);
-            rl.close();
-        });
-    });
-    const answer = await p;
-    return answer;
-}
-
-async function execWorkflowTool(agentTool: z.infer<typeof AgentTool> & { type: "workflow" }, input: any): Promise<any> {
+async function execAgentTool(agentTool: z.infer<typeof ToolAttachment> & { type: "agent" }, input: any): Promise<any> {
     let lastMsg: z.infer<typeof AssistantMessage> | null = null;
-    for await (const event of executeWorkflow(agentTool.name, input.message)) {
+    for await (const event of streamAgent({
+        agent: agentTool.name,
+        input: JSON.stringify(input),
+    })) {
         if (event.type === "message" && event.message.role === "assistant") {
             lastMsg = event.message;
         }
@@ -94,7 +68,7 @@ async function execWorkflowTool(agentTool: z.infer<typeof AgentTool> & { type: "
     }
 
     if (!lastMsg) {
-        throw new Error("No message received from workflow");
+        throw new Error("No message received from agent");
     }
     if (typeof lastMsg.content === "string") {
         return lastMsg.content;
@@ -107,18 +81,17 @@ async function execWorkflowTool(agentTool: z.infer<typeof AgentTool> & { type: "
     }, "");
 }
 
-export async function execTool(agentTool: z.infer<typeof AgentTool>, input: any): Promise<any> {
+export async function execTool(agentTool: z.infer<typeof ToolAttachment>, input: any): Promise<any> {
     switch (agentTool.type) {
         case "mcp":
             return execMcpTool(agentTool, input);
-        case "workflow":
-            return execWorkflowTool(agentTool, input);
+        case "agent":
+            return execAgentTool(agentTool, input);
         case "builtin":
-            switch (agentTool.name) {
-                case "bash":
-                    return execBashTool(agentTool, input);
-                default:
-                    throw new Error(`Unknown builtin tool: ${agentTool.name}`);
+            const builtinTool = BuiltinTools[agentTool.name];
+            if (!builtinTool || !builtinTool.execute) {
+                throw new Error(`Unsupported builtin tool: ${agentTool.name}`);
             }
+            return builtinTool.execute(input);
     }
 }

@@ -34,7 +34,7 @@ const baseModelConfig: z.infer<typeof ModelConfigT> = {
     },
     defaults: {
         provider: "openai",
-        model: "gpt-4.1",
+        model: "gpt-5",
     }
 };
 
@@ -55,7 +55,6 @@ function ensureModelConfig() {
 function ensureDirs() {
     const ensure = (p: string) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
     ensure(WorkDir);
-    ensure(path.join(WorkDir, "workflows"));
     ensure(path.join(WorkDir, "agents"));
     ensure(path.join(WorkDir, "config"));
     ensureMcpConfig();

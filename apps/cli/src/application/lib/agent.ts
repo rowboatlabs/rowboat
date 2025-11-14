@@ -1,29 +1,22 @@
-import { Message, MessageList } from "../entities/message.js";
-import { z } from "zod";
-import { Step, StepInputT, StepOutputT } from "./step.js";
-import { ModelMessage, stepCountIs, streamText, tool, Tool, ToolSet, jsonSchema } from "ai";
-import { Agent, AgentTool } from "../entities/agent.js";
-import { ModelConfig, WorkDir } from "../config/config.js";
+import { jsonSchema, ModelMessage } from "ai";
 import fs from "fs";
 import path from "path";
-import { loadWorkflow } from "./utils.js";
+import { ModelConfig, WorkDir } from "../config/config.js";
+import { Agent, ToolAttachment } from "../entities/agent.js";
+import { createInterface, Interface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+import { AssistantContentPart, AssistantMessage, Message, MessageList, ToolCallPart, ToolMessage, UserMessage } from "../entities/message.js";
+import { runIdGenerator } from "./run-id-gen.js";
+import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
+import { z } from "zod";
 import { getProvider } from "./models.js";
+import { LlmStepStreamEvent } from "../entities/llm-step-events.js";
+import { execTool } from "./exec-tool.js";
+import { RunEvent } from "../entities/run-events.js";
+import { CopilotAgent } from "../assistant/agent.js";
+import { BuiltinTools } from "./builtin-tools.js";
 
-const BashTool = tool({
-    description: "Run a command in the shell",
-    inputSchema: z.object({
-        command: z.string(),
-    }),
-});
-
-const AskHumanTool = tool({
-    description: "Ask the human for input",
-    inputSchema: z.object({
-        question: z.string(),
-    }),
-});
-
-function mapAgentTool(t: z.infer<typeof AgentTool>): Tool {
+export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
     switch (t.type) {
         case "mcp":
             return tool({
@@ -31,31 +24,136 @@ function mapAgentTool(t: z.infer<typeof AgentTool>): Tool {
                 description: t.description,
                 inputSchema: jsonSchema(t.inputSchema),
             });
-        case "workflow":
-            const workflow = loadWorkflow(t.name);
-            if (!workflow) {
-                throw new Error(`Workflow ${t.name} not found`);
+        case "agent":
+            const agent = await loadAgent(t.name);
+            if (!agent) {
+                throw new Error(`Agent ${t.name} not found`);
             }
             return tool({
                 name: t.name,
-                description: workflow.description,
+                description: agent.description,
                 inputSchema: z.object({
                     message: z.string().describe("The message to send to the workflow"),
                 }),
             });
         case "builtin":
-            switch (t.name) {
-                case "bash":
-                    return BashTool;
-                case "ask-human":
-                    return AskHumanTool;
-                default:
-                    throw new Error(`Unknown builtin tool: ${t.name}`);
+            const match = BuiltinTools[t.name];
+            if (!match) {
+                throw new Error(`Unknown builtin tool: ${t.name}`);
             }
+            return tool({
+                description: match.description,
+                inputSchema: match.inputSchema,
+            });
     }
 }
 
-function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
+export class RunLogger {
+    private logFile: string;
+    private fileHandle: fs.WriteStream;
+
+    ensureRunsDir() {
+        const runsDir = path.join(WorkDir, "runs");
+        if (!fs.existsSync(runsDir)) {
+            fs.mkdirSync(runsDir, { recursive: true });
+        }
+    }
+
+    constructor(runId: string) {
+        this.ensureRunsDir();
+        this.logFile = path.join(WorkDir, "runs", `${runId}.jsonl`);
+        this.fileHandle = fs.createWriteStream(this.logFile, {
+            flags: "a",
+            encoding: "utf8",
+        });
+    }
+
+    log(event: z.infer<typeof RunEvent>) {
+        if (event.type !== "stream-event") {
+            this.fileHandle.write(JSON.stringify(event) + "\n");
+        }
+    }
+
+    close() {
+        this.fileHandle.close();
+    }
+}
+
+export class LogAndYield {
+    private logger: RunLogger
+
+    constructor(logger: RunLogger) {
+        this.logger = logger;
+    }
+
+    async *logAndYield(event: z.infer<typeof RunEvent>): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
+        const ev = {
+            ...event,
+            ts: new Date().toISOString(),
+        }
+        this.logger.log(ev);
+        yield ev;
+    }
+}
+
+export class StreamStepMessageBuilder {
+    private parts: z.infer<typeof AssistantContentPart>[] = [];
+    private textBuffer: string = "";
+    private reasoningBuffer: string = "";
+
+    flushBuffers() {
+        // skip reasoning
+        // if (this.reasoningBuffer) {
+        //     this.parts.push({ type: "reasoning", text: this.reasoningBuffer });
+        //     this.reasoningBuffer = "";
+        // }
+        if (this.textBuffer) {
+            this.parts.push({ type: "text", text: this.textBuffer });
+            this.textBuffer = "";
+        }
+    }
+
+    ingest(event: z.infer<typeof LlmStepStreamEvent>) {
+        switch (event.type) {
+            case "reasoning-start":
+            case "reasoning-end":
+            case "text-start":
+            case "text-end":
+                this.flushBuffers();
+                break;
+            case "reasoning-delta":
+                this.reasoningBuffer += event.delta;
+                break;
+            case "text-delta":
+                this.textBuffer += event.delta;
+                break;
+            case "tool-call":
+                this.parts.push({
+                    type: "tool-call",
+                    toolCallId: event.toolCallId,
+                    toolName: event.toolName,
+                    arguments: event.input,
+                });
+                break;
+        }
+    }
+
+    get(): z.infer<typeof AssistantMessage> {
+        this.flushBuffers();
+        return {
+            role: "assistant",
+            content: this.parts,
+        };
+    }
+}
+
+export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
+    const agentPath = path.join(WorkDir, "agents", `${id}.json`);
+    const agent = fs.readFileSync(agentPath, "utf8");
+    return Agent.parse(JSON.parse(agent));
+}
+
+export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
     const result: ModelMessage[] = [];
     for (const msg of messages) {
         switch (msg.role) {
@@ -119,100 +217,275 @@ function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[
     return result;
 }
 
-export class AgentNode implements Step {
-    private id: string;
-    private asTool: boolean;
-    private agent: z.infer<typeof Agent>;
 
-    constructor(id: string, asTool: boolean) {
-        this.id = id;
-        this.asTool = asTool;
-        const agentPath = path.join(WorkDir, "agents", `${id}.json`);
-        const agent = fs.readFileSync(agentPath, "utf8");
-        this.agent = Agent.parse(JSON.parse(agent));
-     }
+export async function* streamAgent(opts: {
+    agent: string;
+    runId?: string;
+    input?: string;
+    interactive?: boolean;
+}) {
+    const messages: z.infer<typeof MessageList> = [];
 
-    tools(): Record<string, z.infer<typeof AgentTool>> {
-        return this.agent.tools ?? {};
+    // load existing and assemble state if required
+    if (opts.runId) {
+        console.error("loading run", opts.runId);
+        let stream: fs.ReadStream | null = null;
+        let rl: Interface | null = null;
+        try {
+            const logFile = path.join(WorkDir, "runs", `${opts.runId}.jsonl`);
+            stream = fs.createReadStream(logFile, { encoding: "utf8" });
+            rl = createInterface({ input: stream, crlfDelay: Infinity });
+            for await (const line of rl) {
+                if (line.trim() === "") {
+                    continue;
+                }
+                const parsed = JSON.parse(line);
+                const event = RunEvent.parse(parsed);
+                switch (event.type) {
+                    case "message":
+                        messages.push(event.message);
+                        break;
+                }
+            }
+        } finally {
+            stream?.close();
+        }
     }
 
-    async* execute(input: StepInputT): StepOutputT {
-        // console.log("\n\n\t>>>>\t\tinput", JSON.stringify(input));
-        const tools: ToolSet = {};
-        // if (!this.background) {
-        //     tools["ask-human"] = AskHumanTool;
-        // }
-        for (const [name, tool] of Object.entries(this.agent.tools ?? {})) {
-            if (this.asTool && name === "ask-human") {
-                continue;
+    // create runId if not present
+    if (!opts.runId) {
+        opts.runId = runIdGenerator.next();
+    }
+
+    // load agent data
+    let agent: z.infer<typeof Agent> | null = null;
+    if (opts.agent === "copilot") {
+        agent = CopilotAgent;
+    } else {
+        agent = await loadAgent(opts.agent);
+    }
+    if (!agent) {
+        throw new Error("unable to load agent");
+    }
+
+    // set up tools
+    const tools: ToolSet = {};
+    for (const [name, tool] of Object.entries(agent.tools ?? {})) {
+        try {
+            tools[name] = await mapAgentTool(tool);
+        } catch (error) {
+            console.error(`Error mapping tool ${name}:`, error);
+            continue;
+        }
+    }
+
+    // set up
+    const logger = new RunLogger(opts.runId);
+    const ly = new LogAndYield(logger);
+    const provider = getProvider(agent.provider);
+    const model = provider(agent.model || ModelConfig.defaults.model);
+
+    // get first input if needed
+    let rl: Interface | null = null;
+    if (opts.interactive) {
+        rl = createInterface({ input, output });
+    }
+    if (opts.input) {
+        const m: z.infer<typeof UserMessage> = {
+            role: "user",
+            content: opts.input,
+        };
+        messages.push(m);
+        yield *ly.logAndYield({
+            type: "message",
+            message: m,
+        });
+    }
+    try {
+        // loop b/w user and agent
+        while (true) {
+            // get input in interactive mode when last message is not user
+            if (opts.interactive && (messages.length === 0 || messages[messages.length - 1].role !== "user")) {
+                const input = await rl!.question("You: ");
+                // Exit condition
+                if (["q", "quit", "exit"].includes(input.toLowerCase())) {
+                    console.log("\n👋 Goodbye!");
+                    return;
+                }
+
+                const m: z.infer<typeof UserMessage> = {
+                    role: "user",
+                    content: input,
+                };
+                messages.push(m);
+                yield* ly.logAndYield({
+                    type: "message",
+                    message: m,
+                });
             }
-            try {
-                tools[name] = mapAgentTool(tool);
-            } catch (error) {
-                console.error(`Error mapping tool ${name}:`, error);
-                continue;
+
+            // inner loop to handle tool calls
+            while (true) {
+                // stream agent response and build message
+                const messageBuilder = new StreamStepMessageBuilder();
+                for await (const event of streamLlm(
+                    model,
+                    messages,
+                    agent.instructions,
+                    tools,
+                )) {
+                    messageBuilder.ingest(event);
+                    yield* ly.logAndYield({
+                        type: "stream-event",
+                        event: event,
+                    });
+                }
+
+                // build and emit final message from agent response
+                const msg = messageBuilder.get();
+                messages.push(msg);
+                yield* ly.logAndYield({
+                    type: "message",
+                    message: msg,
+                });
+
+                // handle tool calls
+                const mappedToolCalls: z.infer<typeof MappedToolCall>[] = [];
+                let msgToolCallParts: z.infer<typeof ToolCallPart>[] = [];
+                if (msg.content instanceof Array) {
+                    msgToolCallParts = msg.content.filter(part => part.type === "tool-call");
+                }
+                const hasToolCalls = msgToolCallParts.length > 0;
+                console.log(msgToolCallParts);
+
+                // validate and map tool calls
+                for (const part of msgToolCallParts) {
+                    const agentTool = tools[part.toolName];
+                    if (!agentTool) {
+                        throw new Error(`Tool ${part.toolName} not found`);
+                    }
+                    mappedToolCalls.push({
+                        toolCall: part,
+                        agentTool: agent.tools![part.toolName],
+                    });
+                }
+
+                for (const call of mappedToolCalls) {
+                    const { agentTool, toolCall } = call;
+                    yield* ly.logAndYield({
+                        type: "tool-invocation",
+                        toolName: toolCall.toolName,
+                        input: JSON.stringify(toolCall.arguments),
+                    });
+                    const result = await execTool(agentTool, toolCall.arguments);
+                    const resultMsg: z.infer<typeof ToolMessage> = {
+                        role: "tool",
+                        content: JSON.stringify(result),
+                        toolCallId: toolCall.toolCallId,
+                        toolName: toolCall.toolName,
+                    };
+                    messages.push(resultMsg);
+                    yield* ly.logAndYield({
+                        type: "tool-result",
+                        toolName: toolCall.toolName,
+                        result: result,
+                    });
+                    yield* ly.logAndYield({
+                        type: "message",
+                        message: resultMsg,
+                    });
+                }
+
+                // if the agent response had tool calls, replay this agent
+                if (hasToolCalls) {
+                    continue;
+                }
+
+                // otherwise, break
+                break;
+            }
+
+            // if not interactive, return
+            if (!opts.interactive) {
+                break;
             }
         }
+    } finally {
+        rl?.close();
+        logger.close();
+    }
+}
 
-        // console.log("\n\n\t>>>>\t\ttools", JSON.stringify(tools, null, 2));
-
-        const provider = getProvider(this.agent.provider);
-        const { fullStream } = streamText({
-            model: provider(this.agent.model || ModelConfig.defaults.model),
-            messages: convertFromMessages(input),
-            system: this.agent.instructions,
-            stopWhen: stepCountIs(1),
-            tools,
-        });
-
-        for await (const event of fullStream) {
-            // console.log("\n\n\t>>>>\t\tstream event", JSON.stringify(event));
-            switch (event.type) {
-                case "reasoning-start":
-                    yield {
-                        type: "reasoning-start",
-                    };
-                    break;
-                case "reasoning-delta":
-                    yield {
-                        type: "reasoning-delta",
-                        delta: event.text,
-                    };
-                    break;
-                case "reasoning-end":
-                    yield {
-                        type: "reasoning-end",
-                    };
-                    break;
-                case "text-start":
-                    yield {
-                        type: "text-start",
-                    };
-                    break;
-                case "text-delta":
-                    yield {
-                        type: "text-delta",
-                        delta: event.text,
-                    };
-                    break;
-                case "tool-call":
-                    yield {
-                        type: "tool-call",
-                        toolCallId: event.toolCallId,
-                        toolName: event.toolName,
-                        input: event.input,
-                    };
-                    break;
-                case "finish":
-                    yield {
-                        type: "usage",
-                        usage: event.totalUsage,
-                    };
-                    break;
-                default:
-                    // console.warn("Unknown event type", event);
-                    continue;
-            }
+async function* streamLlm(
+    model: LanguageModel,
+    messages: z.infer<typeof MessageList>,
+    instructions: string,
+    tools: ToolSet,
+): AsyncGenerator<z.infer<typeof LlmStepStreamEvent>, void, unknown> {
+    const { fullStream } = streamText({
+        model,
+        messages: convertFromMessages(messages),
+        system: instructions,
+        tools,
+        stopWhen: stepCountIs(1),
+        providerOptions: {
+            openai: {
+                reasoningEffort: "low",
+                reasoningSummary: "auto",
+            },
+        }
+    });
+    for await (const event of fullStream) {
+        // console.log("\n\n\t>>>>\t\tstream event", JSON.stringify(event));
+        switch (event.type) {
+            case "reasoning-start":
+                yield {
+                    type: "reasoning-start",
+                };
+                break;
+            case "reasoning-delta":
+                yield {
+                    type: "reasoning-delta",
+                    delta: event.text,
+                };
+                break;
+            case "reasoning-end":
+                yield {
+                    type: "reasoning-end",
+                };
+                break;
+            case "text-start":
+                yield {
+                    type: "text-start",
+                };
+                break;
+            case "text-delta":
+                yield {
+                    type: "text-delta",
+                    delta: event.text,
+                };
+                break;
+            case "tool-call":
+                yield {
+                    type: "tool-call",
+                    toolCallId: event.toolCallId,
+                    toolName: event.toolName,
+                    input: event.input,
+                };
+                break;
+            case "finish":
+                yield {
+                    type: "usage",
+                    usage: event.totalUsage,
+                };
+                break;
+            default:
+                // console.warn("Unknown event type", event);
+                continue;
         }
     }
 }
+export const MappedToolCall = z.object({
+    toolCall: ToolCallPart,
+    agentTool: ToolAttachment,
+});
