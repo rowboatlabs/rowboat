@@ -1,14 +1,13 @@
 import { Message, MessageList } from "../entities/message.js";
 import { z } from "zod";
 import { Step, StepInputT, StepOutputT } from "./step.js";
-import { openai } from "@ai-sdk/openai";
-import { google } from "@ai-sdk/google";
-import { generateText, ModelMessage, stepCountIs, streamText, tool, Tool, ToolSet, jsonSchema } from "ai";
+import { ModelMessage, stepCountIs, streamText, tool, Tool, ToolSet, jsonSchema } from "ai";
 import { Agent, AgentTool } from "../entities/agent.js";
-import { WorkDir } from "../config/config.js";
+import { ModelConfig, WorkDir } from "../config/config.js";
 import fs from "fs";
 import path from "path";
 import { loadWorkflow } from "./utils.js";
+import { getProvider } from "./models.js";
 
 const BashTool = tool({
     description: "Run a command in the shell",
@@ -157,9 +156,9 @@ export class AgentNode implements Step {
 
         // console.log("\n\n\t>>>>\t\ttools", JSON.stringify(tools, null, 2));
 
+        const provider = getProvider(this.agent.provider);
         const { fullStream } = streamText({
-            model: openai("gpt-4.1"),
-            // model: google("gemini-2.5-flash"),
+            model: provider(this.agent.model || ModelConfig.defaults.model),
             messages: convertFromMessages(input),
             system: this.agent.instructions,
             stopWhen: stepCountIs(1),
