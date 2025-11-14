@@ -10,8 +10,9 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamRenderer } from "../lib/stream-renderer.js";
 
-const model = openai("gpt-4.1");
+const model = openai("gpt-5");
 const rl = readline.createInterface({ input, output });
 
 // Base directory for file operations - dynamically use user's home directory
@@ -54,20 +55,10 @@ export async function startCopilot() {
         messages.push({ role: "user", content: userInput });
         
         // Stream AI response
-        process.stdout.write("\nCopilot: ");
-        
-        let currentStep = 0;
         const result = streamText({
             model: model,
             messages: messages,
             system: `You are an intelligent workflow assistant helping users manage their workflows in ${BASE_DIR}.
-
-REASONING & THINKING:
-- Before taking action, think through what the user is asking for and put out a text with your reasoning process and the steps you will take to complete the task.
-- Break down complex tasks into clear steps
-- Explore existing files/structure before creating new ones
-- Explain your reasoning as you work through tasks
-- Be proactive in understanding context
 
 WORKFLOW KNOWLEDGE:
 - Workflows are JSON files that orchestrate multiple agents
@@ -217,11 +208,11 @@ DELETION RULES:
   5. Only delete/modify what the user confirms
 
 COMMUNICATION STYLE:
-- Start by thinking through the request
-- Explain what you're exploring and why
-- Show your reasoning process
+- Break down complex tasks into clear steps
+- Explore existing files/structure before creating new ones
+- Explain your reasoning as you work through tasks
+- Be proactive in understanding context
 - Confirm what you've done and suggest next steps
-- Be conversational but informative
 - Always ask for confirmation before destructive operations!!
 
 Always use relative paths (no ${BASE_DIR} prefix) when calling tools.`,
@@ -599,42 +590,95 @@ Always use relative paths (no ${BASE_DIR} prefix) when calling tools.`,
                     },
                 }),
             },
-            
-            stopWhen: stepCountIs(15),
-            
-            onStepFinish: async ({ toolResults }) => {
-                currentStep++;
-                
-                // Show results with clear formatting
-                if (toolResults && toolResults.length > 0) {
-                    console.log(`\n[Step ${currentStep}]`);
-                    for (const result of toolResults) {
-                        const res = result as any;
-                        console.log(`🔧 Tool: ${res.toolName}`);
-                        
-                        if (res.result && typeof res.result === 'object') {
-                            const resultData = res.result as any;
-                            if (resultData.success) {
-                                console.log(`✅ ${resultData.message || 'Success'}`);
-                                if (resultData.description) console.log(`   → ${resultData.description}`);
-                                if (resultData.reason) console.log(`   → ${resultData.reason}`);
-                            } else {
-                                console.log(`❌ ${resultData.message || 'Failed'}`);
-                            }
-                        }
-                    }
-                    console.log();
-                }
-            },
+            stopWhen: stepCountIs(20),
         });
         
-        // Stream and collect response
+        // Initialize renderer with workflow-style output
+        const renderer = new StreamRenderer({
+            showHeaders: false,
+            dimReasoning: true,
+            jsonIndent: 2,
+            truncateJsonAt: 500,
+        });
+        
+        // Stream and collect response using fullStream
         let assistantResponse = "";
-        for await (const textPart of result.textStream) {
-            process.stdout.write(textPart);
-            assistantResponse += textPart;
+        const { fullStream } = result;
+        
+        for await (const event of fullStream) {
+            switch (event.type) {
+                case "reasoning-start":
+                    renderer.render({
+                        type: "stream-event",
+                        stepId: "copilot",
+                        event: { type: "reasoning-start" }
+                    });
+                    break;
+                case "reasoning-delta":
+                    renderer.render({
+                        type: "stream-event",
+                        stepId: "copilot",
+                        event: { type: "reasoning-delta", delta: event.text }
+                    });
+                    break;
+                case "reasoning-end":
+                    renderer.render({
+                        type: "stream-event",
+                        stepId: "copilot",
+                        event: { type: "reasoning-end" }
+                    });
+                    break;
+                case "text-start":
+                    renderer.render({
+                        type: "stream-event",
+                        stepId: "copilot",
+                        event: { type: "text-start" }
+                    });
+                    break;
+                case "text-delta":
+                    renderer.render({
+                        type: "stream-event",
+                        stepId: "copilot",
+                        event: { type: "text-delta", delta: event.text }
+                    });
+                    assistantResponse += event.text;
+                    break;
+                case "text-end":
+                    renderer.render({
+                        type: "stream-event",
+                        stepId: "copilot",
+                        event: { type: "text-end" }
+                    });
+                    break;
+                case "tool-call":
+                    renderer.render({
+                        type: "stream-event",
+                        stepId: "copilot",
+                        event: {
+                            type: "tool-call",
+                            toolCallId: event.toolCallId,
+                            toolName: event.toolName,
+                            input: 'args' in event ? event.args : event.input
+                        }
+                    });
+                    break;
+                case "tool-result":
+                    // Tool results are not directly rendered in copilot mode
+                    break;
+                case "finish":
+                    renderer.render({
+                        type: "stream-event",
+                        stepId: "copilot",
+                        event: {
+                            type: "usage",
+                            usage: event.totalUsage
+                        }
+                    });
+                    break;
+            }
         }
-        console.log("\n");
+        
+        console.log();
         
         // Add assistant response to history
         messages.push({ role: "assistant", content: assistantResponse });
