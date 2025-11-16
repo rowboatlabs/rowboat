@@ -10,8 +10,7 @@ const BaseRunEvent = z.object({
 export const RunStartEvent = BaseRunEvent.extend({
     type: z.literal("start"),
     runId: z.string(),
-    agentId: z.string(),
-    agent: Agent,
+    agent: z.string(),
     interactive: z.boolean(),
 });
 

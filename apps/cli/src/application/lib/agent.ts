@@ -223,16 +223,17 @@ export async function* streamAgent(opts: {
     runId?: string;
     input?: string;
     interactive?: boolean;
-}) {
+}): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
     const messages: z.infer<typeof MessageList> = [];
 
     // load existing and assemble state if required
-    if (opts.runId) {
-        console.error("loading run", opts.runId);
+    let runId = opts.runId;
+    if (runId) {
+        console.error("loading run", runId);
         let stream: fs.ReadStream | null = null;
         let rl: Interface | null = null;
         try {
-            const logFile = path.join(WorkDir, "runs", `${opts.runId}.jsonl`);
+            const logFile = path.join(WorkDir, "runs", `${runId}.jsonl`);
             stream = fs.createReadStream(logFile, { encoding: "utf8" });
             rl = createInterface({ input: stream, crlfDelay: Infinity });
             for await (const line of rl) {
@@ -253,8 +254,8 @@ export async function* streamAgent(opts: {
     }
 
     // create runId if not present
-    if (!opts.runId) {
-        opts.runId = runIdGenerator.next();
+    if (!runId) {
+        runId = runIdGenerator.next();
     }
 
     // load agent data
@@ -280,10 +281,20 @@ export async function* streamAgent(opts: {
     }
 
     // set up
-    const logger = new RunLogger(opts.runId);
+    const logger = new RunLogger(runId);
     const ly = new LogAndYield(logger);
     const provider = getProvider(agent.provider);
     const model = provider(agent.model || ModelConfig.defaults.model);
+
+    // emit start event if first time run
+    if (!opts.runId) {
+        yield* ly.logAndYield({
+            type: "start",
+            runId,
+            agent: opts.agent,
+            interactive: opts.interactive ?? false,
+        });
+    }
 
     // get first input if needed
     let rl: Interface | null = null;

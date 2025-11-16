@@ -27,7 +27,7 @@ export class StreamRenderer {
     render(event: z.infer<typeof RunEvent>) {
         switch (event.type) {
             case "start": {
-                this.onStart(event.agentId, event.runId, event.interactive);
+                this.onStart(event.agent, event.runId, event.interactive);
                 break;
             }
             case "step-start": {
@@ -94,19 +94,19 @@ export class StreamRenderer {
         }
     }
 
-    private onStart(workflowId: string, runId: string, interactive: boolean) {
+    private onStart(agent: string, runId: string, interactive: boolean) {
         this.write("\n");
-        this.write(this.bold(`▶ Workflow ${workflowId} (run ${runId})`));
+        this.write(this.bold(`▶ Agent ${agent} (run ${runId})`));
         if (!interactive) this.write(this.dim(" (--no-interactive)"));
         this.write("\n");
     }
 
     private onEnd() {
-        this.write(this.bold("\n■ Workflow complete\n"));
+        this.write(this.bold("\n■ complete\n"));
     }
 
     private onError(error: string) {
-        this.write(this.red(`\n✖ Workflow error: ${error}\n`));
+        this.write(this.red(`\n✖ error: ${error}\n`));
     }
 
     private onStepStart() {
