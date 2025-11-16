@@ -7,6 +7,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { Client } from "@modelcontextprotocol/sdk/client";
+import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
 
 const BuiltinToolsSchema = z.record(z.string(), z.object({
     description: z.string(),
@@ -18,6 +19,30 @@ const BuiltinToolsSchema = z.record(z.string(), z.object({
 }));
 
 export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
+    loadSkill: {
+        description: "Load a Rowboat skill definition into context by fetching its guidance string",
+        inputSchema: z.object({
+            skillName: z.string().describe("Skill identifier or path (e.g., 'workflow-run-ops' or 'src/application/assistant/skills/workflow-run-ops/skill.ts')"),
+        }),
+        execute: async ({ skillName }: { skillName: string }) => {
+            const resolved = resolveSkill(skillName);
+
+            if (!resolved) {
+                return {
+                    success: false,
+                    message: `Skill '${skillName}' not found. Available skills: ${availableSkills.join(", ")}`,
+                };
+            }
+
+            return {
+                success: true,
+                skillName: resolved.id,
+                path: resolved.catalogPath,
+                content: resolved.content,
+            };
+        },
+    },
+
     exploreDirectory: {
         description: 'Recursively explore directory structure to understand existing workflows, agents, and file organization',
         inputSchema: z.object({
