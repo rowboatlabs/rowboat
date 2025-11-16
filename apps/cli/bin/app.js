@@ -20,12 +20,18 @@ yargs(hideBin(process.argv))
         .option("input", {
             type: "string",
             description: "The input to the agent",
+        })
+        .option("no-interactive", {
+            type: "boolean",
+            description: "Do not interact with the user",
+            default: false,
         }),
         (argv) => {
             app({
                 agent: argv.agent,
                 runId: argv.run_id,
                 input: argv.input,
+                noInteractive: argv.noInteractive,
             });
         }
     )

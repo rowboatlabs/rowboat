@@ -11,7 +11,6 @@ export const RunStartEvent = BaseRunEvent.extend({
     type: z.literal("start"),
     runId: z.string(),
     agent: z.string(),
-    interactive: z.boolean(),
 });
 
 export const RunStepStartEvent = BaseRunEvent.extend({

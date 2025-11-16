@@ -8,7 +8,8 @@ import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { AssistantMessage } from "../entities/message.js";
 import { BuiltinTools } from "./builtin-tools.js";
-import { streamAgent } from "./agent.js";
+import { loadAgent, streamAgentTurn } from "./agent.js";
+import { app } from "@/app.js";
 
 async function execMcpTool(agentTool: z.infer<typeof ToolAttachment> & { type: "mcp" }, input: any): Promise<any> {
     // load mcp configuration from the tool
@@ -55,9 +56,13 @@ async function execMcpTool(agentTool: z.infer<typeof ToolAttachment> & { type: "
 
 async function execAgentTool(agentTool: z.infer<typeof ToolAttachment> & { type: "agent" }, input: any): Promise<any> {
     let lastMsg: z.infer<typeof AssistantMessage> | null = null;
-    for await (const event of streamAgent({
-        agent: agentTool.name,
-        input: JSON.stringify(input),
+    const agent = await loadAgent(agentTool.name);
+    for await (const event of streamAgentTurn({
+        agent,
+        messages: [{
+            role: "user",
+            content: JSON.stringify(input),
+        }],
     })) {
         if (event.type === "message" && event.message.role === "assistant") {
             lastMsg = event.message;

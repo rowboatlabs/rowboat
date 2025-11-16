@@ -27,7 +27,7 @@ export class StreamRenderer {
     render(event: z.infer<typeof RunEvent>) {
         switch (event.type) {
             case "start": {
-                this.onStart(event.agent, event.runId, event.interactive);
+                this.onStart(event.agent, event.runId);
                 break;
             }
             case "step-start": {
@@ -94,10 +94,9 @@ export class StreamRenderer {
         }
     }
 
-    private onStart(agent: string, runId: string, interactive: boolean) {
+    private onStart(agent: string, runId: string) {
         this.write("\n");
         this.write(this.bold(`▶ Agent ${agent} (run ${runId})`));
-        if (!interactive) this.write(this.dim(" (--no-interactive)"));
         this.write("\n");
     }
 

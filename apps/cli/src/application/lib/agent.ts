@@ -4,7 +4,6 @@ import path from "path";
 import { ModelConfig, WorkDir } from "../config/config.js";
 import { Agent, ToolAttachment } from "../entities/agent.js";
 import { createInterface, Interface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
 import { AssistantContentPart, AssistantMessage, Message, MessageList, ToolCallPart, ToolMessage, UserMessage } from "../entities/message.js";
 import { runIdGenerator } from "./run-id-gen.js";
 import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
@@ -76,23 +75,6 @@ export class RunLogger {
 
     close() {
         this.fileHandle.close();
-    }
-}
-
-export class LogAndYield {
-    private logger: RunLogger
-
-    constructor(logger: RunLogger) {
-        this.logger = logger;
-    }
-
-    async *logAndYield(event: z.infer<typeof RunEvent>): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
-        const ev = {
-            ...event,
-            ts: new Date().toISOString(),
-        }
-        this.logger.log(ev);
-        yield ev;
     }
 }
 
@@ -218,56 +200,11 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
 }
 
 
-export async function* streamAgent(opts: {
-    agent: string;
-    runId?: string;
-    input?: string;
-    interactive?: boolean;
+export async function* streamAgentTurn(opts: {
+    agent: z.infer<typeof Agent>;
+    messages: z.infer<typeof MessageList>;
 }): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
-    const messages: z.infer<typeof MessageList> = [];
-
-    // load existing and assemble state if required
-    let runId = opts.runId;
-    if (runId) {
-        console.error("loading run", runId);
-        let stream: fs.ReadStream | null = null;
-        let rl: Interface | null = null;
-        try {
-            const logFile = path.join(WorkDir, "runs", `${runId}.jsonl`);
-            stream = fs.createReadStream(logFile, { encoding: "utf8" });
-            rl = createInterface({ input: stream, crlfDelay: Infinity });
-            for await (const line of rl) {
-                if (line.trim() === "") {
-                    continue;
-                }
-                const parsed = JSON.parse(line);
-                const event = RunEvent.parse(parsed);
-                switch (event.type) {
-                    case "message":
-                        messages.push(event.message);
-                        break;
-                }
-            }
-        } finally {
-            stream?.close();
-        }
-    }
-
-    // create runId if not present
-    if (!runId) {
-        runId = runIdGenerator.next();
-    }
-
-    // load agent data
-    let agent: z.infer<typeof Agent> | null = null;
-    if (opts.agent === "copilot") {
-        agent = CopilotAgent;
-    } else {
-        agent = await loadAgent(opts.agent);
-    }
-    if (!agent) {
-        throw new Error("unable to load agent");
-    }
+    const { agent, messages } = opts;
 
     // set up tools
     const tools: ToolSet = {};
@@ -281,149 +218,87 @@ export async function* streamAgent(opts: {
     }
 
     // set up
-    const logger = new RunLogger(runId);
-    const ly = new LogAndYield(logger);
     const provider = getProvider(agent.provider);
     const model = provider(agent.model || ModelConfig.defaults.model);
 
-    // emit start event if first time run
-    if (!opts.runId) {
-        yield* ly.logAndYield({
-            type: "start",
-            runId,
-            agent: opts.agent,
-            interactive: opts.interactive ?? false,
-        });
-    }
-
-    // get first input if needed
-    let rl: Interface | null = null;
-    if (opts.interactive) {
-        rl = createInterface({ input, output });
-    }
-    if (opts.input) {
-        const m: z.infer<typeof UserMessage> = {
-            role: "user",
-            content: opts.input,
-        };
-        messages.push(m);
-        yield *ly.logAndYield({
-            type: "message",
-            message: m,
-        });
-    }
-    try {
-        // loop b/w user and agent
-        while (true) {
-            // get input in interactive mode when last message is not user
-            if (opts.interactive && (messages.length === 0 || messages[messages.length - 1].role !== "user")) {
-                const input = await rl!.question("You: ");
-                // Exit condition
-                if (["q", "quit", "exit"].includes(input.toLowerCase())) {
-                    console.log("\n👋 Goodbye!");
-                    return;
-                }
-
-                const m: z.infer<typeof UserMessage> = {
-                    role: "user",
-                    content: input,
-                };
-                messages.push(m);
-                yield* ly.logAndYield({
-                    type: "message",
-                    message: m,
-                });
-            }
-
-            // inner loop to handle tool calls
-            while (true) {
-                // stream agent response and build message
-                const messageBuilder = new StreamStepMessageBuilder();
-                for await (const event of streamLlm(
-                    model,
-                    messages,
-                    agent.instructions,
-                    tools,
-                )) {
-                    messageBuilder.ingest(event);
-                    yield* ly.logAndYield({
-                        type: "stream-event",
-                        event: event,
-                    });
-                }
-
-                // build and emit final message from agent response
-                const msg = messageBuilder.get();
-                messages.push(msg);
-                yield* ly.logAndYield({
-                    type: "message",
-                    message: msg,
-                });
-
-                // handle tool calls
-                const mappedToolCalls: z.infer<typeof MappedToolCall>[] = [];
-                let msgToolCallParts: z.infer<typeof ToolCallPart>[] = [];
-                if (msg.content instanceof Array) {
-                    msgToolCallParts = msg.content.filter(part => part.type === "tool-call");
-                }
-                const hasToolCalls = msgToolCallParts.length > 0;
-                console.log(msgToolCallParts);
-
-                // validate and map tool calls
-                for (const part of msgToolCallParts) {
-                    const agentTool = tools[part.toolName];
-                    if (!agentTool) {
-                        throw new Error(`Tool ${part.toolName} not found`);
-                    }
-                    mappedToolCalls.push({
-                        toolCall: part,
-                        agentTool: agent.tools![part.toolName],
-                    });
-                }
-
-                for (const call of mappedToolCalls) {
-                    const { agentTool, toolCall } = call;
-                    yield* ly.logAndYield({
-                        type: "tool-invocation",
-                        toolName: toolCall.toolName,
-                        input: JSON.stringify(toolCall.arguments),
-                    });
-                    const result = await execTool(agentTool, toolCall.arguments);
-                    const resultMsg: z.infer<typeof ToolMessage> = {
-                        role: "tool",
-                        content: JSON.stringify(result),
-                        toolCallId: toolCall.toolCallId,
-                        toolName: toolCall.toolName,
-                    };
-                    messages.push(resultMsg);
-                    yield* ly.logAndYield({
-                        type: "tool-result",
-                        toolName: toolCall.toolName,
-                        result: result,
-                    });
-                    yield* ly.logAndYield({
-                        type: "message",
-                        message: resultMsg,
-                    });
-                }
-
-                // if the agent response had tool calls, replay this agent
-                if (hasToolCalls) {
-                    continue;
-                }
-
-                // otherwise, break
-                break;
-            }
-
-            // if not interactive, return
-            if (!opts.interactive) {
-                break;
-            }
+    // run one turn
+    while (true) {
+        // stream agent response and build message
+        const messageBuilder = new StreamStepMessageBuilder();
+        for await (const event of streamLlm(
+            model,
+            messages,
+            agent.instructions,
+            tools,
+        )) {
+            messageBuilder.ingest(event);
+            yield {
+                type: "stream-event",
+                event: event,
+            };
         }
-    } finally {
-        rl?.close();
-        logger.close();
+
+        // build and emit final message from agent response
+        const msg = messageBuilder.get();
+        messages.push(msg);
+        yield {
+            type: "message",
+            message: msg,
+        };
+
+        // handle tool calls
+        const mappedToolCalls: z.infer<typeof MappedToolCall>[] = [];
+        let msgToolCallParts: z.infer<typeof ToolCallPart>[] = [];
+        if (msg.content instanceof Array) {
+            msgToolCallParts = msg.content.filter(part => part.type === "tool-call");
+        }
+        const hasToolCalls = msgToolCallParts.length > 0;
+
+        // validate and map tool calls
+        for (const part of msgToolCallParts) {
+            const agentTool = tools[part.toolName];
+            if (!agentTool) {
+                throw new Error(`Tool ${part.toolName} not found`);
+            }
+            mappedToolCalls.push({
+                toolCall: part,
+                agentTool: agent.tools![part.toolName],
+            });
+        }
+
+        for (const call of mappedToolCalls) {
+            const { agentTool, toolCall } = call;
+            yield {
+                type: "tool-invocation",
+                toolName: toolCall.toolName,
+                input: JSON.stringify(toolCall.arguments),
+            };
+            const result = await execTool(agentTool, toolCall.arguments);
+            const resultMsg: z.infer<typeof ToolMessage> = {
+                role: "tool",
+                content: JSON.stringify(result),
+                toolCallId: toolCall.toolCallId,
+                toolName: toolCall.toolName,
+            };
+            messages.push(resultMsg);
+            yield {
+                type: "tool-result",
+                toolName: toolCall.toolName,
+                result: result,
+            };
+            yield {
+                type: "message",
+                message: resultMsg,
+            };
+        }
+
+        // if the agent response had tool calls, replay this agent
+        if (hasToolCalls) {
+            continue;
+        }
+
+        // otherwise, break
+        break;
     }
 }
 
