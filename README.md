@@ -1,6 +1,6 @@
 ![ui](/assets/banner.png)
 
-<h2 align="center">Claude Code for Everything Else</h2>
+<h2 align="center">CLI Tool for Background Agents</h2>
 <h5 align="center">
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
@@ -35,6 +35,7 @@
 
 
 </h5>
+
 - ✨ **Create background agents with full shell access**
    - E.g. "Generate a NotebookLM-style podcast from my saved articles every morning"
 - 🔧 **Connect any MCP server to add capabilities**
