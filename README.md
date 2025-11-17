@@ -1,6 +1,6 @@
 ![ui](/assets/banner.png)
 
-<h2 align="center">CLI Tool for Background Agents</h2>
+<h2 align="center">RowboatX - CLI Tool for Background Agents</h2>
 <h5 align="center">
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
@@ -40,50 +40,54 @@
    - E.g. "Generate a NotebookLM-style podcast from my saved articles every morning"
 - 🔧 **Connect any MCP server to add capabilities**
    - Add MCP servers and RowboatX handles the integration
-- 🎯 **Control agents with standard Unix commands**
-   - RowboatX uses bash to spawn, monitor, and manage all background agents
+- 🎯 **Let RowboatX control and monitor your background agents**
+   - Easily inspect state on the filesystem 
 
-With full terminal access and filesystem-as-state architecture, RowboatX gives you complete control over powerful AI automations!
+Inspired by Claude Code, RowboatX brings the same shell-native power to background automations.
 
 ## Quick start
-1. Set your OpenAI key
+1. Set your LLM API key. Supports OpenAI, Anthropic, Gemini, OpenRouter, LiteLLM, Ollama, and more.
    ```bash
    export OPENAI_API_KEY=your-openai-api-key  
    ```
       
-2. Clone the repository and start Rowboat (requires Docker)
+2. Install RowboatX
    ```bash
-   git clone git@github.com:rowboatlabs/rowboat.git
-   cd rowboat
-   ./start.sh
+   npx @rowboatlabs/rowboatx
    ```
-
-3. Access the app at [http://localhost:3000](http://localhost:3000).
-
-To add tools, RAG, more LLMs, and  triggers checkout the [Advanced](#advanced) section below.
 
 ## Demos
 #### Meeting-prep assistant
 Chat with the copilot to build a meeting-prep workflow, then add a calendar invite as a trigger. Watch the full demo [here](https://youtu.be/KZTP4xZM2DY).
 [![meeting-prep](https://github.com/user-attachments/assets/27755ef5-6549-476f-b9c0-50bef8770384)](https://youtu.be/KZTP4xZM2DY)
 
-#### Customer support assistant
-Chat with the copilot to build a customer support assistant, then connect your MCP server, and data for RAG. Watch the full demo [here](https://youtu.be/Xfo-OfgOl8w).
-[![output](https://github.com/user-attachments/assets/97485fd7-64c3-4d60-a627-f756a89dee64)](https://youtu.be/Xfo-OfgOl8w)
+## Examples
+### Add and Manage MCP servers 
+`$ rowboatx`
+- Add MCP: 'Add this MCP server config: \<config\> '
+- Explore tools: 'What tools are there in \<server-name\> '
 
-#### Personal assistant
-Chat with the copilot to build a personal assistant. Watch the full demo [here](https://youtu.be/6r7P4Vlcn2g).
-[![personal-assistant](https://github.com/user-attachments/assets/0f1c0ffd-23ba-4b49-8bfb-ec7a846f1332)](https://youtu.be/6r7P4Vlcn2g)
+### Create background agents
+`$ rowboatx`
+- 'Create agent to do X.'
+- '... Attach the correct tools from \<mcp-server-name\> to the agent'
+- '... Allow the agent to run shell commands including ffmpeg'
 
-## Advanced
-1. Native RAG Support: Enable file uploads and URL scraping with Rowboat's built-in RAG capabilities – see [RAG Guide](https://docs.rowboatlabs.com/docs/using-rowboat/rag).
+### Schedule and monitor agents
+`$ rowboatx`
+- 'Make agent \<background-agent-name\> run every day at 10 AM' 
+- 'What agents do I have scheduled to run and at what times'
+- 'When was \<background-agent-name\> last run'
+- 'Are any agents waiting for my input or confirmation'
 
-2. Custom LLM Providers: Use any LLM provider, including aggregators like OpenRouter and LiteLLM - see [Using more LLM providers](https://docs.rowboatlabs.com/docs/using-rowboat/customise/custom-llms).
+### Run background agents manually
+``` bash
+rowboatx --agent=<agent-name> --input="xyz" --no-interactive=true
+```
+```bash    
+rowboatx --agent=<agent-name> <run_id> # resume from a previous run
+```
+     
+## Rowboat Classic UI
 
-3. Tools & Triggers: Add tools and event triggers (e.g., Gmail, Slack) for automation – see [Tools](https://docs.rowboatlabs.com/docs/using-rowboat/tools) & [Triggers](https://docs.rowboatlabs.com/docs/using-rowboat/triggers).
-
-4. API & SDK: Integrate Rowboat agents directly into your app – see [API](https://docs.rowboatlabs.com/docs/api-sdk/using_the_api) & [SDK](https://docs.rowboatlabs.com/docs/api-sdk/using_the_sdk) docs.
-
-##
-
-Refer to [Docs](https://docs.rowboatlabs.com/) to learn how to start building agents with Rowboat.
+To use Rowboat Classic UI (not RowboatX), refer to [Classic](https://docs.rowboatlabs.com/). 
