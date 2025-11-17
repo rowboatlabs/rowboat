@@ -1,6 +1,6 @@
 ![ui](/assets/banner.png)
 
-<h2 align="center">Let AI build you coworkers</h2>
+<h2 align="center">CLI Tool for Background Agents</h2>
 <h5 align="center">
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
@@ -35,11 +35,15 @@
 
 
 </h5>
-<p align="center">
-⚡ Build AI agents instantly with natural language | 🔌 Connect tools with one-click integrations | 📂 Power with knowledge by adding documents for RAG | 🔄 Automate workflows by setting up triggers and actions | 🚀 Deploy anywhere via API or SDK<br><br>
-☁️ Prefer a hosted version? Use our <b><a href="https://rowboatlabs.com">cloud</a></b> to starting building agents right away!
-</p>
 
+- ✨ **Create background agents with full shell access**
+   - E.g. "Generate a NotebookLM-style podcast from my saved articles every morning"
+- 🔧 **Connect any MCP server to add capabilities**
+   - Add MCP servers and RowboatX handles the integration
+- 🎯 **Control agents with standard Unix commands**
+   - RowboatX uses bash to spawn, monitor, and manage all background agents
+
+With full terminal access and filesystem-as-state architecture, RowboatX gives you complete control over powerful AI automations!
 
 ## Quick start
 1. Set your OpenAI key
