@@ -40,7 +40,7 @@
     "tools": {
         "bash": {
             "type": "builtin",
-            "name": "bash"
+            "name": "executeCommand"
         }
     }
 }
@@ -53,7 +53,7 @@
     "tools": {
         "bash": {
             "type": "builtin",
-            "name": "bash"
+            "name": "executeCommand"
         }
     }
 }
@@ -65,7 +65,7 @@
     "instructions": "Your job is to pick 2 interesting papers and related papers on the same topic, and then summarise each of them inidivually using the right tool calls. Make sure to pass in the URL of the paper to the summaurse tool. Don't ask for human input.",
     "tools": {
         "summariser": {
-            "type": "workflow",
+            "type": "agent",
             "name": "summariser_workflow"
         }
     }
@@ -109,7 +109,7 @@
         }, 
         "bash": {
             "type": "builtin",
-            "name": "bash"
+            "name": "executeCommand"
         }
     }
 }

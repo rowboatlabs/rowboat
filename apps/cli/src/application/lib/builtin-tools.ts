@@ -44,7 +44,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     exploreDirectory: {
-        description: 'Recursively explore directory structure to understand existing workflows, agents, and file organization',
+        description: 'Recursively explore directory structure to understand existing agents and file organization',
         inputSchema: z.object({
             subdirectory: z.string().optional().describe('Subdirectory to explore (optional, defaults to root)'),
             maxDepth: z.number().optional().describe('Maximum depth to traverse (default: 3)'),
@@ -260,27 +260,35 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
     
-    analyzeWorkflow: {
-        description: 'Read and analyze a workflow file to understand its structure, agents, and dependencies',
+    analyzeAgent: {
+        description: 'Read and analyze an agent file to understand its structure, tools, and configuration',
         inputSchema: z.object({
-            workflowName: z.string().describe('Name of the workflow file to analyze (with or without .json extension)'),
+            agentName: z.string().describe('Name of the agent file to analyze (with or without .json extension)'),
         }),
-        execute: async ({ workflowName }: { workflowName: string }) => {
+        execute: async ({ agentName }: { agentName: string }) => {
             try {
-                const filename = workflowName.endsWith('.json') ? workflowName : `${workflowName}.json`;
-                const filePath = path.join(BASE_DIR, 'workflows', filename);
+                const filename = agentName.endsWith('.json') ? agentName : `${agentName}.json`;
+                const filePath = path.join(BASE_DIR, 'agents', filename);
                 
                 const content = await fs.readFile(filePath, 'utf-8');
-                const workflow = JSON.parse(content);
+                const agent = JSON.parse(content);
                 
                 // Extract key information
+                const toolsList = agent.tools ? Object.keys(agent.tools) : [];
+                const agentTools = agent.tools ? Object.entries(agent.tools).map(([key, tool]: [string, any]) => ({
+                    key,
+                    type: tool.type,
+                    name: tool.name || key,
+                })) : [];
+                
                 const analysis = {
-                    name: workflow.name,
-                    description: workflow.description || 'No description',
-                    agentCount: workflow.agents ? workflow.agents.length : 0,
-                    agents: workflow.agents || [],
-                    tools: workflow.tools || {},
-                    structure: workflow,
+                    name: agent.name,
+                    description: agent.description || 'No description',
+                    model: agent.model || 'Not specified',
+                    toolCount: toolsList.length,
+                    tools: agentTools,
+                    hasOtherAgents: agentTools.some((t: any) => t.type === 'agent'),
+                    structure: agent,
                 };
                 
                 return {
@@ -291,7 +299,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             } catch (error) {
                 return {
                     success: false,
-                    message: `Failed to analyze workflow: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                    message: `Failed to analyze agent: ${error instanceof Error ? error.message : 'Unknown error'}`,
                 };
             }
         },

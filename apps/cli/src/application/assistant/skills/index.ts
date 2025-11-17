@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import workflowAuthoringSkill from "./workflow-authoring/skill.js";
@@ -30,6 +31,13 @@ const definitions: SkillDefinition[] = [
     folder: "workflow-authoring",
     summary: "Creating or editing workflows/agents, validating schema rules, and keeping filenames aligned with JSON ids.",
     content: workflowAuthoringSkill,
+  },
+  {
+    id: "builtin-tools",
+    title: "Builtin Tools Reference",
+    folder: "builtin-tools",
+    summary: "Understanding and using builtin tools (especially executeCommand for bash/shell) in agent definitions.",
+    content: builtinToolsSkill,
   },
   {
     id: "mcp-integration",
