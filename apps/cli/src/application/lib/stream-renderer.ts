@@ -62,6 +62,10 @@ export class StreamRenderer {
                 this.onError(event.error);
                 break;
             }
+            case "pause-for-human-input": {
+                this.onPauseForHumanInput(event.toolCallId, event.question);
+                break;
+            }
         }
     }
 
@@ -191,6 +195,13 @@ export class StreamRenderer {
         this.write(this.cyan(`→ Tool call ${toolName} (${toolCallId})`));
         this.write("\n");
         this.write(this.dim(this.indent(inputStr)));
+        this.write("\n");
+    }
+
+    private onPauseForHumanInput(toolCallId: string, question: string) {
+        this.write(this.cyan(`\n→ Pause for human input (${toolCallId})`));
+        this.write("\n");
+        this.write(this.bold("Question: ") + question);
         this.write("\n");
     }
 

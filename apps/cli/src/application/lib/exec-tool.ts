@@ -67,6 +67,11 @@ async function execAgentTool(agentTool: z.infer<typeof ToolAttachment> & { type:
         if (event.type === "message" && event.message.role === "assistant") {
             lastMsg = event.message;
         }
+        if (event.type === "pause-for-human-input") {
+            return `I need more information from a human in order to continue. I should use the ask-human tool to ask the user for a response on the question below. Once the user comes back with an answer, call this tool again with the answer embedded in the original input that you used to call this tool the first time.
+
+            Question: ${event.question}`;
+        }
         if (event.type === "error") {
             throw new Error(event.error);
         }

@@ -50,6 +50,7 @@ export const RunEndEvent = BaseRunEvent.extend({
 export const RunPauseEvent = BaseRunEvent.extend({
     type: z.literal("pause-for-human-input"),
     toolCallId: z.string(),
+    question: z.string(),
 });
 
 export const RunResumeEvent = BaseRunEvent.extend({

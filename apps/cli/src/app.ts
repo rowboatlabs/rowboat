@@ -8,7 +8,7 @@ import { RunEvent, RunStartEvent } from "./application/entities/run-events.js";
 import { createInterface, Interface } from "node:readline/promises";
 import { runIdGenerator } from "./application/lib/run-id-gen.js";
 import { Agent } from "./application/entities/agent.js";
-import { MessageList } from "./application/entities/message.js";
+import { Message, MessageList, ToolMessage, UserMessage } from "./application/entities/message.js";
 import { z } from "zod";
 import { CopilotAgent } from "./application/assistant/agent.js";
 
@@ -18,7 +18,7 @@ export async function app(opts: {
     input?: string;
     noInteractive?: boolean;
 }) {
-    let inputCount = 0;
+    let askHumanEventMarker: z.infer<typeof RunEvent> & { type: "pause-for-human-input" } | null = null;
     const messages: z.infer<typeof MessageList> = [];
     const renderer = new StreamRenderer();
 
@@ -41,21 +41,22 @@ export async function app(opts: {
                 switch (event.type) {
                     case "message":
                         messages.push(event.message);
+                        if (askHumanEventMarker
+                            && event.message.role === "tool"
+                            && event.message.toolCallId === askHumanEventMarker.toolCallId
+                        ) {
+                            askHumanEventMarker = null;
+                        }
                         break;
+                    case "pause-for-human-input": {
+                        askHumanEventMarker = event;
+                        break;
+                    }
                 }
             }
         } finally {
             stream?.close();
         }
-    }
-
-    // add user input
-    if (opts.input) {
-        messages.push({
-            role: "user",
-            content: opts.input,
-        });
-        inputCount++;
     }
 
     // create runId if not present
@@ -87,6 +88,10 @@ export async function app(opts: {
     }
 
     // loop between user and agent
+    // add user input from cli, if present
+    if (opts.input) {
+        handleUserInput(opts.input, messages, askHumanEventMarker, renderer, logger);
+    }
     let rl: Interface | null = null;
     if (!opts.noInteractive) {
         rl = createInterface({ input, output });
@@ -109,11 +114,7 @@ export async function app(opts: {
                     console.error("Bye!");
                     return;
                 }
-                inputCount++;
-                messages.push({
-                    role: "user",
-                    content: userInput,
-                });
+                handleUserInput(userInput, messages, askHumanEventMarker, renderer, logger);
             }
             for await (const event of streamAgentTurn({
                 agent,
@@ -121,6 +122,9 @@ export async function app(opts: {
             })) {
                 logger.log(event);
                 renderer.render(event);
+                if (event.type === "pause-for-human-input") {
+                    askHumanEventMarker = event;
+                }
                 if (event?.type === "error") {
                     process.exitCode = 1;
                 }
@@ -133,5 +137,44 @@ export async function app(opts: {
     } finally {
         logger.close();
         rl?.close();
+    }
+}
+
+function handleUserInput(
+    input: string,
+    messages: z.infer<typeof MessageList>,
+    askHumanEventMarker: z.infer<typeof RunEvent> & { type: "pause-for-human-input" } | null,
+    renderer: StreamRenderer,
+    logger: RunLogger,
+) {
+    // if waiting on human input, send as response
+    if (askHumanEventMarker) {
+        const message = {
+            role: "tool",
+            content: JSON.stringify({
+                userResponse: input,
+            }),
+            toolCallId: askHumanEventMarker.toolCallId,
+            toolName: "ask-human",
+        } as z.infer<typeof ToolMessage>;
+        messages.push(message);
+        const ev = {
+            type: "message",
+            message,
+        } as z.infer<typeof RunEvent>;
+        logger.log(ev);
+        renderer.render(ev);
+        askHumanEventMarker = null;
+    } else {
+        const message = {
+            role: "user",
+            content: input,
+        } as z.infer<typeof UserMessage>;
+        messages.push(message);
+        const ev = {
+            type: "message",
+            message,
+        } as z.infer<typeof RunEvent>;
+        logger.log(ev);
     }
 }
