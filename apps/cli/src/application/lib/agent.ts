@@ -12,7 +12,6 @@ import { getProvider } from "./models.js";
 import { LlmStepStreamEvent } from "../entities/llm-step-events.js";
 import { execTool } from "./exec-tool.js";
 import { RunEvent } from "../entities/run-events.js";
-import { CopilotAgent } from "../assistant/agent.js";
 import { BuiltinTools } from "./builtin-tools.js";
 
 export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
@@ -36,6 +35,14 @@ export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<T
                 }),
             });
         case "builtin":
+            if (t.name === "ask-human") {
+                return tool({
+                    description: "Ask a human before proceeding",
+                    inputSchema: z.object({
+                        question: z.string().describe("The question to ask the human"),
+                    }),
+                });
+            }
             const match = BuiltinTools[t.name];
             if (!match) {
                 throw new Error(`Unknown builtin tool: ${t.name}`);
@@ -127,6 +134,30 @@ export class StreamStepMessageBuilder {
             content: this.parts,
         };
     }
+}
+
+function normaliseAskHumanToolCall(message: z.infer<typeof AssistantMessage>) {
+    if (typeof message.content === "string") {
+        return;
+    }
+    let askHumanToolCall: z.infer<typeof ToolCallPart> | null = null;
+    const newParts = [];
+    for (const part of message.content as z.infer<typeof AssistantContentPart>[]) {
+        if (part.type === "tool-call" && part.toolName === "ask-human") {
+            if (!askHumanToolCall) {
+                askHumanToolCall = part;
+            } else {
+                (askHumanToolCall as z.infer<typeof ToolCallPart>).arguments += "\n" + part.arguments;
+            }
+            break;
+        } else {
+            newParts.push(part);
+        }
+    }
+    if (askHumanToolCall) {
+        newParts.push(askHumanToolCall);
+    }
+    message.content = newParts;
 }
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
@@ -240,6 +271,7 @@ export async function* streamAgentTurn(opts: {
 
         // build and emit final message from agent response
         const msg = messageBuilder.get();
+        normaliseAskHumanToolCall(msg);
         messages.push(msg);
         yield {
             type: "message",
@@ -266,7 +298,11 @@ export async function* streamAgentTurn(opts: {
             });
         }
 
+        // first, handle tool calls other than ask-human
         for (const call of mappedToolCalls) {
+            if (call.toolCall.toolName === "ask-human") {
+                continue;
+            }
             const { agentTool, toolCall } = call;
             yield {
                 type: "tool-invocation",
@@ -292,13 +328,24 @@ export async function* streamAgentTurn(opts: {
             };
         }
 
+        // then, handle ask-human (only first one)
+        const askHumanCall = mappedToolCalls.filter(call => call.toolCall.toolName === "ask-human")[0];
+        if (askHumanCall) {
+            yield {
+                type: "pause-for-human-input",
+                toolCallId: askHumanCall.toolCall.toolCallId,
+                question: askHumanCall.toolCall.arguments.question as string,
+            };
+            return;
+        }
+
         // if the agent response had tool calls, replay this agent
         if (hasToolCalls) {
             continue;
         }
 
         // otherwise, break
-        break;
+        return;
     }
 }
 
