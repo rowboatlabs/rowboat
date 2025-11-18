@@ -1,6 +1,6 @@
 {
   "name": "@rowboatlabs/rowboatx",
-  "version": "0.3.0",
+  "version": "0.6.0",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -17,7 +17,7 @@
   },
   "keywords": [],
   "author": "Rowboat Labs",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "description": "",
   "devDependencies": {
     "@types/node": "^24.9.1",
