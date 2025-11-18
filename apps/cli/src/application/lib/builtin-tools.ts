@@ -275,7 +275,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     todoList: {
-        description: 'Return the durable todo list for the current session',
+        description: 'Return the todo list for the current copilot session',
         inputSchema: z.object({}),
         execute: async () => {
             const state = await readTodoState();

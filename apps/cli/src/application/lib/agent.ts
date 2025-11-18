@@ -13,6 +13,7 @@ import { LlmStepStreamEvent } from "../entities/llm-step-events.js";
 import { execTool } from "./exec-tool.js";
 import { RunEvent } from "../entities/run-events.js";
 import { BuiltinTools } from "./builtin-tools.js";
+import { readTodoState, pushTodoState, popTodoState } from "./todo-store.js";
 import { collectSystemReminders } from "../assistant/reminders/manager.js";
 
 export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
@@ -237,6 +238,8 @@ export async function* streamAgentTurn(opts: {
     messages: z.infer<typeof MessageList>;
 }): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
     const { agent, messages } = opts;
+    pushTodoState();
+    try {
 
     // set up tools
     const tools: ToolSet = {};
@@ -350,9 +353,21 @@ export async function* streamAgentTurn(opts: {
             continue;
         }
 
+        const completionReminder = await outstandingTodosReminder();
+        if (completionReminder) {
+            messages.push({
+                role: "system",
+                content: completionReminder,
+            });
+            continue;
+        }
+
         // otherwise, break
         return;
     }
+} finally {
+    popTodoState();
+}
 }
 
 async function* streamLlm(
@@ -444,6 +459,15 @@ function attachRemindersToResult(result: any, reminders: string[]) {
         systemReminders: reminders,
     };
 }
+async function outstandingTodosReminder(): Promise<string | null> {
+    const state = await readTodoState();
+    const remaining = state.todos.filter(todo => todo.status !== "done" && todo.status !== "blocked");
+    if (remaining.length === 0) {
+        return null;
+    }
+    return `<system-reminder>\nBefore concluding, finish every todo via the todo tools or mark it as blocked if an issue prevents completion. Outstanding items: ${JSON.stringify(remaining)}\n</system-reminder>`;
+}
+
 export const MappedToolCall = z.object({
     toolCall: ToolCallPart,
     agentTool: ToolAttachment,

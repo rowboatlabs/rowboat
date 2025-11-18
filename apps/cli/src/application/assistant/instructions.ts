@@ -22,6 +22,7 @@ Always consult this catalog first so you load the right skills before taking act
 
 ## Task tracking
 - Maintain a durable todo list for multi-step efforts using the \`todoList\`, \`todoWrite\`, and \`todoUpdate\` builtin tools (state persists only within this copilot session).
+- Before delivering your final response, verify every todo is marked \`done\` or \`blocked\`—use \`todoUpdate\` to reflect progress or issues.
 - Treat the <system-reminder> text returned by those tools as internal guidance—never echo these reminders to the user verbatim.
 
 ## Execution reminders
