@@ -55,18 +55,15 @@ function findBlockedCommands(command: string): string[] {
   return invoked.filter((cmd) => !allowSet.has(cmd));
 }
 
-function enforceSecurity(command: string): CommandResult | null {
+// export const BlockedResult = {
+//   stdout: '',
+//   stderr: `Command blocked by security policy. Update ${SECURITY_CONFIG_PATH} to allow them before retrying.`,
+//   exitCode: 126,
+// };
+
+export function isBlocked(command: string): boolean {
   const blocked = findBlockedCommands(command);
-
-  if (!blocked.length) {
-    return null;
-  }
-
-  return {
-    stdout: '',
-    stderr: `Command blocked by security policy. Blocked command(s): ${blocked.join(', ')}. Update ${SECURITY_CONFIG_PATH} to allow them before retrying.`,
-    exitCode: 126,
-  };
+  return blocked.length > 0;
 }
 
 export interface CommandResult {
@@ -89,11 +86,6 @@ export async function executeCommand(
     maxBuffer?: number; // max buffer size in bytes
   }
 ): Promise<CommandResult> {
-  const securityResult = enforceSecurity(command);
-  if (securityResult) {
-    return securityResult;
-  }
-
   try {
     const { stdout, stderr } = await execPromise(command, {
       cwd: options?.cwd,
@@ -128,11 +120,6 @@ export function executeCommandSync(
     timeout?: number;
   }
 ): CommandResult {
-  const securityResult = enforceSecurity(command);
-  if (securityResult) {
-    return securityResult;
-  }
-
   try {
     const stdout = execSync(command, {
       cwd: options?.cwd,

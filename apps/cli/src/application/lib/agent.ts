@@ -13,6 +13,7 @@ import { execTool } from "./exec-tool.js";
 import { AskHumanRequestEvent, RunEvent, ToolPermissionRequestEvent, ToolPermissionResponseEvent } from "../entities/run-events.js";
 import { BuiltinTools } from "./builtin-tools.js";
 import { CopilotAgent } from "../assistant/agent.js";
+import { isBlocked } from "./command-executor.js";
 
 export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
     switch (t.type) {
@@ -552,11 +553,14 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
                         });
                     }
                     if (underlyingTool.type === "builtin" && underlyingTool.name === "executeCommand") {
-                        yield *state.ingestAndLogAndYield({
-                            type: "tool-permission-request",
-                            toolCall: part,
-                            subflow: [],
-                        });
+                        // if command is blocked, then seek permission
+                        if (isBlocked(part.arguments.command)) {
+                            yield *state.ingestAndLogAndYield({
+                                type: "tool-permission-request",
+                                toolCall: part,
+                                subflow: [],
+                            });
+                        }
                     }
                     if (underlyingTool.type === "agent" && underlyingTool.name) {
                         yield* state.ingestAndLogAndYield({
