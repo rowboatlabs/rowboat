@@ -31,6 +31,12 @@ const baseModelConfig: z.infer<typeof ModelConfigT> = {
         openai: {
             flavor: "openai",
         },
+        anthropic: {
+            flavor: "anthropic",
+        },
+        google: {
+            flavor: "google"
+        },
     },
     defaults: {
         provider: "openai",
