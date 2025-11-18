@@ -57,8 +57,7 @@ Inspired by Claude Code, RowboatX brings the same shell-native power to backgrou
    ```
 
 ## Demo
-[![Screenshot](https://github.com/user-attachments/assets/48921163-c180-489b-bf0b-de2c639f1a96)](https://www.youtube.com/watch?v=cyPBinQzicY&t)
-
+[![Screenshot](https://github.com/user-attachments/assets/ab46ff8b-44bd-400e-beb0-801c6431033f)](https://www.youtube.com/watch?v=cyPBinQzicY&t)
 
 ## Examples
 ### Add and Manage MCP servers 
