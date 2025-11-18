@@ -93,6 +93,14 @@ You can configure your models in `~/.rowboat/config/models.json`
     "openai": {
       "flavor": "openai"
     },
+    "openai-compatible-host": {
+      "flavor": "openai",
+      "baseURL": "http://localhost:2000/...",
+      "apiKey": "...",
+      "headers": {
+        "foo": "bar"
+      }
+    },
     "anthropic": {
       "flavor": "anthropic"
     },
