@@ -1,6 +1,6 @@
 {
   "name": "@rowboatlabs/rowboatx",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "main": "index.js",
   "type": "module",
   "scripts": {

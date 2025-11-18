@@ -30,6 +30,24 @@ export async function updateState(agent: string, runId: string) {
     }
 }
 
+function renderGreeting() {
+    const logo = `
+                                                                                   
+                                  $$\\                            $$\\               
+                                  $$ |                           $$ |              
+ $$$$$$\\   $$$$$$\\  $$\\  $$\\  $$\\ $$$$$$$\\   $$$$$$\\   $$$$$$\\ $$$$$$\\   $$\\   $$\\ 
+$$  __$$\\ $$  __$$\\ $$ | $$ | $$ |$$  __$$\\ $$  __$$\\  \\____$$\\_$$  _|  \\$$\\ $$  |
+$$ |  \\__|$$ /  $$ |$$ | $$ | $$ |$$ |  $$ |$$ /  $$ | $$$$$$$ | $$ |     \\$$$$  / 
+$$ |      $$ |  $$ |$$ | $$ | $$ |$$ |  $$ |$$ |  $$ |$$  __$$ | $$ |$$\\  $$  $$<  
+$$ |      \\$$$$$$  |\\$$$$$\\$$$$  |$$$$$$$  |\\$$$$$$  |\\$$$$$$$ | \\$$$$  |$$  /\\$$\\ 
+\\__|       \\______/  \\_____\\____/ \\_______/  \\______/  \\_______|  \\____/ \\__/  \\__|
+                                                                                   
+                                                                                   
+`;
+    console.log(logo);
+    console.log("\nHow can i help you today?");
+}
+
 export async function app(opts: {
     agent: string;
     runId?: string;
@@ -38,6 +56,10 @@ export async function app(opts: {
 }) {
     const renderer = new StreamRenderer();
     const state = new AgentState(opts.agent, opts.runId);
+
+    if (opts.agent === "copilot" && !opts.runId) {
+        renderGreeting();
+    }
 
     // load existing and assemble state if required
     let runId = opts.runId;
