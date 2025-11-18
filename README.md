@@ -56,10 +56,9 @@ Inspired by Claude Code, RowboatX brings the same shell-native power to backgrou
    npx @rowboatlabs/rowboatx
    ```
 
-## Demos
-#### Meeting-prep assistant
-Chat with the copilot to build a meeting-prep workflow, then add a calendar invite as a trigger. Watch the full demo [here](https://youtu.be/KZTP4xZM2DY).
-[![meeting-prep](https://github.com/user-attachments/assets/27755ef5-6549-476f-b9c0-50bef8770384)](https://youtu.be/KZTP4xZM2DY)
+## Demo
+[![Screenshot](https://github.com/user-attachments/assets/48921163-c180-489b-bf0b-de2c639f1a96)](https://www.youtube.com/watch?v=cyPBinQzicY&t)
+
 
 ## Examples
 ### Add and Manage MCP servers 
