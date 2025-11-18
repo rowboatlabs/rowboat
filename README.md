@@ -16,7 +16,7 @@
   <a href="https://discord.gg/rxB8pzHxaS" target="_blank" rel="noopener">
     <img alt="Discord" src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white&labelColor=5865F2">
   </a>
-  <a href="https://www.rowboatlabs.com/" target="_blank" rel="noopener">
+  <a href="https://www.rowboatx.com/" target="_blank" rel="noopener">
     <img alt="Website" src="https://img.shields.io/badge/Website-10b981?labelColor=10b981&logo=window&logoColor=white">
   </a>
   <a href="https://www.youtube.com/@RowBoatLabs" target="_blank" rel="noopener">
