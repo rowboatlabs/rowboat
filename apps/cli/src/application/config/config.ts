@@ -35,8 +35,11 @@ const baseModelConfig: z.infer<typeof ModelConfigT> = {
             flavor: "anthropic",
         },
         google: {
-            flavor: "google"
+            flavor: "google",
         },
+        ollama: {
+            flavor: "ollama",
+        }
     },
     defaults: {
         provider: "openai",
