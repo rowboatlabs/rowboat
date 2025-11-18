@@ -4,7 +4,18 @@ import { WorkDir } from "./config.js";
 
 export const SECURITY_CONFIG_PATH = path.join(WorkDir, "config", "security.json");
 
-const DEFAULT_ALLOW_LIST = ["ls", "pwd", "cat", "echo", "whoami"];
+const DEFAULT_ALLOW_LIST = [
+    "cat",
+    "curl",
+    "date",
+    "echo",
+    "grep",
+    "jq",
+    "ls",
+    "pwd",
+    "yq",
+    "whoami"
+]
 
 let cachedAllowList: string[] | null = null;
 let cachedMtimeMs: number | null = null;
