@@ -15,6 +15,5 @@ export const CopilotAgent: z.infer<typeof Agent> = {
     name: "rowboatx",
     description: "Rowboatx copilot",
     instructions: CopilotInstructions,
-    model: "gpt-5.1",
     tools,
 }
