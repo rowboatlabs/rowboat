@@ -25,6 +25,17 @@ export const UpdateJobSchema = ScheduledJobRule.pick({
 });
 
 /**
+ * Schema for updating a scheduled job rule's next run configuration.
+ */
+export const UpdateScheduledRuleSchema = ScheduledJobRule
+    .pick({
+        input: true,
+    })
+    .extend({
+        scheduledTime: z.string().datetime(),
+    });
+
+/**
  * Repository interface for managing scheduled job rules in the system.
  * 
  * This interface defines the contract for scheduled job rule management operations including
@@ -68,6 +79,16 @@ export interface IScheduledJobRulesRepository {
      * @throws {NotFoundError} if the scheduled job rule doesn't exist
      */
     update(id: string, data: z.infer<typeof UpdateJobSchema>): Promise<z.infer<typeof ScheduledJobRule>>;
+
+    /**
+     * Updates a scheduled job rule with new input and scheduled time.
+     * 
+     * @param id - The unique identifier of the scheduled job rule to update
+     * @param data - The update data containing input messages and scheduled time
+     * @returns Promise resolving to the updated scheduled job rule
+     * @throws {NotFoundError} if the scheduled job rule doesn't exist
+     */
+    updateRule(id: string, data: z.infer<typeof UpdateScheduledRuleSchema>): Promise<z.infer<typeof ScheduledJobRule>>;
 
     /**
      * Releases a scheduled job rule after it has been executed.

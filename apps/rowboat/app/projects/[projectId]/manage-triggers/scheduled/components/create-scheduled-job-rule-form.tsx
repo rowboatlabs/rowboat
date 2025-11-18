@@ -1,132 +1,197 @@
 'use client';
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/common/panel-common";
-import { createScheduledJobRule } from "@/app/actions/scheduled-job-rules.actions";
+import { createScheduledJobRule, updateScheduledJobRule } from "@/app/actions/scheduled-job-rules.actions";
 import { ArrowLeftIcon, PlusIcon, TrashIcon } from "lucide-react";
 import Link from "next/link";
 import { DatePicker } from "@heroui/react";
-import { ZonedDateTime, now, getLocalTimeZone } from "@internationalized/date";
+import { ZonedDateTime, now, getLocalTimeZone, parseAbsoluteToLocal } from "@internationalized/date";
+import { z } from "zod";
+import { Message } from "@/app/lib/types/types";
+import { ScheduledJobRule } from "@/src/entities/models/scheduled-job-rule";
 
-// Define a simpler message type for the form that only includes the fields we need
 type FormMessage = {
     role: "system" | "user" | "assistant";
     content: string;
 };
 
-export function CreateScheduledJobRuleForm({ projectId, onBack, hasExistingTriggers = true }: { projectId: string; onBack?: () => void; hasExistingTriggers?: boolean }) {
-    const router = useRouter();
-    const [loading, setLoading] = useState(false);
-    const [messages, setMessages] = useState<FormMessage[]>([
-        { role: "user", content: "" }
-    ]);
-    // Set default to 30 minutes from now with timezone info
-    const getDefaultDateTime = () => {
-        const localTimeZone = getLocalTimeZone();
-        const currentTime = now(localTimeZone);
-        const thirtyMinutesFromNow = currentTime.add({ minutes: 30 });
-        return thirtyMinutesFromNow;
-    };
+type BackButtonConfig =
+    | { label: string; onClick: () => void }
+    | { label: string; href: string };
 
-    const [scheduledDateTime, setScheduledDateTime] = useState<ZonedDateTime | null>(getDefaultDateTime());
+type FormSubmitPayload = {
+    messages: FormMessage[];
+    scheduledDateTime: ZonedDateTime;
+};
+
+type ScheduledJobRuleFormBaseProps = {
+    title: string;
+    description?: string;
+    submitLabel: string;
+    submittingLabel: string;
+    errorMessage: string;
+    backButton?: BackButtonConfig;
+    initialMessages?: FormMessage[];
+    initialDateTime?: ZonedDateTime | null;
+    placeholderDateTime: ZonedDateTime;
+    minDateTime: ZonedDateTime;
+    onSubmit: (payload: FormSubmitPayload) => Promise<unknown>;
+    onSuccess?: (result: unknown) => void;
+    successHref?: string;
+};
+
+const createEmptyMessage = (): FormMessage => ({ role: "user", content: "" });
+
+const normaliseMessages = (messages?: FormMessage[]): FormMessage[] => {
+    if (!messages || messages.length === 0) {
+        return [createEmptyMessage()];
+    }
+
+    return messages.map((message) => ({ ...message }));
+};
+
+const convertFormMessagesToMessages = (messages: FormMessage[]): z.infer<typeof Message>[] => {
+    return messages.map((msg) => {
+        if (msg.role === "assistant") {
+            return {
+                role: msg.role,
+                content: msg.content,
+                agentName: null,
+                responseType: "internal" as const,
+                timestamp: undefined,
+            };
+        }
+
+        return {
+            role: msg.role,
+            content: msg.content,
+            timestamp: undefined,
+        };
+    });
+};
+
+function ScheduledJobRuleFormBase({
+    title,
+    description,
+    submitLabel,
+    submittingLabel,
+    errorMessage,
+    backButton,
+    initialMessages,
+    initialDateTime,
+    placeholderDateTime,
+    minDateTime,
+    onSubmit,
+    onSuccess,
+    successHref,
+}: ScheduledJobRuleFormBaseProps) {
+    const router = useRouter();
+    const [messages, setMessages] = useState<FormMessage[]>(normaliseMessages(initialMessages));
+    const [scheduledDateTime, setScheduledDateTime] = useState<ZonedDateTime | null>(initialDateTime ?? placeholderDateTime);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        setMessages(normaliseMessages(initialMessages));
+    }, [initialMessages]);
+
+    useEffect(() => {
+        setScheduledDateTime(initialDateTime ?? placeholderDateTime);
+    }, [initialDateTime, placeholderDateTime]);
 
     const addMessage = () => {
-        setMessages([...messages, { role: "user", content: "" }]);
+        setMessages((prev) => [...prev, createEmptyMessage()]);
     };
 
     const removeMessage = (index: number) => {
-        if (messages.length > 1) {
-            setMessages(messages.filter((_, i) => i !== index));
-        }
+        setMessages((prev) => {
+            if (prev.length <= 1) {
+                return prev;
+            }
+            return prev.filter((_, i) => i !== index);
+        });
     };
 
     const updateMessage = (index: number, field: keyof FormMessage, value: string) => {
-        const newMessages = [...messages];
-        newMessages[index] = { ...newMessages[index], [field]: value };
-        setMessages(newMessages);
+        setMessages((prev) => {
+            const next = [...prev];
+            next[index] = { ...next[index], [field]: value };
+            return next;
+        });
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        
-        // Validate required fields
+
         if (!scheduledDateTime) {
             alert("Please select date and time");
             return;
         }
 
-        if (messages.some(msg => !msg.content?.trim())) {
+        if (messages.some((msg) => !msg.content?.trim())) {
             alert("Please fill in all message content");
             return;
         }
 
         setLoading(true);
         try {
-            // Convert FormMessage to the expected Message type
-            const convertedMessages = messages.map(msg => {
-                if (msg.role === "assistant") {
-                    return {
-                        role: msg.role,
-                        content: msg.content,
-                        agentName: null,
-                        responseType: "internal" as const,
-                        timestamp: undefined
-                    };
-                }
-                return {
-                    role: msg.role,
-                    content: msg.content,
-                    timestamp: undefined
-                };
+            const result = await onSubmit({
+                messages,
+                scheduledDateTime,
             });
-            
-            // Convert ZonedDateTime to ISO string (already in UTC)
-            const scheduledTimeString = scheduledDateTime.toDate().toISOString();
-            
-            await createScheduledJobRule({
-                projectId,
-                input: { messages: convertedMessages },
-                scheduledTime: scheduledTimeString,
-            });
-            if (onBack) {
-                onBack();
-            } else {
-                router.push(`/projects/${projectId}/manage-triggers?tab=scheduled`);
+
+            if (onSuccess) {
+                onSuccess(result);
+            } else if (successHref) {
+                router.push(successHref);
             }
         } catch (error) {
-            console.error("Failed to create scheduled job rule:", error);
-            alert("Failed to create scheduled job rule");
+            console.error(errorMessage, error);
+            alert(errorMessage);
         } finally {
             setLoading(false);
         }
     };
 
-
-
     return (
         <Panel
             title={
                 <div className="flex items-center gap-3">
-                    {hasExistingTriggers && onBack ? (
-                        <Button variant="secondary" size="sm" startContent={<ArrowLeftIcon className="w-4 h-4" />} className="whitespace-nowrap" onClick={onBack}>
-                            Back
-                        </Button>
-                    ) : hasExistingTriggers ? (
-                        <Link href={`/projects/${projectId}/manage-triggers?tab=scheduled`}>
-                            <Button variant="secondary" size="sm" startContent={<ArrowLeftIcon className="w-4 h-4" />} className="whitespace-nowrap">
-                                Back
+                    {backButton ? (
+                        'onClick' in backButton ? (
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                startContent={<ArrowLeftIcon className="w-4 h-4" />}
+                                className="whitespace-nowrap"
+                                onClick={backButton.onClick}
+                            >
+                                {backButton.label}
                             </Button>
-                        </Link>
+                        ) : (
+                            <Link href={backButton.href}>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    startContent={<ArrowLeftIcon className="w-4 h-4" />}
+                                    className="whitespace-nowrap"
+                                >
+                                    {backButton.label}
+                                </Button>
+                            </Link>
+                        )
                     ) : null}
                     <div>
                         <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            CREATE SCHEDULED JOB RULE
+                            {title}
                         </div>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            Note: Triggers run only on the published version of your workflow. Publish any changes to make them active.
-                        </p>
+                        {description ? (
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                {description}
+                            </p>
+                        ) : null}
                     </div>
                 </div>
             }
@@ -142,8 +207,8 @@ export function CreateScheduledJobRuleForm({ projectId, onBack, hasExistingTrigg
                             <DatePicker
                                 value={scheduledDateTime}
                                 onChange={setScheduledDateTime}
-                                placeholderValue={getDefaultDateTime()}
-                                minValue={now(getLocalTimeZone())}
+                                placeholderValue={placeholderDateTime}
+                                minValue={minDateTime}
                                 granularity="minute"
                                 isRequired
                                 className="w-full"
@@ -214,12 +279,120 @@ export function CreateScheduledJobRuleForm({ projectId, onBack, hasExistingTrigg
                                 isLoading={loading}
                                 className="px-6 py-2 whitespace-nowrap"
                             >
-                                {loading ? "Creating..." : "Create Rule"}
+                                {loading ? submittingLabel : submitLabel}
                             </Button>
                         </div>
                     </form>
                 </div>
             </div>
         </Panel>
+    );
+}
+
+export function CreateScheduledJobRuleForm({ projectId, onBack, hasExistingTriggers = true }: { projectId: string; onBack?: () => void; hasExistingTriggers?: boolean }) {
+    const timeZone = useMemo(() => getLocalTimeZone(), []);
+    const minDateTime = useMemo(() => now(timeZone), [timeZone]);
+    const defaultDateTime = useMemo(() => now(timeZone).add({ minutes: 30 }), [timeZone]);
+
+    const handleSubmit = async ({ messages, scheduledDateTime }: FormSubmitPayload) => {
+        const convertedMessages = convertFormMessagesToMessages(messages);
+        const scheduledTimeString = scheduledDateTime.toDate().toISOString();
+
+        await createScheduledJobRule({
+            projectId,
+            input: { messages: convertedMessages },
+            scheduledTime: scheduledTimeString,
+        });
+    };
+
+    const handleSuccess = onBack ? () => onBack() : undefined;
+    const backButton: BackButtonConfig | undefined = hasExistingTriggers
+        ? onBack
+            ? { label: "Back", onClick: onBack }
+            : { label: "Back", href: `/projects/${projectId}/manage-triggers?tab=scheduled` }
+        : undefined;
+
+    return (
+        <ScheduledJobRuleFormBase
+            title="CREATE SCHEDULED JOB RULE"
+            description="Note: Triggers run only on the published version of your workflow. Publish any changes to make them active."
+            submitLabel="Create Rule"
+            submittingLabel="Creating..."
+            errorMessage="Failed to create scheduled job rule"
+            backButton={backButton}
+            initialDateTime={defaultDateTime}
+            placeholderDateTime={defaultDateTime}
+            minDateTime={minDateTime}
+            onSubmit={handleSubmit}
+            onSuccess={handleSuccess}
+            successHref={onBack ? undefined : `/projects/${projectId}/manage-triggers?tab=scheduled`}
+        />
+    );
+}
+
+export function EditScheduledJobRuleForm({
+    projectId,
+    rule,
+    onCancel,
+    onUpdated,
+}: {
+    projectId: string;
+    rule: z.infer<typeof ScheduledJobRule>;
+    onCancel: () => void;
+    onUpdated?: (rule: z.infer<typeof ScheduledJobRule>) => void;
+}) {
+    const timeZone = useMemo(() => getLocalTimeZone(), []);
+    const initialDateTime = useMemo(() => parseAbsoluteToLocal(rule.nextRunAt), [rule.nextRunAt]);
+    const nowDateTime = useMemo(() => now(timeZone), [timeZone]);
+    const minDateTime = useMemo(() => {
+        return initialDateTime.compare(nowDateTime) < 0 ? initialDateTime : nowDateTime;
+    }, [initialDateTime, nowDateTime]);
+
+    const initialMessages = useMemo<FormMessage[]>(() => {
+        return rule.input.messages
+            .filter((message): message is Extract<z.infer<typeof Message>, { role: "system" | "user" | "assistant" }> => {
+                return message.role === "system" || message.role === "user" || message.role === "assistant";
+            })
+            .map((message) => ({
+                role: message.role,
+                content: message.content ?? "",
+            }));
+    }, [rule.input.messages]);
+
+    const handleSubmit = async ({ messages, scheduledDateTime }: FormSubmitPayload) => {
+        const convertedMessages = convertFormMessagesToMessages(messages);
+        const scheduledTimeString = scheduledDateTime.toDate().toISOString();
+
+        const updatedRule = await updateScheduledJobRule({
+            projectId,
+            ruleId: rule.id,
+            input: { messages: convertedMessages },
+            scheduledTime: scheduledTimeString,
+        });
+        return updatedRule;
+    };
+
+    const handleSuccess = (result: unknown) => {
+        if (result && typeof result === 'object' && onUpdated) {
+            onUpdated(result as z.infer<typeof ScheduledJobRule>);
+        }
+        onCancel();
+    };
+
+    return (
+        <ScheduledJobRuleFormBase
+            title="EDIT SCHEDULED JOB RULE"
+            description="Update the scheduled run time and prompt messages for this trigger."
+            submitLabel="Save Changes"
+            submittingLabel="Saving..."
+            errorMessage="Failed to update scheduled job rule"
+            backButton={{ label: "Cancel", onClick: onCancel }}
+            initialMessages={initialMessages}
+            initialDateTime={initialDateTime}
+            placeholderDateTime={initialDateTime}
+            minDateTime={minDateTime}
+            onSubmit={handleSubmit}
+            onSuccess={handleSuccess}
+        />
     );
 }

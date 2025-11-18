@@ -1,17 +1,43 @@
 'use client';
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/common/panel-common";
-import { createRecurringJobRule } from "@/app/actions/recurring-job-rules.actions";
+import { createRecurringJobRule, updateRecurringJobRule } from "@/app/actions/recurring-job-rules.actions";
 import { ArrowLeftIcon, PlusIcon, TrashIcon, InfoIcon } from "lucide-react";
 import Link from "next/link";
+import { z } from "zod";
+import { Message } from "@/app/lib/types/types";
+import { RecurringJobRule } from "@/src/entities/models/recurring-job-rule";
 
 // Define a simpler message type for the form that only includes the fields we need
 type FormMessage = {
     role: "system" | "user" | "assistant";
     content: string;
+};
+
+type BackButtonConfig =
+    | { label: string; onClick: () => void }
+    | { label: string; href: string };
+
+type FormSubmitPayload = {
+    messages: FormMessage[];
+    cron: string;
+};
+
+type RecurringJobRuleFormBaseProps = {
+    title: string;
+    description?: string;
+    submitLabel: string;
+    submittingLabel: string;
+    errorMessage: string;
+    backButton?: BackButtonConfig;
+    initialCron?: string;
+    initialMessages?: FormMessage[];
+    onSubmit: (payload: FormSubmitPayload) => Promise<unknown>;
+    onSuccess?: (result: unknown) => void;
+    successHref?: string;
 };
 
 const commonCronExamples = [
@@ -25,86 +51,112 @@ const commonCronExamples = [
     { label: "Monthly on the 1st at midnight", value: "0 0 1 * *" },
 ];
 
-export function CreateRecurringJobRuleForm({ 
-    projectId, 
-    onBack,
-    hasExistingTriggers = true
-}: { 
-    projectId: string;
-    onBack?: () => void;
-    hasExistingTriggers?: boolean;
-}) {
+const createEmptyMessage = (): FormMessage => ({ role: "user", content: "" });
+
+const normaliseMessages = (messages?: FormMessage[]): FormMessage[] => {
+    if (!messages || messages.length === 0) {
+        return [createEmptyMessage()];
+    }
+
+    return messages.map((message) => ({ ...message }));
+};
+
+const convertFormMessagesToMessages = (messages: FormMessage[]): z.infer<typeof Message>[] => {
+    return messages.map((msg) => {
+        if (msg.role === "assistant") {
+            return {
+                role: msg.role,
+                content: msg.content,
+                agentName: null,
+                responseType: "internal" as const,
+                timestamp: undefined,
+            };
+        }
+
+        return {
+            role: msg.role,
+            content: msg.content,
+            timestamp: undefined,
+        };
+    });
+};
+
+function RecurringJobRuleFormBase({
+    title,
+    description,
+    submitLabel,
+    submittingLabel,
+    errorMessage,
+    backButton,
+    initialCron,
+    initialMessages,
+    onSubmit,
+    onSuccess,
+    successHref,
+}: RecurringJobRuleFormBaseProps) {
     const router = useRouter();
+    const [messages, setMessages] = useState<FormMessage[]>(normaliseMessages(initialMessages));
+    const [cronExpression, setCronExpression] = useState(initialCron ?? "* * * * *");
     const [loading, setLoading] = useState(false);
-    const [messages, setMessages] = useState<FormMessage[]>([
-        { role: "user", content: "" }
-    ]);
-    const [cronExpression, setCronExpression] = useState("* * * * *");
     const [showCronHelp, setShowCronHelp] = useState(false);
 
+    useEffect(() => {
+        setMessages(normaliseMessages(initialMessages));
+    }, [initialMessages]);
+
+    useEffect(() => {
+        setCronExpression(initialCron ?? "* * * * *");
+    }, [initialCron]);
+
     const addMessage = () => {
-        setMessages([...messages, { role: "user", content: "" }]);
+        setMessages((prev) => [...prev, createEmptyMessage()]);
     };
 
     const removeMessage = (index: number) => {
-        if (messages.length > 1) {
-            setMessages(messages.filter((_, i) => i !== index));
-        }
+        setMessages((prev) => {
+            if (prev.length <= 1) {
+                return prev;
+            }
+            return prev.filter((_, i) => i !== index);
+        });
     };
 
     const updateMessage = (index: number, field: keyof FormMessage, value: string) => {
-        const newMessages = [...messages];
-        newMessages[index] = { ...newMessages[index], [field]: value };
-        setMessages(newMessages);
+        setMessages((prev) => {
+            const next = [...prev];
+            next[index] = { ...next[index], [field]: value };
+            return next;
+        });
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        
-        // Validate required fields
+
         if (!cronExpression.trim()) {
             alert("Please enter a cron expression");
             return;
         }
 
-        if (messages.some(msg => !msg.content?.trim())) {
+        if (messages.some((msg) => !msg.content?.trim())) {
             alert("Please fill in all message content");
             return;
         }
 
         setLoading(true);
         try {
-            // Convert FormMessage to the expected Message type
-            const convertedMessages = messages.map(msg => {
-                if (msg.role === "assistant") {
-                    return {
-                        role: msg.role,
-                        content: msg.content,
-                        agentName: null,
-                        responseType: "internal" as const,
-                        timestamp: undefined
-                    };
-                }
-                return {
-                    role: msg.role,
-                    content: msg.content,
-                    timestamp: undefined
-                };
-            });
-            
-            await createRecurringJobRule({
-                projectId,
-                input: { messages: convertedMessages },
+            const result = await onSubmit({
                 cron: cronExpression,
+                messages,
             });
-            if (onBack) {
-                onBack();
-            } else {
-                router.push(`/projects/${projectId}/manage-triggers?tab=recurring`);
+
+            if (onSuccess) {
+                onSuccess(result);
+            } else if (successHref) {
+                router.push(successHref);
             }
         } catch (error) {
-            console.error("Failed to create recurring job rule:", error);
-            alert("Failed to create recurring job rule");
+            console.error(errorMessage, error);
+            alert(errorMessage);
         } finally {
             setLoading(false);
         }
@@ -114,30 +166,39 @@ export function CreateRecurringJobRuleForm({
         <Panel
             title={
                 <div className="flex items-center gap-3">
-                    {hasExistingTriggers && onBack ? (
-                        <Button 
-                            variant="secondary" 
-                            size="sm" 
-                            startContent={<ArrowLeftIcon className="w-4 h-4" />} 
-                            className="whitespace-nowrap"
-                            onClick={onBack}
-                        >
-                            Back
-                        </Button>
-                    ) : hasExistingTriggers ? (
-                        <Link href={`/projects/${projectId}/manage-triggers?tab=recurring`}>
-                            <Button variant="secondary" size="sm" startContent={<ArrowLeftIcon className="w-4 h-4" />} className="whitespace-nowrap">
-                                Back
+                    {backButton ? (
+                        'onClick' in backButton ? (
+                            <Button 
+                                variant="secondary" 
+                                size="sm" 
+                                startContent={<ArrowLeftIcon className="w-4 h-4" />} 
+                                className="whitespace-nowrap"
+                                onClick={backButton.onClick}
+                            >
+                                {backButton.label}
                             </Button>
-                        </Link>
+                        ) : (
+                            <Link href={backButton.href}>
+                                <Button 
+                                    variant="secondary" 
+                                    size="sm" 
+                                    startContent={<ArrowLeftIcon className="w-4 h-4" />} 
+                                    className="whitespace-nowrap"
+                                >
+                                    {backButton.label}
+                                </Button>
+                            </Link>
+                        )
                     ) : null}
                     <div>
                         <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            CREATE RECURRING JOB RULE
+                            {title}
                         </div>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            Note: Triggers run only on the published version of your workflow. Publish any changes to make them active.
-                        </p>
+                        {description ? (
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                {description}
+                            </p>
+                        ) : null}
                     </div>
                 </div>
             }
@@ -262,12 +323,108 @@ export function CreateRecurringJobRuleForm({
                                 isLoading={loading}
                                 className="px-6 py-2 whitespace-nowrap"
                             >
-                                {loading ? "Creating..." : "Create Rule"}
+                                {loading ? submittingLabel : submitLabel}
                             </Button>
                         </div>
                     </form>
                 </div>
             </div>
         </Panel>
+    );
+}
+
+export function CreateRecurringJobRuleForm({ 
+    projectId, 
+    onBack,
+    hasExistingTriggers = true,
+}: { 
+    projectId: string;
+    onBack?: () => void;
+    hasExistingTriggers?: boolean;
+}) {
+    const handleSubmit = async ({ cron, messages }: FormSubmitPayload) => {
+        const convertedMessages = convertFormMessagesToMessages(messages);
+        await createRecurringJobRule({
+            projectId,
+            input: { messages: convertedMessages },
+            cron,
+        });
+    };
+
+    const handleSuccess = onBack ? () => onBack() : undefined;
+    const backButton: BackButtonConfig | undefined = hasExistingTriggers
+        ? onBack
+            ? { label: "Back", onClick: onBack }
+            : { label: "Back", href: `/projects/${projectId}/manage-triggers?tab=recurring` }
+        : undefined;
+
+    return (
+        <RecurringJobRuleFormBase
+            title="CREATE RECURRING JOB RULE"
+            description="Note: Triggers run only on the published version of your workflow. Publish any changes to make them active."
+            submitLabel="Create Rule"
+            submittingLabel="Creating..."
+            errorMessage="Failed to create recurring job rule"
+            backButton={backButton}
+            onSubmit={handleSubmit}
+            onSuccess={handleSuccess}
+            successHref={onBack ? undefined : `/projects/${projectId}/manage-triggers?tab=recurring`}
+        />
+    );
+}
+
+export function EditRecurringJobRuleForm({
+    projectId,
+    rule,
+    onCancel,
+    onUpdated,
+}: {
+    projectId: string;
+    rule: z.infer<typeof RecurringJobRule>;
+    onCancel: () => void;
+    onUpdated?: (rule: z.infer<typeof RecurringJobRule>) => void;
+}) {
+    const initialMessages = useMemo<FormMessage[]>(() => {
+        return rule.input.messages
+            .filter((message): message is Extract<z.infer<typeof Message>, { role: "system" | "user" | "assistant" }> => {
+                return message.role === "system" || message.role === "user" || message.role === "assistant";
+            })
+            .map((message) => ({
+                role: message.role,
+                content: message.content ?? "",
+            }));
+    }, [rule.input.messages]);
+
+    const handleSubmit = async ({ cron, messages }: FormSubmitPayload) => {
+        const convertedMessages = convertFormMessagesToMessages(messages);
+        const updatedRule = await updateRecurringJobRule({
+            projectId,
+            ruleId: rule.id,
+            input: { messages: convertedMessages },
+            cron,
+        });
+        return updatedRule;
+    };
+
+    const handleSuccess = (result: unknown) => {
+        if (result && typeof result === 'object' && onUpdated) {
+            onUpdated(result as z.infer<typeof RecurringJobRule>);
+        }
+        onCancel();
+    };
+
+    return (
+        <RecurringJobRuleFormBase
+            title="EDIT RECURRING JOB RULE"
+            description="Update the cron schedule and prompt messages for this trigger."
+            submitLabel="Save Changes"
+            submittingLabel="Saving..."
+            errorMessage="Failed to update recurring job rule"
+            backButton={{ label: "Cancel", onClick: onCancel }}
+            initialCron={rule.cron}
+            initialMessages={initialMessages}
+            onSubmit={handleSubmit}
+            onSuccess={handleSuccess}
+        />
     );
 }

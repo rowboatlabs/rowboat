@@ -5,6 +5,7 @@ import { IProjectActionAuthorizationPolicy } from '../../policies/project-action
 import { IRecurringJobRulesRepository } from '../../repositories/recurring-job-rules.repository.interface';
 import { RecurringJobRule } from '@/src/entities/models/recurring-job-rule';
 import { Message } from '@/app/lib/types/types';
+import { isValidCronExpression } from '@/src/application/lib/utils/is-valid-cron-expression';
 
 const inputSchema = z.object({
     caller: z.enum(["user", "api"]),
@@ -42,7 +43,7 @@ export class CreateRecurringJobRuleUseCase implements ICreateRecurringJobRuleUse
 
     async execute(request: z.infer<typeof inputSchema>): Promise<z.infer<typeof RecurringJobRule>> {
         // Validate cron expression
-        if (!this.isValidCronExpression(request.cron)) {
+        if (!isValidCronExpression(request.cron)) {
             throw new BadRequestError('Invalid cron expression. Expected format: minute hour day month dayOfWeek');
         }
 
@@ -65,32 +66,5 @@ export class CreateRecurringJobRuleUseCase implements ICreateRecurringJobRuleUse
         });
 
         return rule;
-    }
-
-    private isValidCronExpression(cron: string): boolean {
-        const parts = cron.split(' ');
-        if (parts.length !== 5) {
-            return false;
-        }
-
-        // Basic validation - in production you'd want more sophisticated validation
-        const [minute, hour, day, month, dayOfWeek] = parts;
-        
-        // Check if parts are valid
-        const isValidPart = (part: string) => {
-            if (part === '*') return true;
-            if (part.includes('/')) {
-                const [range, step] = part.split('/');
-                if (range === '*' || (parseInt(step) > 0 && parseInt(step) <= 59)) return true;
-                return false;
-            }
-            if (part.includes('-')) {
-                const [start, end] = part.split('-');
-                return !isNaN(parseInt(start)) && !isNaN(parseInt(end)) && parseInt(start) <= parseInt(end);
-            }
-            return !isNaN(parseInt(part));
-        };
-
-        return isValidPart(minute) && isValidPart(hour) && isValidPart(day) && isValidPart(month) && isValidPart(dayOfWeek);
     }
 }

@@ -1,0 +1,38 @@
+{
+  "name": "@rowboatlabs/rowboatx",
+  "version": "0.6.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "rm -rf dist && tsc",
+    "copilot": "npm run build && node dist/x.js"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "bin": {
+    "rowboatx": "bin/app.js"
+  },
+  "keywords": [],
+  "author": "Rowboat Labs",
+  "license": "Apache-2.0",
+  "description": "",
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.44",
+    "@ai-sdk/google": "^2.0.25",
+    "@ai-sdk/openai": "^2.0.53",
+    "@modelcontextprotocol/sdk": "^1.20.2",
+    "ai": "^5.0.78",
+    "json-schema-to-zod": "^2.6.1",
+    "nanoid": "^5.1.6",
+    "yargs": "^18.0.0",
+    "zod": "^4.1.12"
+  }
+}
