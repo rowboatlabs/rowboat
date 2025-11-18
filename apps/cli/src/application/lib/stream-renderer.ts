@@ -13,6 +13,7 @@ export class StreamRenderer {
     private options: Required<StreamRendererOptions>;
     private reasoningActive = false;
     private textActive = false;
+    private firstText = true;
 
     constructor(options?: StreamRendererOptions) {
         this.options = {
@@ -96,26 +97,38 @@ export class StreamRenderer {
 
     private onStart(agent: string, runId: string) {
         this.write("\n");
-        this.write(this.bold(`▶ Agent ${agent} (run ${runId})`));
+        this.write(this.bold(this.cyan(`╭─ Agent: ${agent}`)));
+        this.write(this.dim(` │ run ${runId}`));
         this.write("\n");
+        this.write(this.dim(`╰─────────────────────────────────────────────────\n`));
     }
 
     private onEnd() {
-        this.write(this.bold("\n■ complete\n"));
+        this.write("\n");
+        this.write(this.dim("─".repeat(50)));
+        this.write("\n");
+        this.write(this.green(this.bold("✓ Complete")));
+        this.write("\n\n");
     }
 
     private onError(error: string) {
-        this.write(this.red(`\n✖ error: ${error}\n`));
+        this.write("\n");
+        this.write(this.red(this.bold("✖ Error")));
+        this.write("\n");
+        this.write(this.red(this.indent(error)));
+        this.write("\n\n");
     }
 
     private onStepStart() {
         this.write("\n");
-        this.write(this.cyan(`─ Step started`));
+        this.write(this.dim("│ "));
+        this.write(this.dim("Step in progress..."));
         this.write("\n");
     }
 
     private onStepEnd() {
-        this.write(this.dim(`✓ Step finished\n`));
+        // More subtle step end - just add a little spacing
+        this.write(this.dim("\n"));
     }
 
     private onStepMessage(stepIndex: number, message: any) {
@@ -131,18 +144,22 @@ export class StreamRenderer {
     }
 
     private onStepToolInvocation(toolName: string, input: string) {
-        this.write(this.cyan(`\n→ Tool invoke ${toolName}`));
+        this.write("\n");
+        this.write(this.cyan("┌─ ") + this.bold(this.cyan(`🔧 ${toolName}`)));
+        this.write("\n");
         if (input && input.length) {
-            this.write("\n" + this.dim(this.indent(this.truncate(input))) + "\n");
-        } else {
+            this.write(this.dim("│ ") + this.dim(this.indent(this.truncate(input)).replace(/\n/g, "\n│ ")));
             this.write("\n");
         }
     }
 
     private onStepToolResult(toolName: string, result: unknown) {
         const res = this.truncate(JSON.stringify(result, null, this.options.jsonIndent));
-        this.write(this.cyan(`\n← Tool result ${toolName}\n`));
-        this.write(this.dim(this.indent(res)) + "\n");
+        this.write(this.dim("│\n"));
+        this.write(this.green("└─ ") + this.dim(this.green(`Result`)));
+        this.write("\n");
+        this.write(this.dim("  " + this.indent(res).replace(/\n/g, "\n  ")));
+        this.write("\n");
     }
 
     private onReasoningStart() {
@@ -150,7 +167,8 @@ export class StreamRenderer {
         this.reasoningActive = true;
         if (this.options.showHeaders) {
             this.write("\n");
-            this.write(this.dim("Reasoning: "));
+            this.write(this.dim("│ "));
+            this.write(this.dim(this.italic("thinking... ")));
         }
     }
 
@@ -162,21 +180,32 @@ export class StreamRenderer {
     private onReasoningEnd() {
         if (!this.reasoningActive) return;
         this.reasoningActive = false;
-        this.write(this.dim("\n"));
+        this.write("\n");
     }
 
     private onTextStart() {
         if (this.textActive) return;
         this.textActive = true;
-        if (this.options.showHeaders) {
+        if (this.options.showHeaders && this.firstText) {
             this.write("\n");
-            this.write(this.bold("Assistant: "));
+            this.write(this.bold("╭─ ") + this.bold("Response"));
+            this.write("\n");
+            this.write(this.dim("│\n"));
+            this.firstText = false;
+        } else if (this.options.showHeaders) {
+            this.write("\n");
+            this.write(this.dim("│ "));
         }
     }
 
     private onTextDelta(delta: string) {
         if (!this.textActive) this.onTextStart();
-        this.write(delta);
+        // Add subtle left margin to assistant text for better readability
+        if (delta.includes("\n")) {
+            this.write(delta.replace(/\n/g, "\n  "));
+        } else {
+            this.write(delta);
+        }
     }
 
     private onTextEnd() {
@@ -188,10 +217,12 @@ export class StreamRenderer {
     private onToolCall(toolCallId: string, toolName: string, input: unknown) {
         const inputStr = this.truncate(JSON.stringify(input, null, this.options.jsonIndent));
         this.write("\n");
-        this.write(this.cyan(`→ Tool call ${toolName} (${toolCallId})`));
+        this.write(this.magenta("┌─ ") + this.bold(this.magenta(`⚡ ${toolName}`)));
+        this.write(this.dim(` (${toolCallId.slice(0, 8)}...)`));
         this.write("\n");
-        this.write(this.dim(this.indent(inputStr)));
+        this.write(this.dim("│ ") + this.dim(this.indent(inputStr).replace(/\n/g, "\n│ ")));
         this.write("\n");
+        this.write(this.dim("└─────────────\n"));
     }
 
     private onUsage(usage: {
@@ -202,13 +233,17 @@ export class StreamRenderer {
         cachedInputTokens?: number;
     }) {
         const parts: string[] = [];
-        if (usage.inputTokens !== undefined) parts.push(`input=${usage.inputTokens}`);
-        if (usage.outputTokens !== undefined) parts.push(`output=${usage.outputTokens}`);
-        if (usage.reasoningTokens !== undefined) parts.push(`reasoning=${usage.reasoningTokens}`);
-        if (usage.cachedInputTokens !== undefined) parts.push(`cached=${usage.cachedInputTokens}`);
-        if (usage.totalTokens !== undefined) parts.push(`total=${usage.totalTokens}`);
-        const line = parts.join(", ");
-        this.write(this.dim(`\nUsage: ${line}\n`));
+        if (usage.inputTokens !== undefined) parts.push(`${this.dim("in:")} ${usage.inputTokens}`);
+        if (usage.outputTokens !== undefined) parts.push(`${this.dim("out:")} ${usage.outputTokens}`);
+        if (usage.reasoningTokens !== undefined) parts.push(`${this.dim("reasoning:")} ${usage.reasoningTokens}`);
+        if (usage.cachedInputTokens !== undefined) parts.push(`${this.dim("cached:")} ${usage.cachedInputTokens}`);
+        if (usage.totalTokens !== undefined) parts.push(`${this.dim("total:")} ${this.bold(usage.totalTokens.toString())}`);
+        const line = parts.join(this.dim(" | "));
+        this.write("\n");
+        this.write(this.dim("╭─ Usage\n"));
+        this.write(this.dim("│ ") + line);
+        this.write("\n");
+        this.write(this.dim("╰─────────────\n"));
     }
 
     // Formatting helpers
@@ -236,12 +271,28 @@ export class StreamRenderer {
         return "\x1b[2m" + text + "\x1b[0m";
     }
 
+    private italic(text: string): string {
+        return "\x1b[3m" + text + "\x1b[0m";
+    }
+
     private cyan(text: string): string {
         return "\x1b[36m" + text + "\x1b[0m";
     }
 
+    private green(text: string): string {
+        return "\x1b[32m" + text + "\x1b[0m";
+    }
+
     private red(text: string): string {
         return "\x1b[31m" + text + "\x1b[0m";
+    }
+
+    private magenta(text: string): string {
+        return "\x1b[35m" + text + "\x1b[0m";
+    }
+
+    private yellow(text: string): string {
+        return "\x1b[33m" + text + "\x1b[0m";
     }
 }
 

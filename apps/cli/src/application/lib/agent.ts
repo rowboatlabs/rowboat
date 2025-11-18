@@ -314,12 +314,6 @@ async function* streamLlm(
         system: instructions,
         tools,
         stopWhen: stepCountIs(1),
-        providerOptions: {
-            openai: {
-                reasoningEffort: "low",
-                reasoningSummary: "auto",
-            },
-        }
     });
     for await (const event of fullStream) {
         // console.log("\n\n\t>>>>\t\tstream event", JSON.stringify(event));
