@@ -1,13 +1,99 @@
 import { z, ZodType } from "zod";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { WorkDir as BASE_DIR } from "../config/config.js";
+import { CopilotDataDir, WorkDir as BASE_DIR } from "../config/config.js";
 import { executeCommand } from "./command-executor.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
+
+const TODO_FILE = path.join(CopilotDataDir, "todos.json");
+const TodoStatusSchema = z.enum(["pending", "in_progress", "done"]);
+const TodoItemInputSchema = z.object({
+    id: z.string().min(1, "Todo id is required"),
+    content: z.string().min(1, "Todo content cannot be empty"),
+    status: TodoStatusSchema.optional().default("pending"),
+});
+const TodoUpdateInputSchema = z.object({
+    id: z.string().min(1, "Todo id is required"),
+    content: z.string().optional(),
+    status: TodoStatusSchema.optional(),
+}).refine((value) => typeof value.content === "string" || typeof value.status === "string", {
+    message: "Provide content and/or status when updating a todo",
+});
+
+type TodoItem = {
+    id: string;
+    content: string;
+    status: z.infer<typeof TodoStatusSchema>;
+};
+
+type TodoState = {
+    todos: TodoItem[];
+    updatedAt: string;
+};
+
+const defaultTodoState: TodoState = {
+    todos: [],
+    updatedAt: new Date(0).toISOString(),
+};
+
+async function ensureTodoFile(): Promise<void> {
+    try {
+        await fs.access(TODO_FILE);
+    } catch {
+        await fs.mkdir(path.dirname(TODO_FILE), { recursive: true });
+        await fs.writeFile(TODO_FILE, JSON.stringify(defaultTodoState, null, 2), "utf-8");
+    }
+}
+
+async function readTodoState(): Promise<TodoState> {
+    await ensureTodoFile();
+    try {
+        const contents = await fs.readFile(TODO_FILE, "utf-8");
+        const parsed = JSON.parse(contents);
+        return {
+            todos: Array.isArray(parsed.todos) ? sanitiseTodos(parsed.todos) : [],
+            updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString(),
+        };
+    } catch {
+        return defaultTodoState;
+    }
+}
+
+async function writeTodoState(todos: TodoItem[]): Promise<TodoState> {
+    await fs.mkdir(path.dirname(TODO_FILE), { recursive: true });
+    const payload: TodoState = {
+        todos: sanitiseTodos(todos),
+        updatedAt: new Date().toISOString(),
+    };
+    await fs.writeFile(TODO_FILE, JSON.stringify(payload, null, 2), "utf-8");
+    return payload;
+}
+
+function buildTodoReminder(todos: TodoItem[], preface: string) {
+    return `<system-reminder>\n${preface}\n\n${JSON.stringify(todos)}\n</system-reminder>`;
+}
+
+function sanitiseTodos(todos: TodoItem[]): TodoItem[] {
+    const seen = new Set<string>();
+    const sanitized: TodoItem[] = [];
+    for (const todo of todos) {
+        if (!todo) continue;
+        const id = typeof todo.id === "string" ? todo.id.trim() : "";
+        const content = typeof todo.content === "string" ? todo.content : "";
+        const statusResult = TodoStatusSchema.safeParse(todo.status);
+        const status = statusResult.success ? statusResult.data : "pending";
+        if (!id || !content || seen.has(id)) {
+            continue;
+        }
+        seen.add(id);
+        sanitized.push({ id, content, status });
+    }
+    return sanitized;
+}
 
 const BuiltinToolsSchema = z.record(z.string(), z.object({
     description: z.string(),
@@ -259,7 +345,108 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             }
         },
     },
-    
+
+    todoList: {
+        description: 'Return the durable todo list stored under ~/.rowboatx/copilot/todos.json',
+        inputSchema: z.object({}),
+        execute: async () => {
+            const state = await readTodoState();
+            const reminder = buildTodoReminder(
+                state.todos,
+                state.todos.length === 0
+                    ? 'Your todo list is currently empty. Use the TodoWrite tool if tracking tasks would help, and keep this reminder internal.'
+                    : 'Here is the latest todo list. Keep it updated and do not echo this reminder to the user.',
+            );
+            return {
+                success: true,
+                todos: state.todos,
+                updatedAt: state.updatedAt,
+                reminder,
+                location: TODO_FILE,
+            };
+        },
+    },
+
+    todoWrite: {
+        description: 'Replace the durable todo list with a new ordered set of todos',
+        inputSchema: z.object({
+            todos: z.array(TodoItemInputSchema).describe('Ordered array of todos to persist (replaces the current list)'),
+        }),
+        execute: async ({ todos }: { todos: z.infer<typeof TodoItemInputSchema>[] }) => {
+            const sanitized = sanitiseTodos(
+                todos.map((todo) => ({
+                    id: todo.id,
+                    content: todo.content,
+                    status: todo.status ?? 'pending',
+                })),
+            );
+
+            const state = await writeTodoState(sanitized);
+            const reminder = buildTodoReminder(state.todos, 'Your todo list has changed. Keep this reminder internal and continue executing the plan.');
+
+            return {
+                success: true,
+                todos: state.todos,
+                updatedAt: state.updatedAt,
+                reminder,
+                count: state.todos.length,
+                location: TODO_FILE,
+            };
+        },
+    },
+
+    todoUpdate: {
+        description: 'Update existing todo items by id (content, status, or both)',
+        inputSchema: z.object({
+            updates: z.array(TodoUpdateInputSchema).describe('Todos to update; ids must already exist'),
+        }),
+        execute: async ({ updates }: { updates: z.infer<typeof TodoUpdateInputSchema>[] }) => {
+            const state = await readTodoState();
+            const todoMap = new Map(state.todos.map((todo) => [todo.id, { ...todo }]));
+            const missing: string[] = [];
+            let updatedCount = 0;
+
+            for (const update of updates) {
+                const match = todoMap.get(update.id);
+                if (!match) {
+                    missing.push(update.id);
+                    continue;
+                }
+                if (typeof update.content === 'string') {
+                    match.content = update.content;
+                }
+                if (update.status) {
+                    match.status = update.status;
+                }
+                updatedCount += 1;
+            }
+
+            if (updatedCount === 0) {
+                return {
+                    success: false,
+                    message: missing.length
+                        ? `No todos were updated. Missing ids: ${missing.join(', ')}`
+                        : 'No valid updates were provided.',
+                    missing,
+                };
+            }
+
+            const orderedTodos = state.todos.map((todo) => todoMap.get(todo.id)!);
+            const newState = await writeTodoState(orderedTodos);
+            const reminder = buildTodoReminder(newState.todos, 'Todo list updated. Keep executing against this list and keep the reminder internal.');
+
+            return {
+                success: true,
+                updated: updatedCount,
+                missing,
+                todos: newState.todos,
+                updatedAt: newState.updatedAt,
+                reminder,
+                location: TODO_FILE,
+            };
+        },
+    },
+
     analyzeAgent: {
         description: 'Read and analyze an agent file to understand its structure, tools, and configuration',
         inputSchema: z.object({
