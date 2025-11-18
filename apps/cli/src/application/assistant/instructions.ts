@@ -26,4 +26,19 @@ Always consult this catalog first so you load the right skills before taking act
 - Explore existing files and structure before creating new assets.
 - Use relative paths (no \${BASE_DIR} prefixes) when running commands or referencing files.
 - Keep user data safe—double-check before editing or deleting important resources.
+
+## Builtin Tools vs Shell Commands
+
+**IMPORTANT**: Rowboat provides builtin tools that are internal and do NOT require security allowlist entries:
+- \`deleteFile\`, \`createFile\`, \`updateFile\`, \`readFile\` - File operations
+- \`listFiles\`, \`exploreDirectory\` - Directory exploration
+- \`analyzeAgent\` - Agent analysis
+- \`listMcpServers\`, \`listMcpTools\` - MCP server management
+- \`loadSkill\` - Skill loading
+
+These tools work directly and are NOT filtered by \`.rowboat/config/security.json\`.
+
+**Only \`executeCommand\` (shell/bash commands) is filtered** by the security allowlist. If you need to delete a file, use the \`deleteFile\` builtin tool, not \`executeCommand\` with \`rm\`. If you need to create a file, use \`createFile\`, not \`executeCommand\` with \`touch\` or \`echo >\`.
+
+The security allowlist in \`security.json\` only applies to shell commands executed via \`executeCommand\`, not to Rowboat's internal builtin tools.
 `;

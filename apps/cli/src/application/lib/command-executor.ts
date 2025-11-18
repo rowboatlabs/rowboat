@@ -1,7 +1,73 @@
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
+import { getSecurityAllowList, SECURITY_CONFIG_PATH } from '../config/security.js';
 
 const execPromise = promisify(exec);
+const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n)/;
+const ENV_ASSIGNMENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
+const WRAPPER_COMMANDS = new Set(['sudo', 'env', 'time', 'command']);
+
+function sanitizeToken(token: string): string {
+  return token.trim().replace(/^['"]+|['"]+$/g, '');
+}
+
+function extractCommandNames(command: string): string[] {
+  const discovered = new Set<string>();
+  const segments = command.split(COMMAND_SPLIT_REGEX);
+
+  for (const segment of segments) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) continue;
+
+    let index = 0;
+    while (index < tokens.length && ENV_ASSIGNMENT_REGEX.test(tokens[index])) {
+      index++;
+    }
+
+    if (index >= tokens.length) continue;
+
+    const primary = sanitizeToken(tokens[index]).toLowerCase();
+    if (!primary) continue;
+
+    discovered.add(primary);
+
+    if (WRAPPER_COMMANDS.has(primary) && index + 1 < tokens.length) {
+      const wrapped = sanitizeToken(tokens[index + 1]).toLowerCase();
+      if (wrapped) {
+        discovered.add(wrapped);
+      }
+    }
+  }
+
+  return Array.from(discovered);
+}
+
+function findBlockedCommands(command: string): string[] {
+  const invoked = extractCommandNames(command);
+  if (!invoked.length) return [];
+
+  const allowList = getSecurityAllowList();
+  if (!allowList.length) return invoked;
+
+  const allowSet = new Set(allowList);
+  if (allowSet.has('*')) return [];
+
+  return invoked.filter((cmd) => !allowSet.has(cmd));
+}
+
+function enforceSecurity(command: string): CommandResult | null {
+  const blocked = findBlockedCommands(command);
+
+  if (!blocked.length) {
+    return null;
+  }
+
+  return {
+    stdout: '',
+    stderr: `Command blocked by security policy. Blocked command(s): ${blocked.join(', ')}. Update ${SECURITY_CONFIG_PATH} to allow them before retrying.`,
+    exitCode: 126,
+  };
+}
 
 export interface CommandResult {
   stdout: string;
@@ -23,6 +89,11 @@ export async function executeCommand(
     maxBuffer?: number; // max buffer size in bytes
   }
 ): Promise<CommandResult> {
+  const securityResult = enforceSecurity(command);
+  if (securityResult) {
+    return securityResult;
+  }
+
   try {
     const { stdout, stderr } = await execPromise(command, {
       cwd: options?.cwd,
@@ -57,6 +128,11 @@ export function executeCommandSync(
     timeout?: number;
   }
 ): CommandResult {
+  const securityResult = enforceSecurity(command);
+  if (securityResult) {
+    return securityResult;
+  }
+
   try {
     const stdout = execSync(command, {
       cwd: options?.cwd,
