@@ -28,14 +28,10 @@ export class StreamRenderer {
     render(event: z.infer<typeof RunEvent>) {
         switch (event.type) {
             case "start": {
-                this.onStart(event.agent, event.runId);
+                this.onStart(event.agentName, event.runId);
                 break;
             }
-            case "step-start": {
-                this.onStepStart();
-                break;
-            }
-            case "stream-event": {
+            case "llm-stream-event": {
                 this.renderLlmEvent(event.event);
                 break;
             }
@@ -51,20 +47,8 @@ export class StreamRenderer {
                 this.onStepToolResult(event.toolName, event.result);
                 break;
             }
-            case "step-end": {
-                this.onStepEnd();
-                break;
-            }
-            case "end": {
-                this.onEnd();
-                break;
-            }
             case "error": {
                 this.onError(event.error);
-                break;
-            }
-            case "pause-for-human-input": {
-                this.onPauseForHumanInput(event.toolCallId, event.question);
                 break;
             }
         }
@@ -99,10 +83,9 @@ export class StreamRenderer {
         }
     }
 
-    private onStart(agent: string, runId: string) {
+    private onStart(agentName: string, runId: string) {
         this.write("\n");
-        this.write(this.bold(this.cyan(`╭─ Agent: ${agent}`)));
-        this.write(this.dim(` │ run ${runId}`));
+        this.write(this.bold(`▶ Agent ${agentName} (run ${runId})`));
         this.write("\n");
         this.write(this.dim(`╰─────────────────────────────────────────────────\n`));
     }

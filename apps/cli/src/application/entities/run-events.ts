@@ -1,60 +1,68 @@
-import { z } from "zod";
 import { LlmStepStreamEvent } from "./llm-step-events.js";
-import { Message } from "./message.js";
+import { Message, ToolCallPart } from "./message.js";
 import { Agent } from "./agent.js";
+import z from "zod";
 
 const BaseRunEvent = z.object({
     ts: z.iso.datetime().optional(),
+    subflow: z.array(z.string()),
 });
 
-export const RunStartEvent = BaseRunEvent.extend({
+export const StartEvent = BaseRunEvent.extend({
     type: z.literal("start"),
     runId: z.string(),
-    agent: z.string(),
+    agentName: z.string(),
 });
 
-export const RunStepStartEvent = BaseRunEvent.extend({
-    type: z.literal("step-start"),
+export const SpawnSubFlowEvent = BaseRunEvent.extend({
+    type: z.literal("spawn-subflow"),
+    agentName: z.string(),
+    toolCallId: z.string(),
 });
 
-export const RunStreamEvent = BaseRunEvent.extend({
-    type: z.literal("stream-event"),
+export const LlmStreamEvent = BaseRunEvent.extend({
+    type: z.literal("llm-stream-event"),
     event: LlmStepStreamEvent,
 });
 
-export const RunMessageEvent = BaseRunEvent.extend({
+export const MessageEvent = BaseRunEvent.extend({
     type: z.literal("message"),
     message: Message,
 });
 
-export const RunToolInvocationEvent = BaseRunEvent.extend({
+export const ToolInvocationEvent = BaseRunEvent.extend({
     type: z.literal("tool-invocation"),
     toolName: z.string(),
     input: z.string(),
 });
 
-export const RunToolResultEvent = BaseRunEvent.extend({
+export const ToolResultEvent = BaseRunEvent.extend({
     type: z.literal("tool-result"),
     toolName: z.string(),
     result: z.any(),
 });
 
-export const RunStepEndEvent = BaseRunEvent.extend({
-    type: z.literal("step-end"),
-});
-
-export const RunEndEvent = BaseRunEvent.extend({
-    type: z.literal("end"),
-});
-
-export const RunPauseEvent = BaseRunEvent.extend({
-    type: z.literal("pause-for-human-input"),
+export const AskHumanRequestEvent = BaseRunEvent.extend({
+    type: z.literal("ask-human-request"),
     toolCallId: z.string(),
-    question: z.string(),
+    query: z.string(),
 });
 
-export const RunResumeEvent = BaseRunEvent.extend({
-    type: z.literal("resume"),
+export const AskHumanResponseEvent = BaseRunEvent.extend({
+    type: z.literal("ask-human-response"),
+    toolCallId: z.string(),
+    response: z.string(),
+});
+
+export const ToolPermissionRequestEvent = BaseRunEvent.extend({
+    type: z.literal("tool-permission-request"),
+    toolCall: ToolCallPart,
+});
+
+export const ToolPermissionResponseEvent = BaseRunEvent.extend({
+    type: z.literal("tool-permission-response"),
+    toolCallId: z.string(),
+    response: z.enum(["approve", "deny"]),
 });
 
 export const RunErrorEvent = BaseRunEvent.extend({
@@ -63,15 +71,15 @@ export const RunErrorEvent = BaseRunEvent.extend({
 });
 
 export const RunEvent = z.union([
-    RunStartEvent,
-    RunStepStartEvent,
-    RunStreamEvent,
-    RunMessageEvent,
-    RunToolInvocationEvent,
-    RunToolResultEvent,
-    RunStepEndEvent,
-    RunEndEvent,
-    RunPauseEvent,
-    RunResumeEvent,
+    StartEvent,
+    SpawnSubFlowEvent,
+    LlmStreamEvent,
+    MessageEvent,
+    ToolInvocationEvent,
+    ToolResultEvent,
+    AskHumanRequestEvent,
+    AskHumanResponseEvent,
+    ToolPermissionRequestEvent,
+    ToolPermissionResponseEvent,
     RunErrorEvent,
 ]);
