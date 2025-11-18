@@ -85,7 +85,38 @@ rowboatx --agent=<agent-name> --input="xyz" --no-interactive=true
 ```bash    
 rowboatx --agent=<agent-name> --run_id=<run_id> # resume from a previous run
 ```
-     
+## Models support
+You can configure your models in `~/.rowboat/config/models.json`
+```json
+{
+  "providers": {
+    "openai": {
+      "flavor": "openai"
+    },
+    "openai-compatible-host": {
+      "flavor": "openai",
+      "baseURL": "http://localhost:2000/...",
+      "apiKey": "...",
+      "headers": {
+        "foo": "bar"
+      }
+    },
+    "anthropic": {
+      "flavor": "anthropic"
+    },
+    "google": {
+      "flavor": "google"
+    },
+    "ollama": {
+      "flavor": "ollama"
+    }
+  },
+  "defaults": {
+    "provider": "openai",
+    "model": "gpt-5"
+  }
+}
+```
 ## Rowboat Classic UI
 
 To use Rowboat Classic UI (not RowboatX), refer to [Classic](https://docs.rowboatlabs.com/). 
