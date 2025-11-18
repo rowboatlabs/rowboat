@@ -84,7 +84,7 @@ Inspired by Claude Code, RowboatX brings the same shell-native power to backgrou
 rowboatx --agent=<agent-name> --input="xyz" --no-interactive=true
 ```
 ```bash    
-rowboatx --agent=<agent-name> <run_id> # resume from a previous run
+rowboatx --agent=<agent-name> --run_id=<run_id> # resume from a previous run
 ```
      
 ## Rowboat Classic UI
