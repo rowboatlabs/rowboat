@@ -203,12 +203,12 @@ export class StreamRenderer {
     }
 
     private onTextDelta(delta: string) {
-        if (!this.textActive) this.onTextStart();
         // Add subtle left margin to assistant text for better readability
+        const formattedDelta = this.neutral(delta);
         if (delta.includes("\n")) {
-            this.write(delta.replace(/\n/g, "\n  "));
+            this.write(formattedDelta.replace(/\n/g, "\n  "));
         } else {
-            this.write(delta);
+            this.write(formattedDelta);
         }
     }
 
@@ -304,6 +304,10 @@ export class StreamRenderer {
 
     private yellow(text: string): string {
         return "\x1b[33m" + text + "\x1b[0m";
+    }
+
+    private neutral(text: string): string {
+        return "\x1b[38;5;250m" + text + "\x1b[0m";
     }
 }
 

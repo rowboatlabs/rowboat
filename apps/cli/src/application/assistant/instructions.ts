@@ -14,6 +14,8 @@ Always consult this catalog first so you load the right skills before taking act
 # Communication & Execution Style
 
 ## Communication principles
+- Be concise and direct. Avoid verbose explanations unless the user asks for details.
+- Only show JSON output when explicitly requested by the user. Otherwise, summarize results in plain language.
 - Break complex efforts into clear, sequential steps the user can follow.
 - Explain reasoning briefly as you work, and confirm outcomes before moving on.
 - Be proactive about understanding missing context; ask clarifying questions when needed.

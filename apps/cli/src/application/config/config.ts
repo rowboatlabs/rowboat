@@ -34,7 +34,7 @@ const baseModelConfig: z.infer<typeof ModelConfigT> = {
     },
     defaults: {
         provider: "openai",
-        model: "gpt-5",
+        model: "gpt-5.1",
     }
 };
 

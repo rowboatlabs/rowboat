@@ -24,7 +24,7 @@ Load this skill whenever a user wants to inspect, create, or update agents insid
 {
   "name": "agent_name",
   "description": "Description of the agent",
-  "model": "gpt-4.1",
+  "model": "gpt-5.1",
   "instructions": "Instructions for the agent",
   "tools": {
     "descriptive_tool_key": {
@@ -91,7 +91,7 @@ Load this skill whenever a user wants to inspect, create, or update agents insid
 {
   "name": "summariser_agent",
   "description": "Summarises an arxiv paper",
-  "model": "gpt-4.1",
+  "model": "gpt-5.1",
   "instructions": "Download and summarise an arxiv paper. Use curl to fetch the PDF. Output just the GIST in two lines. Don't ask for human input.",
   "tools": {
     "bash": {"type": "builtin", "name": "executeCommand"}
@@ -104,7 +104,7 @@ Load this skill whenever a user wants to inspect, create, or update agents insid
 {
   "name": "summarise-a-few",
   "description": "Summarises multiple arxiv papers",
-  "model": "gpt-4.1",
+  "model": "gpt-5.1",
   "instructions": "Pick 2 interesting papers and summarise each using the summariser tool. Pass the paper URL to the tool. Don't ask for human input.",
   "tools": {
     "summariser": {
@@ -120,7 +120,7 @@ Load this skill whenever a user wants to inspect, create, or update agents insid
 {
   "name": "podcast_workflow",
   "description": "Create a podcast from arXiv papers",
-  "model": "gpt-4.1",
+  "model": "gpt-5.1",
   "instructions": "1. Fetch arXiv papers about agents using bash\n2. Pick papers and summarise them using summarise_papers\n3. Create a podcast transcript\n4. Generate audio using text_to_speech\n\nExecute these steps in sequence.",
   "tools": {
     "bash": {"type": "builtin", "name": "executeCommand"},

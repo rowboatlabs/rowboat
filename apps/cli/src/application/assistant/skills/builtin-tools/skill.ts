@@ -54,7 +54,7 @@ Agents can use builtin tools by declaring them in the \`"tools"\` object with \`
 {
   "name": "arxiv-feed-reader",
   "description": "A feed reader for the arXiv",
-  "model": "gpt-4.1",
+  "model": "gpt-5.1",
   "instructions": "Extract latest papers from the arXiv feed and summarize them. Use curl to fetch the RSS feed, then parse it with yq and jq:\n\ncurl -s https://rss.arxiv.org/rss/cs.AI | yq -p=xml -o=json | jq -r '.rss.channel.item[] | select(.title | test(\"agent\"; \"i\")) | \"\\(.title)\\n\\(.link)\\n\\(.description)\\n\"'\n\nThis will give you papers containing 'agent' in the title.",
   "tools": {
     "bash": {
@@ -70,7 +70,7 @@ Agents can use builtin tools by declaring them in the \`"tools"\` object with \`
 {
   "name": "system-monitor",
   "description": "Monitor system resources and processes",
-  "model": "gpt-4.1",
+  "model": "gpt-5.1",
   "instructions": "Monitor system resources using bash commands. Use 'df -h' for disk usage, 'free -h' for memory, 'top -bn1' for processes, 'ps aux' for process list. Parse the output and report any issues.",
   "tools": {
     "bash": {
@@ -86,7 +86,7 @@ Agents can use builtin tools by declaring them in the \`"tools"\` object with \`
 {
   "name": "git-helper",
   "description": "Automate git operations",
-  "model": "gpt-4.1",
+  "model": "gpt-5.1",
   "instructions": "Help with git operations. Use commands like 'git status', 'git log --oneline -10', 'git diff', 'git branch -a' to inspect the repository. Can also run 'git add', 'git commit', 'git push' when instructed.",
   "tools": {
     "bash": {
@@ -127,7 +127,7 @@ Agents can call other agents as tools to create complex multi-step workflows. Th
 \`\`\`json
 {
   "name": "paper_analyzer",
-  "model": "gpt-4.1",
+  "model": "gpt-5.1",
   "instructions": "Pick 2 interesting papers and summarise each using the summariser tool. Pass the paper URL to the summariser. Don't ask for human input.",
   "tools": {
     "summariser": {
