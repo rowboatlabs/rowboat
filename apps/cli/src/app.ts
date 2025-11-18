@@ -9,6 +9,27 @@ import { createInterface, Interface } from "node:readline/promises";
 import { ToolCallPart } from "./application/entities/message.js";
 import { z } from "zod";
 
+export async function updateState(agent: string, runId: string) {
+    const state = new AgentState(agent, runId);
+    // If running in a TTY, read run events from stdin line-by-line
+    if (!input.isTTY) {
+        return;
+    }
+
+    const rl = createInterface({ input, crlfDelay: Infinity });
+    try {
+        for await (const line of rl) {
+            if (line.trim() === "") {
+                continue;
+            }
+            const event = RunEvent.parse(JSON.parse(line));
+            state.ingestAndLog(event);
+        }
+    } finally {
+        rl.close();
+    }
+}
+
 export async function app(opts: {
     agent: string;
     runId?: string;
@@ -16,7 +37,7 @@ export async function app(opts: {
     noInteractive?: boolean;
 }) {
     const renderer = new StreamRenderer();
-    const state = new AgentState(opts.agent);
+    const state = new AgentState(opts.agent, opts.runId);
 
     // load existing and assemble state if required
     let runId = opts.runId;
@@ -45,11 +66,15 @@ export async function app(opts: {
     if (!opts.noInteractive) {
         rl = createInterface({ input, output });
     }
+    let inputConsumed = false;
 
     try {
         while (true) {
             // ask for pending tool permissions
             for (const perm of Object.values(state.getPendingPermissions())) {
+                if (opts.noInteractive) {
+                    return;
+                }
                 const response = await getToolCallPermission(perm.toolCall, rl!);
                 state.ingestAndLog({
                     type: "tool-permission-response",
@@ -61,6 +86,9 @@ export async function app(opts: {
 
             // ask for pending human input
             for (const ask of Object.values(state.getPendingAskHumans())) {
+                if (opts.noInteractive) {
+                    return;
+                }
                 const response = await getAskHumanResponse(ask.query, rl!);
                 state.ingestAndLog({
                     type: "ask-human-response",
@@ -80,6 +108,21 @@ export async function app(opts: {
 
             // if nothing pending, get user input
             if (state.getPendingPermissions().length === 0 && state.getPendingAskHumans().length === 0) {
+                if (opts.input && !inputConsumed) {
+                    state.ingestAndLog({
+                        type: "message",
+                        message: {
+                            role: "user",
+                            content: opts.input,
+                        },
+                        subflow: [],
+                    });
+                    inputConsumed = true;
+                    continue;
+                }
+                if (opts.noInteractive) {
+                    return;
+                }
                 const response = await getUserInput(rl!);
                 state.ingestAndLog({
                     type: "message",
