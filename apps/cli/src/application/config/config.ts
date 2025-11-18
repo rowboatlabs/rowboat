@@ -7,8 +7,7 @@ import { homedir } from "os";
 
 // Resolve app root relative to compiled file location (dist/...)
 export const WorkDir = path.join(homedir(), ".rowboat");
-export const RowboatXDir = path.join(homedir(), ".rowboatx");
-export const CopilotDataDir = path.join(RowboatXDir, "copilot");
+export const CopilotDataDir = path.join(WorkDir, "copilot");
 
 const baseMcpConfig: z.infer<typeof McpServerConfig> = {
     mcpServers: {
@@ -54,20 +53,14 @@ function ensureModelConfig() {
     }
 }
 
-function ensureRowboatXDirs() {
-    const ensure = (p: string) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
-    ensure(RowboatXDir);
-    ensure(CopilotDataDir);
-}
-
 function ensureDirs() {
     const ensure = (p: string) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
     ensure(WorkDir);
     ensure(path.join(WorkDir, "agents"));
     ensure(path.join(WorkDir, "config"));
+    ensure(CopilotDataDir);
     ensureMcpConfig();
     ensureModelConfig();
-    ensureRowboatXDirs();
 }
 
 ensureDirs();

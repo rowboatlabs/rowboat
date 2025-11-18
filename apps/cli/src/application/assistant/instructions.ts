@@ -21,7 +21,7 @@ Always consult this catalog first so you load the right skills before taking act
 - Always ask for confirmation before taking destructive actions.
 
 ## Task tracking
-- Maintain a durable todo list for multi-step efforts using the \`todoList\`, \`todoWrite\`, and \`todoUpdate\` builtin tools (data lives under ~/.rowboatx/copilot/todos.json).
+- Maintain a durable todo list for multi-step efforts using the \`todoList\`, \`todoWrite\`, and \`todoUpdate\` builtin tools (state persists only within this copilot session).
 - Treat the <system-reminder> text returned by those tools as internal guidance—never echo these reminders to the user verbatim.
 
 ## Execution reminders

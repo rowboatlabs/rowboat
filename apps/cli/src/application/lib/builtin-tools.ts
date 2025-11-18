@@ -1,16 +1,15 @@
 import { z, ZodType } from "zod";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { CopilotDataDir, WorkDir as BASE_DIR } from "../config/config.js";
+import { WorkDir as BASE_DIR } from "../config/config.js";
 import { executeCommand } from "./command-executor.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
+import { TodoStatusSchema, readTodoState, writeTodoState, buildTodoReminder } from "./todo-store.js";
 
-const TODO_FILE = path.join(CopilotDataDir, "todos.json");
-const TodoStatusSchema = z.enum(["pending", "in_progress", "done"]);
 const TodoItemInputSchema = z.object({
     id: z.string().min(1, "Todo id is required"),
     content: z.string().min(1, "Todo content cannot be empty"),
@@ -23,77 +22,6 @@ const TodoUpdateInputSchema = z.object({
 }).refine((value) => typeof value.content === "string" || typeof value.status === "string", {
     message: "Provide content and/or status when updating a todo",
 });
-
-type TodoItem = {
-    id: string;
-    content: string;
-    status: z.infer<typeof TodoStatusSchema>;
-};
-
-type TodoState = {
-    todos: TodoItem[];
-    updatedAt: string;
-};
-
-const defaultTodoState: TodoState = {
-    todos: [],
-    updatedAt: new Date(0).toISOString(),
-};
-
-async function ensureTodoFile(): Promise<void> {
-    try {
-        await fs.access(TODO_FILE);
-    } catch {
-        await fs.mkdir(path.dirname(TODO_FILE), { recursive: true });
-        await fs.writeFile(TODO_FILE, JSON.stringify(defaultTodoState, null, 2), "utf-8");
-    }
-}
-
-async function readTodoState(): Promise<TodoState> {
-    await ensureTodoFile();
-    try {
-        const contents = await fs.readFile(TODO_FILE, "utf-8");
-        const parsed = JSON.parse(contents);
-        return {
-            todos: Array.isArray(parsed.todos) ? sanitiseTodos(parsed.todos) : [],
-            updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString(),
-        };
-    } catch {
-        return defaultTodoState;
-    }
-}
-
-async function writeTodoState(todos: TodoItem[]): Promise<TodoState> {
-    await fs.mkdir(path.dirname(TODO_FILE), { recursive: true });
-    const payload: TodoState = {
-        todos: sanitiseTodos(todos),
-        updatedAt: new Date().toISOString(),
-    };
-    await fs.writeFile(TODO_FILE, JSON.stringify(payload, null, 2), "utf-8");
-    return payload;
-}
-
-function buildTodoReminder(todos: TodoItem[], preface: string) {
-    return `<system-reminder>\n${preface}\n\n${JSON.stringify(todos)}\n</system-reminder>`;
-}
-
-function sanitiseTodos(todos: TodoItem[]): TodoItem[] {
-    const seen = new Set<string>();
-    const sanitized: TodoItem[] = [];
-    for (const todo of todos) {
-        if (!todo) continue;
-        const id = typeof todo.id === "string" ? todo.id.trim() : "";
-        const content = typeof todo.content === "string" ? todo.content : "";
-        const statusResult = TodoStatusSchema.safeParse(todo.status);
-        const status = statusResult.success ? statusResult.data : "pending";
-        if (!id || !content || seen.has(id)) {
-            continue;
-        }
-        seen.add(id);
-        sanitized.push({ id, content, status });
-    }
-    return sanitized;
-}
 
 const BuiltinToolsSchema = z.record(z.string(), z.object({
     description: z.string(),
@@ -347,7 +275,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     todoList: {
-        description: 'Return the durable todo list stored under ~/.rowboatx/copilot/todos.json',
+        description: 'Return the durable todo list for the current session',
         inputSchema: z.object({}),
         execute: async () => {
             const state = await readTodoState();
@@ -362,7 +290,6 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 todos: state.todos,
                 updatedAt: state.updatedAt,
                 reminder,
-                location: TODO_FILE,
             };
         },
     },
@@ -373,15 +300,13 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             todos: z.array(TodoItemInputSchema).describe('Ordered array of todos to persist (replaces the current list)'),
         }),
         execute: async ({ todos }: { todos: z.infer<typeof TodoItemInputSchema>[] }) => {
-            const sanitized = sanitiseTodos(
-                todos.map((todo) => ({
-                    id: todo.id,
-                    content: todo.content,
-                    status: todo.status ?? 'pending',
-                })),
-            );
+            const normalized = todos.map((todo) => ({
+                id: todo.id,
+                content: todo.content,
+                status: todo.status ?? 'pending',
+            }));
 
-            const state = await writeTodoState(sanitized);
+            const state = await writeTodoState(normalized);
             const reminder = buildTodoReminder(state.todos, 'Your todo list has changed. Keep this reminder internal and continue executing the plan.');
 
             return {
@@ -390,7 +315,6 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 updatedAt: state.updatedAt,
                 reminder,
                 count: state.todos.length,
-                location: TODO_FILE,
             };
         },
     },
@@ -442,7 +366,6 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 todos: newState.todos,
                 updatedAt: newState.updatedAt,
                 reminder,
-                location: TODO_FILE,
             };
         },
     },

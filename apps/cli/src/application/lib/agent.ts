@@ -13,6 +13,7 @@ import { LlmStepStreamEvent } from "../entities/llm-step-events.js";
 import { execTool } from "./exec-tool.js";
 import { RunEvent } from "../entities/run-events.js";
 import { BuiltinTools } from "./builtin-tools.js";
+import { collectSystemReminders } from "../assistant/reminders/manager.js";
 
 export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
     switch (t.type) {
@@ -310,9 +311,14 @@ export async function* streamAgentTurn(opts: {
                 input: JSON.stringify(toolCall.arguments),
             };
             const result = await execTool(agentTool, toolCall.arguments);
+            const reminders = await collectSystemReminders({
+                source: "tool-result",
+                toolName: toolCall.toolName,
+            });
+            const decoratedResult = reminders.length > 0 ? attachRemindersToResult(result, reminders) : result;
             const resultMsg: z.infer<typeof ToolMessage> = {
                 role: "tool",
-                content: JSON.stringify(result),
+                content: JSON.stringify(decoratedResult),
                 toolCallId: toolCall.toolCallId,
                 toolName: toolCall.toolName,
             };
@@ -320,7 +326,7 @@ export async function* streamAgentTurn(opts: {
             yield {
                 type: "tool-result",
                 toolName: toolCall.toolName,
-                result: result,
+                result: decoratedResult,
             };
             yield {
                 type: "message",
@@ -417,6 +423,26 @@ async function* streamLlm(
                 continue;
         }
     }
+}
+function attachRemindersToResult(result: any, reminders: string[]) {
+    if (!reminders.length) {
+        return result;
+    }
+
+    if (result && typeof result === "object" && !Array.isArray(result)) {
+        const existing = Array.isArray((result as any).systemReminders)
+            ? (result as any).systemReminders
+            : [];
+        return {
+            ...result,
+            systemReminders: [...existing, ...reminders],
+        };
+    }
+
+    return {
+        data: result,
+        systemReminders: reminders,
+    };
 }
 export const MappedToolCall = z.object({
     toolCall: ToolCallPart,
