@@ -46,15 +46,15 @@
 Inspired by Claude Code, RowboatX brings the same shell-native power to background automations.
 
 ## Quick start
-1. Install RowboatX
+1. Set your LLM API key. Supports OpenAI, Anthropic, Gemini, OpenRouter, LiteLLM, Ollama, and more.
+   ```bash
+   export OPENAI_API_KEY=your-openai-api-key 
+   ```
+      
+2. Install RowboatX
    ```bash
    npx @rowboatlabs/rowboatx
    ```
-2. Configure LLM (defaults to OpenAI)
-   ```
-   edit ~/.rowboat/config/models.json 
-   ```
-Then set your API key in your environment. Supports OpenAI, Ollama, Anthropic, Gemini, LMStudio, OpenRouter, LiteLLM
 
 ## Demo
 [![Screenshot](https://github.com/user-attachments/assets/ab46ff8b-44bd-400e-beb0-801c6431033f)](https://www.youtube.com/watch?v=cyPBinQzicY&t)
