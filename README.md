@@ -50,7 +50,7 @@ Inspired by Claude Code, RowboatX brings the same shell-native power to backgrou
    ```bash
    npx @rowboatlabs/rowboatx
    ```
-2. Configure LLM
+2. Configure LLM (defaults to OpenAI)
    ```
    edit ~/.rowboat/config/models.json 
    ```
