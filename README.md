@@ -47,7 +47,7 @@ Inspired by Claude Code, RowboatX brings the same shell-native power to backgrou
 
 ## Quick start
 ```bash
-npx @rowboatlabs/rowboatx
+npx @rowboatlabs/rowboatx@latest
 ```
 
 ## Demo
