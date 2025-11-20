@@ -234,10 +234,10 @@ export async function modelConfig() {
         };
         const defaultModels: Record<(typeof flavors)[number], string> = {
             openai: "gpt-5.1",
-            anthropic: "claude-3.5-sonnet",
-            google: "gemini-1.5-pro",
+            anthropic: "claude-sonnet-4-5",
+            google: "gemini-2.5-pro",
             ollama: "llama3.1",
-            "openai-compatible": "gpt-4o",
+            "openai-compatible": "openai/gpt-5.1",
             openrouter: "openrouter/auto",
         };
 
@@ -245,10 +245,7 @@ export async function modelConfig() {
         const currentModel = config?.defaults?.model;
         const currentProviderConfig = currentProvider ? config?.providers?.[currentProvider] : undefined;
         if (config) {
-           console.log("Currently using:");
-            console.log(`- provider: ${currentProvider || "none"}${currentProviderConfig?.flavor ? ` (${currentProviderConfig.flavor})` : ""}`);
-            console.log(`- model: ${currentModel || "none"}`);
-            console.log("");
+            renderCurrentModel(currentProvider || "none", currentProviderConfig?.flavor || "", currentModel || "none");
         }
 
         const flavorPromptLines = flavors
@@ -377,8 +374,16 @@ export async function modelConfig() {
         };
 
         await updateModelConfig(newConfig as any);
-        console.log(`Model configuration updated. Provider '${providerName}' ${config?.providers?.[providerName] ? "overwritten" : "added"}.`);
+        renderCurrentModel(providerName, selectedFlavor, model);
+        console.log(`Configuration written to ${WorkDir}/config/models.json. You can also edit this file manually`);
     } finally {
         rl.close();
     }
+}
+
+function renderCurrentModel(provider: string, flavor: string, model: string) {
+    console.log("Currently using:");
+    console.log(`- provider: ${provider}${flavor ? ` (${flavor})` : ""}`);
+    console.log(`- model: ${model}`);
+    console.log("");
 }
