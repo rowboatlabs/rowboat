@@ -227,7 +227,7 @@ export async function modelConfig() {
         const defaultBaseUrls: Record<(typeof flavors)[number], string> = {
             openai: "https://api.openai.com/v1",
             anthropic: "https://api.anthropic.com/v1",
-            google: "https://generativelanguage.googleapis.com",
+            google: "https://generativelanguage.googleapis.com/v1beta",
             ollama: "http://localhost:11434",
             "openai-compatible": "http://localhost:8080/v1",
             openrouter: "https://openrouter.ai/api/v1",
