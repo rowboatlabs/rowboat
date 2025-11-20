@@ -27,14 +27,14 @@ yargs(hideBin(process.argv))
                 description: "Do not interact with the user",
                 default: false,
             })
-            .option("sync-examples", {
+            .option("sync-example", {
                 type: "string",
                 description: "Import an example workflow by name (use 'all' for every example) before running",
             }),
         async (argv) => {
             let agent = argv.agent ?? "copilot";
-            if (argv["sync-examples"]) {
-                const requested = String(argv["sync-examples"]).trim();
+            if (argv["sync-example"]) {
+                const requested = String(argv["sync-example"]).trim();
                 const isAll = requested.toLowerCase() === "all";
                 try {
                     const examplesToImport = isAll ? await listAvailableExamples() : [requested];
@@ -58,7 +58,7 @@ yargs(hideBin(process.argv))
                     console.error(error?.message ?? error);
                     process.exit(1);
                 }
-                console.error("Examples imported. Re-run rowboatx without --sync-examples (or with --agent <name>) when you're ready to chat.");
+                console.error("Examples imported. Re-run rowboatx without --sync-example (or with --agent <name>) when you're ready to chat.");
                 return;
             }
             await app({
