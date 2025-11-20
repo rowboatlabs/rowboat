@@ -7,7 +7,8 @@ import { WorkDir, getModelConfig, updateModelConfig } from "./application/config
 import { RunEvent } from "./application/entities/run-events.js";
 import { createInterface, Interface } from "node:readline/promises";
 import { ToolCallPart } from "./application/entities/message.js";
-import { z } from "zod";
+import { keyof, z } from "zod";
+import { Flavor, ModelConfig } from "./application/entities/models.js";
 
 export async function updateState(agent: string, runId: string) {
     const state = new AgentState(agent, runId);
@@ -216,15 +217,15 @@ export async function modelConfig() {
 
     const rl = createInterface({ input, output });
     try {
-        const flavors = [
-            "openai",
-            "anthropic",
-            "google",
-            "ollama",
-            "openai-compatible",
-            "openrouter",
-        ] as const;
-        const defaultBaseUrls: Record<(typeof flavors)[number], string> = {
+        const defaultApiKeyEnvVars: Record<z.infer<typeof Flavor>, string> = {
+            openai: "OPENAI_API_KEY",
+            anthropic: "ANTHROPIC_API_KEY",
+            google: "GOOGLE_GENERATIVE_AI_API_KEY",
+            ollama: "",
+            "openai-compatible": "",
+            openrouter: "",
+        };
+        const defaultBaseUrls: Record<z.infer<typeof Flavor>, string> = {
             openai: "https://api.openai.com/v1",
             anthropic: "https://api.anthropic.com/v1",
             google: "https://generativelanguage.googleapis.com/v1beta",
@@ -232,7 +233,7 @@ export async function modelConfig() {
             "openai-compatible": "http://localhost:8080/v1",
             openrouter: "https://openrouter.ai/api/v1",
         };
-        const defaultModels: Record<(typeof flavors)[number], string> = {
+        const defaultModels: Record<z.infer<typeof Flavor>, string> = {
             openai: "gpt-5.1",
             anthropic: "claude-sonnet-4-5",
             google: "gemini-2.5-pro",
@@ -248,25 +249,22 @@ export async function modelConfig() {
             renderCurrentModel(currentProvider || "none", currentProviderConfig?.flavor || "", currentModel || "none");
         }
 
-        const flavorPromptLines = flavors
+        const FlavorList = [...Flavor.options];
+        const flavorPromptLines = FlavorList
             .map((f, idx) => `  ${idx + 1}. ${f}`)
             .join("\n");
         const flavorAnswer = await rl.question(
-            `Select a provider type:\n${flavorPromptLines}\nEnter number or name` +
-            (currentProvider ? ` [${currentProvider}]` : "") +
-            ": ",
+            `Select a provider type:\n${flavorPromptLines}\nEnter number or name: `
         );
         let selectedFlavorRaw = flavorAnswer.trim();
-        let selectedFlavor: (typeof flavors)[number] | null = null;
-        if (selectedFlavorRaw === "" && currentProvider && (flavors as readonly string[]).includes(currentProvider)) {
-            selectedFlavor = currentProvider as (typeof flavors)[number];
-        } else if (/^\d+$/.test(selectedFlavorRaw)) {
+        let selectedFlavor: z.infer<typeof Flavor> | null = null;
+        if (/^\d+$/.test(selectedFlavorRaw)) {
             const idx = parseInt(selectedFlavorRaw, 10) - 1;
-            if (idx >= 0 && idx < flavors.length) {
-                selectedFlavor = flavors[idx];
+            if (idx >= 0 && idx < FlavorList.length) {
+                selectedFlavor = FlavorList[idx];
             }
-        } else if ((flavors as readonly string[]).includes(selectedFlavorRaw)) {
-            selectedFlavor = selectedFlavorRaw as (typeof flavors)[number];
+        } else if (FlavorList.includes(selectedFlavorRaw as z.infer<typeof Flavor>)) {
+            selectedFlavor = selectedFlavorRaw as z.infer<typeof Flavor>;
         }
         if (!selectedFlavor) {
             console.error("Invalid selection. Exiting.");
@@ -335,21 +333,38 @@ export async function modelConfig() {
             return;
         }
 
+        const headers: Record<string, string> = {};
+
         const providerNameAns = await rl.question(
             `Enter a name/alias for this provider [${selectedFlavor}]: `,
         );
         providerName = providerNameAns.trim() || selectedFlavor;
 
-        const baseUrlDefault = defaultBaseUrls[selectedFlavor] || "";
         const baseUrlAns = await rl.question(
-            `Enter baseURL for ${selectedFlavor} [${baseUrlDefault}]: `,
+            `Enter baseURL for ${selectedFlavor} [${defaultBaseUrls[selectedFlavor]}]: `,
         );
-        const baseURL = (baseUrlAns.trim() || baseUrlDefault) || undefined;
+        const baseURL = baseUrlAns.trim() || undefined;
 
-        const apiKeyAns = await rl.question(
-            `Enter API key for ${selectedFlavor} (leave blank to skip): `,
-        );
-        const apiKey = apiKeyAns.trim() || undefined;
+        let apiKey: string | undefined = undefined;
+        if (selectedFlavor !== "ollama") {
+            let autopickText = "";
+            if (defaultApiKeyEnvVars[selectedFlavor]) {
+                autopickText = ` (leave blank to pick from environment variable ${defaultApiKeyEnvVars[selectedFlavor]})`;
+            }
+            const apiKeyAns = await rl.question(
+                `Enter API key for ${selectedFlavor}${autopickText}: `,
+            );
+            apiKey = apiKeyAns.trim() || undefined;
+        }
+        if (selectedFlavor === "ollama") {
+            const keyAns = await rl.question(
+                `Enter API key for ${selectedFlavor} (optional): `
+            );
+            const key = keyAns.trim();
+            if (key) {
+                headers["Authorization"] = `Bearer ${key}`;
+            }
+        }
 
         const modelDefault = defaultModels[selectedFlavor];
         const modelAns = await rl.question(
@@ -363,6 +378,7 @@ export async function modelConfig() {
                 flavor: selectedFlavor,
                 ...(apiKey ? { apiKey } : {}),
                 ...(baseURL ? { baseURL } : {}),
+                ...(headers ? { headers } : {}),
             },
         };
         const newConfig = {
