@@ -46,15 +46,9 @@
 Inspired by Claude Code, RowboatX brings the same shell-native power to background automations.
 
 ## Quick start
-1. Set your LLM API key. Supports OpenAI, Anthropic, Gemini, OpenRouter, LiteLLM, Ollama, and more.
-   ```bash
-   export OPENAI_API_KEY=your-openai-api-key 
-   ```
-      
-2. Install RowboatX
-   ```bash
-   npx @rowboatlabs/rowboatx
-   ```
+```bash
+npx @rowboatlabs/rowboatx
+```
 
 ## Demo
 [![Screenshot](https://github.com/user-attachments/assets/ab46ff8b-44bd-400e-beb0-801c6431033f)](https://www.youtube.com/watch?v=cyPBinQzicY&t)
@@ -86,15 +80,20 @@ rowboatx --agent=<agent-name> --input="xyz" --no-interactive=true
 rowboatx --agent=<agent-name> --run_id=<run_id> # resume from a previous run
 ```
 ## Models support
-You can configure your models in `~/.rowboat/config/models.json`
+You can configure your models using:
+```bash
+rowboatx model-config
+```
+
+Alternatively, you can directly edit `~/.rowboat/config/models.json`
 ```json
 {
   "providers": {
     "openai": {
       "flavor": "openai"
     },
-    "openai-compatible-host": {
-      "flavor": "openai",
+    "lm-studio": {
+      "flavor": "openai-compatible",
       "baseURL": "http://localhost:2000/...",
       "apiKey": "...",
       "headers": {
@@ -112,7 +111,7 @@ You can configure your models in `~/.rowboat/config/models.json`
     }
   },
   "defaults": {
-    "provider": "openai",
+    "provider": "lm-studio",
     "model": "gpt-5"
   }
 }
