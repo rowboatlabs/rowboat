@@ -1,7 +1,7 @@
 import { jsonSchema, ModelMessage } from "ai";
 import fs from "fs";
 import path from "path";
-import { ModelConfig, WorkDir } from "../config/config.js";
+import { getModelConfig, WorkDir } from "../config/config.js";
 import { Agent, ToolAttachment } from "../entities/agent.js";
 import { AssistantContentPart, AssistantMessage, Message, MessageList, ToolCallPart, ToolMessage, UserMessage } from "../entities/message.js";
 import { runIdGenerator } from "./run-id-gen.js";
@@ -405,6 +405,12 @@ export class AgentState {
 }
 
 export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
+    // get model config
+    const modelConfig = await getModelConfig();
+    if (!modelConfig) {
+        throw new Error("Model config not found");
+    }
+
     // set up agent
     const agent = await loadAgent(state.agentName);
 
@@ -412,8 +418,8 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
     const tools = await buildTools(agent);
 
     // set up provider + model
-    const provider = getProvider(agent.provider);
-    const model = provider(agent.model || ModelConfig.defaults.model);
+    const provider = await getProvider(agent.provider);
+    const model = provider.languageModel(agent.model || modelConfig.defaults.model);
     let loopCounter = 0;
 
     while (true) {

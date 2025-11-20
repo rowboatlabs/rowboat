@@ -3,7 +3,7 @@ import { StreamRenderer } from "./application/lib/stream-renderer.js";
 import { stdin as input, stdout as output } from "node:process";
 import fs from "fs";
 import path from "path";
-import { WorkDir } from "./application/config/config.js";
+import { WorkDir, getModelConfig, updateModelConfig } from "./application/config/config.js";
 import { RunEvent } from "./application/entities/run-events.js";
 import { createInterface, Interface } from "node:readline/promises";
 import { ToolCallPart } from "./application/entities/message.js";
@@ -54,6 +54,12 @@ export async function app(opts: {
     input?: string;
     noInteractive?: boolean;
 }) {
+    // check if model config is required
+    const c = await getModelConfig();
+    if (!c) {
+        await modelConfig();
+    }
+
     const renderer = new StreamRenderer();
     const state = new AgentState(opts.agent, opts.runId);
 
@@ -202,4 +208,177 @@ async function getUserInput(
         process.exit(0);
     }
     return input;
+}
+
+export async function modelConfig() {
+    // load existing model config
+    const config = await getModelConfig();
+
+    const rl = createInterface({ input, output });
+    try {
+        const flavors = [
+            "openai",
+            "anthropic",
+            "google",
+            "ollama",
+            "openai-compatible",
+            "openrouter",
+        ] as const;
+        const defaultBaseUrls: Record<(typeof flavors)[number], string> = {
+            openai: "https://api.openai.com/v1",
+            anthropic: "https://api.anthropic.com/v1",
+            google: "https://generativelanguage.googleapis.com/v1beta",
+            ollama: "http://localhost:11434",
+            "openai-compatible": "http://localhost:8080/v1",
+            openrouter: "https://openrouter.ai/api/v1",
+        };
+        const defaultModels: Record<(typeof flavors)[number], string> = {
+            openai: "gpt-5.1",
+            anthropic: "claude-3.5-sonnet",
+            google: "gemini-1.5-pro",
+            ollama: "llama3.1",
+            "openai-compatible": "gpt-4o",
+            openrouter: "openrouter/auto",
+        };
+
+        const currentProvider = config?.defaults?.provider;
+        const currentModel = config?.defaults?.model;
+        const currentProviderConfig = currentProvider ? config?.providers?.[currentProvider] : undefined;
+        if (config) {
+           console.log("Currently using:");
+            console.log(`- provider: ${currentProvider || "none"}${currentProviderConfig?.flavor ? ` (${currentProviderConfig.flavor})` : ""}`);
+            console.log(`- model: ${currentModel || "none"}`);
+            console.log("");
+        }
+
+        const flavorPromptLines = flavors
+            .map((f, idx) => `  ${idx + 1}. ${f}`)
+            .join("\n");
+        const flavorAnswer = await rl.question(
+            `Select a provider type:\n${flavorPromptLines}\nEnter number or name` +
+            (currentProvider ? ` [${currentProvider}]` : "") +
+            ": ",
+        );
+        let selectedFlavorRaw = flavorAnswer.trim();
+        let selectedFlavor: (typeof flavors)[number] | null = null;
+        if (selectedFlavorRaw === "" && currentProvider && (flavors as readonly string[]).includes(currentProvider)) {
+            selectedFlavor = currentProvider as (typeof flavors)[number];
+        } else if (/^\d+$/.test(selectedFlavorRaw)) {
+            const idx = parseInt(selectedFlavorRaw, 10) - 1;
+            if (idx >= 0 && idx < flavors.length) {
+                selectedFlavor = flavors[idx];
+            }
+        } else if ((flavors as readonly string[]).includes(selectedFlavorRaw)) {
+            selectedFlavor = selectedFlavorRaw as (typeof flavors)[number];
+        }
+        if (!selectedFlavor) {
+            console.error("Invalid selection. Exiting.");
+            return;
+        }
+
+        const existingAliases = Object.keys(config?.providers || {}).filter(
+            (name) => config?.providers?.[name]?.flavor === selectedFlavor,
+        );
+        let providerName: string | null = null;
+        let chooseMode: "existing" | "add" = "add";
+        if (existingAliases.length > 0) {
+            const listLines = existingAliases
+                .map((alias, idx) => `  ${idx + 1}. use existing: ${alias}`)
+                .join("\n");
+            const addIndex = existingAliases.length + 1;
+            const providerSelect = await rl.question(
+                `Found existing providers for ${selectedFlavor}:\n${listLines}\n  ${addIndex}. add new\nEnter number or name/alias [${addIndex}]: `,
+            );
+            const sel = providerSelect.trim();
+            if (sel === "" || sel.toLowerCase() === "add" || sel.toLowerCase() === "new") {
+                chooseMode = "add";
+            } else if (/^\d+$/.test(sel)) {
+                const idx = parseInt(sel, 10) - 1;
+                if (idx >= 0 && idx < existingAliases.length) {
+                    providerName = existingAliases[idx];
+                    chooseMode = "existing";
+                } else if (idx === existingAliases.length) {
+                    chooseMode = "add";
+                } else {
+                    console.error("Invalid selection. Exiting.");
+                    return;
+                }
+            } else if (existingAliases.includes(sel)) {
+                providerName = sel;
+                chooseMode = "existing";
+            } else {
+                console.error("Invalid selection. Exiting.");
+                return;
+            }
+        }
+        if (chooseMode === "existing" && !providerName) {
+            console.error("No provider selected. Exiting.");
+            return;
+        }
+
+        if (chooseMode === "existing") {
+            const modelDefault =
+                currentProvider === providerName && currentModel
+                    ? currentModel
+                    : defaultModels[selectedFlavor];
+            const modelAns = await rl.question(
+                `Specify model for ${selectedFlavor} [${modelDefault}]: `,
+            );
+            const model = modelAns.trim() || modelDefault;
+
+            const newConfig = {
+                providers: { ...(config?.providers || {}) },
+                defaults: {
+                    provider: providerName!,
+                    model,
+                },
+            };
+            await updateModelConfig(newConfig as any);
+            console.log(`Model configuration updated. Provider set to '${providerName}'.`);
+            return;
+        }
+
+        const providerNameAns = await rl.question(
+            `Enter a name/alias for this provider [${selectedFlavor}]: `,
+        );
+        providerName = providerNameAns.trim() || selectedFlavor;
+
+        const baseUrlDefault = defaultBaseUrls[selectedFlavor] || "";
+        const baseUrlAns = await rl.question(
+            `Enter baseURL for ${selectedFlavor} [${baseUrlDefault}]: `,
+        );
+        const baseURL = (baseUrlAns.trim() || baseUrlDefault) || undefined;
+
+        const apiKeyAns = await rl.question(
+            `Enter API key for ${selectedFlavor} (leave blank to skip): `,
+        );
+        const apiKey = apiKeyAns.trim() || undefined;
+
+        const modelDefault = defaultModels[selectedFlavor];
+        const modelAns = await rl.question(
+            `Specify model for ${selectedFlavor} [${modelDefault}]: `,
+        );
+        const model = modelAns.trim() || modelDefault;
+
+        const mergedProviders = {
+            ...(config?.providers || {}),
+            [providerName]: {
+                flavor: selectedFlavor,
+                ...(apiKey ? { apiKey } : {}),
+                ...(baseURL ? { baseURL } : {}),
+            },
+        };
+        const newConfig = {
+            providers: mergedProviders,
+            defaults: {
+                provider: providerName,
+                model,
+            },
+        };
+
+        await updateModelConfig(newConfig as any);
+        console.log(`Model configuration updated. Provider '${providerName}' ${config?.providers?.[providerName] ? "overwritten" : "added"}.`);
+    } finally {
+        rl.close();
+    }
 }
