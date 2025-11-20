@@ -1,16 +1,20 @@
-import z from "zod";
+import { z } from "zod";
 
-const StdioMcpServerConfig = z.object({
+export const StdioMcpServerConfig = z.object({
+    type: z.literal("stdio").optional(),
     command: z.string(),
     args: z.array(z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
 });
 
-const HttpMcpServerConfig = z.object({
+export const HttpMcpServerConfig = z.object({
+    type: z.literal("http").optional(),
     url: z.string(),
     headers: z.record(z.string(), z.string()).optional(),
 });
 
+export const McpServerDefinition = z.union([StdioMcpServerConfig, HttpMcpServerConfig]);
+
 export const McpServerConfig = z.object({
-    mcpServers: z.record(z.string(), z.union([StdioMcpServerConfig, HttpMcpServerConfig])),
+    mcpServers: z.record(z.string(), McpServerDefinition),
 });

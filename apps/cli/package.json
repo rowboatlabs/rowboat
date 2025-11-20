@@ -10,7 +10,8 @@
   },
   "files": [
     "dist",
-    "bin"
+    "bin",
+    "examples"
   ],
   "bin": {
     "rowboatx": "bin/app.js"
