@@ -1,12 +1,14 @@
 import path from "path";
 import fs from "fs";
 import { McpServerConfig } from "../entities/mcp.js";
-import { ModelConfig as ModelConfigT } from "../entities/models.js";
+import { ModelConfig } from "../entities/models.js";
 import { z } from "zod";
 import { homedir } from "os";
 
 // Resolve app root relative to compiled file location (dist/...)
 export const WorkDir = path.join(homedir(), ".rowboat");
+
+let modelConfig: z.infer<typeof ModelConfig> | null = null;
 
 const baseMcpConfig: z.infer<typeof McpServerConfig> = {
     mcpServers: {
@@ -26,38 +28,10 @@ const baseMcpConfig: z.infer<typeof McpServerConfig> = {
     }
 };
 
-const baseModelConfig: z.infer<typeof ModelConfigT> = {
-    providers: {
-        openai: {
-            flavor: "openai",
-        },
-        anthropic: {
-            flavor: "anthropic",
-        },
-        google: {
-            flavor: "google",
-        },
-        ollama: {
-            flavor: "ollama",
-        }
-    },
-    defaults: {
-        provider: "openai",
-        model: "gpt-5.1",
-    }
-};
-
 function ensureMcpConfig() {
     const configPath = path.join(WorkDir, "config", "mcp.json");
     if (!fs.existsSync(configPath)) {
         fs.writeFileSync(configPath, JSON.stringify(baseMcpConfig, null, 2));
-    }
-}
-
-function ensureModelConfig() {
-    const configPath = path.join(WorkDir, "config", "models.json");
-    if (!fs.existsSync(configPath)) {
-        fs.writeFileSync(configPath, JSON.stringify(baseModelConfig, null, 2));
     }
 }
 
@@ -67,10 +41,7 @@ function ensureDirs() {
     ensure(path.join(WorkDir, "agents"));
     ensure(path.join(WorkDir, "config"));
     ensureMcpConfig();
-    ensureModelConfig();
 }
-
-ensureDirs();
 
 function loadMcpServerConfig(): z.infer<typeof McpServerConfig> {
     const configPath = path.join(WorkDir, "config", "mcp.json");
@@ -79,13 +50,27 @@ function loadMcpServerConfig(): z.infer<typeof McpServerConfig> {
     return McpServerConfig.parse(JSON.parse(config));
 }
 
-function loadModelConfig(): z.infer<typeof ModelConfigT> {
+export async function getModelConfig(): Promise<z.infer<typeof ModelConfig> | null> {
+    if (modelConfig) {
+        return modelConfig;
+    }
     const configPath = path.join(WorkDir, "config", "models.json");
-    if (!fs.existsSync(configPath)) return baseModelConfig;
-    const config = fs.readFileSync(configPath, "utf8");
-    return ModelConfigT.parse(JSON.parse(config));
+    try {
+        const config = await fs.promises.readFile(configPath, "utf8");
+        modelConfig = ModelConfig.parse(JSON.parse(config));
+        return modelConfig;
+    } catch (error) {
+        console.error(`Warning! model config not found!`);
+        return null;
+    }
 }
 
+export async function updateModelConfig(config: z.infer<typeof ModelConfig>) {
+    modelConfig = config;
+    const configPath = path.join(WorkDir, "config", "models.json");
+    await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
+}
+
+ensureDirs();
 const { mcpServers } = loadMcpServerConfig();
 export const McpServers = mcpServers;
-export const ModelConfig = loadModelConfig();

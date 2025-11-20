@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { app } from '../dist/app.js';
+import { app, modelConfig } from '../dist/app.js';
 
 yargs(hideBin(process.argv))
 
@@ -34,6 +34,14 @@ yargs(hideBin(process.argv))
                 input: argv.input,
                 noInteractive: argv.noInteractive,
             });
+        }
+    )
+    .command(
+        "model-config",
+        "Select model",
+        (y) => y,
+        (argv) => {
+            modelConfig();
         }
     )
     .command(
