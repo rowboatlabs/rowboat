@@ -2,12 +2,21 @@ import { AgentState, streamAgent } from "./application/lib/agent.js";
 import { StreamRenderer } from "./application/lib/stream-renderer.js";
 import { stdin as input, stdout as output } from "node:process";
 import fs from "fs";
+import { promises as fsp } from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { WorkDir, getModelConfig, updateModelConfig } from "./application/config/config.js";
 import { RunEvent } from "./application/entities/run-events.js";
 import { createInterface, Interface } from "node:readline/promises";
 import { ToolCallPart } from "./application/entities/message.js";
+import { Agent } from "./application/entities/agent.js";
+import { McpServerConfig, McpServerDefinition } from "./application/entities/mcp.js";
 import { z } from "zod";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PackageRoot = path.resolve(__dirname, "..");
+const ExamplesDir = path.join(PackageRoot, "examples");
 
 export async function updateState(agent: string, runId: string) {
     const state = new AgentState(agent, runId);
@@ -386,4 +395,126 @@ function renderCurrentModel(provider: string, flavor: string, model: string) {
     console.log(`- provider: ${provider}${flavor ? ` (${flavor})` : ""}`);
     console.log(`- model: ${model}`);
     console.log("");
+}
+
+const ExampleSchema = z.object({
+    id: z.string().min(1),
+    "post-install-instructions": z.string().optional(),
+    description: z.string().optional(),
+    entryAgent: z.string().optional(),
+    agents: z.array(Agent).min(1),
+    mcpServers: z.record(z.string(), McpServerDefinition).optional(),
+}).refine(
+    (data) => !data.entryAgent || data.agents.some((agent) => agent.name === data.entryAgent),
+    {
+        message: "entryAgent must reference one of the defined agents",
+        path: ["entryAgent"],
+    },
+);
+
+async function readExampleFile(exampleName: string): Promise<string> {
+    const examplePath = path.join(ExamplesDir, `${exampleName}.json`);
+    try {
+        return await fsp.readFile(examplePath, "utf8");
+    } catch (error: any) {
+        if (error?.code === "ENOENT") {
+            const availableExamples = await listAvailableExamples();
+            const listMessage = availableExamples.length
+                ? `Available examples: ${availableExamples.join(", ")}`
+                : "No packaged examples were found.";
+            throw new Error(`Unknown example '${exampleName}'. ${listMessage}`);
+        }
+        // Re-throw other errors (permission issues, etc.)
+        throw error;
+    }
+}
+
+async function listAvailableExamples(): Promise<string[]> {
+    try {
+        const entries = await fsp.readdir(ExamplesDir);
+        return entries
+            .filter((entry) => entry.endsWith(".json"))
+            .map((entry) => entry.replace(/\.json$/, ""))
+            .sort();
+    } catch {
+        return [];
+    }
+}
+
+async function writeAgents(agents: z.infer<typeof Agent>[]) {
+    await fsp.mkdir(path.join(WorkDir, "agents"), { recursive: true });
+    await Promise.all(
+        agents.map(async (agent) => {
+            const agentPath = path.join(WorkDir, "agents", `${agent.name}.json`);
+            await fsp.writeFile(agentPath, JSON.stringify(agent, null, 2), "utf8");
+        }),
+    );
+}
+
+async function mergeMcpServers(servers: Record<string, z.infer<typeof McpServerDefinition>>) {
+    const result = { added: [] as string[], skipped: [] as string[] };
+    
+    // Early return if no servers to process
+    if (!servers || Object.keys(servers).length === 0) {
+        return result;
+    }
+    
+    const configPath = path.join(WorkDir, "config", "mcp.json");
+    
+    // Read existing config
+    let currentConfig: z.infer<typeof McpServerConfig> = { mcpServers: {} };
+    try {
+        const contents = await fsp.readFile(configPath, "utf8");
+        currentConfig = McpServerConfig.parse(JSON.parse(contents));
+    } catch (error: any) {
+        if (error?.code !== "ENOENT") {
+            throw new Error(`Unable to read MCP config: ${error.message ?? error}`);
+        }
+        // File doesn't exist yet, use empty config
+    }
+    
+    // Merge servers
+    for (const [name, definition] of Object.entries(servers)) {
+        if (currentConfig.mcpServers[name]) {
+            result.skipped.push(name);
+        } else {
+            currentConfig.mcpServers[name] = definition;
+            result.added.push(name);
+        }
+    }
+    
+    // Only write if we added new servers
+    if (result.added.length > 0) {
+        await fsp.mkdir(path.dirname(configPath), { recursive: true });
+        await fsp.writeFile(configPath, JSON.stringify(currentConfig, null, 2), "utf8");
+    }
+    
+    return result;
+}
+
+export async function importExample(exampleName: string) {
+    const raw = await readExampleFile(exampleName);
+    const parsed = ExampleSchema.parse(JSON.parse(raw));
+    const entryAgentName = parsed.entryAgent ?? parsed.agents[0]?.name;
+    if (!entryAgentName) {
+        throw new Error(`Example '${exampleName}' does not define any agents to run.`);
+    }
+    const postInstallInstructions = parsed["post-install-instructions"];
+    await writeAgents(parsed.agents);
+    let serverMerge = { added: [] as string[], skipped: [] as string[] };
+    if (parsed.mcpServers) {
+        serverMerge = await mergeMcpServers(parsed.mcpServers);
+    }
+    return {
+        id: parsed.id,
+        entryAgent: entryAgentName,
+        importedAgents: parsed.agents.map((agent) => agent.name),
+        addedServers: serverMerge.added,
+        skippedServers: serverMerge.skipped,
+        postInstallInstructions,
+    };
+}
+
+export async function listExamples() {
+    return listAvailableExamples();
 }
