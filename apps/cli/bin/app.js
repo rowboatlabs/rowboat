@@ -37,7 +37,7 @@ yargs(hideBin(process.argv))
         }
     )
     .command(
-        "sync-example <example>",
+        "import-example <example>",
         "Import an example workflow by name",
         (y) => y.positional("example", {
             type: "string",
@@ -53,7 +53,7 @@ yargs(hideBin(process.argv))
         }
     )
     .command(
-        "list-example",
+        "list-examples",
         "List all available example workflows",
         (y) => y,
         async () => {
