@@ -1,14 +1,16 @@
 import z from "zod";
 
+export const Flavor = z.enum([
+    "anthropic",
+    "google",
+    "ollama",
+    "openai",
+    "openai-compatible",
+    "openrouter",
+]);
+
 export const Provider = z.object({
-    flavor: z.enum([
-        "anthropic",
-        "google",
-        "ollama",
-        "openai",
-        "openai-compatible",
-        "openrouter",
-    ]),
+    flavor: Flavor,
     apiKey: z.string().optional(),
     baseURL: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
