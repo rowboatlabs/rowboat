@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Filter, ObjectId } from "mongodb";
 import { db } from "@/app/lib/mongodb";
-import { CreateRuleSchema, IScheduledJobRulesRepository, ListedRuleItem, UpdateJobSchema } from "@/src/application/repositories/scheduled-job-rules.repository.interface";
+import { CreateRuleSchema, IScheduledJobRulesRepository, ListedRuleItem, UpdateJobSchema, UpdateScheduledRuleSchema } from "@/src/application/repositories/scheduled-job-rules.repository.interface";
 import { ScheduledJobRule } from "@/src/entities/models/scheduled-job-rule";
 import { NotFoundError } from "@/src/entities/errors/common";
 import { PaginatedList } from "@/src/entities/common/paginated-list";
@@ -133,6 +133,41 @@ export class MongoDBScheduledJobRulesRepository implements IScheduledJobRulesRep
 
         if (!result) {
             return null;
+        }
+
+        return this.convertDocToModel(result);
+    }
+
+    /**
+     * Reconfigures a scheduled job rule's input and next run time.
+     */
+    async updateRule(id: string, data: z.infer<typeof UpdateScheduledRuleSchema>): Promise<z.infer<typeof ScheduledJobRule>> {
+        const scheduledDate = new Date(data.scheduledTime);
+        const nextRunAtSeconds = Math.floor(scheduledDate.getTime() / 1000);
+        const nextRunAt = Math.floor(nextRunAtSeconds / 60) * 60;
+        const now = new Date().toISOString();
+
+        const result = await this.collection.findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            {
+                $set: {
+                    input: data.input,
+                    nextRunAt,
+                    status: "pending",
+                    workerId: null,
+                    lastWorkerId: null,
+                    updatedAt: now,
+                },
+                $unset: {
+                    output: "",
+                    processedAt: "",
+                },
+            },
+            { returnDocument: "after" },
+        );
+
+        if (!result) {
+            throw new NotFoundError(`Scheduled job rule ${id} not found`);
         }
 
         return this.convertDocToModel(result);

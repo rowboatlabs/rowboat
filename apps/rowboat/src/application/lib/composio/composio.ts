@@ -9,6 +9,12 @@ export const composio = new Composio({
     apiKey: COMPOSIO_API_KEY,
 });
 
+// Warn if API key is missing, helps diagnose HTML error pages from auth proxies
+if (!process.env.COMPOSIO_API_KEY || COMPOSIO_API_KEY === 'test') {
+    const warnLogger = new PrefixLogger('composioApiCall');
+    warnLogger.log('WARNING: COMPOSIO_API_KEY is not set or using default placeholder. Requests may fail with non-JSON HTML error pages.');
+}
+
 export async function composioApiCall<T extends z.ZodTypeAny>(
     schema: T,
     url: string,
@@ -32,11 +38,36 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
         });
         const duration = Date.now() - then;
         logger.log(`Took: ${duration}ms`);
-        const data = await response.json();
-        if ('error' in data) {
-            const response = ZErrorResponse.parse(data);
-            throw new Error(`(code: ${response.error.error_code}): ${response.error.message}: ${response.error.suggested_fix}: ${response.error.errors?.join(', ')}`);
+
+        const contentType = response.headers.get('content-type') || '';
+        const rawText = await response.text();
+
+        // Helpful logging when non-OK or non-JSON
+        if (!response.ok || !contentType.includes('application/json')) {
+            logger.log(`Non-JSON or non-OK response`, {
+                status: response.status,
+                statusText: response.statusText,
+                contentType,
+                preview: rawText.slice(0, 200),
+            });
         }
+
+        if (!response.ok) {
+            throw new Error(`Composio API error: ${response.status} ${response.statusText} (url: ${url}) body: ${rawText.slice(0, 500)}`);
+        }
+
+        let data: unknown;
+        try {
+            data = contentType.includes('application/json') ? JSON.parse(rawText) : (() => { throw new Error('Expected JSON but received non-JSON response'); })();
+        } catch (e: any) {
+            throw new Error(`Failed to parse Composio JSON response (url: ${url}): ${e?.message || e}. Body preview: ${rawText.slice(0, 500)}`);
+        }
+
+        if (typeof data === 'object' && data !== null && 'error' in (data as any)) {
+            const parsedError = ZErrorResponse.parse(data);
+            throw new Error(`(code: ${parsedError.error.error_code}): ${parsedError.error.message}: ${parsedError.error.suggested_fix}: ${parsedError.error.errors?.join(', ')}`);
+        }
+
         return schema.parse(data);
     } catch (error) {
         logger.log(`Error:`, error);
@@ -74,13 +105,111 @@ export async function listTools(toolkitSlug: string, searchQuery: string | null 
         url.searchParams.set("cursor", cursor);
     }
 
-    // fetch
-    return composioApiCall(ZListResponse(ZTool), url.toString());
+    // First get the tools list response
+    const toolsResponse = await fetch(url.toString(), {
+        headers: {
+            "x-api-key": COMPOSIO_API_KEY,
+        },
+    });
+    
+    if (!toolsResponse.ok) {
+        throw new Error(`Failed to fetch tools list: ${toolsResponse.status} ${toolsResponse.statusText}`);
+    }
+    
+    const toolsData = await toolsResponse.json();
+    
+    // Check for error response
+    if ('error' in toolsData) {
+        const response = ZErrorResponse.parse(toolsData);
+        throw new Error(`(code: ${response.error.error_code}): ${response.error.message}: ${response.error.suggested_fix}: ${response.error.errors?.join(', ')}`);
+    }
+    
+    // Get toolkit data to compute no_auth for all tools
+    const toolkitUrl = new URL(`${BASE_URL}/toolkits/${toolkitSlug}`);
+    const toolkitResponse = await fetch(toolkitUrl.toString(), {
+        headers: {
+            "x-api-key": COMPOSIO_API_KEY,
+        },
+    });
+    
+    if (!toolkitResponse.ok) {
+        throw new Error(`Failed to fetch toolkit: ${toolkitResponse.status} ${toolkitResponse.statusText}`);
+    }
+    
+    const toolkitData = await toolkitResponse.json();
+    
+    // Compute no_auth from toolkit data
+    const no_auth = toolkitData.composio_managed_auth_schemes?.includes('NO_AUTH') || 
+                    toolkitData.auth_config_details?.some((config: any) => config.mode === 'NO_AUTH') || 
+                    false;
+    
+    // Enrich all tools in the list with computed no_auth
+    const enrichedToolsData = {
+        ...toolsData,
+        items: toolsData.items.map((tool: any) => ({
+            ...tool,
+            no_auth
+        }))
+    };
+    
+    // Now parse with our schema
+    return ZListResponse(ZTool).parse(enrichedToolsData);
 }
 
 export async function getTool(toolSlug: string): Promise<z.infer<typeof ZTool>> {
     const url = new URL(`${BASE_URL}/tools/${toolSlug}`);
-    return composioApiCall(ZTool, url.toString());
+    
+    // First get the tool response
+    const toolResponse = await fetch(url.toString(), {
+        headers: {
+            "x-api-key": COMPOSIO_API_KEY,
+        },
+    });
+    
+    if (!toolResponse.ok) {
+        throw new Error(`Failed to fetch tool: ${toolResponse.status} ${toolResponse.statusText}`);
+    }
+    
+    const toolData = await toolResponse.json();
+    
+    // Check for error response
+    if ('error' in toolData) {
+        const response = ZErrorResponse.parse(toolData);
+        throw new Error(`(code: ${response.error.error_code}): ${response.error.message}: ${response.error.suggested_fix}: ${response.error.errors?.join(', ')}`);
+    }
+    
+    // Get toolkit data to compute no_auth
+    const toolkitSlug = toolData.toolkit?.slug;
+    if (!toolkitSlug) {
+        throw new Error(`Tool response missing toolkit slug: ${JSON.stringify(toolData)}`);
+    }
+    
+    const toolkitUrl = new URL(`${BASE_URL}/toolkits/${toolkitSlug}`);
+    const toolkitResponse = await fetch(toolkitUrl.toString(), {
+        headers: {
+            "x-api-key": COMPOSIO_API_KEY,
+        },
+    });
+    
+    if (!toolkitResponse.ok) {
+        throw new Error(`Failed to fetch toolkit: ${toolkitResponse.status} ${toolkitResponse.statusText}`);
+    }
+    
+    const toolkitData = await toolkitResponse.json();
+    
+    // Compute no_auth from toolkit data
+    const no_auth = toolkitData.composio_managed_auth_schemes?.includes('NO_AUTH') || 
+                    toolkitData.auth_config_details?.some((config: any) => config.mode === 'NO_AUTH') || 
+                    false;
+    
+    // Inject computed no_auth into tool data
+    const enrichedToolData = {
+        ...toolData,
+        no_auth
+    };
+    
+    // Now parse with our schema
+    return ZTool.parse(enrichedToolData);
 }
 
 export async function listAuthConfigs(toolkitSlug: string, cursor: string | null = null, managedOnly: boolean = false): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZAuthConfig>>>> {

@@ -85,11 +85,11 @@ export function ComposeBoxCopilot({
                           group-hover:opacity-100 transition-opacity">
                 Press ⌘ + Enter to send
             </div>
-            {/* Outer container with padding */}
-            <div className="rounded-2xl border-[1.5px] border-gray-200 dark:border-[#2a2d31] p-3 relative 
+            {/* Outer container without external padding; textarea grows to fill */}
+            <div className="rounded-2xl border-[1.5px] border-gray-200 dark:border-[#2a2d31] relative 
                           bg-white dark:bg-[#1e2023] flex items-end gap-2">
                 {/* Textarea */}
-                <div className="flex-1">
+                <div className="flex-1 p-3">
                     <Textarea
                         ref={textareaRef}
                         value={input}
@@ -98,7 +98,7 @@ export function ComposeBoxCopilot({
                         onFocus={handleFocus}
                         onBlur={() => setIsFocused(false)}
                         disabled={loading}
-                        placeholder="Type a message..."
+                        placeholder="Ask Skipper to build or update your assistant..."
                         autoResize={true}
                         maxHeight={200}
                         className={`
@@ -132,7 +132,7 @@ export function ComposeBoxCopilot({
                         scale-100 hover:scale-105 active:scale-95
                         disabled:opacity-50 disabled:scale-95
                         hover:shadow-md dark:hover:shadow-indigo-950/10
-                        mb-0.5
+                        mb-1.5 mr-2
                     `}
                 >
                     {loading ? (
@@ -268,7 +268,7 @@ function CopilotStatusBar({
         // Show real button when ready
         return (
             <button
-                onClick={handleApplyAll}
+                onClick={() => { void handleApplyAll?.(); }}
                 disabled={allApplied}
                 className={`flex items-center gap-2 px-3 py-1 rounded-full font-medium text-xs transition-colors duration-200
                     ${

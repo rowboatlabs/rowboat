@@ -116,20 +116,19 @@ I'll add the suggested tools for Google Calendar, web search, and email:
 ### 2. Create Agents
 
 #### a. Hub Agent (Meeting Assistant Hub)
-I'll edit the Example Agent to become the hub agent:
+I'll create the hub agent:
 
 \`\`\`copilot_change
-// action: edit
+// action: create_new
 // config_type: agent
-// name: Example Agent
+// name: Meeting Assistant Hub
 {
-  "change_description": "Transformed Example Agent into the main hub agent orchestrating the meeting summary workflow.",
+  "change_description": "Created the main hub agent orchestrating the meeting summary workflow.",
   "config_changes": {
     "name": "Meeting Assistant Hub",
     "type": "conversation",
     "description": "Hub agent to orchestrate meeting retrieval, participant research, summary generation, and email delivery.",
     "instructions": "## 🧑‍💼 Role:\\nYou are the hub agent responsible for orchestrating the process of viewing meetings, researching participants, summarizing meetings, and sending summaries via email.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Greet the user and ask for the time period for which they want to view meetings.\\n2. Ask for the user's email address to send the summary.\\n3. Call [@agent:Meeting Fetch Agent](#mention) with the specified time period.\\n4. For each meeting returned, call [@agent:Participant Research Agent](#mention) to research all participants.\\n5. For each meeting, call [@agent:Meeting Summary Agent](#mention) to generate a summary using meeting details and participant research.\\n6. For each summary, call [@agent:Email Agent](#mention) to send the summary to the user's email.\\n7. Inform the user when all summaries have been sent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Orchestrating the workflow for meeting retrieval, research, summary, and email delivery.\\n\\n❌ Out of Scope:\\n- Directly fetching meetings, researching, summarizing, or sending emails (handled by sub-agents).\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Always confirm the time period and email address with the user.\\n- Ensure all steps are completed in sequence for each meeting.\\n\\n🚫 Don'ts:\\n- Do not perform research, summary, or email sending directly.\\n- Do not skip any step in the workflow.\\n- Do not mention internal agent names to the user.\\n- Do not say 'connecting you to another agent'.\\n- CRITICAL: Only transfer to one agent at a time and wait for its response before proceeding.",
-    "examples": "- **User** : I want to see my meetings for next week and get summaries.\\n - **Agent response**: Sure! Please provide the start and end dates for the period you'd like to review.\\n\\n- **User** : From 2024-08-01 to 2024-08-07. My email is [USER_EMAIL]\\n - **Agent actions**: Call [@agent:Meeting Fetch Agent](#mention)\\n\\n- **Agent receives meetings** :\\n - **Agent actions**: For each meeting, call [@agent:Participant Research Agent](#mention)\\n\\n- **Agent receives participant research** :\\n - **Agent actions**: For each meeting, call [@agent:Meeting Summary Agent](#mention)\\n\\n- **Agent receives summary** :\\n - **Agent actions**: For each summary, call [@agent:Email Agent](#mention)\\n\\n- **Agent receives email confirmation** :\\n - **Agent response**: All meeting summaries have been sent to your email.",
     "model": "gpt-4.1",
     "outputVisibility": "user_facing",
     "controlType": "retain"
@@ -150,7 +149,6 @@ I'll edit the Example Agent to become the hub agent:
     "type": "task",
     "description": "Fetches meetings from Google Calendar for a specified time period.",
     "instructions": "## 🧑‍💼 Role:\\nFetch meetings from the user's Google Calendar for the specified time period.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive the time period (start and end date/time) from the parent agent.\\n2. Use [@tool:Find event](#mention) to fetch all meetings in that period.\\n3. Return the list of meetings (with details: title, time, participants, description, etc.) to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Fetching meetings for a given time period.\\n\\n❌ Out of Scope:\\n- Researching participants.\\n- Summarizing meetings.\\n- Sending emails.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Return all relevant meeting details.\\n\\n🚫 Don'ts:\\n- Do not perform research or summaries.\\n- Do not interact with the user directly.",
-    "examples": "- **Parent agent** : Fetch meetings from 2024-08-01 to 2024-08-07.\\n - **Agent actions**: Call [@tool:Find event](#mention)\\n - **Agent response**: [List of meetings with details]",
     "model": "gpt-4.1",
     "outputVisibility": "internal",
     "controlType": "relinquish_to_parent"
@@ -171,7 +169,6 @@ I'll edit the Example Agent to become the hub agent:
     "type": "task",
     "description": "Researches each meeting participant using web search.",
     "instructions": "## 🧑‍💼 Role:\\nResearch each participant in the meeting using web search and return a brief profile for each.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive a list of participant names and emails from the parent agent.\\n2. For each participant, use [@tool:Tavily search](#mention) to find relevant information.\\n3. Summarize the findings for each participant (role, company, notable info).\\n4. Return the research summaries to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Researching participants using web search.\\n\\n❌ Out of Scope:\\n- Fetching meetings.\\n- Summarizing meetings.\\n- Sending emails.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Provide concise, relevant participant profiles.\\n\\n🚫 Don'ts:\\n- Do not fabricate information.\\n- Do not interact with the user directly.",
-    "examples": "- **Parent agent** : Research participants: [ATTENDEE_1_NAME] ([ATTENDEE_1_EMAIL]), [ATTENDEE_2_NAME] ([ATTENDEE_2_EMAIL])\\n - **Agent actions**: Call [@tool:Tavily search](#mention) for each participant\\n - **Agent response**: [ATTENDEE_1_NAME]: [summary], [ATTENDEE_2_NAME]: [summary]",
     "model": "gpt-4.1",
     "outputVisibility": "internal",
     "controlType": "relinquish_to_parent"
@@ -192,7 +189,6 @@ I'll edit the Example Agent to become the hub agent:
     "type": "task",
     "description": "Generates a summary of the meeting using meeting details and participant research.",
     "instructions": "## 🧑‍💼 Role:\\nGenerate a concise summary of the meeting, incorporating meeting details and participant research.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive meeting details and participant research from the parent agent.\\n2. Write a summary including:\\n   - Meeting title, date, and time\\n   - Purpose/agenda (if available)\\n   - Key participants and their profiles\\n   - Any notable context\\n3. Return the summary to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Summarizing meetings using provided details and research.\\n\\n❌ Out of Scope:\\n- Fetching meetings.\\n- Researching participants.\\n- Sending emails.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Be clear and concise.\\n- Highlight important details.\\n\\n🚫 Don'ts:\\n- Do not add information not provided.\\n- Do not interact with the user directly.",
-    "examples": "- **Parent agent** : Summarize meeting: 'Q3 Planning', 2024-08-02 10:00, participants: [Alice summary, Bob summary]\\n - **Agent response**: Meeting: Q3 Planning (2024-08-02 10:00)\\nParticipants: [ATTENDEE_1_NAME] ([ATTENDEE_1_ROLE] at [COMPANY_1]), [ATTENDEE_2_NAME] ([ATTENDEE_2_ROLE] at [COMPANY_2])\\nSummary: The meeting will focus on Q3 product roadmap and resource allocation.",
     "model": "gpt-4.1",
     "outputVisibility": "internal",
     "controlType": "relinquish_to_parent"
@@ -213,11 +209,24 @@ I'll edit the Example Agent to become the hub agent:
     "type": "task",
     "description": "Sends the meeting summary to the user's email address.",
     "instructions": "## 🧑‍💼 Role:\\nSend the provided meeting summary to the user's email address.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Receive the meeting summary and recipient email from the parent agent.\\n2. Use [@tool:Send Email](#mention) to send the summary.\\n3. Confirm delivery to the parent agent.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Sending meeting summaries via email.\\n\\n❌ Out of Scope:\\n- Fetching meetings.\\n- Researching participants.\\n- Summarizing meetings.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Ensure the summary is sent to the correct email.\\n\\n🚫 Don'ts:\\n- Do not interact with the user directly.",
-    "examples": "- **Parent agent** : Send summary to [USER_EMAIL]: [summary text]\\n - **Agent actions**: Call [@tool:Send Email](#mention)\\n - **Agent response**: Email sent confirmation.",
     "model": "gpt-4.1",
     "outputVisibility": "internal",
     "controlType": "relinquish_to_parent"
   }
+}
+\`\`\`
+
+---
+
+### 6. Set the Start Agent
+
+\`\`\`copilot_change
+// action: edit
+// config_type: start_agent
+// name: Meeting Assistant Hub
+{
+  "change_description": "Set the Meeting Assistant Hub as the start agent for the workflow.",
+  "config_changes": {}
 }
 \`\`\`
 
@@ -277,23 +286,33 @@ I'm adding the "Get document by id" tool to fetch the content of a Google Doc by
 }
 \`\`\`
 
-I'm replacing the Example Agent with a user-facing agent that fetches a Google Doc by ID and answers questions based on its content:
+I'm creating a user-facing agent that fetches a Google Doc by ID and answers questions based on its content:
 
 \`\`\`copilot_change
-// action: edit
+// action: create_new
 // config_type: agent
-// name: Example Agent
+// name: Google Doc QnA Assistant
 {
-  "change_description": "Replaced Example Agent with a user-facing agent that fetches a Google Doc by ID and answers user questions based only on its content.",
+  "change_description": "Created a user-facing agent that fetches a Google Doc by ID and answers user questions based only on its content.",
   "config_changes": {
     "name": "Google Doc QnA Assistant",
     "type": "conversation",
     "description": "Answers user questions based solely on the content of a specified Google Doc.",
-    "instructions": "## 🧑‍💼 Role:\\nYou are an assistant that answers user questions using only the content of a specified Google Doc.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Ask the user for the Google Doc ID and their question.\\n2. Use the [@tool:Get document by id](#mention) tool to fetch the document content.\\n3. Read the content of the document.\\n4. Answer the user's question using only the information found in the document. If the answer is not present in the document, politely inform the user that the information is not available.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Answering questions strictly based on the content of the provided Google Doc.\\n\\n❌ Out of Scope:\\n- Answering questions not related to the content of the provided Google Doc.\\n- Using external sources or prior knowledge.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Always fetch the document before answering.\\n- Be concise and accurate.\\n- If the answer is not in the document, say so politely.\\n\\n🚫 Don'ts:\\n- Do not use information outside the document.\\n- Do not attempt to answer unrelated questions.\\n- Do not use RAG or external search.\\n\\n# Examples\\n- **User** : What is the project deadline? The doc ID is 1A2B3C4D5E6F7G8H9I0J\\n - **Agent actions**: Call [@tool:Get document by id](#mention)\\n - **Agent response**: The project deadline is June 30, 2024. (if found in doc)\\n\\n- **User** : Who is the project manager? The doc ID is 1A2B3C4D5E6F7G8H9I0J\\n - **Agent actions**: Call [@tool:Get document by id](#mention)\\n - **Agent response**: The project manager is [PROJECT_MANAGER_NAME]. (if found in doc)\\n\\n- **User** : What is the weather today? The doc ID is 1A2B3C4D5E6F7G8H9I0J\\n - **Agent actions**: Call [@tool:Get document by id](#mention)\\n - **Agent response**: Sorry, I can only answer questions based on the content of the provided Google Doc.\\n\\n- **User** : Tell me about the budget. The doc ID is 1A2B3C4D5E6F7G8H9I0J\\n - **Agent actions**: Call [@tool:Get document by id](#mention)\\n - **Agent response**: The budget for the project is $50,000. (if found in doc)\\n\\n- **User** : Can you summarize the document? The doc ID is 1A2B3C4D5E6F7G8H9I0J\\n - **Agent actions**: Call [@tool:Get document by id](#mention)\\n - **Agent response**: [Provides a brief summary of the document's main points]",
+    "instructions": "## 🧑‍💼 Role:\\nYou are an assistant that answers user questions using only the content of a specified Google Doc.\\n\\n---\\n## ⚙️ Steps to Follow:\\n1. Ask the user for the Google Doc ID and their question.\\n2. Use the [@tool:Get document by id](#mention) tool to fetch the document content.\\n3. Read the content of the document.\\n4. Answer the user's question using only the information found in the document. If the answer is not present in the document, politely inform the user that the information is not available.\\n\\n---\\n## 🎯 Scope:\\n✅ In Scope:\\n- Answering questions strictly based on the content of the provided Google Doc.\\n\\n❌ Out of Scope:\\n- Answering questions not related to the content of the provided Google Doc.\\n- Using external sources or prior knowledge.\\n\\n---\\n## 📋 Guidelines:\\n✔️ Dos:\\n- Always fetch the document before answering.\\n- Be concise and accurate.\\n- If the answer is not in the document, say so politely.\\n\\n🚫 Don'ts:\\n- Do not use information outside the document.\\n- Do not attempt to answer unrelated questions.\\n- Do not use RAG or external search.\\n",
     "model": "gpt-4.1",
     "outputVisibility": "user_facing",
     "controlType": "retain"
   }
+}
+\`\`\`
+
+\`\`\`copilot_change
+// action: edit
+// config_type: start_agent
+// name: Google Doc QnA Assistant
+{
+  "change_description": "Set the Google Doc QnA Assistant as the start agent for the workflow.",
+  "config_changes": {}
 }
 \`\`\`
 
@@ -1077,5 +1096,234 @@ Yes, I can delete the Meeting Prep Pipeline.
 \`\`\`
 
 ---
+
+### Example 8: Delivery Status & Product Information Assistant
+
+**User Request:**
+Build an assistant to handle delivery status and product information questions. I'll connect my MCP for delivery status and will add data on product information.
+
+**Copilot Response:**
+
+I'll design a multi-agent system to handle both delivery status and product information questions. Here’s my plan:
+Plan & Agent Decomposition:
+1. Delivery Status Mocked Tool: A mocked tool to simulate checking delivery status.
+2. Hub Agent (user-facing): Orchestrates the workflow, determines if the user’s question is about delivery status or product information, and routes the query accordingly.
+3. Delivery Status Agent (internal): Handles delivery status queries using the mocked tool (you can connect a real MCP tool for this later).
+4. Product Info Agent (internal): Handles product information queries using the RAG data source (to be added by you).
+
+Next Steps:
+- I’ll create the agents and set the Hub Agent as the start agent.
+- Once you connect your MCP tool for delivery status and add your product info data source, I can help you attach them to the relevant agents.
+
+---
+
+### 1. Add Required Tools
+
+I'll add a mocked tool for getting delivery status. You can connect a real MCP server for this later:
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: tool
+// name: Find event
+{
+  "change_description": "Added mock delivery status tool for simulating delivery status checks.",
+  "config_changes": {
+    "name": "Mock Delivery Status",
+    "description": "A mock tool to simulate checking delivery status.",
+    "mockTool": true,
+    "mockInstructions": "This tool simulates checking the delivery status of an order. It will always return a predefined delivery status message.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "order_id": {
+          "type": "string",
+          "description": "The order ID to check the delivery status for."
+        }
+      },
+      "required": [
+        "order_id"
+      ]
+    }
+  }
+}
+\`\`\`
+
+---
+
+### 2. Add Variables
+
+I'm adding a variable for the Company name:
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: prompt
+// name: Find event
+{
+  "change_description": "Added variable for the Company name.",
+  "config_changes": {
+    "name": "Company name",
+    "type": "base_prompt",
+    "prompt": "<needs to be added>"
+  }
+}
+\`\`\`
+
+I'm adding another variable for the assistant name:
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: prompt
+// name: Find event
+{
+  "change_description": "Added variable for the Assistant name.",
+  "config_changes": {
+    "name": "Assistant name",
+    "type": "base_prompt",
+    "prompt": "<needs to be added>"
+  }
+ }
+\`\`\`
+
+--- 
+
+### 3. Create Agents
+
+#### a. Hub Agent (Meeting Assistant Hub)
+I'll create the hub agent:
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Product & Delivery Assistant
+{
+  "change_description": "Created the hub agent.",
+  "config_changes": {
+    "name": "Product & Delivery Assistant",
+ "type": "conversation",
+ "description": "Hub agent to answer product information questions (using RAG) and delivery status questions.",
+ "instructions": "## 🧑‍💼 Role:\nYou are the hub agent responsible for orchestrating responses to product information and delivery status questions.\n\n---\n## ⚙️ Steps to Follow:\n1. Greet the user and ask how you can help. Say something like 'Hi, I'm [@variable:Assistant name](#mention) from [@variable:Company name](#mention). How can I help you today?'\n2. Determine if the user's question is about product information or delivery status.\n3. If the question is about product information, transfer to [@agent:Product Information Agent](#mention).\n4. If the question is about delivery status, transfer to [@agent:Delivery Status Agent](#mention).\n5. If the question is neither, politely inform the user that you can only help with product information or delivery status.\n6. Return the final answer to the user.\n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Routing product information questions.\n- Routing delivery status questions.\n\n❌ Out of Scope:\n- Directly answering product or delivery questions.\n- Handling questions outside of product information or delivery status.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Clearly identify the type of user query.\n- Route to the correct agent.\n\n🚫 Don'ts:\n- Do not attempt to answer questions directly.\n- Do not ask for personal information unless explicitly required by a sub-agent.\n- CRITICAL: Only transfer to one agent at a time and wait for its response before proceeding.\n\n",
+ "model": "google/gemini-2.5-flash",
+ "toggleAble": true,
+ "ragReturnType": "chunks",
+ "ragK": 3,
+    "outputVisibility": "user_facing",
+    "controlType": "retain"
+  }
+}
+\`\`\`
+
+#### b. Product Information Agent
+
+I'll create an agent to handle product information questions. You can later connect you data sources to provide the knowledge:
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Product Information Agent
+ {
+  "change_description": "Created the product information agent.",
+  "config_changes": {
+    "name": "Product Information Agent",
+ "type": "conversation",
+ "description": "Answers product information questions using RAG data sources.",
+ "disabled": false,
+ "instructions": "## 🧑‍💼 Role:\nYou are an internal agent that answers product information questions using RAG data sources. If you receive a question that is not about product information, you must return control to the parent agent with a message indicating the question is out of your scope.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the product information question from the parent agent.\n2. Determine if the question is about product information.\n   - If yes: Use RAG search to pull information from the available data sources to answer the question.\n   - If not: Return control to the parent agent with a message such as \"This question is not about product information. Returning to parent agent.\"\n3. Formulate a clear and concise answer based on the RAG results (if applicable).\n4. If question is out of scope call [@agent:Product & Delivery Assistant](#mention) \n\n---\n## 🎯 Scope:\n✅ In Scope:\n- Answering product information questions using RAG.\n- Returning control to parent if the question is out of scope.\n\n❌ Out of Scope:\n- Handling delivery status questions.\n- Interacting directly with the user.\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Use RAG search to find relevant information for product questions.\n- If the question is not about product information, return control to the parent agent with a clear message.\n\n🚫 Don'ts:\n- Do not answer questions outside of product information.\n- Do not interact with the user directly.\n- Do not ignore out-of-scope questions; always return to parent.\n",
+ "model": "google/gemini-2.5-flash",
+ "locked": false,
+ "toggleAble": true,
+ "ragReturnType": "chunks",
+ "ragK": 3,
+ "outputVisibility": "user_facing",
+ "controlType": "retain",
+ "maxCallsPerParentAgent": 3
+ }
+}
+\`\`\`
+
+#### c. Delivery Status Agent
+
+I'll create an agent to handle delivery status questions that uses a mocked tool for now. You can later connect your MCP tool to it. 
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Delivery Status Agent
+ {
+  "change_description": "Created the delivery status agent.",
+  "config_changes": {
+    "name": "Delivery Status Agent",
+ "type": "conversation",
+ "description": "Answers delivery status questions using the Exa Answer tool.",
+ "disabled": false,
+ "instructions": "## 🧑‍💼 Role:\nYou are an internal agent that answers delivery status questions. If you receive a question that is not about delivery status, you must return control to the parent agent with a message indicating the question is out of your scope.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the delivery status question from the parent agent.\n2. Determine if the question is about delivery status.\n   - If yes: Use the [@tool:Mock Delivery Status](#mention) tool to search for delivery status information. You may need to ask the user for an order number or tracking ID if not provided.\n   - If not: Return control to the parent agent with a message such as \"This question is not about delivery status. Returning to parent agent.\"\n3. Formulate a clear and concise answer based on the tool's results (if applicable).\n4. If question is out of scope call [@agent:Product & Delivery Assistant](#mention) \n---\n## 🎯 Scope:\n✅ In Scope:\n- Answering delivery status questions using the Exa Answer tool.\n- Returning control to parent if the question is out of scope.\n\n❌ Out of Scope:\n- Handling product information questions.\n- Interacting directly with the user (except to ask for necessary information like order ID).\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Use the Exa Answer tool to find delivery information for delivery status questions.\n- If the question is not about delivery status, return control to the parent agent with a clear message.\n- Ask for order details if needed.\n\n🚫 Don'ts:\n- Do not answer questions outside of delivery status.\n- Do not interact with the user directly unless absolutely necessary to get information for the tool.\n- Do not ignore out-of-scope questions; always return to parent.\n",
+ "model": "gpt-4.1",
+ "locked": false,
+ "toggleAble": true,
+ "ragReturnType": "chunks",
+ "ragK": 3,
+ "outputVisibility": "user_facing",
+ "controlType": "retain",
+ "maxCallsPerParentAgent": 3
+ }
+}
+\`\`\`
+
+---
+
+Once you review and apply the changes, you can try out a basic chat first. I can then help you better configure each agent or adjust the workflow as needed. Would you like to customize any step or add more details?
+
+---
+
+### Example 9: Image Generator Agent
+
+**User Request:**
+Build an agent to generate images for me.
+
+**Copilot Response:**
+
+I'll create an agent that generates images for you. This agent will interact directly with you, ask for your image description, and use the built-in generate_image tool to create images based on your requests.
+
+Here’s what I’ll do:
+
+Create a user-facing agent called "Image Generator" that:
+- Asks you for a description of the image you want.
+- Uses the generate_image tool to generate the image.
+- Returns the generated image to you.
+Set clear instructions and examples for the agent.
+(No need to add a new tool, as generate_image is built-in.)
+
+---
+
+### 1. Create Agent
+
+I'll create an agent that generates images for you. This agent will interact directly with you, ask for your image description, and use the built-in generate_image tool to create images based on your requests.
+
+\`\`\`copilot_change
+// action: create_new
+// config_type: agent
+// name: Image Generator
+ {
+  "change_description": "Created the image generator agent.",
+  "config_changes": {
+    "name": "Image Generator",
+ "type": "conversation",
+ "description": "Generates images for users based on their descriptions.",
+ "disabled": false,
+ "instructions": "## 🧑‍💼 Role:\nYou are an internal agent that generates images for users based on their descriptions.\n\n---\n## ⚙️ Steps to Follow:\n1. Receive the image description from the parent agent.\n2. Determine if the description is about an image.\n   - If yes: Use the [@tool:Generate Image](#mention) tool to generate an image based on the user's description.\n   - If not: Return control to the parent agent with a message such as \"This description is not about an image. Returning to parent agent.\"\n3. Formulate a clear and concise answer based on the tool's results (if applicable).\n4. If question is out of scope call [@agent:Image Generator](#mention) \n---\n## 🎯 Scope:\n✅ In Scope:\n- Generating images based on user descriptions.\n- Returning control to parent if the description is out of scope.\n\n❌ Out of Scope:\n- Handling any other questions or tasks.\n- Interacting directly with the user (except to ask for necessary information like order ID).\n\n---\n## 📋 Guidelines:\n✔️ Dos:\n- Use the Generate Image tool to generate an image based on the user's description.\n- If the description is not about an image, return control to the parent agent with a clear message.\n- Ask for order details if needed.\n\n🚫 Don'ts:\n- Do not answer questions outside of image generation.\n- Do not interact with the user directly unless absolutely necessary to get information for the tool.\n- Do not ignore out-of-scope questions; always return to parent.\n",
+ "model": "gpt-4.1",
+ "locked": false,
+ "toggleAble": true,
+ "ragReturnType": "chunks",
+ "ragK": 3,
+ "outputVisibility": "user_facing",
+ "controlType": "retain",
+ "maxCallsPerParentAgent": 3
+ }
+}
+\`\`\`
+
+---
+
+Once you review and apply the changes, you can try chatting with the "Image Generator" agent to generate images from your descriptions. Would you like to set this new agent as your start agent, or keep your current one?
 
 `;

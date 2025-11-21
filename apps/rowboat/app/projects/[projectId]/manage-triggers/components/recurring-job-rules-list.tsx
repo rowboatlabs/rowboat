@@ -8,7 +8,8 @@ import { listRecurringJobRules, deleteRecurringJobRule } from "@/app/actions/rec
 import { z } from "zod";
 import { ListedRecurringRuleItem } from "@/src/application/repositories/recurring-job-rules.repository.interface";
 import { isToday, isThisWeek, isThisMonth } from "@/lib/utils/date";
-import { PlusIcon, Trash2 } from "lucide-react";
+import { PlusIcon, Trash2, ArrowLeftIcon } from "lucide-react";
+import { CreateRecurringJobRuleForm } from "./create-recurring-job-rule-form";
 
 type ListedItem = z.infer<typeof ListedRecurringRuleItem>;
 
@@ -19,6 +20,7 @@ export function RecurringJobRulesList({ projectId }: { projectId: string }) {
     const [loadingMore, setLoadingMore] = useState<boolean>(false);
     const [hasMore, setHasMore] = useState<boolean>(false);
     const [deletingRule, setDeletingRule] = useState<string | null>(null);
+    const [showCreateForm, setShowCreateForm] = useState<boolean>(false);
 
     const fetchPage = useCallback(async (cursorArg?: string | null) => {
         const res = await listRecurringJobRules({ projectId, cursor: cursorArg ?? undefined, limit: 20 });
@@ -39,6 +41,12 @@ export function RecurringJobRulesList({ projectId }: { projectId: string }) {
         return () => { ignore = true; };
     }, [fetchPage]);
 
+    useEffect(() => {
+        if (!loading && items.length === 0 && !showCreateForm) {
+            setShowCreateForm(true);
+        }
+    }, [loading, items.length, showCreateForm]);
+
     const loadMore = useCallback(async () => {
         if (!cursor) return;
         setLoadingMore(true);
@@ -48,6 +56,24 @@ export function RecurringJobRulesList({ projectId }: { projectId: string }) {
         setHasMore(Boolean(res.nextCursor));
         setLoadingMore(false);
     }, [cursor, fetchPage]);
+
+    const handleCreateNew = () => {
+        setShowCreateForm(true);
+    };
+
+    const handleBackToList = () => {
+        setShowCreateForm(false);
+        // Reload the list in case new triggers were created
+        const reload = async () => {
+            setLoading(true);
+            const res = await fetchPage(null);
+            setItems(res.items);
+            setCursor(res.nextCursor);
+            setHasMore(Boolean(res.nextCursor));
+            setLoading(false);
+        };
+        reload();
+    };
 
     const handleDeleteRule = async (ruleId: string) => {
         if (!window.confirm('Are you sure you want to delete this recurring trigger?')) {
@@ -125,6 +151,10 @@ export function RecurringJobRulesList({ projectId }: { projectId: string }) {
         return cron;
     };
 
+    if (showCreateForm) {
+        return <CreateRecurringJobRuleForm projectId={projectId} onBack={handleBackToList} hasExistingTriggers={items.length > 0} />;
+    }
+
     return (
         <Panel
             title={
@@ -134,11 +164,14 @@ export function RecurringJobRulesList({ projectId }: { projectId: string }) {
             }
             rightActions={
                 <div className="flex items-center gap-3">
-                    <Link href={`/projects/${projectId}/manage-triggers/recurring/new`}>
-                        <Button size="sm" className="whitespace-nowrap" startContent={<PlusIcon className="w-4 h-4" />}>
-                            New Recurring Trigger
-                        </Button>
-                    </Link>
+                    <Button 
+                        size="sm" 
+                        className="whitespace-nowrap" 
+                        startContent={<PlusIcon className="w-4 h-4" />}
+                        onClick={handleCreateNew}
+                    >
+                        New Recurring Trigger
+                    </Button>
                 </div>
             }
         >
