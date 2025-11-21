@@ -218,6 +218,7 @@ export async function modelConfig() {
     const rl = createInterface({ input, output });
     try {
         const defaultApiKeyEnvVars: Record<z.infer<typeof Flavor>, string> = {
+            "rowboat [free]": "",
             openai: "OPENAI_API_KEY",
             anthropic: "ANTHROPIC_API_KEY",
             google: "GOOGLE_GENERATIVE_AI_API_KEY",
@@ -226,6 +227,7 @@ export async function modelConfig() {
             openrouter: "",
         };
         const defaultBaseUrls: Record<z.infer<typeof Flavor>, string> = {
+            "rowboat [free]": "",
             openai: "https://api.openai.com/v1",
             anthropic: "https://api.anthropic.com/v1",
             google: "https://generativelanguage.googleapis.com/v1beta",
@@ -234,6 +236,7 @@ export async function modelConfig() {
             openrouter: "https://openrouter.ai/api/v1",
         };
         const defaultModels: Record<z.infer<typeof Flavor>, string> = {
+            "rowboat [free]": "google/gemini-3-pro-preview",
             openai: "gpt-5.1",
             anthropic: "claude-sonnet-4-5",
             google: "gemini-2.5-pro",
@@ -335,18 +338,25 @@ export async function modelConfig() {
 
         const headers: Record<string, string> = {};
 
-        const providerNameAns = await rl.question(
-            `Enter a name/alias for this provider [${selectedFlavor}]: `,
-        );
-        providerName = providerNameAns.trim() || selectedFlavor;
+        if (selectedFlavor !== "rowboat [free]") {
+            const providerNameAns = await rl.question(
+                `Enter a name/alias for this provider [${selectedFlavor}]: `,
+            );
+            providerName = providerNameAns.trim() || selectedFlavor;
+        } else {
+            providerName = selectedFlavor;
+        }
 
-        const baseUrlAns = await rl.question(
-            `Enter baseURL for ${selectedFlavor} [${defaultBaseUrls[selectedFlavor]}]: `,
-        );
-        const baseURL = baseUrlAns.trim() || undefined;
+        let baseURL: string | undefined = undefined;
+        if (selectedFlavor !== "rowboat [free]") {
+            const baseUrlAns = await rl.question(
+                `Enter baseURL for ${selectedFlavor} [${defaultBaseUrls[selectedFlavor]}]: `,
+            );
+            baseURL = baseUrlAns.trim() || undefined;
+        }
 
         let apiKey: string | undefined = undefined;
-        if (selectedFlavor !== "ollama") {
+        if (selectedFlavor !== "ollama" && selectedFlavor !== "rowboat [free]") {
             let autopickText = "";
             if (defaultApiKeyEnvVars[selectedFlavor]) {
                 autopickText = ` (leave blank to pick from environment variable ${defaultApiKeyEnvVars[selectedFlavor]})`;

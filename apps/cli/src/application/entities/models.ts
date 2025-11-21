@@ -1,6 +1,7 @@
 import z from "zod";
 
 export const Flavor = z.enum([
+    "rowboat [free]",
     "anthropic",
     "google",
     "ollama",
