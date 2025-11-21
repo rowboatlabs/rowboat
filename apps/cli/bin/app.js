@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { app, modelConfig, updateState, importExample, listExamples } from '../dist/app.js';
+import { app, modelConfig, updateState, importExample, listExamples, exportWorkflow } from '../dist/app.js';
 
 yargs(hideBin(process.argv))
 
@@ -86,6 +86,24 @@ yargs(hideBin(process.argv))
                 }
             } catch (error) {
                 console.error(error?.message ?? error);
+                process.exit(1);
+            }
+        }
+    )
+    .command(
+        "export",
+        "Export a workflow with all dependencies (outputs to stdout)",
+        (y) => y
+            .option("agent", {
+                type: "string",
+                description: "Entry agent name to export",
+                demandOption: true,
+            }),
+        async (argv) => {
+            try {
+                await exportWorkflow(String(argv.agent).trim());
+            } catch (error) {
+                console.error("Error:", error?.message ?? error);
                 process.exit(1);
             }
         }

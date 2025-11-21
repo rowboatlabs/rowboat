@@ -542,3 +542,81 @@ export async function importExample(exampleName?: string, filePath?: string) {
 export async function listExamples() {
     return listAvailableExamples();
 }
+
+export async function exportWorkflow(entryAgentName: string) {
+    const agentsDir = path.join(WorkDir, "agents");
+    const mcpConfigPath = path.join(WorkDir, "config", "mcp.json");
+    
+    // Read MCP config
+    let mcpConfig: z.infer<typeof McpServerConfig> = { mcpServers: {} };
+    try {
+        const mcpContent = await fsp.readFile(mcpConfigPath, "utf8");
+        mcpConfig = McpServerConfig.parse(JSON.parse(mcpContent));
+    } catch (error: any) {
+        if (error?.code !== "ENOENT") {
+            throw new Error(`Failed to read MCP config: ${error.message ?? error}`);
+        }
+    }
+    
+    // Recursively discover all agents and MCP servers
+    const discoveredAgents = new Map<string, z.infer<typeof Agent>>();
+    const discoveredMcpServers = new Set<string>();
+    
+    async function discoverAgent(agentName: string) {
+        if (discoveredAgents.has(agentName)) {
+            return; // Already processed
+        }
+        
+        // Load agent
+        const agentPath = path.join(agentsDir, `${agentName}.json`);
+        let agentContent: string;
+        try {
+            agentContent = await fsp.readFile(agentPath, "utf8");
+        } catch (error: any) {
+            if (error?.code === "ENOENT") {
+                throw new Error(`Agent not found: ${agentName}`);
+            }
+            throw new Error(`Failed to read agent ${agentName}: ${error.message ?? error}`);
+        }
+        
+        const agent = Agent.parse(JSON.parse(agentContent));
+        discoveredAgents.set(agentName, agent);
+        
+        // Process tools
+        if (agent.tools) {
+            for (const [toolKey, tool] of Object.entries(agent.tools)) {
+                if (tool.type === "agent") {
+                    // Recursively discover dependent agent
+                    await discoverAgent(tool.name);
+                } else if (tool.type === "mcp") {
+                    // Track MCP server
+                    discoveredMcpServers.add(tool.mcpServerName);
+                }
+            }
+        }
+    }
+    
+    // Start discovery from entry agent
+    await discoverAgent(entryAgentName);
+    
+    // Build MCP servers object
+    const workflowMcpServers: Record<string, z.infer<typeof McpServerDefinition>> = {};
+    for (const serverName of discoveredMcpServers) {
+        if (mcpConfig.mcpServers[serverName]) {
+            workflowMcpServers[serverName] = mcpConfig.mcpServers[serverName];
+        } else {
+            throw new Error(`MCP server '${serverName}' is referenced but not found in config`);
+        }
+    }
+    
+    // Build workflow object
+    const workflow: z.infer<typeof Example> = {
+        id: entryAgentName,
+        entryAgent: entryAgentName,
+        agents: Array.from(discoveredAgents.values()),
+        ...(Object.keys(workflowMcpServers).length > 0 ? { mcpServers: workflowMcpServers } : {}),
+    };
+    
+    // Output to stdout
+    console.log(JSON.stringify(workflow, null, 2));
+}
