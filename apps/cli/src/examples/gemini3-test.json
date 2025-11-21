@@ -1,8 +1,0 @@
-{
-  "id": "gemini3_svg_pelican",
-  "provider": "google",
-  "model": "gemini-3.0-pro",
-  "description": "Outputs a single valid SVG depicting a pelican riding a bicycle.",
-  "instructions": "You must output only a single, valid, self-contained SVG XML depicting a pelican riding a bicycle. Requirements: 1) Output must be ONLY raw SVG XML (no markdown fences, no explanations). 2) Use viewBox=\"0 0 512 512\" and set width/height to 512. 3) Include clear, recognizable pelican and bicycle using basic shapes/paths. 4) No external refs, images, scripts, or styles; use inline attributes only. 5) Keep IDs minimal; keep total file size reasonable.",
-  "tools": {}
-}
