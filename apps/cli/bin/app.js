@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { app, modelConfig } from '../dist/app.js';
+import { app, modelConfig, updateState, importExample, listExamples, exportWorkflow } from '../dist/app.js';
 
 yargs(hideBin(process.argv))
 
@@ -34,6 +34,78 @@ yargs(hideBin(process.argv))
                 input: argv.input,
                 noInteractive: argv.noInteractive,
             });
+        }
+    )
+    .command(
+        "import",
+        "Import an example workflow (--example) or custom workflow from file (--file)",
+        (y) => y
+            .option("example", {
+                type: "string",
+                description: "Name of built-in example to import",
+            })
+            .option("file", {
+                type: "string",
+                description: "Path to custom workflow JSON file",
+            })
+            .check((argv) => {
+                if (!argv.example && !argv.file) {
+                    throw new Error("Either --example or --file must be provided");
+                }
+                if (argv.example && argv.file) {
+                    throw new Error("Cannot use both --example and --file at the same time");
+                }
+                return true;
+            }),
+        async (argv) => {
+            try {
+                if (argv.example) {
+                    await importExample(String(argv.example).trim());
+                } else if (argv.file) {
+                    await importExample(undefined, String(argv.file).trim());
+                }
+            } catch (error) {
+                console.error("Error:", error?.message ?? error);
+                process.exit(1);
+            }
+        }
+    )
+    .command(
+        "list-examples",
+        "List all available example workflows",
+        (y) => y,
+        async () => {
+            try {
+                const examples = await listExamples();
+                if (examples.length === 0) {
+                    console.error("No packaged examples are available to list.");
+                    return;
+                }
+                for (const example of examples) {
+                    console.log(example);
+                }
+            } catch (error) {
+                console.error(error?.message ?? error);
+                process.exit(1);
+            }
+        }
+    )
+    .command(
+        "export",
+        "Export a workflow with all dependencies (outputs to stdout)",
+        (y) => y
+            .option("agent", {
+                type: "string",
+                description: "Entry agent name to export",
+                demandOption: true,
+            }),
+        async (argv) => {
+            try {
+                await exportWorkflow(String(argv.agent).trim());
+            } catch (error) {
+                console.error("Error:", error?.message ?? error);
+                process.exit(1);
+            }
         }
     )
     .command(

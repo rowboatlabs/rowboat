@@ -12,19 +12,6 @@ let modelConfig: z.infer<typeof ModelConfig> | null = null;
 
 const baseMcpConfig: z.infer<typeof McpServerConfig> = {
     mcpServers: {
-        firecrawl: {
-            command: "npx",
-            args: ["-y", "supergateway", "--stdio", "npx -y firecrawl-mcp"],
-            env: {
-                FIRECRAWL_API_KEY: "fc-aaacee4bdd164100a4d83af85bef6fdc",
-            },
-        },
-        test: {
-            url: "http://localhost:3000",
-            headers: {
-                "Authorization": "Bearer test",
-            },
-        },
     }
 };
 
