@@ -37,15 +37,33 @@ yargs(hideBin(process.argv))
         }
     )
     .command(
-        "import-example <example>",
-        "Import an example workflow by name",
-        (y) => y.positional("example", {
-            type: "string",
-            description: "The example to import",
-        }),
+        "import",
+        "Import an example workflow (--example) or custom workflow from file (--file)",
+        (y) => y
+            .option("example", {
+                type: "string",
+                description: "Name of built-in example to import",
+            })
+            .option("file", {
+                type: "string",
+                description: "Path to custom workflow JSON file",
+            })
+            .check((argv) => {
+                if (!argv.example && !argv.file) {
+                    throw new Error("Either --example or --file must be provided");
+                }
+                if (argv.example && argv.file) {
+                    throw new Error("Cannot use both --example and --file at the same time");
+                }
+                return true;
+            }),
         async (argv) => {
             try {
-                await importExample(String(argv.example).trim());
+                if (argv.example) {
+                    await importExample(String(argv.example).trim());
+                } else if (argv.file) {
+                    await importExample(undefined, String(argv.file).trim());
+                }
             } catch (error) {
                 console.error("Error:", error?.message ?? error);
                 process.exit(1);

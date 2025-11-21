@@ -10,6 +10,7 @@ import { createInterface, Interface } from "node:readline/promises";
 import { ToolCallPart } from "./application/entities/message.js";
 import { Agent } from "./application/entities/agent.js";
 import { McpServerConfig, McpServerDefinition } from "./application/entities/mcp.js";
+import { Example } from "./application/entities/example.js";
 import { z } from "zod";
 import { Flavor } from "./application/entities/models.js";
 import { examples } from "./examples/index.js";
@@ -466,15 +467,37 @@ async function mergeMcpServers(servers: Record<string, z.infer<typeof McpServerD
     return result;
 }
 
-export async function importExample(exampleName: string) {
-    // Validate example exists
-    const example = examples[exampleName];
-    if (!example) {
-        const availableExamples = Object.keys(examples);
-        const listMessage = availableExamples.length
-            ? `Available examples: ${availableExamples.join(", ")}`
-            : "No packaged examples are available.";
-        throw new Error(`Unknown example '${exampleName}'. ${listMessage}`);
+export async function importExample(exampleName?: string, filePath?: string) {
+    let example: z.infer<typeof Example>;
+    let sourceName: string;
+    
+    if (exampleName) {
+        // Load from built-in examples
+        example = examples[exampleName];
+        if (!example) {
+            const availableExamples = Object.keys(examples);
+            const listMessage = availableExamples.length
+                ? `Available examples: ${availableExamples.join(", ")}`
+                : "No packaged examples are available.";
+            throw new Error(`Unknown example '${exampleName}'. ${listMessage}`);
+        }
+        sourceName = exampleName;
+    } else if (filePath) {
+        // Load from file path
+        try {
+            const fileContent = await fsp.readFile(filePath, "utf8");
+            example = Example.parse(JSON.parse(fileContent));
+            sourceName = path.basename(filePath, ".json");
+        } catch (error: any) {
+            if (error?.code === "ENOENT") {
+                throw new Error(`File not found: ${filePath}`);
+            } else if (error?.name === "ZodError") {
+                throw new Error(`Invalid workflow file format: ${error.message}`);
+            }
+            throw new Error(`Failed to read workflow file: ${error.message ?? error}`);
+        }
+    } else {
+        throw new Error("Either exampleName or filePath must be provided");
     }
     
     // Import agents and MCP servers
@@ -489,7 +512,7 @@ export async function importExample(exampleName: string) {
     const entryAgent = example.entryAgent ?? importedAgents[0] ?? "";
     
     const output = [
-        `✓ Imported example '${exampleName}'`,
+        `✓ Imported workflow '${sourceName}'`,
         `  Agents: ${importedAgents.join(", ")}`,
         `  Primary: ${entryAgent}`,
     ];
