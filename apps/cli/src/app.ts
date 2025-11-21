@@ -4,7 +4,6 @@ import { stdin as input, stdout as output } from "node:process";
 import fs from "fs";
 import { promises as fsp } from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import { WorkDir, getModelConfig, updateModelConfig } from "./application/config/config.js";
 import { RunEvent } from "./application/entities/run-events.js";
 import { createInterface, Interface } from "node:readline/promises";
@@ -12,12 +11,8 @@ import { ToolCallPart } from "./application/entities/message.js";
 import { Agent } from "./application/entities/agent.js";
 import { McpServerConfig, McpServerDefinition } from "./application/entities/mcp.js";
 import { z } from "zod";
-import { Flavor, ModelConfig } from "./application/entities/models.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const PackageRoot = path.resolve(__dirname, "..");
-const ExamplesDir = path.join(PackageRoot, "examples");
+import { Flavor } from "./application/entities/models.js";
+import { examples } from "./examples/index.js";
 
 export async function updateState(agent: string, runId: string) {
     const state = new AgentState(agent, runId);
@@ -413,51 +408,14 @@ function renderCurrentModel(provider: string, flavor: string, model: string) {
     console.log("");
 }
 
-const ExampleSchema = z.object({
-    id: z.string().min(1),
-    "post-install-instructions": z.string().optional(),
-    description: z.string().optional(),
-    entryAgent: z.string().optional(),
-    agents: z.array(Agent).min(1),
-    mcpServers: z.record(z.string(), McpServerDefinition).optional(),
-}).refine(
-    (data) => !data.entryAgent || data.agents.some((agent) => agent.name === data.entryAgent),
-    {
-        message: "entryAgent must reference one of the defined agents",
-        path: ["entryAgent"],
-    },
-);
-
-async function readExampleFile(exampleName: string): Promise<string> {
-    const examplePath = path.join(ExamplesDir, `${exampleName}.json`);
-    try {
-        return await fsp.readFile(examplePath, "utf8");
-    } catch (error: any) {
-        if (error?.code === "ENOENT") {
-            const availableExamples = await listAvailableExamples();
-            const listMessage = availableExamples.length
-                ? `Available examples: ${availableExamples.join(", ")}`
-                : "No packaged examples were found.";
-            throw new Error(`Unknown example '${exampleName}'. ${listMessage}`);
-        }
-        // Re-throw other errors (permission issues, etc.)
-        throw error;
-    }
-}
-
 async function listAvailableExamples(): Promise<string[]> {
-    try {
-        const entries = await fsp.readdir(ExamplesDir);
-        return entries
-            .filter((entry) => entry.endsWith(".json"))
-            .map((entry) => entry.replace(/\.json$/, ""))
-            .sort();
-    } catch {
-        return [];
-    }
+    return Object.keys(examples);
 }
 
-async function writeAgents(agents: z.infer<typeof Agent>[]) {
+async function writeAgents(agents: z.infer<typeof Agent>[] | undefined) {
+    if (!agents) {
+        return;
+    }
     await fsp.mkdir(path.join(WorkDir, "agents"), { recursive: true });
     await Promise.all(
         agents.map(async (agent) => {
@@ -509,22 +467,17 @@ async function mergeMcpServers(servers: Record<string, z.infer<typeof McpServerD
 }
 
 export async function importExample(exampleName: string) {
-    const raw = await readExampleFile(exampleName);
-    const parsed = ExampleSchema.parse(JSON.parse(raw));
-    const entryAgentName = parsed.entryAgent ?? parsed.agents[0]?.name;
-    if (!entryAgentName) {
-        throw new Error(`Example '${exampleName}' does not define any agents to run.`);
-    }
-    const postInstallInstructions = parsed["post-install-instructions"];
-    await writeAgents(parsed.agents);
+    const example = examples[exampleName];
+    const postInstallInstructions = example.instructions;
+    await writeAgents(example.agents);
     let serverMerge = { added: [] as string[], skipped: [] as string[] };
-    if (parsed.mcpServers) {
-        serverMerge = await mergeMcpServers(parsed.mcpServers);
+    if (example.mcpServers) {
+        serverMerge = await mergeMcpServers(example.mcpServers);
     }
     return {
-        id: parsed.id,
-        entryAgent: entryAgentName,
-        importedAgents: parsed.agents.map((agent) => agent.name),
+        id: example.id,
+        entryAgent: example.entryAgent,
+        importedAgents: example.agents?.map((agent) => agent.name) ?? [],
         addedServers: serverMerge.added,
         skippedServers: serverMerge.skipped,
         postInstallInstructions,

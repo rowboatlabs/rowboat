@@ -1,6 +1,6 @@
 {
   "id": "twitter-podcast",
-  "post-import-instructions": "This example workflow generates a narrated podcast episode from recent AI-related tweets using multiple agents.",
+  "instructions": "This example workflow generates a narrated podcast episode from recent AI-related tweets using multiple agents.",
   "description": "Generates a narrated podcast episode from recent AI-related tweets using multiple agents.",
   "entryAgent": "tweet-podcast",
   "agents": [
