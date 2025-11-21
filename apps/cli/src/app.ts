@@ -467,21 +467,53 @@ async function mergeMcpServers(servers: Record<string, z.infer<typeof McpServerD
 }
 
 export async function importExample(exampleName: string) {
+    // Validate example exists
     const example = examples[exampleName];
-    const postInstallInstructions = example.instructions;
+    if (!example) {
+        const availableExamples = Object.keys(examples);
+        const listMessage = availableExamples.length
+            ? `Available examples: ${availableExamples.join(", ")}`
+            : "No packaged examples are available.";
+        throw new Error(`Unknown example '${exampleName}'. ${listMessage}`);
+    }
+    
+    // Import agents and MCP servers
     await writeAgents(example.agents);
     let serverMerge = { added: [] as string[], skipped: [] as string[] };
     if (example.mcpServers) {
         serverMerge = await mergeMcpServers(example.mcpServers);
     }
-    return {
-        id: example.id,
-        entryAgent: example.entryAgent,
-        importedAgents: example.agents?.map((agent) => agent.name) ?? [],
-        addedServers: serverMerge.added,
-        skippedServers: serverMerge.skipped,
-        postInstallInstructions,
-    };
+    
+    // Build and display output message
+    const importedAgents = example.agents?.map((agent) => agent.name) ?? [];
+    const entryAgent = example.entryAgent ?? importedAgents[0] ?? "";
+    
+    const output = [
+        `✓ Imported example '${exampleName}'`,
+        `  Agents: ${importedAgents.join(", ")}`,
+        `  Primary: ${entryAgent}`,
+    ];
+    
+    if (serverMerge.added.length > 0) {
+        output.push(`  MCP servers added: ${serverMerge.added.join(", ")}`);
+    }
+    if (serverMerge.skipped.length > 0) {
+        output.push(`  MCP servers skipped (already configured): ${serverMerge.skipped.join(", ")}`);
+    }
+    
+    console.log(output.join("\n"));
+    
+    // Display post-install instructions if present
+    if (example.instructions) {
+        console.log("\n" + "=".repeat(60));
+        console.log("POST-INSTALL INSTRUCTIONS");
+        console.log("=".repeat(60));
+        console.log(example.instructions);
+        console.log("=".repeat(60) + "\n");
+    }
+    
+    // Display next steps
+    console.log(`\nRun: rowboatx --agent ${entryAgent}`);
 }
 
 export async function listExamples() {
