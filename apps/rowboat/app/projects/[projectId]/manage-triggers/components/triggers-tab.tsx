@@ -206,6 +206,12 @@ export function TriggersTab({ projectId }: { projectId: string }) {
   }, [showCreateFlow, loadTriggers]);
 
   useEffect(() => {
+    if (!loading && !error && triggers.length === 0 && !showCreateFlow) {
+      setShowCreateFlow(true);
+    }
+  }, [loading, error, triggers.length, showCreateFlow]);
+
+  useEffect(() => {
     // No-op: trigger names are now derived from slug locally
   }, [triggers]);
 
@@ -454,17 +460,24 @@ export function TriggersTab({ projectId }: { projectId: string }) {
       return (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Select a Toolkit to Create Trigger
-            </h3>
-            <Button
-              variant="secondary"
-              onClick={handleBackToList}
-              startContent={<ArrowLeftIcon className="w-4 h-4" />}
-              className="whitespace-nowrap"
-            >
-              Back to Triggers
-            </Button>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                Select a Toolkit to Create Trigger
+              </h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Note: Triggers run only on the published version of your workflow. Publish any changes to make them active.
+              </p>
+            </div>
+            {triggers.length > 0 && (
+              <Button
+                variant="secondary"
+                onClick={handleBackToList}
+                startContent={<ArrowLeftIcon className="w-4 h-4" />}
+                className="whitespace-nowrap"
+              >
+                Back to Triggers
+              </Button>
+            )}
           </div>
 
           <SelectComposioToolkit

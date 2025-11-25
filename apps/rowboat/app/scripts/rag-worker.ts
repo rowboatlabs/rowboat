@@ -22,7 +22,7 @@ import { container } from '@/di/container';
 
 const FILE_PARSING_PROVIDER_API_KEY = process.env.FILE_PARSING_PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
 const FILE_PARSING_PROVIDER_BASE_URL = process.env.FILE_PARSING_PROVIDER_BASE_URL || undefined;
-const FILE_PARSING_MODEL = process.env.FILE_PARSING_MODEL || 'gpt-4o';
+const FILE_PARSING_MODEL = process.env.FILE_PARSING_MODEL || 'gpt-4.1';
 
 const dataSourcesRepository = container.resolve<IDataSourcesRepository>('dataSourcesRepository');
 const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>('dataSourceDocsRepository');

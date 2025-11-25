@@ -1,5 +1,6 @@
 "use client";
 import { DataSource } from "@/src/entities/models/data-source";
+import { TriggerSchemaForCopilot } from "@/src/entities/models/copilot";
 import { Project } from "@/src/entities/models/project";
 import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
@@ -10,10 +11,15 @@ import { revertToLiveWorkflow } from "@/app/actions/project.actions";
 import { fetchProject } from "@/app/actions/project.actions";
 import { Workflow } from "@/app/lib/types/workflow_types";
 import { ModelsResponse } from "@/app/lib/types/billing_types";
+import { listScheduledJobRules } from "@/app/actions/scheduled-job-rules.actions";
+import { listRecurringJobRules } from "@/app/actions/recurring-job-rules.actions";
+import { listComposioTriggerDeployments } from "@/app/actions/composio.actions";
+import { transformTriggersForCopilot, DEFAULT_TRIGGER_FETCH_LIMIT } from "./trigger-transform";
 
 export function App({
     initialProjectData,
     initialDataSources,
+    initialTriggers,
     eligibleModels,
     useRag,
     useRagUploads,
@@ -24,6 +30,7 @@ export function App({
 }: {
     initialProjectData: z.infer<typeof Project>;
     initialDataSources: z.infer<typeof DataSource>[];
+    initialTriggers: z.infer<typeof TriggerSchemaForCopilot>[];
     eligibleModels: z.infer<typeof ModelsResponse> | "*";
     useRag: boolean;
     useRagUploads: boolean;
@@ -32,33 +39,75 @@ export function App({
     defaultModel: string;
     chatWidgetHost: string;
 }) {
-    const [mode, setMode] = useState<'draft' | 'live'>('draft');
+    const [mode, setMode] = useState<'draft' | 'live'>(() => {
+        if (typeof window === 'undefined') return 'draft';
+        const stored = window.localStorage.getItem(`workflow_mode_${initialProjectData.id}`);
+        return stored === 'live' || stored === 'draft' ? stored : 'draft';
+    });
+    const [autoPublishEnabled, setAutoPublishEnabled] = useState(() => {
+        if (typeof window === 'undefined') return true; // Default to auto-publish
+        const stored = window.localStorage.getItem(`auto_publish_${initialProjectData.id}`);
+        return stored !== null ? stored === 'true' : true;
+    });
     const [project, setProject] = useState<z.infer<typeof Project>>(initialProjectData);
     const [dataSources, setDataSources] = useState<z.infer<typeof DataSource>[]>(initialDataSources);
+    const [triggers, setTriggers] = useState<z.infer<typeof TriggerSchemaForCopilot>[]>(initialTriggers);
     const [loading, setLoading] = useState(false);
 
     console.log('workflow app.tsx render');
 
+    const handleToggleAutoPublish = (enabled: boolean) => {
+        setAutoPublishEnabled(enabled);
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(`auto_publish_${initialProjectData.id}`, enabled.toString());
+        }
+    };
+
     // choose which workflow to display
-    let workflow: z.infer<typeof Workflow> | undefined = project?.draftWorkflow;
-    if (mode == 'live') {
-        workflow = project?.liveWorkflow;
+    let workflow: z.infer<typeof Workflow> | undefined;
+    if (autoPublishEnabled) {
+        // In auto-publish mode, always use draft (since they're synced)
+        workflow = project?.draftWorkflow;
+    } else {
+        // Manual mode: use current logic
+        workflow = mode === 'live' ? project?.liveWorkflow : project?.draftWorkflow;
     }
+
+    const fetchTriggers = useCallback(async () => {
+        const [scheduled, recurring, composio] = await Promise.all([
+            listScheduledJobRules({ projectId: initialProjectData.id, limit: DEFAULT_TRIGGER_FETCH_LIMIT }),
+            listRecurringJobRules({ projectId: initialProjectData.id, limit: DEFAULT_TRIGGER_FETCH_LIMIT }),
+            listComposioTriggerDeployments({ projectId: initialProjectData.id, limit: DEFAULT_TRIGGER_FETCH_LIMIT }),
+        ]);
+
+        return transformTriggersForCopilot({
+            scheduled: scheduled.items ?? [],
+            recurring: recurring.items ?? [],
+            composio: composio.items ?? [],
+        });
+    }, [initialProjectData.id]);
+
+    const refreshTriggers = useCallback(async () => {
+        const nextTriggers = await fetchTriggers();
+        setTriggers(nextTriggers);
+    }, [fetchTriggers]);
 
     const reloadData = useCallback(async () => {
         setLoading(true);
-        const [
-            projectData,
-            sourcesData,
-        ] = await Promise.all([
-            fetchProject(initialProjectData.id),
-            listDataSources(initialProjectData.id),
-        ]);
+        try {
+            const [projectData, sourcesData, triggerData] = await Promise.all([
+                fetchProject(initialProjectData.id),
+                listDataSources(initialProjectData.id),
+                fetchTriggers(),
+            ]);
 
-        setProject(projectData);
-        setDataSources(sourcesData);
-        setLoading(false);
-    }, [initialProjectData.id]);
+            setProject(projectData);
+            setDataSources(sourcesData);
+            setTriggers(triggerData);
+        } finally {
+            setLoading(false);
+        }
+    }, [fetchTriggers, initialProjectData.id]);
 
     const handleProjectToolsUpdate = useCallback(async () => {
         // Lightweight refresh for tool-only updates
@@ -101,13 +150,24 @@ export function App({
     }, [dataSources, initialProjectData.id]);
 
     function handleSetMode(mode: 'draft' | 'live') {
+        try {
+            if (typeof window !== 'undefined') {
+                window.localStorage.setItem(`workflow_mode_${initialProjectData.id}`, mode);
+            }
+        } catch {}
         setMode(mode);
+        // Reload data to ensure we have the latest workflow data for the current mode
+        reloadData();
     }
 
     async function handleRevertToLive() {
         setLoading(true);
-        await revertToLiveWorkflow(initialProjectData.id);
-        reloadData();
+        try {
+            await revertToLiveWorkflow(initialProjectData.id);
+            await reloadData();
+        } finally {
+            setLoading(false);
+        }
     }
 
     // if workflow is null, show the selector
@@ -121,8 +181,11 @@ export function App({
         {!loading && project && workflow && (dataSources !== null) && <WorkflowEditor
             projectId={initialProjectData.id}
             isLive={mode == 'live'}
+            autoPublishEnabled={autoPublishEnabled}
+            onToggleAutoPublish={handleToggleAutoPublish}
             workflow={workflow}
             dataSources={dataSources}
+            triggers={triggers}
             projectConfig={project}
             useRag={useRag}
             useRagUploads={useRagUploads}
@@ -135,6 +198,7 @@ export function App({
             onProjectToolsUpdated={handleProjectToolsUpdate}
             onDataSourcesUpdated={handleDataSourcesUpdate}
             onProjectConfigUpdated={handleProjectConfigUpdate}
+            onTriggersUpdated={refreshTriggers}
             chatWidgetHost={chatWidgetHost}
         />}
     </>

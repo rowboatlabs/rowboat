@@ -1,0 +1,559 @@
+{
+  "id": "twitter-podcast",
+  "instructions": "This example workflow generates a narrated podcast episode from recent AI-related tweets using multiple agents.",
+  "description": "Generates a narrated podcast episode from recent AI-related tweets using multiple agents.",
+  "entryAgent": "tweet-podcast",
+  "agents": [
+    {
+      "name": "tweet-podcast",
+      "description": "An agent that will produce a podcast from recent tweets",
+      "model": "gpt-5.1",
+      "instructions": "You are the orchestrator for producing a short podcast episode end-to-end. Follow these steps in order and only advance once each step succeeds:\n\n1. Tweets: call the tweets workflow to collect the latest tweets, .\n\n2.Transcript creation: Provide the resulting tweets to the podcast_transcript_agent tool so it can script a ~1 minute alternating dialogue between John and Chloe that references the tweets and a balanced conversation about AI bubble.\n\n4. Audio production: Send the transcript to the elevenlabs_audio_gen tool create an audio file.",
+      "tools": {
+        "tweets": {
+          "type": "agent",
+          "name": "tweets"
+        },
+        "podcast_transcript_agent": {
+          "type": "agent",
+          "name": "podcast_transcript_agent"
+        },
+        "elevenlabs_audio_gen": {
+          "type": "agent",
+          "name": "elevenlabs_audio_gen"
+        }
+      }
+    },
+    {
+      "name": "tweets",
+      "description": "Checks latest tweets",
+      "model": "gpt-4.1",
+      "instructions": "Pulls the recent 10 recent tweets each on OpenAI, Anthropic, Nvidia, Grok, Gemini",
+      "tools": {
+        "search_tweets": {
+          "type": "mcp",
+          "name": "TWITTER_RECENT_SEARCH",
+          "description": "Search recent Tweets from the last 7 days using X/Twitter's search syntax via Composio's Twitter MCP server.",
+          "mcpServerName": "twitter",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query for matching Tweets. Use X search operators like from:username, -is:retweet, -is:reply, has:media, lang:en, etc. Limited to last 7 days."
+              },
+              "start_time": {
+                "type": "string",
+                "description": "Oldest UTC timestamp (YYYY-MM-DDTHH:mm:ssZ) for results, within the last 7 days."
+              },
+              "end_time": {
+                "type": "string",
+                "description": "Newest UTC timestamp (YYYY-MM-DDTHH:mm:ssZ) for results; exclusive."
+              },
+              "max_results": {
+                "type": "integer",
+                "description": "Number of Tweets to return (up to 2000 per call).",
+                "default": 10
+              },
+              "sort_order": {
+                "type": "string",
+                "enum": [
+                  "recency",
+                  "relevancy"
+                ],
+                "description": "Order of results: 'recency' (most recent first) or 'relevancy'."
+              },
+              "tweet_fields": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "article",
+                        "attachments",
+                        "author_id",
+                        "card_uri",
+                        "context_annotations",
+                        "conversation_id",
+                        "created_at",
+                        "edit_controls",
+                        "edit_history_tweet_ids",
+                        "entities",
+                        "geo",
+                        "id",
+                        "in_reply_to_user_id",
+                        "lang",
+                        "non_public_metrics",
+                        "note_tweet",
+                        "organic_metrics",
+                        "possibly_sensitive",
+                        "promoted_metrics",
+                        "public_metrics",
+                        "referenced_tweets",
+                        "reply_settings",
+                        "scopes",
+                        "source",
+                        "text",
+                        "withheld"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Tweet fields to include in the response. Example: ['created_at','author_id','public_metrics']."
+              },
+              "expansions": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "article.cover_media",
+                        "article.media_entities",
+                        "attachments.media_keys",
+                        "attachments.media_source_tweet",
+                        "attachments.poll_ids",
+                        "author_id",
+                        "author_screen_name",
+                        "edit_history_tweet_ids",
+                        "entities.mentions.username",
+                        "entities.note.mentions.username",
+                        "geo.place_id",
+                        "in_reply_to_user_id",
+                        "referenced_tweets.id",
+                        "referenced_tweets.id.author_id"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Expansions to hydrate related objects like users, media, polls, and places."
+              },
+              "media_fields": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "alt_text",
+                        "duration_ms",
+                        "height",
+                        "media_key",
+                        "non_public_metrics",
+                        "organic_metrics",
+                        "preview_image_url",
+                        "promoted_metrics",
+                        "public_metrics",
+                        "type",
+                        "url",
+                        "variants",
+                        "width"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Media fields to include when media keys are expanded."
+              },
+              "place_fields": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "contained_within",
+                        "country",
+                        "country_code",
+                        "full_name",
+                        "geo",
+                        "id",
+                        "name",
+                        "place_type"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Place fields to include when place IDs are expanded."
+              },
+              "poll_fields": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "duration_minutes",
+                        "end_datetime",
+                        "id",
+                        "options",
+                        "voting_status"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Poll fields to include when poll IDs are expanded."
+              },
+              "user_fields": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "affiliation",
+                        "connection_status",
+                        "created_at",
+                        "description",
+                        "entities",
+                        "id",
+                        "location",
+                        "most_recent_tweet_id",
+                        "name",
+                        "pinned_tweet_id",
+                        "profile_banner_url",
+                        "profile_image_url",
+                        "protected",
+                        "public_metrics",
+                        "receives_your_dm",
+                        "subscription_type",
+                        "url",
+                        "verified",
+                        "verified_type",
+                        "withheld",
+                        "username"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "User fields to include when user IDs are expanded. Username is always returned by default."
+              },
+              "since_id": {
+                "type": "string",
+                "description": "Return Tweets more recent than this ID (cannot be used with start_time)."
+              },
+              "until_id": {
+                "type": "string",
+                "description": "Return Tweets older than this ID (cannot be used with end_time)."
+              },
+              "next_token": {
+                "type": "string",
+                "description": "Pagination token from a previous response's meta.next_token."
+              },
+              "pagination_token": {
+                "type": "string",
+                "description": "Alternative pagination token from a previous meta.next_token; next_token is preferred."
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "bash": {
+          "type": "builtin",
+          "name": "executeCommand",
+          "description": "Execute bash commands to manipulate files like tweets.txt, e.g. writing search results to disk or appending logs.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "The bash command to execute, such as 'echo \"text\" >> tweets.txt' or 'cat tweets.txt'."
+              }
+            },
+            "required": [
+              "command"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "name": "podcast_transcript_agent",
+      "description": "An agent that will generate a transcript of a podcast",
+      "model": "gpt-4.1",
+      "instructions": "You job is to create a NotebookLM style 1 minute podcast between 2 speakers John and Chloe. Each line should be a new speaker. The podcast should be about the contents of the two papers (that were selected). You can use [sighs], [inhales then exhales], [chuckles], [laughs], [clears throat], [coughs], [sniffs], [pauses] etc. to make the podcast more natural."
+    },
+    {
+      "name": "elevenlabs_audio_gen",
+      "description": "An agent that will generate an audio file from a text",
+      "model": "gpt-4.1",
+      "instructions": "Your job is to take the mutli speaker transcript and generate an audio file from it. Use the elevenlabs text to speech tool to do this. For each speaker turn, you should generate an audio file and then combine them all into a single audio file. Use the voice_name 'Liam' for John and 'Cassidy' for Chloe. Make sure to remove the speaker names from the text before generating the audio files. Use the eleven_v3 model_id. In addition, you should use the compose_music tool to generate a short musical intro and outro for the podcast. The intro should be a small 5-10 second clip modeled after popular podcasts which fades and the podcast starts. The outro should be 10-15 seconds of a related sound. Save the intro and outro to files, and then use the bash tool to stitch them with the main podcast audio so that the final output audio file starts with the intro music, then the full conversation, and ends with the outro music. Place all generated audio on the Desktop by default unless otherwise instructed. Don't wait for confirmation - go ahead and produce the podcast.",
+      "tools": {
+        "text_to_speech": {
+          "type": "mcp",
+          "name": "text_to_speech",
+          "description": "Generate an audio file from a text",
+          "mcpServerName": "elevenLabs",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "The text to generate an audio file from"
+              },
+              "voice_name": {
+                "type": "string",
+                "description": "The voice name to use for the audio file"
+              },
+              "model_id": {
+                "type": "string",
+                "description": "The model id to use for the audio file"
+              }
+            }
+          }
+        },
+        "compose_music": {
+          "type": "mcp",
+          "name": "compose_music",
+          "description": "Generate intro and outro music for the podcast and save as audio files",
+          "mcpServerName": "elevenLabs",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Prompt"
+              },
+              "output_directory": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Output Directory"
+              },
+              "composition_plan": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/MusicPrompt"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "music_length_ms": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Music Length Ms"
+              }
+            },
+            "$defs": {
+              "MusicPrompt": {
+                "additionalProperties": true,
+                "properties": {
+                  "positive_global_styles": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "title": "Positive Global Styles",
+                    "type": "array"
+                  },
+                  "negative_global_styles": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "title": "Negative Global Styles",
+                    "type": "array"
+                  },
+                  "sections": {
+                    "items": {
+                      "$ref": "#/$defs/SongSection"
+                    },
+                    "title": "Sections",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "positive_global_styles",
+                  "negative_global_styles",
+                  "sections"
+                ],
+                "title": "MusicPrompt",
+                "type": "object"
+              },
+              "SectionSource": {
+                "additionalProperties": true,
+                "properties": {
+                  "song_id": {
+                    "title": "Song Id",
+                    "type": "string"
+                  },
+                  "range": {
+                    "$ref": "#/$defs/TimeRange"
+                  },
+                  "negative_ranges": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "$ref": "#/$defs/TimeRange"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null,
+                    "title": "Negative Ranges"
+                  }
+                },
+                "required": [
+                  "song_id",
+                  "range"
+                ],
+                "title": "SectionSource",
+                "type": "object"
+              },
+              "SongSection": {
+                "additionalProperties": true,
+                "properties": {
+                  "section_name": {
+                    "title": "Section Name",
+                    "type": "string"
+                  },
+                  "positive_local_styles": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "title": "Positive Local Styles",
+                    "type": "array"
+                  },
+                  "negative_local_styles": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "title": "Negative Local Styles",
+                    "type": "array"
+                  },
+                  "duration_ms": {
+                    "title": "Duration Ms",
+                    "type": "integer"
+                  },
+                  "lines": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "title": "Lines",
+                    "type": "array"
+                  },
+                  "source_from": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/SectionSource"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": [
+                  "section_name",
+                  "positive_local_styles",
+                  "negative_local_styles",
+                  "duration_ms",
+                  "lines"
+                ],
+                "title": "SongSection",
+                "type": "object"
+              },
+              "TimeRange": {
+                "additionalProperties": true,
+                "properties": {
+                  "start_ms": {
+                    "title": "Start Ms",
+                    "type": "integer"
+                  },
+                  "end_ms": {
+                    "title": "End Ms",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "start_ms",
+                  "end_ms"
+                ],
+                "title": "TimeRange",
+                "type": "object"
+              }
+            },
+            "title": "compose_musicArguments"
+          }
+        },
+        "bash": {
+          "type": "builtin",
+          "name": "executeCommand"
+        }
+      }
+    }
+  ],
+  "mcpServers": {
+    "elevenLabs": {
+      "command": "uvx",
+      "args": [
+        "elevenlabs-mcp"
+      ],
+      "env": {
+        "ELEVENLABS_API_KEY": "<your-api-key>"
+      }
+    },
+    "calendar": {
+      "type": "http",
+      "url": "<composio-url>"
+    },
+    "twitter": {
+      "type": "http",
+      "url": "<composio-url>"
+    }
+  }
+}

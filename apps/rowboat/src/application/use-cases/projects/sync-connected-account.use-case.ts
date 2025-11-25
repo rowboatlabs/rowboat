@@ -51,7 +51,23 @@ export class SyncConnectedAccountUseCase implements ISyncConnectedAccountUseCase
         }
         const account = project.composioConnectedAccounts?.[toolkitSlug];
         if (!account || account.id !== connectedAccountId) {
-            throw new Error(`Connected account ${connectedAccountId} not found in project ${projectId}`);
+            // Log detailed mismatch context to aid debugging
+            try {
+                // Avoid crashing on logging itself
+                // Include both expected and stored IDs, toolkit slug, and available toolkits
+                // so we can quickly spot wrong slug or race conditions.
+                // Note: This is server-side logging only.
+                console.error('[Composio] Connected account mismatch', {
+                    projectId,
+                    toolkitSlug,
+                    expectedConnectedAccountId: connectedAccountId,
+                    storedAccountId: account?.id ?? null,
+                    storedStatus: account?.status ?? null,
+                    availableToolkits: Object.keys(project.composioConnectedAccounts || {}),
+                });
+            } catch {}
+
+            throw new Error(`Connected account ${connectedAccountId} not found in project ${projectId} (toolkit: ${toolkitSlug})`);
         }
 
         if (account.status === 'ACTIVE') {
@@ -85,5 +101,4 @@ export class SyncConnectedAccountUseCase implements ISyncConnectedAccountUseCase
         return updated;
     }
 }
-
 

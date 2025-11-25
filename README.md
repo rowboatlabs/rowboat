@@ -1,6 +1,6 @@
 ![ui](/assets/banner.png)
 
-<h2 align="center">Let AI build multi-agent workflows for you in minutes</h2>
+<h2 align="center">RowboatX - CLI Tool for Background Agents</h2>
 <h5 align="center">
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
@@ -16,7 +16,7 @@
   <a href="https://discord.gg/rxB8pzHxaS" target="_blank" rel="noopener">
     <img alt="Discord" src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white&labelColor=5865F2">
   </a>
-  <a href="https://www.rowboatlabs.com/" target="_blank" rel="noopener">
+  <a href="https://www.rowboatx.com/" target="_blank" rel="noopener">
     <img alt="Website" src="https://img.shields.io/badge/Website-10b981?labelColor=10b981&logo=window&logoColor=white">
   </a>
   <a href="https://www.youtube.com/@RowBoatLabs" target="_blank" rel="noopener">
@@ -36,95 +36,86 @@
 
 </h5>
 
-- ✨ **Start from an idea -> copilot builds your multi-agent workflows**
-   - E.g. "Build me an assistant for a food delivery company to handle delivery status and missing items. Include the necessary tools."
-- 🌐 **Connect MCP servers**
-   - Add the MCP servers in settings -> import the tools into Rowboat.     
-- 📞 **Integrate into your app using the HTTP API or Python SDK**
-   - Grab the project ID and generated API key from settings and use the API.
+- ✨ **Create background agents with full shell access**
+   - E.g. "Generate a NotebookLM-style podcast from my saved articles every morning"
+- 🔧 **Connect any MCP server to add capabilities**
+   - Add MCP servers and RowboatX handles the integration
+- 🎯 **Let RowboatX control and monitor your background agents**
+   - Easily inspect state on the filesystem 
 
-Powered by OpenAI's Agents SDK, Rowboat is the fastest way to build multi-agents!
+Inspired by Claude Code, RowboatX brings the same shell-native power to background automations.
 
 ## Quick start
-1. Set your OpenAI key
-      ```bash
-   export OPENAI_API_KEY=your-openai-api-key
-   ```
-      
-2. Clone the repository and start Rowboat
-   ```bash
-   git clone git@github.com:rowboatlabs/rowboat.git
-   cd rowboat
-   ./start.sh
-   ```
-
-3. Access the app at [http://localhost:3000](http://localhost:3000).
-
-Note: We have added native RAG support including file-uploads and URL scraping. See the [RAG](https://docs.rowboatlabs.com/using_rag) section of our docs for this.
-
-Note: See the [Using custom LLM providers](https://docs.rowboatlabs.com/setup/#using-custom-llm-providers) section of our docs for using custom providers like OpenRouter and LiteLLM.
+```bash
+npx @rowboatlabs/rowboatx@latest
+```
 
 ## Demo
+[![Screenshot](https://github.com/user-attachments/assets/ab46ff8b-44bd-400e-beb0-801c6431033f)](https://www.youtube.com/watch?v=cyPBinQzicY&t)
 
-#### Create a multi-agent assistant with MCP tools by chatting with Rowboat
-[![Screenshot 2025-04-23 at 00 25 31](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/YRTCw9UHRbU)
+## Examples
+### Add and Manage MCP servers 
+`$ rowboatx`
+- Add MCP: 'Add this MCP server config: \<config\> '
+- Explore tools: 'What tools are there in \<server-name\> '
 
-## Integrate with Rowboat agents
+### Create background agents
+`$ rowboatx`
+- 'Create agent to do X.'
+- '... Attach the correct tools from \<mcp-server-name\> to the agent'
+- '... Allow the agent to run shell commands including ffmpeg'
 
-There are 2 ways to integrate with the agents you create in Rowboat
+### Schedule and monitor agents
+`$ rowboatx`
+- 'Make agent \<background-agent-name\> run every day at 10 AM' 
+- 'What agents do I have scheduled to run and at what times'
+- 'When was \<background-agent-name\> last run'
+- 'Are any agents waiting for my input or confirmation'
 
-1. HTTP API
-   - You can use the API directly at [http://localhost:3000/api/v1/](http://localhost:3000/api/v1/)
-   - See [API Docs](https://docs.rowboatlabs.com/using_the_api/) for details
-   ```bash
-   curl --location 'http://localhost:3000/api/v1/<PROJECT_ID>/chat' \
-   --header 'Content-Type: application/json' \
-   --header 'Authorization: Bearer <API_KEY>' \
-   --data '{
-       "messages": [
-           {
-               "role": "user",
-               "content": "tell me the weather in london in metric units"
-           }
-       ],
-       "state": null
-   }'
-   ```
-   
+### Run background agents manually
+``` bash
+rowboatx --agent=<agent-name> --input="xyz" --no-interactive=true
+```
+```bash    
+rowboatx --agent=<agent-name> --run_id=<run_id> # resume from a previous run
+```
+## Models support
+You can configure your models using:
+```bash
+rowboatx model-config
+```
 
-2. Python SDK
-   You can use the included Python SDK to interact with the Agents
-   ```
-   pip install rowboat
-   ```
+Alternatively, you can directly edit `~/.rowboat/config/models.json`
+```json
+{
+  "providers": {
+    "openai": {
+      "flavor": "openai"
+    },
+    "lm-studio": {
+      "flavor": "openai-compatible",
+      "baseURL": "http://localhost:2000/...",
+      "apiKey": "...",
+      "headers": {
+        "foo": "bar"
+      }
+    },
+    "anthropic": {
+      "flavor": "anthropic"
+    },
+    "google": {
+      "flavor": "google"
+    },
+    "ollama": {
+      "flavor": "ollama"
+    }
+  },
+  "defaults": {
+    "provider": "lm-studio",
+    "model": "gpt-5"
+  }
+}
+```
+## Rowboat Classic UI
 
-   See [SDK Docs](https://docs.rowboatlabs.com/using_the_sdk/) for details. Here is a quick example:
-   ```python
-   from rowboat import Client, StatefulChat
-   from rowboat.schema import UserMessage, SystemMessage
-
-   # Initialize the client
-   client = Client(
-       host="http://localhost:3000",
-       project_id="<PROJECT_ID>",
-       api_key="<API_KEY>"
-   )
-
-   # Create a stateful chat session (recommended)
-   chat = StatefulChat(client)
-   response = chat.run("What's the weather in London?")
-   print(response)
-
-   # Or use the low-level client API
-   messages = [
-       SystemMessage(role='system', content="You are a helpful assistant"),
-       UserMessage(role='user', content="Hello, how are you?")
-   ]
-   
-   # Get response
-   response = client.chat(messages=messages)
-   print(response.messages[-1].content)
-   ```
-
-
-Refer to [Docs](https://docs.rowboatlabs.com/) to learn how to start building agents with Rowboat.
+To use Rowboat Classic UI (not RowboatX), refer to [Classic](https://docs.rowboatlabs.com/). 
