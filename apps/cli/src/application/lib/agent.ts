@@ -14,6 +14,7 @@ import { AskHumanRequestEvent, RunEvent, ToolPermissionRequestEvent, ToolPermiss
 import { BuiltinTools } from "./builtin-tools.js";
 import { CopilotAgent } from "../assistant/agent.js";
 import { isBlocked } from "./command-executor.js";
+import { AgentConfig } from "../entities/agent-config.js";
 
 export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
     switch (t.type) {
@@ -165,9 +166,36 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     if (id === "copilot") {
         return CopilotAgent;
     }
-    const agentPath = path.join(WorkDir, "agents", `${id}.json`);
-    const agent = fs.readFileSync(agentPath, "utf8");
-    return Agent.parse(JSON.parse(agent));
+    const agentDir = path.join(WorkDir, "agents", id);
+    if (!fs.existsSync(agentDir)) {
+        throw new Error(`Agent directory not found: ${agentDir}`);
+    }
+
+    const instructionsPath = path.join(agentDir, "instructions.md");
+    if (!fs.existsSync(instructionsPath)) {
+        throw new Error(`Missing instructions.md for agent '${id}'`);
+    }
+    const instructions = fs.readFileSync(instructionsPath, "utf8");
+
+    const toolsPath = path.join(agentDir, "tools.json");
+    const tools = fs.existsSync(toolsPath)
+        ? JSON.parse(fs.readFileSync(toolsPath, "utf8"))
+        : undefined;
+
+    const configPath = path.join(agentDir, "config.json");
+    if (!fs.existsSync(configPath)) {
+        throw new Error(`Missing config.json for agent '${id}'`);
+    }
+    const config = AgentConfig.parse(JSON.parse(fs.readFileSync(configPath, "utf8")));
+
+    return Agent.parse({
+        name: id,
+        provider: config.provider,
+        model: config.model,
+        description: config.description,
+        instructions,
+        tools,
+    });
 }
 
 export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
