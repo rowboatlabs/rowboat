@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -21,21 +25,19 @@ jobs:
 
       - name: Install deps
         run: npm ci
-        working-directory: apps/rowboat
+        working-directory: apps/cli
 
       # optional: run tests
       # - run: npm test
 
       - name: Build
         run: npm run build
-        working-directory: apps/rowboat
+        working-directory: apps/cli
 
       - name: Pack
         run: npm pack
-        working-directory: apps/rowboat
+        working-directory: apps/cli
 
       - name: Publish to npm
         run: npm publish --access public
-        working-directory: apps/rowboat
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        working-directory: apps/cli
