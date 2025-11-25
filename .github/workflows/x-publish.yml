@@ -1,0 +1,41 @@
+name: Publish to npm
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install deps
+        run: npm ci
+        working-directory: apps/rowboat
+
+      # optional: run tests
+      # - run: npm test
+
+      - name: Build
+        run: npm run build
+        working-directory: apps/rowboat
+
+      - name: Pack
+        run: npm pack
+        working-directory: apps/rowboat
+
+      - name: Publish to npm
+        run: npm publish --access public
+        working-directory: apps/rowboat
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
