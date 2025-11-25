@@ -27,7 +27,13 @@ export async function getProvider(name: string = ""): Promise<ProviderV2> {
     }
     const { apiKey, baseURL, headers } = providerConfig;
     switch (providerConfig.flavor) {
-        case "openai":
+        case "rowboat [free]":
+            providerMap[name] = createOpenAICompatible({
+                name: "rowboat [free]",
+                baseURL: "https://ai-gateway.rowboatlabs.com/v1",
+            });
+            break;
+         case "openai":
             providerMap[name] = createOpenAI({
                 apiKey,
                 baseURL,
