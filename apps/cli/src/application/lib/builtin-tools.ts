@@ -8,6 +8,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
+import { McpServerDefinition, McpServerConfig } from "../entities/mcp.js";
 
 const BuiltinToolsSchema = z.record(z.string(), z.object({
     description: z.string(),
@@ -300,6 +301,118 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 return {
                     success: false,
                     message: `Failed to analyze agent: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                };
+            }
+        },
+    },
+    
+    addMcpServer: {
+        description: 'Add or update an MCP server in the configuration with validation. This ensures the server definition is valid before saving.',
+        inputSchema: z.object({
+            serverName: z.string().describe('Name/alias for the MCP server'),
+            serverType: z.enum(['stdio', 'http']).describe('Type of MCP server: "stdio" for command-based or "http" for HTTP/SSE-based'),
+            command: z.string().optional().describe('Command to execute (required for stdio type, e.g., "npx", "python", "node")'),
+            args: z.array(z.string()).optional().describe('Command arguments (optional, for stdio type)'),
+            env: z.record(z.string(), z.string()).optional().describe('Environment variables (optional, for stdio type)'),
+            url: z.string().optional().describe('HTTP/SSE endpoint URL (required for http type)'),
+            headers: z.record(z.string(), z.string()).optional().describe('HTTP headers (optional, for http type)'),
+        }),
+        execute: async ({ serverName, serverType, command, args, env, url, headers }: { 
+            serverName: string;
+            serverType: 'stdio' | 'http';
+            command?: string;
+            args?: string[];
+            env?: Record<string, string>;
+            url?: string;
+            headers?: Record<string, string>;
+        }) => {
+            try {
+                // Build server definition based on type
+                let serverDef: any;
+                if (serverType === 'stdio') {
+                    if (!command) {
+                        return {
+                            success: false,
+                            message: 'For stdio type servers, "command" is required. Example: "npx" or "python"',
+                            validationErrors: ['Missing required field: command'],
+                        };
+                    }
+                    serverDef = {
+                        type: 'stdio',
+                        command,
+                        ...(args ? { args } : {}),
+                        ...(env ? { env } : {}),
+                    };
+                } else if (serverType === 'http') {
+                    if (!url) {
+                        return {
+                            success: false,
+                            message: 'For http type servers, "url" is required. Example: "http://localhost:3000/sse"',
+                            validationErrors: ['Missing required field: url'],
+                        };
+                    }
+                    serverDef = {
+                        type: 'http',
+                        url,
+                        ...(headers ? { headers } : {}),
+                    };
+                } else {
+                    return {
+                        success: false,
+                        message: `Invalid serverType: ${serverType}. Must be "stdio" or "http"`,
+                        validationErrors: [`Invalid serverType: ${serverType}`],
+                    };
+                }
+                
+                // Validate against Zod schema
+                const validationResult = McpServerDefinition.safeParse(serverDef);
+                if (!validationResult.success) {
+                    return {
+                        success: false,
+                        message: 'Server definition failed validation. Check the errors below.',
+                        validationErrors: validationResult.error.issues.map((e: any) => `${e.path.join('.')}: ${e.message}`),
+                        providedDefinition: serverDef,
+                    };
+                }
+                
+                // Read existing config
+                const configPath = path.join(BASE_DIR, 'config', 'mcp.json');
+                let currentConfig: z.infer<typeof McpServerConfig> = { mcpServers: {} };
+                try {
+                    const content = await fs.readFile(configPath, 'utf-8');
+                    currentConfig = McpServerConfig.parse(JSON.parse(content));
+                } catch (error: any) {
+                    if (error?.code !== 'ENOENT') {
+                        return {
+                            success: false,
+                            message: `Failed to read existing MCP config: ${error.message}`,
+                        };
+                    }
+                    // File doesn't exist, use empty config
+                }
+                
+                // Check if server already exists
+                const isUpdate = !!currentConfig.mcpServers[serverName];
+                
+                // Add/update server
+                currentConfig.mcpServers[serverName] = validationResult.data;
+                
+                // Write back to file
+                await fs.mkdir(path.dirname(configPath), { recursive: true });
+                await fs.writeFile(configPath, JSON.stringify(currentConfig, null, 2), 'utf-8');
+                
+                return {
+                    success: true,
+                    message: `MCP server '${serverName}' ${isUpdate ? 'updated' : 'added'} successfully`,
+                    serverName,
+                    serverType,
+                    isUpdate,
+                    configuration: validationResult.data,
+                };
+            } catch (error) {
+                return {
+                    success: false,
+                    message: `Failed to add MCP server: ${error instanceof Error ? error.message : 'Unknown error'}`,
                 };
             }
         },
