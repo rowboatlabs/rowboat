@@ -256,24 +256,6 @@ Once an MCP server is configured, add its tools to agent definitions:
 }
 \`\`\`
 
-- Filesystem operations:
-\`\`\`json
-"tools": {
-  "read_file": {
-    "type": "mcp",
-    "name": "read_file",
-    "description": "Read file contents",
-    "mcpServerName": "filesystem",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "path": {"type": "string", "description": "File path to read"}
-      },
-      "required": ["path"]
-    }
-  }
-}
-\`\`\`
 
 ## Safety reminders
 - ALWAYS use \`addMcpServer\` to configure MCP servers—never manually edit config files
