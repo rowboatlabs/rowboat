@@ -7,7 +7,7 @@ Load this skill whenever a user wants to inspect, create, or update agents insid
 
 **IMPORTANT**: In the CLI, there are NO separate "workflow" files. Everything is an agent.
 
-- **All definitions live in \`agents/*.json\`** - there is no separate workflows folder
+- **All definitions live in \`agents/<agent_name>/\`** with separate files for config, tools, and instructions
 - Agents configure a model, instructions, and the tools they can use
 - Tools can be: builtin (like \`executeCommand\`), MCP integrations, or **other agents**
 - **"Workflows" are just agents that orchestrate other agents** by having them as tools
@@ -20,23 +20,39 @@ Load this skill whenever a user wants to inspect, create, or update agents insid
 4. Data flows through tool call parameters and responses
 
 ## Agent format
+\`\`\`
+agents/
+  agent_name/
+    config.json       # description + optional model/provider
+    instructions.md   # agent instructions
+    tools.json        # tool definitions
+\`\`\`
+
+**config.json**
 \`\`\`json
 {
-  "name": "agent_name",
   "description": "Description of the agent",
-  "model": "gpt-5.1",
-  "instructions": "Instructions for the agent",
-  "tools": {
-    "descriptive_tool_key": {
-      "type": "mcp",
-      "name": "actual_mcp_tool_name",
-      "description": "What the tool does",
-      "mcpServerName": "server_name_from_config",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "param1": {"type": "string", "description": "What the parameter means"}
-        }
+  "model": "gpt-5.1"
+}
+\`\`\`
+
+**instructions.md**
+\`\`\`md
+Instructions for the agent
+\`\`\`
+
+**tools.json**
+\`\`\`json
+{
+  "descriptive_tool_key": {
+    "type": "mcp",
+    "name": "actual_mcp_tool_name",
+    "description": "What the tool does",
+    "mcpServerName": "server_name_from_config",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "param1": {"type": "string", "description": "What the parameter means"}
       }
     }
   }
@@ -88,53 +104,51 @@ Load this skill whenever a user wants to inspect, create, or update agents insid
 
 **1. Task-specific agent** (does one thing):
 \`\`\`json
-{
-  "name": "summariser_agent",
-  "description": "Summarises an arxiv paper",
-  "model": "gpt-5.1",
-  "instructions": "Download and summarise an arxiv paper. Use curl to fetch the PDF. Output just the GIST in two lines. Don't ask for human input.",
-  "tools": {
-    "bash": {"type": "builtin", "name": "executeCommand"}
-  }
-}
+// agents/summariser_agent/config.json
+{ "description": "Summarises an arxiv paper", "model": "gpt-5.1" }
+
+// agents/summariser_agent/instructions.md
+Download and summarise an arxiv paper. Use curl to fetch the PDF. Output just the GIST in two lines. Don't ask for human input.
+
+// agents/summariser_agent/tools.json
+{ "bash": { "type": "builtin", "name": "executeCommand" } }
 \`\`\`
 
 **2. Agent that delegates to other agents**:
 \`\`\`json
-{
-  "name": "summarise-a-few",
-  "description": "Summarises multiple arxiv papers",
-  "model": "gpt-5.1",
-  "instructions": "Pick 2 interesting papers and summarise each using the summariser tool. Pass the paper URL to the tool. Don't ask for human input.",
-  "tools": {
-    "summariser": {
-      "type": "agent",
-      "name": "summariser_agent"
-    }
-  }
-}
+// agents/summarise-a-few/config.json
+{ "description": "Summarises multiple arxiv papers", "model": "gpt-5.1" }
+
+// agents/summarise-a-few/instructions.md
+Pick 2 interesting papers and summarise each using the summariser tool. Pass the paper URL to the tool. Don't ask for human input.
+
+// agents/summarise-a-few/tools.json
+{ "summariser": { "type": "agent", "name": "summariser_agent" } }
 \`\`\`
 
 **3. Orchestrator agent** (coordinates the whole workflow):
 \`\`\`json
+// agents/podcast_workflow/config.json
+{ "description": "Create a podcast from arXiv papers", "model": "gpt-5.1" }
+
+// agents/podcast_workflow/instructions.md
+1. Fetch arXiv papers about agents using bash
+2. Pick papers and summarise them using summarise_papers
+3. Create a podcast transcript
+4. Generate audio using text_to_speech
+
+Execute these steps in sequence.
+
+// agents/podcast_workflow/tools.json
 {
-  "name": "podcast_workflow",
-  "description": "Create a podcast from arXiv papers",
-  "model": "gpt-5.1",
-  "instructions": "1. Fetch arXiv papers about agents using bash\n2. Pick papers and summarise them using summarise_papers\n3. Create a podcast transcript\n4. Generate audio using text_to_speech\n\nExecute these steps in sequence.",
-  "tools": {
-    "bash": {"type": "builtin", "name": "executeCommand"},
-    "summarise_papers": {
-      "type": "agent",
-      "name": "summarise-a-few"
-    },
-    "text_to_speech": {
-      "type": "mcp",
-      "name": "text_to_speech",
-      "mcpServerName": "elevenLabs",
-      "description": "Generate audio",
-      "inputSchema": { "type": "object", "properties": {...}}
-    }
+  "bash": { "type": "builtin", "name": "executeCommand" },
+  "summarise_papers": { "type": "agent", "name": "summarise-a-few" },
+  "text_to_speech": {
+    "type": "mcp",
+    "name": "text_to_speech",
+    "mcpServerName": "elevenLabs",
+    "description": "Generate audio",
+    "inputSchema": { "type": "object", "properties": { "...": "..." } }
   }
 }
 \`\`\`
@@ -142,10 +156,10 @@ Load this skill whenever a user wants to inspect, create, or update agents insid
 **To run this workflow**: \`rowboatx --agent podcast_workflow\`
 
 ## Naming and organization rules
-- **All agents live in \`agents/*.json\`** - no other location
-- Agent filenames must match the \`"name"\` field exactly
-- When referencing an agent as a tool, use its \`"name"\` value
-- Always keep filenames and \`"name"\` fields perfectly aligned
+- **All agents live in \`agents/<agent_name>/\`** with \`config.json\`, \`instructions.md\`, and \`tools.json\`
+- Directory name must match the agent name exactly
+- When referencing an agent as a tool, use its directory/agent name
+- Keep directory names aligned with any references inside tools.json
 - Use relative paths (no \${BASE_DIR} prefixes) when giving examples to users
 
 ## Best practices for multi-agent design
