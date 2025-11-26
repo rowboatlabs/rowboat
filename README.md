@@ -9,20 +9,11 @@
 </p>
 
 <p align="center">
-  <a href="https://docs.rowboatlabs.com/" target="_blank" rel="noopener">
-    <img alt="Docs" src="https://img.shields.io/badge/Docs-8b5cf6?labelColor=8b5cf6&logo=readthedocs&logoColor=white">
-  </a>
   <a href="https://discord.gg/rxB8pzHxaS" target="_blank" rel="noopener">
     <img alt="Discord" src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white&labelColor=5865F2">
   </a>
   <a href="https://www.rowboatx.com/" target="_blank" rel="noopener">
     <img alt="Website" src="https://img.shields.io/badge/Website-10b981?labelColor=10b981&logo=window&logoColor=white">
-  </a>
-  <a href="https://www.youtube.com/@RowBoatLabs" target="_blank" rel="noopener">
-    <img alt="YouTube" src="https://img.shields.io/badge/YouTube-FF0000?labelColor=FF0000&logo=youtube&logoColor=white">
-  </a>
-  <a href="https://www.linkedin.com/company/rowboat-labs" target="_blank" rel="noopener">
-    <img alt="LinkedIn" src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff">
   </a>
   <a href="https://x.com/intent/user?screen_name=rowboatlabshq" target="_blank" rel="noopener">
     <img alt="Twitter" src="https://img.shields.io/twitter/follow/rowboatlabshq?style=social">
@@ -115,12 +106,33 @@ Alternatively, you can directly edit `~/.rowboat/config/models.json`
   }
 }
 ```
+## Contributing
+
+We want help with:
+
+- **Agent templates** - Pre-built agents others can use (podcast generator, meeting prep, etc.)
+- **MCP server integrations** - Add support for new tools
+- **Platform support** - Windows improvements, Linux edge cases
+
+```bash
+git clone git@github.com:rowboatlabs/rowboat.git
+cd rowboat
+npm install
+npm run build
+npm link
+rowboatx
+```
+
+Ping us on [Discord](https://discord.com/invite/rxB8pzHxaS) if you want to discuss before building.
+
 --- 
-# Rowboat Studio - Cursor for Multi-agent Workflows
+## Prefer a Web UI: Rowboat Studio
+
+*Cursor for Multi-agent Workflows*
 
 ⚡ Build AI agents instantly with natural language | 🔌 Connect tools with one-click integrations | 📂 Power with knowledge by adding documents for RAG | 🔄 Automate workflows by setting up triggers and actions | 🚀 Deploy anywhere via API or SDK<br><br>
 
-## Quick start
+### Quick start
 1. Set your OpenAI key
    ```bash
    export OPENAI_API_KEY=your-openai-api-key  
@@ -128,19 +140,19 @@ Alternatively, you can directly edit `~/.rowboat/config/models.json`
       
 2. Clone the repository and start Rowboat (requires Docker)
    ```bash
-   git clone git@github.com:rowboatlabs/rowboat.git
-   cd rowboat
    ./start.sh
    ```
 
 3. Access the app at [http://localhost:3000](http://localhost:3000).
 
-To add tools, RAG, more LLMs, and  triggers checkout the [Advanced](#advanced) section below.
 #### Create a multi-agent assistant with MCP tools by chatting with Rowboat
 [![meeting-prep](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/KZTP4xZM2DY)
-
+See [Docs](https://docs.rowboatlabs.com/) for more details.
+ 
 ---
+<div align="center">
+  
+Made with ❤️ by the Rowboat team
 
-# Contributing
-
-We'd love your help making Rowboat better! Join our 💬 [Discord](https://discord.com/invite/rxB8pzHxaS)
+[Discord](https://discord.gg/rxB8pzHxaS) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
+</div>
