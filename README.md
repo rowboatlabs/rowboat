@@ -1,6 +1,5 @@
 ![ui](/assets/banner.png)
 
-<h2 align="center">RowboatX - CLI Tool for Background Agents</h2>
 <h5 align="center">
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
@@ -33,7 +32,7 @@
   </a>
 </p>
 
-
+# RowboatX - Claude Code for Everyday Automations
 </h5>
 
 - ✨ **Create background agents with full shell access**
@@ -116,6 +115,32 @@ Alternatively, you can directly edit `~/.rowboat/config/models.json`
   }
 }
 ```
-## Rowboat Classic UI
+--- 
+# Rowboat Studio - Cursor for Multi-agent Workflows
 
-To use Rowboat Classic UI (not RowboatX), refer to [Classic](https://docs.rowboatlabs.com/). 
+⚡ Build AI agents instantly with natural language | 🔌 Connect tools with one-click integrations | 📂 Power with knowledge by adding documents for RAG | 🔄 Automate workflows by setting up triggers and actions | 🚀 Deploy anywhere via API or SDK<br><br>
+
+## Quick start
+1. Set your OpenAI key
+   ```bash
+   export OPENAI_API_KEY=your-openai-api-key  
+   ```
+      
+2. Clone the repository and start Rowboat (requires Docker)
+   ```bash
+   git clone git@github.com:rowboatlabs/rowboat.git
+   cd rowboat
+   ./start.sh
+   ```
+
+3. Access the app at [http://localhost:3000](http://localhost:3000).
+
+To add tools, RAG, more LLMs, and  triggers checkout the [Advanced](#advanced) section below.
+#### Create a multi-agent assistant with MCP tools by chatting with Rowboat
+[![meeting-prep](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/KZTP4xZM2DY)
+
+---
+
+# Contributing
+
+We'd love your help making Rowboat better! Join our 💬 [Discord](https://discord.com/invite/rxB8pzHxaS)
