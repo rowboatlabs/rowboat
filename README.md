@@ -1,4 +1,4 @@
-![ui](/assets/banner.png)
+![ui](https://github.com/user-attachments/assets/fdf0679f-b107-48ce-b326-04db752838d9)
 
 <h5 align="center">
 
