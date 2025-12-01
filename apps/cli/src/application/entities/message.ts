@@ -1,13 +1,17 @@
 import { z } from "zod";
 
+export const ProviderOptions = z.record(z.string(), z.record(z.string(), z.json()));
+
 export const TextPart = z.object({
     type: z.literal("text"),
     text: z.string(),
+    providerOptions: ProviderOptions.optional(),
 });
 
 export const ReasoningPart = z.object({
     type: z.literal("reasoning"),
     text: z.string(),
+    providerOptions: ProviderOptions.optional(),
 });
 
 export const ToolCallPart = z.object({
@@ -15,6 +19,7 @@ export const ToolCallPart = z.object({
     toolCallId: z.string(),
     toolName: z.string(),
     arguments: z.any(),
+    providerOptions: ProviderOptions.optional(),
 });
 
 export const AssistantContentPart = z.union([
@@ -26,6 +31,7 @@ export const AssistantContentPart = z.union([
 export const UserMessage = z.object({
     role: z.literal("user"),
     content: z.string(),
+    providerOptions: ProviderOptions.optional(),
 });
 
 export const AssistantMessage = z.object({
@@ -34,11 +40,13 @@ export const AssistantMessage = z.object({
         z.string(),
         z.array(AssistantContentPart),
     ]),
+    providerOptions: ProviderOptions.optional(),
 });
 
 export const SystemMessage = z.object({
     role: z.literal("system"),
     content: z.string(),
+    providerOptions: ProviderOptions.optional(),
 });
 
 export const ToolMessage = z.object({
@@ -46,6 +54,7 @@ export const ToolMessage = z.object({
     content: z.string(),
     toolCallId: z.string(),
     toolName: z.string(),
+    providerOptions: ProviderOptions.optional(),
 });
 
 export const Message = z.discriminatedUnion("role", [

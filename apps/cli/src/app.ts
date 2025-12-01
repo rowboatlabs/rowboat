@@ -14,6 +14,7 @@ import { Example } from "./application/entities/example.js";
 import { z } from "zod";
 import { Flavor } from "./application/entities/models.js";
 import { examples } from "./examples/index.js";
+import { modelMessageSchema } from "ai";
 
 export async function updateState(agent: string, runId: string) {
     const state = new AgentState(agent, runId);
@@ -225,6 +226,7 @@ export async function modelConfig() {
         const defaultApiKeyEnvVars: Record<z.infer<typeof Flavor>, string> = {
             "rowboat [free]": "",
             openai: "OPENAI_API_KEY",
+            aigateway: "AI_GATEWAY_API_KEY",
             anthropic: "ANTHROPIC_API_KEY",
             google: "GOOGLE_GENERATIVE_AI_API_KEY",
             ollama: "",
@@ -234,6 +236,7 @@ export async function modelConfig() {
         const defaultBaseUrls: Record<z.infer<typeof Flavor>, string> = {
             "rowboat [free]": "",
             openai: "https://api.openai.com/v1",
+            aigateway: "https://ai-gateway.vercel.sh/v1/ai",
             anthropic: "https://api.anthropic.com/v1",
             google: "https://generativelanguage.googleapis.com/v1beta",
             ollama: "http://localhost:11434",
@@ -243,6 +246,7 @@ export async function modelConfig() {
         const defaultModels: Record<z.infer<typeof Flavor>, string> = {
             "rowboat [free]": "google/gemini-3-pro-preview",
             openai: "gpt-5.1",
+            aigateway: "gpt-5.1",
             anthropic: "claude-sonnet-4-5",
             google: "gemini-2.5-pro",
             ollama: "llama3.1",

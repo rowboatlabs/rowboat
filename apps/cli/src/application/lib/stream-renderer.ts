@@ -77,8 +77,8 @@ export class StreamRenderer {
             case "tool-call":
                 this.onToolCall(event.toolCallId, event.toolName, event.input);
                 break;
-            case "usage":
-                this.onUsage(event.usage);
+            case "finish-step":
+                this.onFinishStep(event.finishReason, event.usage);
                 break;
         }
     }
@@ -219,13 +219,15 @@ export class StreamRenderer {
         this.write("\n");
     }
 
-    private onUsage(usage: {
-        inputTokens?: number;
-        outputTokens?: number;
-        totalTokens?: number;
-        reasoningTokens?: number;
-        cachedInputTokens?: number;
-    }) {
+    private onFinishStep(
+        finishReason: "stop" | "tool-calls" | "length" | "content-filter" | "error" | "other" | "unknown",
+        usage: {
+            inputTokens?: number;
+            outputTokens?: number;
+            totalTokens?: number;
+            reasoningTokens?: number;
+            cachedInputTokens?: number;
+        }) {
         const parts: string[] = [];
         if (usage.inputTokens !== undefined) parts.push(`${this.dim("in:")} ${usage.inputTokens}`);
         if (usage.outputTokens !== undefined) parts.push(`${this.dim("out:")} ${usage.outputTokens}`);
@@ -234,8 +236,13 @@ export class StreamRenderer {
         if (usage.totalTokens !== undefined) parts.push(`${this.dim("total:")} ${this.bold(usage.totalTokens.toString())}`);
         const line = parts.join(this.dim(" | "));
         this.write("\n");
-        this.write(this.dim("╭─ Usage\n"));
-        this.write(this.dim("│ ") + line);
+        this.write(this.bold("╭─ ") + this.bold("Finish"));
+        this.write("\n");
+        this.write(this.dim("│ ") + this.dim("reason: ") + finishReason);
+        if (line.length) {
+            this.write("\n");
+            this.write(this.dim("│ ") + line);
+        }
         this.write("\n");
         this.write(this.dim("╰─────────────\n"));
     }
