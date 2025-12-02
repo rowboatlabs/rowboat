@@ -106,6 +106,13 @@ Alternatively, you can directly edit `~/.rowboat/config/models.json`
   }
 }
 ```
+
+## Stargazers
+
+Thanks to all our supporters!
+
+[![Star History Chart](https://api.star-history.com/svg?repos=rowboatlabs/rowboat&type=Date)](https://www.star-history.com/#rowboatlabs/rowboat&Date)
+
 ## Contributing
 
 We want help with:
@@ -126,7 +133,7 @@ rowboatx
 Ping us on [Discord](https://discord.com/invite/rxB8pzHxaS) if you want to discuss before building.
 
 --- 
-## Prefer a Web UI: Rowboat Studio
+## Prefer a Web UI: Rowboat Web Studio
 
 *Cursor for Multi-agent Workflows*
 
