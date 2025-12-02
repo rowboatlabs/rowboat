@@ -1,19 +1,102 @@
 import { jsonSchema, ModelMessage, modelMessageSchema } from "ai";
 import fs from "fs";
 import path from "path";
-import { getModelConfig, WorkDir } from "../config/config.js";
-import { Agent, ToolAttachment } from "../entities/agent.js";
+import { WorkDir } from "../config/config.js";
+import { Agent, ToolAttachment } from "./agents.js";
 import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage, UserMessage } from "../entities/message.js";
-import { runIdGenerator } from "./run-id-gen.js";
 import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
 import { z } from "zod";
-import { getProvider } from "./models.js";
 import { LlmStepStreamEvent } from "../entities/llm-step-events.js";
-import { execTool } from "./exec-tool.js";
-import { AskHumanRequestEvent, RunEvent, ToolPermissionRequestEvent, ToolPermissionResponseEvent } from "../entities/run-events.js";
-import { BuiltinTools } from "./builtin-tools.js";
-import { CopilotAgent } from "../assistant/agent.js";
-import { isBlocked } from "./command-executor.js";
+import { execTool } from "../application/lib/exec-tool.js";
+import { MessageEvent, AskHumanRequestEvent, RunEvent, ToolInvocationEvent, ToolPermissionRequestEvent, ToolPermissionResponseEvent } from "../entities/run-events.js";
+import { BuiltinTools } from "../application/lib/builtin-tools.js";
+import { CopilotAgent } from "../application/assistant/agent.js";
+import { isBlocked } from "../application/lib/command-executor.js";
+import container from "../di/container.js";
+import { IModelConfigRepo } from "../models/repo.js";
+import { getProvider } from "../models/models.js";
+import { IAgentsRepo } from "./repo.js";
+import { IdGen, IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
+import { IBus } from "../application/lib/bus.js";
+import { IMessageQueue } from "../application/lib/message-queue.js";
+import { IRunsRepo } from "../runs/repo.js";
+import { IRunsLock } from "../runs/lock.js";
+
+export interface IAgentRuntime {
+    trigger(runId: string): Promise<void>;
+}
+
+export class AgentRuntime implements IAgentRuntime {
+    private runsRepo: IRunsRepo;
+    private idGenerator: IMonotonicallyIncreasingIdGenerator;
+    private bus: IBus;
+    private messageQueue: IMessageQueue;
+    private modelConfigRepo: IModelConfigRepo;
+    private runsLock: IRunsLock;
+
+    constructor({
+        runsRepo,
+        idGenerator,
+        bus,
+        messageQueue,
+        modelConfigRepo,
+        runsLock,
+    }: {
+        runsRepo: IRunsRepo;
+        idGenerator: IMonotonicallyIncreasingIdGenerator;
+        bus: IBus;
+        messageQueue: IMessageQueue;
+        modelConfigRepo: IModelConfigRepo;
+        runsLock: IRunsLock;
+    }) {
+        this.runsRepo = runsRepo;
+        this.idGenerator = idGenerator;
+        this.bus = bus;
+        this.messageQueue = messageQueue;
+        this.modelConfigRepo = modelConfigRepo;
+        this.runsLock = runsLock;
+    }
+
+    async trigger(runId: string): Promise<void> {
+        if (!await this.runsLock.lock(runId)) {
+            console.log(`unable to acquire lock on run ${runId}`);
+            return;
+        }
+        try {
+            while (true) {
+                let eventCount = 0;
+                const run = await this.runsRepo.fetch(runId);
+                if (!run) {
+                    throw new Error(`Run ${runId} not found`);
+                }
+                const state = new AgentState();
+                for (const event of run.log) {
+                    state.ingest(event);
+                }
+                for await (const event of streamAgent({
+                    state,
+                    idGenerator: this.idGenerator,
+                    runId,
+                    messageQueue: this.messageQueue,
+                    modelConfigRepo: this.modelConfigRepo,
+                })) {
+                    eventCount++;
+                    if (event.type !== "llm-stream-event") {
+                        await this.runsRepo.appendEvents(runId, [event]);
+                    }
+                    await this.bus.publish(event);
+                }
+
+                // if no events, break
+                if (!eventCount) {
+                    break;
+                }
+            }
+        } finally {
+            await this.runsLock.release(runId);
+        }
+    }
+}
 
 export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
     switch (t.type) {
@@ -128,8 +211,8 @@ export class StreamStepMessageBuilder {
                 });
                 break;
             case "finish-step":
-               this.providerOptions = event.providerOptions;
-               break;
+                this.providerOptions = event.providerOptions;
+                break;
         }
     }
 
@@ -171,9 +254,8 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     if (id === "copilot") {
         return CopilotAgent;
     }
-    const agentPath = path.join(WorkDir, "agents", `${id}.json`);
-    const agent = fs.readFileSync(agentPath, "utf8");
-    return Agent.parse(JSON.parse(agent));
+    const repo = container.resolve<IAgentsRepo>('agentsRepo');
+    return await repo.fetch(id);
 }
 
 export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
@@ -262,10 +344,9 @@ async function buildTools(agent: z.infer<typeof Agent>): Promise<ToolSet> {
 }
 
 export class AgentState {
-    logger: RunLogger | null = null;
     runId: string | null = null;
     agent: z.infer<typeof Agent> | null = null;
-    agentName: string;
+    agentName: string | null = null;
     messages: z.infer<typeof MessageList> = [];
     lastAssistantMsg: z.infer<typeof AssistantMessage> | null = null;
     subflowStates: Record<string, AgentState> = {};
@@ -275,20 +356,6 @@ export class AgentState {
     pendingAskHumanRequests: Record<string, z.infer<typeof AskHumanRequestEvent>> = {};
     allowedToolCallIds: Record<string, true> = {};
     deniedToolCallIds: Record<string, true> = {};
-
-    constructor(agentName: string, runId?: string) {
-        this.agentName = agentName;
-        this.runId = runId || runIdGenerator.next();
-        this.logger = new RunLogger(this.runId);
-        if (!runId) {
-            this.logger.log({
-                type: "start",
-                runId: this.runId,
-                agentName: this.agentName,
-                subflow: [],
-            });
-        }
-    }
 
     getPendingPermissions(): z.infer<typeof ToolPermissionRequestEvent>[] {
         const response: z.infer<typeof ToolPermissionRequestEvent>[] = [];
@@ -346,6 +413,9 @@ export class AgentState {
     ingest(event: z.infer<typeof RunEvent>) {
         if (event.subflow.length > 0) {
             const { subflow, ...rest } = event;
+            if (!this.subflowStates[subflow[0]]) {
+                this.subflowStates[subflow[0]] = new AgentState();
+            }
             this.subflowStates[subflow[0]].ingest({
                 ...rest,
                 subflow: subflow.slice(1),
@@ -353,6 +423,10 @@ export class AgentState {
             return;
         }
         switch (event.type) {
+            case "start":
+                this.runId = event.runId;
+                this.agentName = event.agentName;
+                break;
             case "message":
                 this.messages.push(event.message);
                 if (event.message.content instanceof Array) {
@@ -370,9 +444,6 @@ export class AgentState {
                 if (event.message.role === "assistant") {
                     this.lastAssistantMsg = event.message;
                 }
-                break;
-            case "spawn-subflow":
-                this.subflowStates[event.toolCallId] = new AgentState(event.agentName);
                 break;
             case "tool-permission-request":
                 this.pendingToolPermissionRequests[event.toolCall.toolCallId] = event;
@@ -406,27 +477,33 @@ export class AgentState {
                 break;
         }
     }
-
-    ingestAndLog(event: z.infer<typeof RunEvent>) {
-        this.ingest(event);
-        this.logger!.log(event);
-    }
-
-    *ingestAndLogAndYield(event: z.infer<typeof RunEvent>): Generator<z.infer<typeof RunEvent>, void, unknown> {
-        this.ingestAndLog(event);
-        yield event;
-    }
 }
 
-export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
-    // get model config
-    const modelConfig = await getModelConfig();
+export async function* streamAgent({
+    state,
+    idGenerator,
+    runId,
+    messageQueue,
+    modelConfigRepo,
+}: {
+    state: AgentState,
+    idGenerator: IMonotonicallyIncreasingIdGenerator;
+    runId: string;
+    messageQueue: IMessageQueue;
+    modelConfigRepo: IModelConfigRepo;
+}): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
+    async function* processEvent(event: z.infer<typeof RunEvent>): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
+        state.ingest(event);
+        yield event;
+    }
+
+    const modelConfig = await modelConfigRepo.getConfig();
     if (!modelConfig) {
         throw new Error("Model config not found");
     }
 
     // set up agent
-    const agent = await loadAgent(state.agentName);
+    const agent = await loadAgent(state.agentName!);
 
     // set up tools
     const tools = await buildTools(agent);
@@ -436,9 +513,16 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
     const model = provider.languageModel(agent.model || modelConfig.defaults.model);
     let loopCounter = 0;
 
+    console.log('here');
+
+    async function pendingMsgs() {
+        const pendingMsgs = [];
+
+    }
+
     while (true) {
         // console.error(`loop counter: ${loopCounter++}`)
-        // if last response is from assistant and text, so exit
+        // if last response is from assistant and text, get any pending msgs
         const lastMessage = state.messages[state.messages.length - 1];
         if (lastMessage
             && lastMessage.role === "assistant"
@@ -446,8 +530,28 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
                 || !lastMessage.content.some(part => part.type === "tool-call")
             )
         ) {
-            // console.error("Nothing to do, exiting (a.)")
-            return;
+            let pending = 0;
+            while(true) {
+                const msg = await messageQueue.dequeue(runId);
+                if (!msg) {
+                    break;
+                }
+                pending++;
+                yield *processEvent({
+                    runId,
+                    type: "message",
+                    messageId: msg.messageId,
+                    message: {
+                        role: "user",
+                        content: msg.message,
+                    },
+                    subflow: [],
+                });
+            }
+            // if no msgs found, return
+            if (!pending) {
+                return;
+            }
         }
 
         // execute any pending tool calls
@@ -461,7 +565,9 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
 
             // if tool has been denied, deny
             if (state.deniedToolCallIds[toolCallId]) {
-                yield* state.ingestAndLogAndYield({
+                yield *processEvent({
+                    runId,
+                    messageId: await idGenerator.next(),
                     type: "message",
                     message: {
                         role: "tool",
@@ -480,7 +586,8 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
             }
 
             // execute approved tool
-            yield* state.ingestAndLogAndYield({
+            yield *processEvent({
+                runId,
                 type: "tool-invocation",
                 toolName: toolCall.toolName,
                 input: JSON.stringify(toolCall.arguments),
@@ -489,8 +596,14 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
             let result: any = null;
             if (agent.tools![toolCall.toolName].type === "agent") {
                 let subflowState = state.subflowStates[toolCallId];
-                for await (const event of streamAgent(subflowState)) {
-                    yield* state.ingestAndLogAndYield({
+                for await (const event of streamAgent({
+                    state: subflowState,
+                    idGenerator,
+                    runId,
+                    messageQueue,
+                    modelConfigRepo,
+                })) {
+                    yield *processEvent({
                         ...event,
                         subflow: [toolCallId, ...event.subflow],
                     });
@@ -508,13 +621,16 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
                     toolCallId: toolCall.toolCallId,
                     toolName: toolCall.toolName,
                 };
-                yield* state.ingestAndLogAndYield({
+                yield* processEvent({
+                    runId,
                     type: "tool-result",
                     toolName: toolCall.toolName,
                     result: result,
                     subflow: [],
                 });
-                yield* state.ingestAndLogAndYield({
+                yield *processEvent({
+                    runId,
+                    messageId: await idGenerator.next(),
                     type: "message",
                     message: resultMsg,
                     subflow: [],
@@ -529,9 +645,28 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
         }
 
         // if current message state isn't runnable, exit
+        /*
         if (state.messages.length === 0 || state.messages[state.messages.length - 1].role === "assistant") {
             // console.error("current message state isn't runnable, exiting (c.)")
             return;
+        }
+        */
+
+        while(true) {
+            const msg = await messageQueue.dequeue(runId);
+            if (!msg) {
+                break;
+            }
+            yield *processEvent({
+                runId,
+                type: "message",
+                messageId: msg.messageId,
+                message: {
+                    role: "user",
+                    content: msg.message,
+                },
+                subflow: [],
+            });
         }
 
         // run one LLM turn.
@@ -544,7 +679,8 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
             tools,
         )) {
             messageBuilder.ingest(event);
-            yield* state.ingestAndLogAndYield({
+            yield *processEvent({
+                runId,
                 type: "llm-stream-event",
                 event: event,
                 subflow: [],
@@ -553,7 +689,9 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
 
         // build and emit final message from agent response
         const message = messageBuilder.get();
-        yield* state.ingestAndLogAndYield({
+        yield *processEvent({
+            runId,
+            messageId: await idGenerator.next(),
             type: "message",
             message,
             subflow: [],
@@ -565,7 +703,8 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
                 if (part.type === "tool-call") {
                     const underlyingTool = agent.tools![part.toolName];
                     if (underlyingTool.type === "builtin" && underlyingTool.name === "ask-human") {
-                        yield* state.ingestAndLogAndYield({
+                        yield *processEvent({
+                            runId,
                             type: "ask-human-request",
                             toolCallId: part.toolCallId,
                             query: part.arguments.question,
@@ -575,7 +714,8 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
                     if (underlyingTool.type === "builtin" && underlyingTool.name === "executeCommand") {
                         // if command is blocked, then seek permission
                         if (isBlocked(part.arguments.command)) {
-                            yield* state.ingestAndLogAndYield({
+                            yield *processEvent({
+                                runId,
                                 type: "tool-permission-request",
                                 toolCall: part,
                                 subflow: [],
@@ -583,13 +723,16 @@ export async function* streamAgent(state: AgentState): AsyncGenerator<z.infer<ty
                         }
                     }
                     if (underlyingTool.type === "agent" && underlyingTool.name) {
-                        yield* state.ingestAndLogAndYield({
+                        yield *processEvent({
+                            runId,
                             type: "spawn-subflow",
                             agentName: underlyingTool.name,
                             toolCallId: part.toolCallId,
                             subflow: [],
                         });
-                        yield* state.ingestAndLogAndYield({
+                        yield *processEvent({
+                            runId,
+                            messageId: await idGenerator.next(),
                             type: "message",
                             message: {
                                 role: "user",

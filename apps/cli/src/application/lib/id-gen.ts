@@ -1,19 +1,23 @@
-class RunIdGenerator {
+export interface IMonotonicallyIncreasingIdGenerator {
+    next(): Promise<string>;
+}
+
+export class IdGen implements IMonotonicallyIncreasingIdGenerator {
     private lastMs = 0;
     private seq = 0;
     private readonly pid: string;
     private readonly hostTag: string;
 
-    constructor(hostTag: string = "") {
+    constructor() {
         this.pid = String(process.pid).padStart(7, "0");
-        this.hostTag = hostTag ? `-${hostTag}` : "";
+        this.hostTag = "";
     }
 
     /**
      * Returns an ISO8601-based, lexicographically sortable id string.
      * Example: 2025-11-11T04-36-29Z-0001234-h1-000
      */
-    next(): string {
+    async next(): Promise<string> {
         const now = Date.now();
         const ms = now >= this.lastMs ? now : this.lastMs; // monotonic clamp
         this.seq = ms === this.lastMs ? this.seq + 1 : 0;
@@ -28,5 +32,3 @@ class RunIdGenerator {
         return `${iso}-${this.pid}${this.hostTag}-${seqStr}`;
     }
 }
-
-export const runIdGenerator = new RunIdGenerator();

@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { RunEvent } from "../entities/run-events.js";
-import { LlmStepStreamEvent } from "../entities/llm-step-events.js";
+import { RunEvent } from "../../entities/run-events.js";
+import { LlmStepStreamEvent } from "../../entities/llm-step-events.js";
 
 export interface StreamRendererOptions {
     showHeaders?: boolean;

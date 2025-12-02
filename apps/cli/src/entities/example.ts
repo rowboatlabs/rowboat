@@ -1,6 +1,6 @@
 import z from "zod"
-import { Agent } from "./agent.js"
-import { McpServerDefinition } from "./mcp.js"
+import { Agent } from "../agents/agents.js"
+import { McpServerDefinition } from "../mcp/mcp.js";
 
 export const Example = z.object({
     id: z.string(),

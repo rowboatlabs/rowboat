@@ -1,6 +1,6 @@
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
-import { getSecurityAllowList, SECURITY_CONFIG_PATH } from '../config/security.js';
+import { getSecurityAllowList, SECURITY_CONFIG_PATH } from '../../config/security.js';
 
 const execPromise = promisify(exec);
 const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n)/;

@@ -116,20 +116,4 @@ yargs(hideBin(process.argv))
             modelConfig();
         }
     )
-    .command(
-        "update-state <agent> <run_id>",
-        "Update state for a run",
-        (y) => y
-            .positional("agent", {
-                type: "string",
-                description: "The agent to run",
-            })
-            .positional("run_id", {
-                type: "string",
-                description: "The run id to update",
-            }),
-        (argv) => {
-            updateState(argv.agent, argv.run_id);
-        }
-    )
     .parse();
