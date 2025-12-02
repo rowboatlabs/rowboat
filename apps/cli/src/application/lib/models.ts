@@ -1,4 +1,5 @@
 import { ProviderV2 } from "@ai-sdk/provider";
+import { createGateway } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createAnthropic } from "@ai-sdk/anthropic";
@@ -27,11 +28,24 @@ export async function getProvider(name: string = ""): Promise<ProviderV2> {
     }
     const { apiKey, baseURL, headers } = providerConfig;
     switch (providerConfig.flavor) {
-        case "openai":
+        case "rowboat [free]":
+            providerMap[name] = createGateway({
+                apiKey: "rowboatx",
+                baseURL: "https://ai-gateway.rowboatlabs.com/v1/ai",
+            });
+            break;
+         case "openai":
             providerMap[name] = createOpenAI({
                 apiKey,
                 baseURL,
                 headers,
+            });
+            break;
+        case "aigateway":
+            providerMap[name] = createGateway({
+                apiKey,
+                baseURL,
+                headers
             });
             break;
         case "anthropic":
@@ -59,7 +73,7 @@ export async function getProvider(name: string = ""): Promise<ProviderV2> {
                 name,
                 apiKey,
                 baseURL : baseURL || "",
-                headers
+                headers,
             });
             break;
         case "openrouter":

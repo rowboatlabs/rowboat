@@ -1,0 +1,46 @@
+name: Publish to npm
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Install deps
+        run: npm ci
+        working-directory: apps/cli
+
+      # optional: run tests
+      # - run: npm test
+
+      - name: Build
+        run: npm run build
+        working-directory: apps/cli
+
+      - name: Pack
+        run: npm pack
+        working-directory: apps/cli
+
+      - name: Publish to npm
+        run: npm publish --access public
+        working-directory: apps/cli
