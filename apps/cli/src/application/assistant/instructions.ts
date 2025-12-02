@@ -1,5 +1,5 @@
 import { skillCatalog } from "./skills/index.js";
-import { WorkDir as BASE_DIR } from "../config/config.js";
+import { WorkDir as BASE_DIR } from "../../config/config.js";
 
 export const CopilotInstructions = `You are an intelligent workflow assistant helping users manage their workflows in ${BASE_DIR}. You can also help the user with general tasks.
 

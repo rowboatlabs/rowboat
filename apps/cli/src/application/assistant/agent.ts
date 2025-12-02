@@ -1,4 +1,4 @@
-import { Agent, ToolAttachment } from "../entities/agent.js";
+import { Agent, ToolAttachment } from "../../agents/agents.js";
 import z from "zod";
 import { CopilotInstructions } from "./instructions.js";
 import { BuiltinTools } from "../lib/builtin-tools.js";

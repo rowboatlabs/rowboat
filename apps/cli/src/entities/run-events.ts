@@ -1,16 +1,15 @@
 import { LlmStepStreamEvent } from "./llm-step-events.js";
 import { Message, ToolCallPart } from "./message.js";
-import { Agent } from "./agent.js";
 import z from "zod";
 
 const BaseRunEvent = z.object({
+    runId: z.string(),
     ts: z.iso.datetime().optional(),
     subflow: z.array(z.string()),
 });
 
 export const StartEvent = BaseRunEvent.extend({
     type: z.literal("start"),
-    runId: z.string(),
     agentName: z.string(),
 });
 
@@ -27,6 +26,7 @@ export const LlmStreamEvent = BaseRunEvent.extend({
 
 export const MessageEvent = BaseRunEvent.extend({
     type: z.literal("message"),
+    messageId: z.string(),
     message: Message,
 });
 

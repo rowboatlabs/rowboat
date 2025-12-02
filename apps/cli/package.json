@@ -6,7 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "rm -rf dist && tsc",
-    "copilot": "npm run build && node dist/x.js"
+    "server": "node dist/server.js"
   },
   "files": [
     "dist",
@@ -21,7 +21,6 @@
   "description": "",
   "devDependencies": {
     "@types/node": "^24.9.1",
-    "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
   "dependencies": {
@@ -30,9 +29,14 @@
     "@ai-sdk/openai": "^2.0.53",
     "@ai-sdk/openai-compatible": "^1.0.27",
     "@ai-sdk/provider": "^2.0.0",
+    "@hono/node-server": "^1.19.6",
+    "@hono/standard-validator": "^0.1.5",
     "@modelcontextprotocol/sdk": "^1.20.2",
     "@openrouter/ai-sdk-provider": "^1.2.6",
     "ai": "^5.0.102",
+    "awilix": "^12.0.5",
+    "hono": "^4.10.7",
+    "hono-openapi": "^1.1.1",
     "json-schema-to-zod": "^2.6.1",
     "nanoid": "^5.1.6",
     "ollama-ai-provider-v2": "^1.5.4",

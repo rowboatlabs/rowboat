@@ -6,13 +6,42 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOllama } from "ollama-ai-provider-v2";
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { getModelConfig } from "../config/config.js";
+import { IModelConfigRepo } from "./repo.js";
+import container from "../di/container.js";
+import z from "zod";
+
+export const Flavor = z.enum([
+    "rowboat [free]",
+    "aigateway",
+    "anthropic",
+    "google",
+    "ollama",
+    "openai",
+    "openai-compatible",
+    "openrouter",
+]);
+
+export const Provider = z.object({
+    flavor: Flavor,
+    apiKey: z.string().optional(),
+    baseURL: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+});
+
+export const ModelConfig = z.object({
+    providers: z.record(z.string(), Provider),
+    defaults: z.object({
+        provider: z.string(),
+        model: z.string(),
+    }),
+});
 
 const providerMap: Record<string, ProviderV2> = {};
 
 export async function getProvider(name: string = ""): Promise<ProviderV2> {
     // get model conf
-    const modelConfig = await getModelConfig();
+    const repo = container.resolve<IModelConfigRepo>("modelConfigRepo");
+    const modelConfig = await repo.getConfig();
     if (!modelConfig) {
         throw new Error("Model config not found");
     }
