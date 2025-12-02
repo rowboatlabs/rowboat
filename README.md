@@ -26,14 +26,12 @@
 # RowboatX - Claude Code for Everyday Automations
 </h5>
 
-- ✨ **Create background agents with full shell access**
-   - E.g. "Generate a NotebookLM-style podcast from my saved articles every morning"
-- 🔧 **Connect any MCP server to add capabilities**
-   - Add MCP servers and RowboatX handles the integration
-- 🎯 **Let RowboatX control and monitor your background agents**
-   - Easily inspect state on the filesystem 
+RowboatX is a local-first CLI for creating background AI agents with full shell access.
 
-Inspired by Claude Code, RowboatX brings the same shell-native power to background automations.
+**Example agents you can create:**
+- Research every person before your meetings (Exa search MCP + Google Calendar MCP)
+- Daily podcast summarizing your saved articles (ElevenLabs MCP + ffmpeg)
+- Auto-triage Slack DMs and draft responses while you sleep (Slack MCP)
 
 ## Quick start
 ```bash
