@@ -539,6 +539,122 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
     
+    executeMcpTool: {
+        description: 'Execute a specific tool from an MCP server. Use this to run MCP tools on behalf of the user. IMPORTANT: Always use listMcpTools first to get the tool\'s inputSchema, then match the required parameters exactly in the arguments field.',
+        inputSchema: z.object({
+            serverName: z.string().describe('Name of the MCP server that provides the tool'),
+            toolName: z.string().describe('Name of the tool to execute'),
+            arguments: z.record(z.string(), z.any()).optional().describe('Arguments to pass to the tool (as key-value pairs matching the tool\'s input schema). MUST include all required parameters from the tool\'s inputSchema.'),
+        }),
+        execute: async ({ serverName, toolName, arguments: args = {} }: { serverName: string, toolName: string, arguments?: Record<string, any> }) => {
+            let transport: any;
+            let client: any;
+            
+            try {
+                const configPath = path.join(BASE_DIR, 'config', 'mcp.json');
+                const content = await fs.readFile(configPath, 'utf-8');
+                const config = JSON.parse(content);
+                
+                const mcpConfig = config.mcpServers[serverName];
+                if (!mcpConfig) {
+                    return {
+                        success: false,
+                        message: `MCP server '${serverName}' not found in configuration. Use listMcpServers to see available servers.`,
+                    };
+                }
+                
+                // Create transport based on config type
+                if ('command' in mcpConfig) {
+                    transport = new StdioClientTransport({
+                        command: mcpConfig.command,
+                        args: mcpConfig.args || [],
+                        env: mcpConfig.env || {},
+                    });
+                } else {
+                    try {
+                        transport = new StreamableHTTPClientTransport(new URL(mcpConfig.url));
+                    } catch {
+                        transport = new SSEClientTransport(new URL(mcpConfig.url));
+                    }
+                }
+                
+                // Create and connect client
+                client = new Client({
+                    name: 'rowboat-copilot',
+                    version: '1.0.0',
+                });
+                
+                await client.connect(transport);
+                
+                // Get tool list to validate the tool exists and check schema
+                const toolsList = await client.listTools();
+                const toolDef = toolsList.tools.find((t: any) => t.name === toolName);
+                
+                if (!toolDef) {
+                    await client.close();
+                    transport.close();
+                    return {
+                        success: false,
+                        message: `Tool '${toolName}' not found in server '${serverName}'. Use listMcpTools to see available tools.`,
+                        availableTools: toolsList.tools.map((t: any) => t.name),
+                    };
+                }
+                
+                // Validate required parameters
+                const inputSchema = toolDef.inputSchema;
+                if (inputSchema && inputSchema.required && Array.isArray(inputSchema.required)) {
+                    const missingParams = inputSchema.required.filter((param: string) => !(param in args));
+                    if (missingParams.length > 0) {
+                        await client.close();
+                        transport.close();
+                        return {
+                            success: false,
+                            message: `Missing required parameters: ${missingParams.join(', ')}`,
+                            requiredParameters: inputSchema.required,
+                            providedArguments: Object.keys(args),
+                            toolSchema: inputSchema,
+                            hint: `Use listMcpTools to see the full schema for '${toolName}' and ensure all required parameters are included in the arguments field.`,
+                        };
+                    }
+                }
+                
+                // Call the tool
+                const result = await client.callTool({
+                    name: toolName,
+                    arguments: args,
+                });
+                
+                // Close connection
+                await client.close();
+                transport.close();
+                
+                return {
+                    success: true,
+                    serverName,
+                    toolName,
+                    result: result.content,
+                    message: `Successfully executed tool '${toolName}' from server '${serverName}'`,
+                };
+            } catch (error) {
+                // Ensure cleanup
+                try {
+                    if (client) await client.close();
+                    if (transport) transport.close();
+                } catch (cleanupError) {
+                    // Ignore cleanup errors
+                }
+                
+                return {
+                    success: false,
+                    message: `Failed to execute MCP tool: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                    serverName,
+                    toolName,
+                    hint: 'Use listMcpTools to verify the tool exists and check its schema. Ensure all required parameters are provided in the arguments field.',
+                };
+            }
+        },
+    },
+    
     executeCommand: {
         description: 'Execute a shell command and return the output. Use this to run bash/shell commands.',
         inputSchema: z.object({
