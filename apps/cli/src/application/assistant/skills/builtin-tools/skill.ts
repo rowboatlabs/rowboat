@@ -150,6 +150,37 @@ Agents can call other agents as tools to create complex multi-step workflows. Th
 
 While \`executeCommand\` is the most versatile, other builtin tools exist for specific Rowboat operations (file management, agent inspection, etc.). These are primarily used by the Rowboat copilot itself and are not typically needed in user agents. If you need file operations, consider using bash commands like \`cat\`, \`echo\`, \`tee\`, etc. through \`executeCommand\`.
 
+### Copilot-Specific Builtin Tools
+
+The Rowboat copilot has access to special builtin tools that regular agents don't typically use. These tools help the copilot assist users with workspace management and MCP integration:
+
+#### File & Directory Operations
+- \`exploreDirectory\` - Recursively explore directory structure
+- \`readFile\` - Read and parse file contents
+- \`createFile\` - Create a new file with content
+- \`updateFile\` - Update or overwrite existing file contents
+- \`deleteFile\` - Delete a file
+- \`listFiles\` - List all files and directories
+
+#### Agent Operations
+- \`analyzeAgent\` - Read and analyze an agent file structure
+- \`loadSkill\` - Load a Rowboat skill definition into context
+
+#### MCP Operations
+- \`addMcpServer\` - Add or update an MCP server configuration (with validation)
+- \`listMcpServers\` - List all available MCP servers
+- \`listMcpTools\` - List all available tools from a specific MCP server
+- \`executeMcpTool\` - **Execute a specific MCP tool on behalf of the user**
+
+#### Using executeMcpTool as Copilot
+
+The \`executeMcpTool\` builtin allows the copilot to directly execute MCP tools without creating an agent. Load the "mcp-integration" skill for complete guidance on discovering and executing MCP tools, including workflows, schema matching, and examples.
+
+**When to use executeMcpTool vs creating an agent:**
+- Use \`executeMcpTool\` for immediate, one-time tasks
+- Create an agent when the user needs repeated use or autonomous operation
+- Create an agent for complex multi-step workflows involving multiple tools
+
 ## Best Practices
 
 1. **Give agents clear examples** in their instructions showing exact bash commands to run
