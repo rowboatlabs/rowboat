@@ -573,6 +573,10 @@ const routes = new Hono()
     )
     .get(
         '/stream',
+        describeRoute({
+            summary: 'Subscribe to run events',
+            description: 'Subscribe to run events',
+        }),
         async (c) => {
             return streamSSE(c, async (stream) => {
                 const bus = container.resolve<IBus>('bus');
@@ -607,19 +611,6 @@ const routes = new Hono()
             });
         }
     )
-    .get('/sse', async (c) => {
-        return streamSSE(c, async (stream) => {
-            while (true) {
-                const message = `It is ${new Date().toISOString()}`
-                await stream.writeSSE({
-                    data: message,
-                    event: 'time-update',
-                    id: String(id++),
-                })
-                await stream.sleep(1000)
-            }
-        })
-    })
     ;
 
 const app = new Hono()
