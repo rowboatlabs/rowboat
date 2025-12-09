@@ -22,6 +22,7 @@ export const CreateRunOptions = Run.pick({
 export interface IRunsRepo {
     create(options: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>>;
     fetch(id: string): Promise<z.infer<typeof Run>>;
+    list(cursor?: string): Promise<z.infer<typeof ListRunsResponse>>;
     appendEvents(runId: string, events: z.infer<typeof RunEvent>[]): Promise<void>;
 }
 
@@ -74,6 +75,70 @@ export class FSRunsRepo implements IRunsRepo {
             createdAt: events[0].ts!,
             agentId: events[0].agentName,
             log: events,
+        };
+    }
+
+    async list(cursor?: string): Promise<z.infer<typeof ListRunsResponse>> {
+        const runsDir = path.join(WorkDir, 'runs');
+        const PAGE_SIZE = 20;
+
+        let files: string[] = [];
+        try {
+            const entries = await fsp.readdir(runsDir, { withFileTypes: true });
+            files = entries
+                .filter(e => e.isFile() && e.name.endsWith('.jsonl'))
+                .map(e => e.name);
+        } catch (err: any) {
+            if (err && err.code === 'ENOENT') {
+                return { runs: [] };
+            }
+            throw err;
+        }
+
+        files.sort((a, b) => b.localeCompare(a));
+
+        const cursorFile = cursor;
+        let startIndex = 0;
+        if (cursorFile) {
+            const exact = files.indexOf(cursorFile);
+            if (exact >= 0) {
+                startIndex = exact + 1;
+            } else {
+                const firstOlder = files.findIndex(name => name.localeCompare(cursorFile) < 0);
+                startIndex = firstOlder === -1 ? files.length : firstOlder;
+            }
+        }
+
+        const selected = files.slice(startIndex, startIndex + PAGE_SIZE);
+        const runs: z.infer<typeof ListRunsResponse>['runs'] = [];
+
+        for (const name of selected) {
+            const runId = name.slice(0, -'.jsonl'.length);
+            try {
+                const contents = await fsp.readFile(path.join(runsDir, name), 'utf8');
+                const firstLine = contents.split('\n').find(line => line.trim() !== '');
+                if (!firstLine) {
+                    continue;
+                }
+                const start = StartEvent.parse(JSON.parse(firstLine));
+                runs.push({
+                    id: runId,
+                    createdAt: start.ts!,
+                    agentId: start.agentName,
+                });
+            } catch {
+                continue;
+            }
+        }
+
+        const hasMore = startIndex + PAGE_SIZE < files.length;
+        const nextCursor = hasMore && selected.length > 0
+            ? selected[selected.length - 1]
+            : undefined;
+
+        return {
+            runs,
+            ...(nextCursor ? { nextCursor } : {}),
         };
     }
 }

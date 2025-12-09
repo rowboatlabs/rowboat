@@ -12,9 +12,8 @@ import { ModelConfig, Provider } from "./models/models.js";
 import { IAgentsRepo } from "./agents/repo.js";
 import { Agent } from "./agents/agents.js";
 import { AskHumanResponsePayload, authorizePermission, createMessage, createRun, replyToHumanInputRequest, Run, stop, ToolPermissionAuthorizePayload } from './runs/runs.js';
-import { IRunsRepo, ListRunsResponse, CreateRunOptions } from './runs/repo.js';
+import { IRunsRepo, CreateRunOptions, ListRunsResponse } from './runs/repo.js';
 import { IBus } from './application/lib/bus.js';
-import { RunEvent } from './entities/run-events.js';
 
 let id = 0;
 
@@ -460,6 +459,31 @@ const routes = new Hono()
         async (c) => {
             const run = await createRun(c.req.valid('json'));
             return c.json(run);
+        }
+    )
+    .get(
+        '/runs',
+        describeRoute({
+            summary: 'List runs',
+            description: 'List all runs',
+            responses: {
+                200: {
+                    description: 'Runs list',
+                    content: {
+                        'application/json': {
+                            schema: resolver(ListRunsResponse),
+                        },
+                    },
+                },
+            },
+        }),
+        validator('query', z.object({
+            cursor: z.string().optional(),
+        })),
+        async (c) => {
+            const repo = container.resolve<IRunsRepo>('runsRepo');
+            const runs = await repo.list(c.req.valid('query').cursor);
+            return c.json(runs);
         }
     )
     .post(
