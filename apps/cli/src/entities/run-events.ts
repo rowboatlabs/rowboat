@@ -32,12 +32,14 @@ export const MessageEvent = BaseRunEvent.extend({
 
 export const ToolInvocationEvent = BaseRunEvent.extend({
     type: z.literal("tool-invocation"),
+    toolCallId: z.string().optional(),
     toolName: z.string(),
     input: z.string(),
 });
 
 export const ToolResultEvent = BaseRunEvent.extend({
     type: z.literal("tool-result"),
+    toolCallId: z.string().optional(),
     toolName: z.string(),
     result: z.any(),
 });

@@ -251,7 +251,7 @@ function normaliseAskHumanToolCall(message: z.infer<typeof AssistantMessage>) {
 }
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
-    if (id === "copilot") {
+    if (id === "copilot" || id === "rowboatx") {
         return CopilotAgent;
     }
     const repo = container.resolve<IAgentsRepo>('agentsRepo');
@@ -589,6 +589,7 @@ export async function* streamAgent({
             yield *processEvent({
                 runId,
                 type: "tool-invocation",
+                toolCallId,
                 toolName: toolCall.toolName,
                 input: JSON.stringify(toolCall.arguments),
                 subflow: [],
@@ -624,6 +625,7 @@ export async function* streamAgent({
                 yield* processEvent({
                     runId,
                     type: "tool-result",
+                    toolCallId: toolCall.toolCallId,
                     toolName: toolCall.toolName,
                     result: result,
                     subflow: [],
