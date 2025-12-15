@@ -7,7 +7,11 @@ import {
   CreditCard,
   LogOut,
   Sparkles,
+  Moon,
+  Sun,
+  MonitorCog,
 } from "lucide-react"
+import { useEffect, useState } from "react"
 
 import {
   Avatar,
@@ -40,6 +44,40 @@ export function NavUser({
   }
 }) {
   const { isMobile } = useSidebar()
+  const [theme, setTheme] = useState<"light" | "dark" | "system">("system")
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const saved = (localStorage.getItem("theme") as "light" | "dark" | "system") || "system"
+    setTheme(saved)
+    applyTheme(saved)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    if (theme !== "system") return
+    const media = window.matchMedia("(prefers-color-scheme: dark)")
+    const listener = () => applyTheme("system")
+    media.addEventListener("change", listener)
+    return () => media.removeEventListener("change", listener)
+  }, [theme])
+
+  const applyTheme = (value: "light" | "dark" | "system") => {
+    const resolved =
+      value === "system"
+        ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : value
+    const root = document.documentElement
+    root.classList.toggle("dark", resolved === "dark")
+    localStorage.setItem("theme", value)
+  }
+
+  const handleTheme = (value: "light" | "dark" | "system") => {
+    setTheme(value)
+    if (typeof window !== "undefined") {
+      applyTheme(value)
+    }
+  }
 
   return (
     <SidebarMenu>
@@ -84,6 +122,31 @@ export function NavUser({
               <DropdownMenuItem>
                 <Sparkles />
                 Upgrade to Pro
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Theme</DropdownMenuLabel>
+              <DropdownMenuItem
+                className={theme === "light" ? "bg-muted" : ""}
+                onClick={() => handleTheme("light")}
+              >
+                <Sun className="mr-2" />
+                Light
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className={theme === "dark" ? "bg-muted" : ""}
+                onClick={() => handleTheme("dark")}
+              >
+                <Moon className="mr-2" />
+                Dark
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className={theme === "system" ? "bg-muted" : ""}
+                onClick={() => handleTheme("system")}
+              >
+                <MonitorCog className="mr-2" />
+                System
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

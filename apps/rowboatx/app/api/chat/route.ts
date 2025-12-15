@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { message, runId } = body;
+    const { message, runId, agentId } = body;
 
     if (!message || typeof message !== 'string') {
       return Response.json(
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     // Create new run if no runId provided
     if (!currentRunId) {
       const run = await cliClient.createRun({
-        agentId: 'copilot',
+        agentId: agentId || 'copilot',
       });
       currentRunId = run.id;
     }

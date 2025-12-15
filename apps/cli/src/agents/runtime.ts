@@ -427,6 +427,13 @@ export class AgentState {
                 this.runId = event.runId;
                 this.agentName = event.agentName;
                 break;
+            case "spawn-subflow":
+                // Seed the subflow state with its agent so downstream loadAgent works.
+                if (!this.subflowStates[event.toolCallId]) {
+                    this.subflowStates[event.toolCallId] = new AgentState();
+                }
+                this.subflowStates[event.toolCallId].agentName = event.agentName;
+                break;
             case "message":
                 this.messages.push(event.message);
                 if (event.message.content instanceof Array) {

@@ -36,9 +36,27 @@ import { Message, MessageContent, MessageResponse } from "@/components/ai-elemen
 import { Conversation, ConversationContent } from "@/components/ai-elements/conversation";
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "@/components/ai-elements/tool";
 import { Reasoning, ReasoningTrigger, ReasoningContent } from "@/components/ai-elements/reasoning";
+import {
+  Artifact,
+  ArtifactAction,
+  ArtifactActions,
+  ArtifactClose,
+  ArtifactContent,
+  ArtifactDescription,
+  ArtifactHeader,
+  ArtifactTitle,
+} from "@/components/ai-elements/artifact";
 import { useState, useEffect, useRef } from "react";
-import { GlobeIcon, MicIcon } from "lucide-react";
+import { MicIcon, Save, Loader2, Lock } from "lucide-react";
 import { RunEvent } from "@/lib/cli-client";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface ChatMessage {
   id: string;
@@ -68,14 +86,20 @@ interface ReasoningBlock {
 
 type ConversationItem = ChatMessage | ToolCall | ReasoningBlock;
 
-export default function HomePage() {
+type ResourceKind = "agent" | "config" | "run";
+
+type SelectedResource = {
+  kind: ResourceKind;
+  name: string;
+};
+
+function PageBody() {
+  // Use local proxy to avoid CORS/port mismatches.
+  const apiBase = "/api/cli";
   const [text, setText] = useState<string>("");
-  const [useWebSearch, setUseWebSearch] = useState<boolean>(false);
   const [useMicrophone, setUseMicrophone] = useState<boolean>(false);
-  const [status, setStatus] = useState<
-    "submitted" | "streaming" | "ready" | "error"
-  >("ready");
-  
+  const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");
+
   // Chat state
   const [runId, setRunId] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationItem[]>([]);
@@ -85,6 +109,72 @@ export default function HomePage() {
   const committedMessageIds = useRef<Set<string>>(new Set());
   const isEmptyConversation =
     conversation.length === 0 && !currentAssistantMessage && !currentReasoning;
+  const [selectedResource, setSelectedResource] = useState<SelectedResource | null>(null);
+  const [artifactTitle, setArtifactTitle] = useState("");
+  const [artifactSubtitle, setArtifactSubtitle] = useState("");
+  const [artifactText, setArtifactText] = useState("");
+  const [artifactOriginal, setArtifactOriginal] = useState("");
+  const [artifactLoading, setArtifactLoading] = useState(false);
+  const [artifactError, setArtifactError] = useState<string | null>(null);
+  const [artifactReadOnly, setArtifactReadOnly] = useState(false);
+  const [agentOptions, setAgentOptions] = useState<string[]>(["copilot"]);
+  const [selectedAgent, setSelectedAgent] = useState<string>("copilot");
+
+  const artifactDirty = !artifactReadOnly && artifactText !== artifactOriginal;
+  const stripExtension = (name: string) => name.replace(/\.[^/.]+$/, "");
+
+  const requestJson = async (
+    url: string,
+    options?: (RequestInit & { allow404?: boolean }) | undefined
+  ) => {
+    const isLocalApi = url.startsWith("/api/rowboat");
+    const fullUrl =
+      url.startsWith("http://") || url.startsWith("https://") || isLocalApi
+        ? url
+        : apiBase
+        ? `${apiBase}${url}`
+        : url;
+    const { allow404, ...rest } = options || {};
+    const res = await fetch(fullUrl, {
+      ...rest,
+      headers: {
+        "Content-Type": "application/json",
+        ...(rest.headers || {}),
+      },
+    });
+
+    const contentType = res.headers.get("content-type")?.toLowerCase() ?? "";
+    const isJson = contentType.includes("application/json");
+    const text = await res.text();
+
+    if (!res.ok) {
+      if (res.status === 404 && allow404) return null;
+      if (isJson) {
+        try {
+          const errObj = JSON.parse(text);
+          const errMsg =
+            typeof errObj === "string"
+              ? errObj
+              : errObj?.message || errObj?.error || JSON.stringify(errObj);
+          throw new Error(errMsg || `Request failed: ${res.status} ${res.statusText}`);
+        } catch {
+          /* fall through to generic error */
+        }
+      }
+      if (res.status === 404) {
+        throw new Error("Resource not found on the CLI backend (404)");
+      }
+      throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+    }
+
+    if (!text) return null;
+    if (!isJson) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  };
 
   const renderPromptInput = () => (
     <PromptInput globalDrop multiple onSubmit={handleSubmit}>
@@ -116,13 +206,23 @@ export default function HomePage() {
             <MicIcon size={16} />
             <span className="sr-only">Microphone</span>
           </PromptInputButton>
-          <PromptInputButton
-            onClick={() => setUseWebSearch(!useWebSearch)}
-            variant={useWebSearch ? "default" : "ghost"}
+          <Select
+            value={selectedAgent}
+            onValueChange={(value) => setSelectedAgent(value)}
           >
-            <GlobeIcon size={16} />
-            <span>Search</span>
-          </PromptInputButton>
+            <SelectTrigger className="w-32">
+              <SelectValue placeholder="Agent" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {agentOptions.map((agent) => (
+                  <SelectItem key={agent} value={agent}>
+                    {agent}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </PromptInputTools>
         <PromptInputSubmit
           disabled={!(text.trim() || status) || status === "streaming"}
@@ -238,27 +338,37 @@ export default function HomePage() {
             );
             if (toolCalls.length) {
               setConversation((prev) => {
-                const updated = [...prev];
+                let updated: ConversationItem[] = prev.map((item) => {
+                  if (item.type !== 'tool') return item;
+                  const match = toolCalls.find(
+                    (part: any) => part.toolCallId === item.id
+                  );
+                  return match
+                    ? {
+                        ...item,
+                        name: match.toolName,
+                        input: match.arguments,
+                        status: 'pending',
+                      }
+                    : item;
+                });
+
                 for (const part of toolCalls) {
-                  const idx = updated.findIndex(
+                  const exists = updated.some(
                     (item) => item.type === 'tool' && item.id === part.toolCallId
                   );
-                  if (idx >= 0) {
-                    updated[idx] = {
-                      ...updated[idx],
-                      name: part.toolName,
-                      input: part.arguments,
-                      status: 'pending',
-                    };
-                  } else {
-                    updated.push({
-                      id: part.toolCallId,
-                      type: 'tool',
-                      name: part.toolName,
-                      input: part.arguments,
-                      status: 'pending',
-                      timestamp: Date.now(),
-                    });
+                  if (!exists) {
+                    updated = [
+                      ...updated,
+                      {
+                        id: part.toolCallId,
+                        type: 'tool',
+                        name: part.toolName,
+                        input: part.arguments,
+                        status: 'pending',
+                        timestamp: Date.now(),
+                      },
+                    ];
                   }
                 }
                 return updated;
@@ -362,6 +472,7 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userMessage,
+          agentId: selectedAgent,
           runId: runId,
         }),
       });
@@ -385,9 +496,178 @@ export default function HomePage() {
     }
   };
 
+  useEffect(() => {
+    if (!selectedResource) return;
+    let cancelled = false;
+    const load = async () => {
+      setArtifactLoading(true);
+      setArtifactError(null);
+      try {
+        let title = selectedResource.name;
+        let subtitle = "";
+        let text = "";
+        let readOnly = false;
+
+        if (selectedResource.kind === "agent") {
+          const raw = selectedResource.name;
+          const id = stripExtension(raw) || raw;
+          const data = await requestJson(`/agents/${encodeURIComponent(id)}`);
+
+          subtitle = "Agent";
+          text = JSON.stringify(data ?? {}, null, 2);
+        } else if (selectedResource.kind === "config") {
+          const lower = selectedResource.name.toLowerCase();
+          if (lower.includes("mcp")) {
+            const data = await requestJson("/mcp");
+            subtitle = "MCP config";
+            text = JSON.stringify(data ?? {}, null, 2);
+          } else if (lower.includes("model")) {
+            const data = await requestJson("/models");
+            subtitle = "Models config";
+            text = JSON.stringify(data ?? {}, null, 2);
+          } else {
+            throw new Error("Unsupported config file");
+          }
+        } else if (selectedResource.kind === "run") {
+          subtitle = "Run (read-only)";
+          readOnly = true;
+
+          const local = await requestJson(
+            `/api/rowboat/run?file=${encodeURIComponent(selectedResource.name)}`
+          );
+          if (local?.parsed) {
+            text = JSON.stringify(local.parsed, null, 2);
+          } else if (local?.raw) {
+            text = local.raw;
+          } else {
+            text = "";
+          }
+        }
+
+        if (cancelled) return;
+        setArtifactTitle(title);
+        setArtifactSubtitle(subtitle);
+        setArtifactText(text);
+        setArtifactOriginal(text);
+        setArtifactReadOnly(readOnly);
+      } catch (error: any) {
+        if (!cancelled) {
+          setArtifactError(error?.message || "Failed to load resource");
+          setArtifactText("");
+        }
+      } finally {
+        if (!cancelled) {
+          setArtifactLoading(false);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedResource]);
+
+  useEffect(() => {
+    const loadAgents = async () => {
+      try {
+        const res = await fetch("/api/rowboat/summary");
+        if (!res.ok) return;
+        const data = await res.json();
+        const agents = Array.isArray(data.agents)
+          ? data.agents.map((a: string) => stripExtension(a))
+          : [];
+        const merged = Array.from(new Set(["copilot", ...agents]));
+        setAgentOptions(merged);
+      } catch (e) {
+        console.error("Failed to load agent list", e);
+      }
+    };
+    loadAgents();
+  }, []);
+
+  useEffect(() => {
+    // Changing agent starts a fresh conversation context
+    setRunId(null);
+    setConversation([]);
+    setCurrentAssistantMessage("");
+    setCurrentReasoning("");
+  }, [selectedAgent]);
+
+  const handleSave = async () => {
+    if (!selectedResource || artifactReadOnly || !artifactDirty) return;
+    setArtifactLoading(true);
+    setArtifactError(null);
+    try {
+      const parsed = JSON.parse(artifactText);
+      if (selectedResource.kind === "agent") {
+        const raw = selectedResource.name;
+        const targetId = stripExtension(raw) || raw;
+
+        await requestJson(`/agents/${encodeURIComponent(targetId)}`, {
+          method: "PUT",
+          body: JSON.stringify(parsed),
+        });
+      } else if (selectedResource.kind === "config") {
+        const lower = selectedResource.name.toLowerCase();
+        const previous = artifactOriginal ? JSON.parse(artifactOriginal) : {};
+
+        if (lower.includes("model")) {
+          const newProviders = parsed.providers || {};
+          const oldProviders = previous.providers || {};
+          const toDelete = Object.keys(oldProviders).filter(
+            (name) => !Object.prototype.hasOwnProperty.call(newProviders, name)
+          );
+          for (const name of toDelete) {
+            await requestJson(`/models/providers/${encodeURIComponent(name)}`, {
+              method: "DELETE",
+            });
+          }
+          for (const name of Object.keys(newProviders)) {
+            await requestJson(`/models/providers/${encodeURIComponent(name)}`, {
+              method: "PUT",
+              body: JSON.stringify(newProviders[name]),
+            });
+          }
+          if (parsed.defaults) {
+            await requestJson("/models/default", {
+              method: "PUT",
+              body: JSON.stringify(parsed.defaults),
+            });
+          }
+        } else if (lower.includes("mcp")) {
+          const newServers = parsed.mcpServers || parsed || {};
+          const oldServers = previous.mcpServers || {};
+          const toDelete = Object.keys(oldServers).filter(
+            (name) => !Object.prototype.hasOwnProperty.call(newServers, name)
+          );
+          for (const name of toDelete) {
+            await requestJson(`/mcp/${encodeURIComponent(name)}`, {
+              method: "DELETE",
+            });
+          }
+          for (const name of Object.keys(newServers)) {
+            await requestJson(`/mcp/${encodeURIComponent(name)}`, {
+              method: "PUT",
+              body: JSON.stringify(newServers[name]),
+            });
+          }
+        } else {
+          throw new Error("Unsupported config file");
+        }
+      }
+
+      setArtifactOriginal(JSON.stringify(JSON.parse(artifactText), null, 2));
+    } catch (error: any) {
+      setArtifactError(error?.message || "Failed to save changes");
+    } finally {
+      setArtifactLoading(false);
+    }
+  };
+
   return (
-    <SidebarProvider>
-      <AppSidebar />
+    <>
+      <AppSidebar onSelectResource={setSelectedResource} />
       <SidebarInset className="h-svh">
         <header className="flex h-16 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-2 px-4">
@@ -410,113 +690,191 @@ export default function HomePage() {
           </div>
         </header>
 
-        <div className="relative flex w-full flex-1 min-h-0 flex-col overflow-hidden">
-          {/* Messages area */}
-          <Conversation className="flex-1 min-h-0 pb-48">
-            <ConversationContent className="!flex !flex-col !items-center !gap-8 !p-4">
-              <div className="w-full max-w-3xl mx-auto space-y-4">
+        <div className="flex flex-1 flex-col gap-4 overflow-hidden px-4 pb-0 md:flex-row">
+          <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden">
+            {/* Messages area */}
+            <Conversation className="flex-1 min-h-0 overflow-y-auto">
+              <div className="pointer-events-none sticky bottom-0 z-10 h-16 bg-gradient-to-t from-background via-background/80 to-transparent" />
+              <ConversationContent className="!flex !flex-col !items-center !gap-8 !p-4 pt-4 pb-32">
+                <div className="w-full max-w-3xl mx-auto space-y-4">
 
-              {/* Render conversation items in order */}
-              {conversation.map((item) => {
-                if (item.type === 'message') {
-                  return (
-                    <Message
-                      key={item.id}
-                      from={item.role}
-                    >
-                      <MessageContent>
-                        <MessageResponse>
-                          {item.content}
-                        </MessageResponse>
-                      </MessageContent>
-                    </Message>
-                  );
-                } else if (item.type === 'tool') {
-                  const stateMap: Record<string, any> = {
-                    'pending': 'input-streaming',
-                    'running': 'input-available',
-                    'completed': 'output-available',
-                    'error': 'output-error',
-                  };
-                  
-                  return (
-                    <div key={item.id} className="mb-2">
-                      <Tool>
-                        <ToolHeader 
-                          title={item.name}
-                          type="tool-call"
-                          state={stateMap[item.status] || 'input-streaming'}
-                        />
-                        <ToolContent>
-                          <ToolInput input={item.input} />
-                          {item.result && (
-                            <ToolOutput output={item.result} errorText={undefined} />
-                          )}
-                        </ToolContent>
-                      </Tool>
-                    </div>
-                  );
-                } else if (item.type === 'reasoning') {
-                  return (
-                    <div key={item.id} className="mb-2">
-                      <Reasoning isStreaming={item.isStreaming}>
-                        <ReasoningTrigger />
-                        <ReasoningContent>
-                          {item.content}
-                        </ReasoningContent>
-                      </Reasoning>
-                    </div>
-                  );
-                }
-                return null;
-              })}
+                {/* Render conversation items in order */}
+                {conversation.map((item) => {
+                  if (item.type === 'message') {
+                    return (
+                      <Message
+                        key={item.id}
+                        from={item.role}
+                      >
+                        <MessageContent>
+                          <MessageResponse>
+                            {item.content}
+                          </MessageResponse>
+                        </MessageContent>
+                      </Message>
+                    );
+                  } else if (item.type === 'tool') {
+                    const stateMap: Record<string, any> = {
+                      'pending': 'input-streaming',
+                      'running': 'input-available',
+                      'completed': 'output-available',
+                      'error': 'output-error',
+                    };
+                    
+                    return (
+                      <div key={item.id} className="mb-2">
+                        <Tool>
+                          <ToolHeader 
+                            title={item.name}
+                            type="tool-call"
+                            state={stateMap[item.status] || 'input-streaming'}
+                          />
+                          <ToolContent>
+                            <ToolInput input={item.input} />
+                            {item.result && (
+                              <ToolOutput output={item.result} errorText={undefined} />
+                            )}
+                          </ToolContent>
+                        </Tool>
+                      </div>
+                    );
+                  } else if (item.type === 'reasoning') {
+                    return (
+                      <div key={item.id} className="mb-2">
+                        <Reasoning isStreaming={item.isStreaming}>
+                          <ReasoningTrigger />
+                          <ReasoningContent>
+                            {item.content}
+                          </ReasoningContent>
+                        </Reasoning>
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
 
-              {/* Streaming reasoning */}
-              {currentReasoning && (
-                <div className="mb-2">
-                  <Reasoning isStreaming={true}>
-                    <ReasoningTrigger />
-                    <ReasoningContent>
-                      {currentReasoning}
-                    </ReasoningContent>
-                  </Reasoning>
+                {/* Streaming reasoning */}
+                {currentReasoning && (
+                  <div className="mb-2">
+                    <Reasoning isStreaming={true}>
+                      <ReasoningTrigger />
+                      <ReasoningContent>
+                        {currentReasoning}
+                      </ReasoningContent>
+                    </Reasoning>
+                  </div>
+                )}
+
+                {/* Streaming message */}
+                {currentAssistantMessage && (
+                  <Message from="assistant">
+                    <MessageContent>
+                      <MessageResponse>
+                        {currentAssistantMessage}
+                      </MessageResponse>
+                      <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse" />
+                    </MessageContent>
+                  </Message>
+                )}
                 </div>
-              )}
+              </ConversationContent>
+            </Conversation>
 
-              {/* Streaming message */}
-              {currentAssistantMessage && (
-                <Message from="assistant">
-                  <MessageContent>
-                    <MessageResponse>
-                      {currentAssistantMessage}
-                    </MessageResponse>
-                    <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse" />
-                  </MessageContent>
-                </Message>
-              )}
+            {/* Input area */}
+            {isEmptyConversation ? (
+              <div className="absolute inset-0 flex items-center justify-center px-4 pb-16">
+                <div className="w-full max-w-3xl space-y-3 text-center">
+                  <h2 className="text-4xl font-semibold text-foreground/80">
+                    RowboatX
+                  </h2>
+                  {renderPromptInput()}
+                </div>
               </div>
-            </ConversationContent>
-          </Conversation>
+            ) : (
+              <div className="w-full px-4 pb-5 pt-2">
+                <div className="w-full max-w-3xl mx-auto">
+                  {renderPromptInput()}
+                </div>
+              </div>
+            )}
+          </div>
 
-          {/* Input area */}
-          {isEmptyConversation ? (
-            <div className="absolute inset-0 flex items-center justify-center px-4 pb-16">
-              <div className="w-full max-w-3xl space-y-3 text-center">
-                <h2 className="text-4xl font-semibold text-foreground/80">
-                  RowboatX
-                </h2>
-                {renderPromptInput()}
-              </div>
-            </div>
-          ) : (
-            <div className="absolute bottom-2 left-0 right-0 flex justify-center w-full px-4 pb-5 pt-1 bg-background/95 backdrop-blur-sm">
-              <div className="w-full max-w-3xl">
-                {renderPromptInput()}
-              </div>
+          {selectedResource && (
+            <div className="flex w-full flex-col md:w-[70%] md:max-w-4xl md:shrink-0 min-h-[260px] md:min-h-0 py-5">
+              <Artifact className="flex-1 min-h-0 h-full">
+                <ArtifactHeader>
+                  <div className="flex flex-col">
+                    <ArtifactTitle className="truncate">{artifactTitle}</ArtifactTitle>
+                    <ArtifactDescription className="text-xs">
+                      {artifactSubtitle || selectedResource.kind}
+                      {artifactReadOnly && (
+                        <span className="ml-2 inline-flex items-center gap-1 text-muted-foreground">
+                          <Lock className="h-3 w-3" /> Read-only
+                        </span>
+                      )}
+                    </ArtifactDescription>
+                  </div>
+                  <ArtifactActions>
+                    {!artifactReadOnly && (
+                      <ArtifactAction
+                        tooltip={artifactDirty ? "Save changes" : "Saved"}
+                        disabled={!artifactDirty || artifactLoading}
+                        onClick={handleSave}
+                      >
+                        {artifactLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4" />
+                        )}
+                      </ArtifactAction>
+                    )}
+                    <ArtifactClose onClick={() => setSelectedResource(null)} />
+                  </ArtifactActions>
+                </ArtifactHeader>
+                <ArtifactContent className="bg-muted/30">
+                  {artifactLoading ? (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading
+                    </div>
+                  ) : artifactError ? (
+                    <div className="text-sm text-red-500 whitespace-pre-wrap break-words">
+                      {artifactError}
+                    </div>
+                  ) : (
+                    <div className="flex h-full flex-col gap-2">
+                      {artifactReadOnly ? (
+                        <pre className="h-full min-h-[240px] max-h-[70vh] w-full overflow-auto whitespace-pre-wrap rounded-md border bg-background p-4 font-mono text-sm leading-relaxed text-foreground">
+                          {artifactText}
+                        </pre>
+                      ) : (
+                        <textarea
+                          value={artifactText}
+                          onChange={(e) => setArtifactText(e.target.value)}
+                          readOnly={artifactReadOnly}
+                          className="h-full min-h-[240px] max-h-[70vh] w-full resize-none rounded-md border bg-background p-4 font-mono text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                        />
+                      )}
+                      {artifactReadOnly && (
+                        <p className="text-xs text-muted-foreground">
+                          Runs are read-only; use the API to replay or inspect in detail.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </ArtifactContent>
+              </Artifact>
             </div>
           )}
         </div>
       </SidebarInset>
+    </>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <SidebarProvider>
+      <PageBody />
     </SidebarProvider>
   );
 }
