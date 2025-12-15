@@ -312,6 +312,8 @@ export function ToolkitAuthModal({
         return 'Bearer Token';
       case 'BASIC':
         return 'Basic Auth';
+      case 'SAML':
+        return 'SAML';
       default:
         return authScheme.toLowerCase().replace('_', ' ');
     }

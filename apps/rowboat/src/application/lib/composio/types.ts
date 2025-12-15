@@ -15,6 +15,7 @@ export const ZAuthScheme = z.enum([
     'NO_AUTH',
     'OAUTH1',
     'OAUTH2',
+    'SAML',
 ]);
 
 export const ZConnectedAccountStatus = z.enum([
