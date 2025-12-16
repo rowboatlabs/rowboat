@@ -36,16 +36,10 @@ const openai = createOpenAI({
     compatibility: "strict",
 });
 
-const composioToolSearchToolSuggestion = z.object({
-    toolkit: z.string(),
-    tool_slug: z.string(),
-    description: z.string(),
-});
-
 const composioToolSearchResponseSchema = z.object({
-    main_tools: z.array(composioToolSearchToolSuggestion).optional(),
-    related_tools: z.array(composioToolSearchToolSuggestion).optional(),
-    results: z.array(composioToolSearchToolSuggestion).optional(), // Keep for backward compatibility
+    results: z.array(z.object({
+        primary_tool_slugs: z.array(z.string()).optional(),
+    }).passthrough()).optional(),
 }).passthrough();
 
 function getContextPrompt(context: z.infer<typeof CopilotChatContext> | null): string {
@@ -182,17 +176,19 @@ async function searchRelevantTools(usageTracker: UsageTracker, query: string): P
     const result = composioToolSearchResponseSchema.safeParse(searchResult.data);
     if (!result.success) {
         logger.log(`tool search response is invalid: ${JSON.stringify(result.error)}`);
-        logger.log(`expected schema: results (array), got: ${JSON.stringify(Object.keys(searchResult.data || {}))}`);
         return 'No tools found!';
     }
-    const tools = result.data.main_tools || result.data.results || [];
     
-    if (!tools.length) {
+    // Extract tool slugs from results[].primary_tool_slugs[]
+    const toolSlugs = (result.data.results || [])
+        .flatMap((item: any) => item.primary_tool_slugs || [])
+        .filter((slug: string) => slug);
+    
+    if (!toolSlugs.length) {
         logger.log(`tool search yielded no results`);
         return 'No tools found!';
     }
-
-    const toolSlugs = tools.map((item) => item.tool_slug);
+    
     logger.log(`found tool slugs: ${toolSlugs.join(', ')}`);
     console.log("✅ TOOL CALL SUCCESS: COMPOSIO_SEARCH_TOOLS", { 
         toolSlugs, 
@@ -201,7 +197,20 @@ async function searchRelevantTools(usageTracker: UsageTracker, query: string): P
 
     // Enrich tools with full details
     console.log("🔧 TOOL CALL: getTool (multiple calls)", { toolSlugs });
-    const composioTools = await Promise.all(toolSlugs.map(slug => getTool(slug)));
+    const composioToolsResults = await Promise.allSettled(
+        toolSlugs.map(slug => getTool(slug))
+    );
+    
+    // Filter out failed tool fetches
+    const composioTools = composioToolsResults
+        .filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled')
+        .map(result => result.value);
+    
+    if (composioTools.length === 0) {
+        logger.log('all tool fetches failed');
+        return 'No tools found!';
+    }
+    
     const workflowTools: z.infer<typeof WorkflowTool>[] = composioTools.map(tool => ({
         name: tool.name,
         description: tool.description,

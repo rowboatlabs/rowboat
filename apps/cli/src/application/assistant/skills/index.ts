@@ -43,7 +43,7 @@ const definitions: SkillDefinition[] = [
     id: "mcp-integration",
     title: "MCP Integration Guidance",
     folder: "mcp-integration",
-    summary: "Listing MCP servers/tools and embedding their schemas in agent definitions.",
+    summary: "Discovering, executing, and integrating MCP tools. Use this to check what external capabilities are available and execute MCP tools on behalf of users.",
     content: mcpIntegrationSkill,
   },
   {
