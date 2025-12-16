@@ -11,6 +11,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "sourceMap": true,
+    "jsx": "react-jsx",
     "paths": {
       "@/*": [
         "./src/*"

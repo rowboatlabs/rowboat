@@ -1,6 +1,5 @@
 import { WorkDir } from "../config/config.js";
-import { McpServerConfig } from "./mcp.js";
-import { McpServerDefinition } from "./mcp.js";
+import { McpServerConfig, McpServerDefinition } from "./schema.js";
 import fs from "fs/promises";
 import path from "path";
 import z from "zod";
