@@ -4,8 +4,8 @@ import { streamSSE } from 'hono/streaming'
 import { describeRoute, validator, resolver, openAPIRouteHandler } from "hono-openapi"
 import z from 'zod';
 import container from './di/container.js';
-import { executeTool, listServers, listTools, ListToolsResponse, McpServerList } from "./mcp/mcp.js";
-import { McpServerDefinition } from "./mcp/mcp.js";
+import { executeTool, listServers, listTools } from "./mcp/mcp.js";
+import { ListToolsResponse, McpServerDefinition, McpServerList } from "./mcp/schema.js";
 import { IMcpConfigRepo } from './mcp/repo.js';
 import { IModelConfigRepo } from './models/repo.js';
 import { ModelConfig, Provider } from "./models/models.js";
