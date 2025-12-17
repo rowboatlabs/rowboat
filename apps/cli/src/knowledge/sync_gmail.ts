@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { google } from 'googleapis';
 import { authenticate } from '@google-cloud/local-auth';
-import TurndownService from 'turndown';
+import { NodeHtmlMarkdown } from 'node-html-markdown'
 import { OAuth2Client } from 'google-auth-library';
 
 // Configuration
@@ -12,11 +12,7 @@ const TOKEN_PATH = path.join(process.cwd(), 'token_api.json'); // Reuse Python's
 const SYNC_INTERVAL_MS = 60 * 1000;
 const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
 
-// Initialize Turndown service for HTML to Markdown
-const turndownService = new TurndownService({
-    headingStyle: 'atx',
-    codeBlockStyle: 'fenced'
-});
+const nhm = new NodeHtmlMarkdown();
 
 // --- Auth Functions ---
 
@@ -112,7 +108,7 @@ function getBody(payload: any): string {
                 body += cleanLines.join('\n');
             } else if (part.mimeType === 'text/html' && part.body && part.body.data) {
                 const html = decodeBase64(part.body.data);
-                let md = turndownService.turndown(html);
+                let md = nhm.translate(html);
                 // Simple quote stripping for MD
                 const cleanLines = md.split('\n').filter((line: string) => !line.trim().startsWith('>'));
                 body += cleanLines.join('\n');
@@ -123,7 +119,7 @@ function getBody(payload: any): string {
     } else if (payload.body && payload.body.data) {
         const data = decodeBase64(payload.body.data);
         if (payload.mimeType === 'text/html') {
-             let md = turndownService.turndown(data);
+             let md = nhm.translate(data);
              body += md.split('\n').filter((line: string) => !line.trim().startsWith('>')).join('\n');
         } else {
              body += data.split('\n').filter((line: string) => !line.trim().startsWith('>')).join('\n');
