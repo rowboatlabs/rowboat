@@ -3,7 +3,7 @@ import path from 'path';
 import { google } from 'googleapis';
 import { authenticate } from '@google-cloud/local-auth';
 import { OAuth2Client } from 'google-auth-library';
-import TurndownService from 'turndown';
+import { NodeHtmlMarkdown } from 'node-html-markdown'
 
 // Configuration
 const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
@@ -14,11 +14,7 @@ const SCOPES = [
     'https://www.googleapis.com/auth/drive.readonly'
 ];
 
-// Initialize Turndown
-const turndownService = new TurndownService({
-    headingStyle: 'atx',
-    codeBlockStyle: 'fenced'
-});
+const nhm = new NodeHtmlMarkdown();
 
 // --- Auth Functions ---
 
@@ -188,7 +184,7 @@ async function processAttachments(drive: any, event: any, syncDir: string) {
                 });
 
                 const html = res.data;
-                const md = turndownService.turndown(html);
+                const md = nhm.translate(html);
 
                 const frontmatter = [
                     `# ${att.title}`,
