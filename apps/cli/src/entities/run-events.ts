@@ -8,6 +8,14 @@ const BaseRunEvent = z.object({
     subflow: z.array(z.string()),
 });
 
+export const RunProcessingStartEvent = BaseRunEvent.extend({
+    type: z.literal("run-processing-start"),
+});
+
+export const RunProcessingEndEvent = BaseRunEvent.extend({
+    type: z.literal("run-processing-end"),
+});
+
 export const StartEvent = BaseRunEvent.extend({
     type: z.literal("start"),
     agentName: z.string(),
@@ -71,6 +79,8 @@ export const RunErrorEvent = BaseRunEvent.extend({
 });
 
 export const RunEvent = z.union([
+    RunProcessingStartEvent,
+    RunProcessingEndEvent,
     StartEvent,
     SpawnSubFlowEvent,
     LlmStreamEvent,
