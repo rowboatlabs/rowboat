@@ -14,6 +14,7 @@ import { Agent } from "./agents/agents.js";
 import { AskHumanResponsePayload, authorizePermission, createMessage, createRun, replyToHumanInputRequest, Run, stop, ToolPermissionAuthorizePayload } from './runs/runs.js';
 import { IRunsRepo, CreateRunOptions, ListRunsResponse } from './runs/repo.js';
 import { IBus } from './application/lib/bus.js';
+import { cors } from 'hono/cors';
 
 let id = 0;
 
@@ -638,6 +639,7 @@ const routes = new Hono()
     ;
 
 const app = new Hono()
+    .use("/*", cors())
     .route("/", routes)
     .get(
         "/openapi.json",
