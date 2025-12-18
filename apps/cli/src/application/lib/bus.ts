@@ -13,7 +13,6 @@ export class InMemoryBus implements IBus {
     private subscribers: Map<string, ((event: z.infer<typeof RunEvent>) => Promise<void>)[]> = new Map();
 
     async publish(event: z.infer<typeof RunEvent>): Promise<void> {
-        console.log(this.subscribers);
         const pending: Promise<void>[] = [];
         for (const subscriber of this.subscribers.get(event.runId) || []) {
             pending.push(subscriber(event));
@@ -21,7 +20,6 @@ export class InMemoryBus implements IBus {
         for (const subscriber of this.subscribers.get('*') || []) {
             pending.push(subscriber(event));
         }
-        console.log(pending.length);
         await Promise.all(pending);
     }
 
@@ -30,7 +28,6 @@ export class InMemoryBus implements IBus {
             this.subscribers.set(runId, []);
         }
         this.subscribers.get(runId)!.push(handler);
-        console.log(this.subscribers);
         return () => {
             this.subscribers.get(runId)!.splice(this.subscribers.get(runId)!.indexOf(handler), 1);
         };

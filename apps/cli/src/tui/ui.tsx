@@ -941,7 +941,7 @@ function AgentPickerModal({
     onCancel: () => void;
 }) {
     const items = agents.map((agent) => ({
-        label: `${agent.name} – ${truncate(agent.description, 40)}`,
+        label: `${agent.name}${agent.description ? ` – ${truncate(agent.description, 40)}` : ""}`,
         value: agent.name,
     }));
     return (
