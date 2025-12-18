@@ -6,63 +6,12 @@ import z from "zod";
 import { IMcpConfigRepo } from "./repo.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-
-export const StdioMcpServerConfig = z.object({
-    type: z.literal("stdio").optional(),
-    command: z.string(),
-    args: z.array(z.string()).optional(),
-    env: z.record(z.string(), z.string()).optional(),
-});
-
-export const HttpMcpServerConfig = z.object({
-    type: z.literal("http").optional(),
-    url: z.string(),
-    headers: z.record(z.string(), z.string()).optional(),
-});
-
-export const McpServerDefinition = z.union([StdioMcpServerConfig, HttpMcpServerConfig]);
-
-export const McpServerConfig = z.object({
-    mcpServers: z.record(z.string(), McpServerDefinition),
-});
-
-const connectionState = z.enum(["disconnected", "connected", "error"]);
-
-export const McpServerList = z.object({
-    mcpServers: z.record(z.string(), z.object({
-        config: McpServerDefinition,
-        state: connectionState,
-        error: z.string().nullable(),
-    })),
-});
-
-/*
-            inputSchema: {
-                [x: string]: unknown;
-                type: "object";
-                properties?: Record<string, object> | undefined;
-                required?: string[] | undefined;
-            };
-*/
-export const Tool = z.object({
-    name: z.string(),
-    description: z.string().optional(),
-    inputSchema: z.object({
-        type: z.literal("object"),
-        properties: z.record(z.string(), z.any()).optional(),
-        required: z.array(z.string()).optional(),
-    }),
-    outputSchema: z.object({
-        type: z.literal("object"),
-        properties: z.record(z.string(), z.any()).optional(),
-        required: z.array(z.string()).optional(),
-    }).optional(),
-})
-
-export const ListToolsResponse = z.object({
-    tools: z.array(Tool),
-    nextCursor: z.string().optional(),
-});
+import {
+    connectionState,
+    ListToolsResponse,
+    McpServerDefinition,
+    McpServerList,
+} from "./schema.js";
 
 type mcpState = {
     state: z.infer<typeof connectionState>,

@@ -7,7 +7,7 @@ import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
 import container from "../../di/container.js";
 import { IMcpConfigRepo } from "../..//mcp/repo.js";
-import { McpServerDefinition } from "../../mcp/mcp.js";
+import { McpServerDefinition } from "../../mcp/schema.js";
 
 const BuiltinToolsSchema = z.record(z.string(), z.object({
     description: z.string(),

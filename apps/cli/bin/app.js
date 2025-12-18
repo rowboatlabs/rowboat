@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { app, modelConfig, updateState, importExample, listExamples, exportWorkflow } from '../dist/app.js';
+import { app, modelConfig, importExample, listExamples, exportWorkflow } from '../dist/app.js';
+import { runTui } from '../dist/tui/index.js';
 
 yargs(hideBin(process.argv))
 
@@ -33,6 +34,20 @@ yargs(hideBin(process.argv))
                 runId: argv.run_id,
                 input: argv.input,
                 noInteractive: argv.noInteractive,
+            });
+        }
+    )
+    .command(
+        "ui",
+        "Launch the interactive Rowboat dashboard",
+        (y) => y
+            .option("server-url", {
+                type: "string",
+                description: "Rowboat server base URL",
+            }),
+        (argv) => {
+            runTui({
+                serverUrl: argv.serverUrl,
             });
         }
     )

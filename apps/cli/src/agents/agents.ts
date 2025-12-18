@@ -29,7 +29,7 @@ export const Agent = z.object({
     name: z.string(),
     provider: z.string().optional(),
     model: z.string().optional(),
-    description: z.string(),
+    description: z.string().optional(),
     instructions: z.string(),
     tools: z.record(z.string(), ToolAttachment).optional(),
 });

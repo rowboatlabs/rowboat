@@ -4,8 +4,8 @@ import { streamSSE } from 'hono/streaming'
 import { describeRoute, validator, resolver, openAPIRouteHandler } from "hono-openapi"
 import z from 'zod';
 import container from './di/container.js';
-import { executeTool, listServers, listTools, ListToolsResponse, McpServerList } from "./mcp/mcp.js";
-import { McpServerDefinition } from "./mcp/mcp.js";
+import { executeTool, listServers, listTools } from "./mcp/mcp.js";
+import { ListToolsResponse, McpServerDefinition, McpServerList } from "./mcp/schema.js";
 import { IMcpConfigRepo } from './mcp/repo.js';
 import { IModelConfigRepo } from './models/repo.js';
 import { ModelConfig, Provider } from "./models/models.js";
@@ -14,6 +14,7 @@ import { Agent } from "./agents/agents.js";
 import { AskHumanResponsePayload, authorizePermission, createMessage, createRun, replyToHumanInputRequest, Run, stop, ToolPermissionAuthorizePayload } from './runs/runs.js';
 import { IRunsRepo, CreateRunOptions, ListRunsResponse } from './runs/repo.js';
 import { IBus } from './application/lib/bus.js';
+import { cors } from 'hono/cors';
 
 let id = 0;
 
@@ -620,7 +621,6 @@ const routes = new Hono()
                 unsub = await bus.subscribe('*', async (event) => {
                     if (aborted) return;
 
-                    console.log('got ev', event);
                     await stream.writeSSE({
                         data: JSON.stringify(event),
                         event: "message",
@@ -638,6 +638,7 @@ const routes = new Hono()
     ;
 
 const app = new Hono()
+    .use("/*", cors())
     .route("/", routes)
     .get(
         "/openapi.json",
