@@ -621,7 +621,6 @@ const routes = new Hono()
                 unsub = await bus.subscribe('*', async (event) => {
                     if (aborted) return;
 
-                    console.log('got ev', event);
                     await stream.writeSSE({
                         data: JSON.stringify(event),
                         event: "message",
