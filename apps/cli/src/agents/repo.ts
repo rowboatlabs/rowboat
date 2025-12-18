@@ -77,7 +77,9 @@ export class FSAgentsRepo implements IAgentsRepo {
     }
 
     async create(agent: z.infer<typeof Agent>): Promise<void> {
-        await fs.writeFile(path.join(this.agentsDir, `${agent.name}.md`), agent.instructions);
+        const { instructions, ...rest } = agent;
+        const contents = `---\n${stringify(rest)}\n---\n${instructions}`;
+        await fs.writeFile(path.join(this.agentsDir, `${agent.name}.md`), contents);
     }
 
     async update(id: string, agent: z.infer<typeof UpdateAgentSchema>): Promise<void> {
