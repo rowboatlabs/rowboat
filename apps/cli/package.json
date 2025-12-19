@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "rm -rf dist && tsc",
-    "server": "node dist/server.js"
+    "server": "node dist/server.js",
+    "migrate-agents": "node dist/scripts/migrate-agents.js"
   },
   "files": [
     "dist",
