@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 import { cn } from "@/lib/utils";
 import type { Experimental_GeneratedImage } from "ai";
 
@@ -8,7 +9,6 @@ export type ImageProps = Experimental_GeneratedImage & {
 
 export const Image = ({
   base64,
-  uint8Array,
   mediaType,
   ...props
 }: ImageProps) => (

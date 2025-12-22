@@ -5,7 +5,6 @@ import { ChevronRight, Clock3, FileText, Folder, Play, Plug, Rocket, Users } fro
 
 import { NavUser } from "@/components/nav-user"
 import { TeamSwitcher } from "@/components/team-switcher"
-import { NavMain } from "@/components/nav-main"
 import { NavProjects } from "@/components/nav-projects"
 import {
   Sidebar,
