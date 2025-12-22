@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
         reader?.cancel();
         try {
           controller.close();
-        } catch (e) {
+        } catch {
           // Already closed, ignore
         }
       });
@@ -43,10 +43,11 @@ export async function GET(request: NextRequest) {
           throw new Error(`Failed to connect to backend: ${response.statusText}`);
         }
 
-        reader = response.body?.getReader();
-        if (!reader) {
+        const body = response.body;
+        if (!body) {
           throw new Error('No response body');
         }
+        reader = body.getReader();
 
         // Read and forward stream
         while (!isClosed) {
@@ -60,15 +61,15 @@ export async function GET(request: NextRequest) {
           if (!isClosed) {
             try {
               controller.enqueue(value);
-            } catch (e) {
+            } catch {
               // Controller closed, stop reading
               break;
             }
           }
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Only log non-abort errors
-        if (error.name !== 'AbortError') {
+        if ((error as Error).name !== 'AbortError') {
           console.error('Stream error:', error);
         }
         
@@ -77,7 +78,7 @@ export async function GET(request: NextRequest) {
           try {
             const errorMessage = `data: ${JSON.stringify({ type: 'error', error: String(error) })}\n\n`;
             controller.enqueue(encoder.encode(errorMessage));
-          } catch (e) {
+          } catch {
             // Controller already closed, ignore
           }
         }
@@ -86,7 +87,7 @@ export async function GET(request: NextRequest) {
         if (reader) {
           try {
             await reader.cancel();
-          } catch (e) {
+          } catch {
             // Ignore cancel errors
           }
         }
@@ -94,7 +95,7 @@ export async function GET(request: NextRequest) {
         if (!isClosed) {
           try {
             controller.close();
-          } catch (e) {
+          } catch {
             // Already closed, ignore
           }
         }
@@ -110,4 +111,3 @@ export async function GET(request: NextRequest) {
     },
   });
 }
-

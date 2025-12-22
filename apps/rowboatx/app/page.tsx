@@ -46,9 +46,8 @@ import {
   ArtifactHeader,
   ArtifactTitle,
 } from "@/components/ai-elements/artifact";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { MicIcon, Save, Loader2, Lock } from "lucide-react";
-import { RunEvent } from "@/lib/cli-client";
 import {
   Select,
   SelectContent,
@@ -57,6 +56,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { JsonEditor } from "@/components/json-editor";
+import { TiptapMarkdownEditor } from "@/components/tiptap-markdown-editor";
+import { MarkdownViewer } from "@/components/markdown-viewer";
 
 interface ChatMessage {
   id: string;
@@ -70,8 +72,8 @@ interface ToolCall {
   id: string;
   type: 'tool';
   name: string;
-  input: any;
-  result?: any;
+  input: unknown;
+  result?: unknown;
   status: 'pending' | 'running' | 'completed' | 'error';
   timestamp: number;
 }
@@ -93,15 +95,28 @@ type SelectedResource = {
   name: string;
 };
 
+type ToolCallContentPart = {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  arguments: unknown;
+};
+
+type RunEvent = {
+  type: string;
+  [key: string]: unknown;
+};
+
 function PageBody() {
-  // Use local proxy to avoid CORS/port mismatches.
   const apiBase = "/api/cli";
+  const streamUrl = "/api/stream";
   const [text, setText] = useState<string>("");
   const [useMicrophone, setUseMicrophone] = useState<boolean>(false);
   const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");
 
   // Chat state
   const [runId, setRunId] = useState<string | null>(null);
+  const [isRunProcessing, setIsRunProcessing] = useState(false);
   const [conversation, setConversation] = useState<ConversationItem[]>([]);
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>("");
   const [currentReasoning, setCurrentReasoning] = useState<string>("");
@@ -117,23 +132,22 @@ function PageBody() {
   const [artifactLoading, setArtifactLoading] = useState(false);
   const [artifactError, setArtifactError] = useState<string | null>(null);
   const [artifactReadOnly, setArtifactReadOnly] = useState(false);
+  const [artifactFileType, setArtifactFileType] = useState<"json" | "markdown">("json");
   const [agentOptions, setAgentOptions] = useState<string[]>(["copilot"]);
   const [selectedAgent, setSelectedAgent] = useState<string>("copilot");
 
   const artifactDirty = !artifactReadOnly && artifactText !== artifactOriginal;
   const stripExtension = (name: string) => name.replace(/\.[^/.]+$/, "");
+  const detectFileType = (name: string): "json" | "markdown" =>
+    name.toLowerCase().match(/\.(md|markdown)$/) ? "markdown" : "json";
 
   const requestJson = async (
     url: string,
     options?: (RequestInit & { allow404?: boolean }) | undefined
   ) => {
-    const isLocalApi = url.startsWith("/api/rowboat");
-    const fullUrl =
-      url.startsWith("http://") || url.startsWith("https://") || isLocalApi
-        ? url
-        : apiBase
-        ? `${apiBase}${url}`
-        : url;
+    const fullUrl = url.startsWith("/api/")
+      ? url
+      : `${apiBase}${url.startsWith("/") ? url : `/${url}`}`;
     const { allow404, ...rest } = options || {};
     const res = await fetch(fullUrl, {
       ...rest,
@@ -241,7 +255,7 @@ function PageBody() {
     }
 
     console.log('🔌 Creating new EventSource connection');
-    const eventSource = new EventSource('/api/stream');
+    const eventSource = new EventSource(streamUrl);
     eventSourceRef.current = eventSource;
 
     const handleMessage = (e: MessageEvent) => {
@@ -276,13 +290,23 @@ function PageBody() {
       eventSource.close();
       eventSourceRef.current = null;
     };
-  }, []); // Empty deps - only run once
+  }, [streamUrl]);
 
   // Handle different event types from the copilot
   const handleEvent = (event: RunEvent) => {
     console.log('Event received:', event.type, event);
 
     switch (event.type) {
+      case 'run-processing-start':
+        setIsRunProcessing(true);
+        setStatus((prev) => (prev === 'error' ? prev : 'streaming'));
+        break;
+
+      case 'run-processing-end':
+        setIsRunProcessing(false);
+        setStatus('ready');
+        break;
+
       case 'start':
         setStatus('streaming');
         setCurrentAssistantMessage('');
@@ -290,125 +314,141 @@ function PageBody() {
         break;
 
       case 'llm-stream-event':
-        console.log('LLM stream event type:', event.event?.type);
+        {
+          const llmEvent = (event.event as {
+            type?: string;
+            delta?: string;
+            toolCallId?: string;
+            toolName?: string;
+            input?: unknown;
+          }) || {};
+          console.log('LLM stream event type:', llmEvent.type);
         
-        if (event.event?.type === 'reasoning-delta') {
-          setCurrentReasoning(prev => prev + event.event.delta);
-        } else if (event.event?.type === 'reasoning-end') {
-          // Commit reasoning block if we have content
-          setCurrentReasoning(reasoning => {
-            if (reasoning) {
-              setConversation(prev => [...prev, {
-                id: `reasoning-${Date.now()}`,
-                type: 'reasoning',
-                content: reasoning,
-                isStreaming: false,
-                timestamp: Date.now(),
-              }]);
-            }
-            return '';
-          });
-        } else if (event.event?.type === 'text-delta') {
-          setCurrentAssistantMessage(prev => prev + event.event.delta);
-          setStatus('streaming');
-        } else if (event.event?.type === 'text-end') {
-          console.log('TEXT END received - waiting for message event');
-        } else if (event.event?.type === 'tool-call') {
-          // Add tool call to conversation immediately
-          setConversation(prev => [...prev, {
-            id: event.event.toolCallId,
-            type: 'tool',
-            name: event.event.toolName,
-            input: event.event.input,
-            status: 'running',
-            timestamp: Date.now(),
-          }]);
-        } else if (event.event?.type === 'finish-step') {
-          console.log('FINISH STEP received - waiting for message event');
-        }
-        break;
-
-      case 'message':
-        console.log('MESSAGE event received:', event);
-        if (event.message?.role === 'assistant') {
-          // If the final assistant message contains tool calls, sync them to conversation
-          if (Array.isArray(event.message.content)) {
-            const toolCalls = event.message.content.filter(
-              (part: any) => part?.type === 'tool-call'
-            );
-            if (toolCalls.length) {
-              setConversation((prev) => {
-                let updated: ConversationItem[] = prev.map((item) => {
-                  if (item.type !== 'tool') return item;
-                  const match = toolCalls.find(
-                    (part: any) => part.toolCallId === item.id
-                  );
-                  return match
-                    ? {
-                        ...item,
-                        name: match.toolName,
-                        input: match.arguments,
-                        status: 'pending',
-                      }
-                    : item;
-                });
-
-                for (const part of toolCalls) {
-                  const exists = updated.some(
-                    (item) => item.type === 'tool' && item.id === part.toolCallId
-                  );
-                  if (!exists) {
-                    updated = [
-                      ...updated,
-                      {
-                        id: part.toolCallId,
-                        type: 'tool',
-                        name: part.toolName,
-                        input: part.arguments,
-                        status: 'pending',
-                        timestamp: Date.now(),
-                      },
-                    ];
-                  }
-                }
-                return updated;
-              });
-            }
-          }
-
-          const messageId = event.messageId || `assistant-${Date.now()}`;
-          
-          if (committedMessageIds.current.has(messageId)) {
-            console.log('⚠️ Message already committed, skipping:', messageId);
-            return;
-          }
-          
-          committedMessageIds.current.add(messageId);
-          
-          setCurrentAssistantMessage(currentMsg => {
-            console.log('✅ Committing message:', messageId, currentMsg);
-            if (currentMsg) {
-              setConversation(prev => {
-                const exists = prev.some(m => m.id === messageId);
-                if (exists) {
-                  console.log('⚠️ Message ID already in array, skipping:', messageId);
-                  return prev;
-                }
-                return [...prev, {
-                  id: messageId,
-                  type: 'message',
-                  role: 'assistant',
-                  content: currentMsg,
+          if (llmEvent.type === 'reasoning-delta' && llmEvent.delta) {
+            setCurrentReasoning(prev => prev + llmEvent.delta);
+          } else if (llmEvent.type === 'reasoning-end') {
+            // Commit reasoning block if we have content
+            setCurrentReasoning(reasoning => {
+              if (reasoning) {
+                setConversation(prev => [...prev, {
+                  id: `reasoning-${Date.now()}`,
+                  type: 'reasoning',
+                  content: reasoning,
+                  isStreaming: false,
                   timestamp: Date.now(),
-                }];
-              });
-            }
-            return '';
-          });
-          setStatus('ready');
-          console.log('Status set to ready');
+                }]);
+              }
+              return '';
+            });
+          } else if (llmEvent.type === 'text-delta' && llmEvent.delta) {
+            setCurrentAssistantMessage(prev => prev + llmEvent.delta);
+            setStatus('streaming');
+          } else if (llmEvent.type === 'text-end') {
+            console.log('TEXT END received - waiting for message event');
+          } else if (llmEvent.type === 'tool-call') {
+            // Add tool call to conversation immediately
+            setConversation(prev => [...prev, {
+              id: llmEvent.toolCallId || `tool-${Date.now()}`,
+              type: 'tool',
+              name: llmEvent.toolName || 'tool',
+              input: llmEvent.input,
+              status: 'running',
+              timestamp: Date.now(),
+            }]);
+          } else if (llmEvent.type === 'finish-step') {
+            console.log('FINISH STEP received - waiting for message event');
+          }
         }
         break;
+
+      case 'message': {
+        console.log('MESSAGE event received:', event);
+        const message = (event.message as { role?: string; content?: unknown }) || {};
+        if (message.role !== 'assistant') {
+          break;
+        }
+
+        if (Array.isArray(message.content)) {
+          const toolCalls = message.content.filter(
+            (part): part is ToolCallContentPart =>
+              (part as ToolCallContentPart)?.type === 'tool-call'
+          );
+          if (toolCalls.length) {
+            setConversation((prev) => {
+              let updated: ConversationItem[] = prev.map((item) => {
+                if (item.type !== 'tool') return item;
+                const match = toolCalls.find(
+                  (part) => part.toolCallId === item.id
+                );
+                return match
+                  ? {
+                      ...item,
+                      name: match.toolName,
+                      input: match.arguments,
+                      status: 'pending',
+                    }
+                  : item;
+              });
+
+              for (const part of toolCalls) {
+                const exists = updated.some(
+                  (item) => item.type === 'tool' && item.id === part.toolCallId
+                );
+                if (!exists) {
+                  updated = [
+                    ...updated,
+                    {
+                      id: part.toolCallId,
+                      type: 'tool',
+                      name: part.toolName,
+                      input: part.arguments,
+                      status: 'pending',
+                      timestamp: Date.now(),
+                    },
+                  ];
+                }
+              }
+              return updated;
+            });
+          }
+        }
+
+        const messageId =
+          typeof event.messageId === "string"
+            ? event.messageId
+            : `assistant-${Date.now()}`;
+        
+        if (committedMessageIds.current.has(messageId)) {
+          console.log('⚠️ Message already committed, skipping:', messageId);
+          break;
+        }
+        
+        committedMessageIds.current.add(messageId);
+        
+        setCurrentAssistantMessage(currentMsg => {
+          console.log('✅ Committing message:', messageId, currentMsg);
+          if (currentMsg) {
+            setConversation(prev => {
+              const exists = prev.some(m => m.id === messageId);
+              if (exists) {
+                console.log('⚠️ Message ID already in array, skipping:', messageId);
+                return prev;
+              }
+              return [...prev, {
+                id: messageId,
+                type: 'message',
+                role: 'assistant',
+                content: currentMsg,
+                timestamp: Date.now(),
+              }];
+            });
+          }
+          return '';
+        });
+        setStatus('ready');
+        console.log('Status set to ready');
+        break;
+      }
 
       case 'tool-invocation':
         setConversation(prev => prev.map(item =>
@@ -428,12 +468,16 @@ function PageBody() {
 
       case 'error':
         // Only set error status for actual errors, not connection issues
-        if (event.error && !event.error.includes('terminated')) {
+        {
+          const errorMsg = typeof event.error === "string" ? event.error : "";
+          if (errorMsg && !errorMsg.includes('terminated')) {
           setStatus('error');
-          console.error('Agent error:', event.error);
+          console.error('Agent error:', errorMsg);
         } else {
-          console.log('Connection error (will auto-reconnect):', event.error);
+          console.log('Connection error (will auto-reconnect):', errorMsg);
           setStatus('ready');
+        }
+        setIsRunProcessing(false);
         }
         break;
         
@@ -466,27 +510,28 @@ function PageBody() {
     setText("");
 
     try {
-      // Send message to backend
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      let nextRunId = runId;
+      if (!nextRunId) {
+        const runData = await requestJson("/runs/new", {
+          method: "POST",
+          body: JSON.stringify({
+            agentId: selectedAgent,
+          }),
+        });
+        nextRunId = runData?.id;
+        setRunId(nextRunId);
+      }
+
+      if (!nextRunId) {
+        throw new Error("Run ID unavailable after creation");
+      }
+
+      await requestJson(`/runs/${encodeURIComponent(nextRunId)}/messages/new`, {
+        method: "POST",
         body: JSON.stringify({
           message: userMessage,
-          agentId: selectedAgent,
-          runId: runId,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to send message');
-      }
-
-      const data = await response.json();
-      
-      // Store runId for subsequent messages
-      if (data.runId && !runId) {
-        setRunId(data.runId);
-      }
 
       setStatus('streaming');
     } catch (error) {
@@ -503,34 +548,96 @@ function PageBody() {
       setArtifactLoading(true);
       setArtifactError(null);
       try {
-        let title = selectedResource.name;
+        const title = selectedResource.name;
         let subtitle = "";
         let text = "";
         let readOnly = false;
+        const detectedType = detectFileType(selectedResource.name);
+        setArtifactFileType(detectedType);
 
         if (selectedResource.kind === "agent") {
           const raw = selectedResource.name;
-          const id = stripExtension(raw) || raw;
-          const data = await requestJson(`/agents/${encodeURIComponent(id)}`);
+          const isMarkdown = /\.(md|markdown)$/i.test(raw);
 
-          subtitle = "Agent";
-          text = JSON.stringify(data ?? {}, null, 2);
+          if (isMarkdown) {
+            subtitle = "Agent (Markdown)";
+            const response = await fetch(
+              `/api/rowboat/agent?file=${encodeURIComponent(raw)}`
+            );
+            if (!response.ok) {
+              if (response.status === 404) {
+                text = "";
+              } else {
+                throw new Error(`Failed to load agent file: ${response.status}`);
+              }
+            } else {
+              const data = await response.json();
+              text = data?.content || data?.raw || "";
+            }
+            setArtifactFileType("markdown");
+          } else {
+            const id = stripExtension(raw) || raw;
+            const data = await requestJson(`/agents/${encodeURIComponent(id)}`);
+
+            subtitle = "Agent";
+            text = JSON.stringify(data ?? {}, null, 2);
+            setArtifactFileType("json");
+          }
         } else if (selectedResource.kind === "config") {
           const lower = selectedResource.name.toLowerCase();
-          if (lower.includes("mcp")) {
+          if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
+            // Load markdown file as plain text from local API
+            try {
+              const response = await fetch(
+                `/api/rowboat/config?file=${encodeURIComponent(selectedResource.name)}`
+              );
+              if (!response.ok) {
+                if (response.status === 404) {
+                  // File doesn't exist, start with empty content
+                  text = "";
+                } else {
+                  throw new Error(`Failed to load markdown file: ${response.status}`);
+                }
+              } else {
+                const data = await response.json();
+                text = data.content || data.raw || "";
+              }
+              subtitle = "Markdown";
+              setArtifactFileType("markdown");
+            } catch (error: unknown) {
+              const err = error as Error;
+              console.error("Error loading markdown file:", error);
+              // Show error but still allow editing
+              setArtifactError(err?.message || "Failed to load markdown file");
+              text = "";
+              subtitle = "Markdown";
+              setArtifactFileType("markdown");
+            }
+          } else if (lower.includes("mcp")) {
             const data = await requestJson("/mcp");
             subtitle = "MCP config";
             text = JSON.stringify(data ?? {}, null, 2);
+            setArtifactFileType("json");
           } else if (lower.includes("model")) {
             const data = await requestJson("/models");
             subtitle = "Models config";
             text = JSON.stringify(data ?? {}, null, 2);
+            setArtifactFileType("json");
           } else {
-            throw new Error("Unsupported config file");
+            // Try to load as JSON by default
+            try {
+              const data = await requestJson(`/config/${encodeURIComponent(selectedResource.name)}`);
+              subtitle = "Config";
+              text = JSON.stringify(data ?? {}, null, 2);
+              setArtifactFileType("json");
+            } catch {
+              throw new Error("Unsupported config file");
+            }
           }
         } else if (selectedResource.kind === "run") {
           subtitle = "Run (read-only)";
           readOnly = true;
+          setArtifactFileType(detectedType);
 
           const local = await requestJson(
             `/api/rowboat/run?file=${encodeURIComponent(selectedResource.name)}`
@@ -550,9 +657,10 @@ function PageBody() {
         setArtifactText(text);
         setArtifactOriginal(text);
         setArtifactReadOnly(readOnly);
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (!cancelled) {
-          setArtifactError(error?.message || "Failed to load resource");
+          const err = error as Error;
+          setArtifactError(err?.message || "Failed to load resource");
           setArtifactText("");
         }
       } finally {
@@ -565,7 +673,6 @@ function PageBody() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedResource]);
 
   useEffect(() => {
@@ -592,6 +699,7 @@ function PageBody() {
     setConversation([]);
     setCurrentAssistantMessage("");
     setCurrentReasoning("");
+    setIsRunProcessing(false);
   }, [selectedAgent]);
 
   const handleSave = async () => {
@@ -599,67 +707,102 @@ function PageBody() {
     setArtifactLoading(true);
     setArtifactError(null);
     try {
-      const parsed = JSON.parse(artifactText);
       if (selectedResource.kind === "agent") {
-        const raw = selectedResource.name;
-        const targetId = stripExtension(raw) || raw;
+        if (artifactFileType === "markdown") {
+          const response = await fetch(
+            `/api/rowboat/agent?file=${encodeURIComponent(selectedResource.name)}`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "text/plain" },
+              body: artifactText,
+            }
+          );
+          if (!response.ok) {
+            throw new Error("Failed to save agent file");
+          }
+          setArtifactOriginal(artifactText);
+        } else {
+          const parsed = JSON.parse(artifactText);
+          const raw = selectedResource.name;
+          const targetId = stripExtension(raw) || raw;
 
-        await requestJson(`/agents/${encodeURIComponent(targetId)}`, {
-          method: "PUT",
-          body: JSON.stringify(parsed),
-        });
+          await requestJson(`/agents/${encodeURIComponent(targetId)}`, {
+            method: "PUT",
+            body: JSON.stringify(parsed),
+          });
+          setArtifactOriginal(JSON.stringify(parsed, null, 2));
+        }
       } else if (selectedResource.kind === "config") {
         const lower = selectedResource.name.toLowerCase();
-        const previous = artifactOriginal ? JSON.parse(artifactOriginal) : {};
-
-        if (lower.includes("model")) {
-          const newProviders = parsed.providers || {};
-          const oldProviders = previous.providers || {};
-          const toDelete = Object.keys(oldProviders).filter(
-            (name) => !Object.prototype.hasOwnProperty.call(newProviders, name)
+        
+        if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
+          // Save markdown file as plain text via local API
+          const response = await fetch(
+            `/api/rowboat/config?file=${encodeURIComponent(selectedResource.name)}`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "text/plain" },
+              body: artifactText,
+            }
           );
-          for (const name of toDelete) {
-            await requestJson(`/models/providers/${encodeURIComponent(name)}`, {
-              method: "DELETE",
-            });
+          if (!response.ok) {
+            throw new Error("Failed to save markdown file");
           }
-          for (const name of Object.keys(newProviders)) {
-            await requestJson(`/models/providers/${encodeURIComponent(name)}`, {
-              method: "PUT",
-              body: JSON.stringify(newProviders[name]),
-            });
-          }
-          if (parsed.defaults) {
-            await requestJson("/models/default", {
-              method: "PUT",
-              body: JSON.stringify(parsed.defaults),
-            });
-          }
-        } else if (lower.includes("mcp")) {
-          const newServers = parsed.mcpServers || parsed || {};
-          const oldServers = previous.mcpServers || {};
-          const toDelete = Object.keys(oldServers).filter(
-            (name) => !Object.prototype.hasOwnProperty.call(newServers, name)
-          );
-          for (const name of toDelete) {
-            await requestJson(`/mcp/${encodeURIComponent(name)}`, {
-              method: "DELETE",
-            });
-          }
-          for (const name of Object.keys(newServers)) {
-            await requestJson(`/mcp/${encodeURIComponent(name)}`, {
-              method: "PUT",
-              body: JSON.stringify(newServers[name]),
-            });
-          }
+          setArtifactOriginal(artifactText);
         } else {
-          throw new Error("Unsupported config file");
+          // Handle JSON config files
+          const parsed = JSON.parse(artifactText);
+          const previous = artifactOriginal ? JSON.parse(artifactOriginal) : {};
+
+          if (lower.includes("model")) {
+            const newProviders = parsed.providers || {};
+            const oldProviders = previous.providers || {};
+            const toDelete = Object.keys(oldProviders).filter(
+              (name) => !Object.prototype.hasOwnProperty.call(newProviders, name)
+            );
+            for (const name of toDelete) {
+              await requestJson(`/models/providers/${encodeURIComponent(name)}`, {
+                method: "DELETE",
+              });
+            }
+            for (const name of Object.keys(newProviders)) {
+              await requestJson(`/models/providers/${encodeURIComponent(name)}`, {
+                method: "PUT",
+                body: JSON.stringify(newProviders[name]),
+              });
+            }
+            if (parsed.defaults) {
+              await requestJson("/models/default", {
+                method: "PUT",
+                body: JSON.stringify(parsed.defaults),
+              });
+            }
+          } else if (lower.includes("mcp")) {
+            const newServers = parsed.mcpServers || parsed || {};
+            const oldServers = previous.mcpServers || {};
+            const toDelete = Object.keys(oldServers).filter(
+              (name) => !Object.prototype.hasOwnProperty.call(newServers, name)
+            );
+            for (const name of toDelete) {
+              await requestJson(`/mcp/${encodeURIComponent(name)}`, {
+                method: "DELETE",
+              });
+            }
+            for (const name of Object.keys(newServers)) {
+              await requestJson(`/mcp/${encodeURIComponent(name)}`, {
+                method: "PUT",
+                body: JSON.stringify(newServers[name]),
+              });
+            }
+          } else {
+            throw new Error("Unsupported config file");
+          }
+          setArtifactOriginal(JSON.stringify(parsed, null, 2));
         }
       }
-
-      setArtifactOriginal(JSON.stringify(JSON.parse(artifactText), null, 2));
-    } catch (error: any) {
-      setArtifactError(error?.message || "Failed to save changes");
+    } catch (error: unknown) {
+      const err = error as Error;
+      setArtifactError(err?.message || "Failed to save changes");
     } finally {
       setArtifactLoading(false);
     }
@@ -692,6 +835,12 @@ function PageBody() {
 
         <div className="flex flex-1 flex-col gap-4 overflow-hidden px-4 pb-0 md:flex-row">
           <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden">
+            {isRunProcessing && (
+              <div className="pointer-events-none absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-muted/80 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Working...</span>
+              </div>
+            )}
             {/* Messages area */}
             <Conversation className="flex-1 min-h-0 overflow-y-auto">
               <div className="pointer-events-none sticky bottom-0 z-10 h-16 bg-gradient-to-t from-background via-background/80 to-transparent" />
@@ -714,30 +863,33 @@ function PageBody() {
                       </Message>
                     );
                   } else if (item.type === 'tool') {
-                    const stateMap: Record<string, any> = {
-                      'pending': 'input-streaming',
-                      'running': 'input-available',
-                      'completed': 'output-available',
-                      'error': 'output-error',
+                    const stateMap: Record<ToolCall['status'], 'input-streaming' | 'input-available' | 'output-available' | 'output-error'> = {
+                      pending: 'input-streaming',
+                      running: 'input-available',
+                      completed: 'output-available',
+                      error: 'output-error',
                     };
                     
                     return (
                       <div key={item.id} className="mb-2">
-                        <Tool>
-                          <ToolHeader 
-                            title={item.name}
-                            type="tool-call"
-                            state={stateMap[item.status] || 'input-streaming'}
-                          />
+                      <Tool>
+                        <ToolHeader 
+                          title={item.name}
+                          type="tool-call"
+                          state={stateMap[item.status] || 'input-streaming'}
+                        />
                           <ToolContent>
                             <ToolInput input={item.input} />
-                            {item.result && (
-                              <ToolOutput output={item.result} errorText={undefined} />
+                            {item.result != null && (
+                              <ToolOutput
+                              output={item.result as ReactNode}
+                              errorText={undefined}
+                            />
                             )}
                           </ToolContent>
-                        </Tool>
-                      </div>
-                    );
+                      </Tool>
+                    </div>
+                  );
                   } else if (item.type === 'reasoning') {
                     return (
                       <div key={item.id} className="mb-2">
@@ -843,15 +995,25 @@ function PageBody() {
                   ) : (
                     <div className="flex h-full flex-col gap-2">
                       {artifactReadOnly ? (
-                        <pre className="h-full min-h-[240px] max-h-[70vh] w-full overflow-auto whitespace-pre-wrap rounded-md border bg-background p-4 font-mono text-sm leading-relaxed text-foreground">
-                          {artifactText}
-                        </pre>
+                        artifactFileType === "markdown" ? (
+                          <MarkdownViewer content={artifactText} />
+                        ) : (
+                          <pre className="h-full min-h-[240px] max-h-[70vh] w-full overflow-auto whitespace-pre-wrap rounded-md border bg-background p-4 font-mono text-sm leading-relaxed text-foreground">
+                            {artifactText}
+                          </pre>
+                        )
+                      ) : artifactFileType === "markdown" ? (
+                        <TiptapMarkdownEditor
+                          content={artifactText}
+                          onChange={(newContent) => setArtifactText(newContent)}
+                          readOnly={false}
+                          placeholder="Start writing your markdown..."
+                        />
                       ) : (
-                        <textarea
-                          value={artifactText}
-                          onChange={(e) => setArtifactText(e.target.value)}
-                          readOnly={artifactReadOnly}
-                          className="h-full min-h-[240px] max-h-[70vh] w-full resize-none rounded-md border bg-background p-4 font-mono text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                        <JsonEditor
+                          content={artifactText}
+                          onChange={(newContent) => setArtifactText(newContent)}
+                          readOnly={false}
                         />
                       )}
                       {artifactReadOnly && (
