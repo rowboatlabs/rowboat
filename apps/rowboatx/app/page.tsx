@@ -46,7 +46,7 @@ import {
   ArtifactHeader,
   ArtifactTitle,
 } from "@/components/ai-elements/artifact";
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode, useCallback } from "react";
 import { MicIcon, Save, Loader2, Lock } from "lucide-react";
 import {
   Select,
@@ -108,7 +108,7 @@ type RunEvent = {
 };
 
 function PageBody() {
-  const apiBase = "/api/cli";
+  const [apiBase, setApiBase] = useState<string>("http://localhost:3000")
   const streamUrl = "/api/stream";
   const [text, setText] = useState<string>("");
   const [useMicrophone, setUseMicrophone] = useState<boolean>(false);
@@ -140,14 +140,17 @@ function PageBody() {
   const stripExtension = (name: string) => name.replace(/\.[^/.]+$/, "");
   const detectFileType = (name: string): "json" | "markdown" =>
     name.toLowerCase().match(/\.(md|markdown)$/) ? "markdown" : "json";
+  
+  useEffect(() => {
+    setApiBase(window.config.apiBase);
+  }, []);
 
-  const requestJson = async (
+  const requestJson = useCallback(async (
     url: string,
     options?: (RequestInit & { allow404?: boolean }) | undefined
   ) => {
-    const fullUrl = url.startsWith("/api/")
-      ? url
-      : `${apiBase}${url.startsWith("/") ? url : `/${url}`}`;
+    const fullUrl = new URL(url, apiBase).toString();
+    console.log('fullUrl', fullUrl);
     const { allow404, ...rest } = options || {};
     const res = await fetch(fullUrl, {
       ...rest,
@@ -188,7 +191,7 @@ function PageBody() {
     } catch {
       return null;
     }
-  };
+  }, [apiBase]);
 
   const renderPromptInput = () => (
     <PromptInput globalDrop multiple onSubmit={handleSubmit}>
@@ -269,7 +272,7 @@ function PageBody() {
 
     const handleError = (e: Event) => {
       const target = e.target as EventSource;
-      
+
       // Only log if it's not a normal close
       if (target.readyState === EventSource.CLOSED) {
         console.log('SSE connection closed, will reconnect on next message');
@@ -323,7 +326,7 @@ function PageBody() {
             input?: unknown;
           }) || {};
           console.log('LLM stream event type:', llmEvent.type);
-        
+
           if (llmEvent.type === 'reasoning-delta' && llmEvent.delta) {
             setCurrentReasoning(prev => prev + llmEvent.delta);
           } else if (llmEvent.type === 'reasoning-end') {
@@ -382,11 +385,11 @@ function PageBody() {
                 );
                 return match
                   ? {
-                      ...item,
-                      name: match.toolName,
-                      input: match.arguments,
-                      status: 'pending',
-                    }
+                    ...item,
+                    name: match.toolName,
+                    input: match.arguments,
+                    status: 'pending',
+                  }
                   : item;
               });
 
@@ -417,14 +420,14 @@ function PageBody() {
           typeof event.messageId === "string"
             ? event.messageId
             : `assistant-${Date.now()}`;
-        
+
         if (committedMessageIds.current.has(messageId)) {
           console.log('⚠️ Message already committed, skipping:', messageId);
           break;
         }
-        
+
         committedMessageIds.current.add(messageId);
-        
+
         setCurrentAssistantMessage(currentMsg => {
           console.log('✅ Committing message:', messageId, currentMsg);
           if (currentMsg) {
@@ -471,16 +474,16 @@ function PageBody() {
         {
           const errorMsg = typeof event.error === "string" ? event.error : "";
           if (errorMsg && !errorMsg.includes('terminated')) {
-          setStatus('error');
-          console.error('Agent error:', errorMsg);
-        } else {
-          console.log('Connection error (will auto-reconnect):', errorMsg);
-          setStatus('ready');
-        }
-        setIsRunProcessing(false);
+            setStatus('error');
+            console.error('Agent error:', errorMsg);
+          } else {
+            console.log('Connection error (will auto-reconnect):', errorMsg);
+            setStatus('ready');
+          }
+          setIsRunProcessing(false);
         }
         break;
-        
+
       default:
         console.log('Unhandled event type:', event.type);
     }
@@ -673,7 +676,7 @@ function PageBody() {
     return () => {
       cancelled = true;
     };
-  }, [selectedResource]);
+  }, [selectedResource, requestJson]);
 
   useEffect(() => {
     const loadAgents = async () => {
@@ -734,7 +737,7 @@ function PageBody() {
         }
       } else if (selectedResource.kind === "config") {
         const lower = selectedResource.name.toLowerCase();
-        
+
         if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
           // Save markdown file as plain text via local API
           const response = await fetch(
@@ -847,87 +850,87 @@ function PageBody() {
               <ConversationContent className="!flex !flex-col !items-center !gap-8 !p-4 pt-4 pb-32">
                 <div className="w-full max-w-3xl mx-auto space-y-4">
 
-                {/* Render conversation items in order */}
-                {conversation.map((item) => {
-                  if (item.type === 'message') {
-                    return (
-                      <Message
-                        key={item.id}
-                        from={item.role}
-                      >
-                        <MessageContent>
-                          <MessageResponse>
-                            {item.content}
-                          </MessageResponse>
-                        </MessageContent>
-                      </Message>
-                    );
-                  } else if (item.type === 'tool') {
-                    const stateMap: Record<ToolCall['status'], 'input-streaming' | 'input-available' | 'output-available' | 'output-error'> = {
-                      pending: 'input-streaming',
-                      running: 'input-available',
-                      completed: 'output-available',
-                      error: 'output-error',
-                    };
-                    
-                    return (
-                      <div key={item.id} className="mb-2">
-                      <Tool>
-                        <ToolHeader 
-                          title={item.name}
-                          type="tool-call"
-                          state={stateMap[item.status] || 'input-streaming'}
-                        />
-                          <ToolContent>
-                            <ToolInput input={item.input} />
-                            {item.result != null && (
-                              <ToolOutput
-                              output={item.result as ReactNode}
-                              errorText={undefined}
+                  {/* Render conversation items in order */}
+                  {conversation.map((item) => {
+                    if (item.type === 'message') {
+                      return (
+                        <Message
+                          key={item.id}
+                          from={item.role}
+                        >
+                          <MessageContent>
+                            <MessageResponse>
+                              {item.content}
+                            </MessageResponse>
+                          </MessageContent>
+                        </Message>
+                      );
+                    } else if (item.type === 'tool') {
+                      const stateMap: Record<ToolCall['status'], 'input-streaming' | 'input-available' | 'output-available' | 'output-error'> = {
+                        pending: 'input-streaming',
+                        running: 'input-available',
+                        completed: 'output-available',
+                        error: 'output-error',
+                      };
+
+                      return (
+                        <div key={item.id} className="mb-2">
+                          <Tool>
+                            <ToolHeader
+                              title={item.name}
+                              type="tool-call"
+                              state={stateMap[item.status] || 'input-streaming'}
                             />
-                            )}
-                          </ToolContent>
-                      </Tool>
+                            <ToolContent>
+                              <ToolInput input={item.input} />
+                              {item.result != null && (
+                                <ToolOutput
+                                  output={item.result as ReactNode}
+                                  errorText={undefined}
+                                />
+                              )}
+                            </ToolContent>
+                          </Tool>
+                        </div>
+                      );
+                    } else if (item.type === 'reasoning') {
+                      return (
+                        <div key={item.id} className="mb-2">
+                          <Reasoning isStreaming={item.isStreaming}>
+                            <ReasoningTrigger />
+                            <ReasoningContent>
+                              {item.content}
+                            </ReasoningContent>
+                          </Reasoning>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })}
+
+                  {/* Streaming reasoning */}
+                  {currentReasoning && (
+                    <div className="mb-2">
+                      <Reasoning isStreaming={true}>
+                        <ReasoningTrigger />
+                        <ReasoningContent>
+                          {currentReasoning}
+                        </ReasoningContent>
+                      </Reasoning>
                     </div>
-                  );
-                  } else if (item.type === 'reasoning') {
-                    return (
-                      <div key={item.id} className="mb-2">
-                        <Reasoning isStreaming={item.isStreaming}>
-                          <ReasoningTrigger />
-                          <ReasoningContent>
-                            {item.content}
-                          </ReasoningContent>
-                        </Reasoning>
-                      </div>
-                    );
-                  }
-                  return null;
-                })}
+                  )}
 
-                {/* Streaming reasoning */}
-                {currentReasoning && (
-                  <div className="mb-2">
-                    <Reasoning isStreaming={true}>
-                      <ReasoningTrigger />
-                      <ReasoningContent>
-                        {currentReasoning}
-                      </ReasoningContent>
-                    </Reasoning>
-                  </div>
-                )}
-
-                {/* Streaming message */}
-                {currentAssistantMessage && (
-                  <Message from="assistant">
-                    <MessageContent>
-                      <MessageResponse>
-                        {currentAssistantMessage}
-                      </MessageResponse>
-                      <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse" />
-                    </MessageContent>
-                  </Message>
-                )}
+                  {/* Streaming message */}
+                  {currentAssistantMessage && (
+                    <Message from="assistant">
+                      <MessageContent>
+                        <MessageResponse>
+                          {currentAssistantMessage}
+                        </MessageResponse>
+                        <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse" />
+                      </MessageContent>
+                    </Message>
+                  )}
                 </div>
               </ConversationContent>
             </Conversation>
