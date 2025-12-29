@@ -1,0 +1,61 @@
+import { app, BrowserWindow } from "electron";
+import path from "node:path";
+import { setupIpcHandlers, startRunsWatcher, startWorkspaceWatcher, stopWorkspaceWatcher } from "./ipc.js";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const preloadPath = path.join(__dirname, "../../preload/dist/preload.js");
+console.log("preloadPath", preloadPath);
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 800,
+    height: 600,
+    webPreferences: {
+      // IMPORTANT: keep Node out of renderer
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: preloadPath,
+    },
+  });
+
+  win.loadURL("http://localhost:5173"); // load the dev server
+}
+
+app.whenReady().then(() => {
+  setupIpcHandlers();
+
+  createWindow();
+
+  // Start workspace watcher as a main-process service
+  // Watcher runs independently and catches ALL filesystem changes:
+  // - Changes made via IPC handlers (workspace:writeFile, etc.)
+  // - External changes (terminal, git, other editors)
+  // Only starts once (guarded in startWorkspaceWatcher)
+  startWorkspaceWatcher();
+
+
+  // start runs watcher
+  startRunsWatcher();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+app.on("before-quit", () => {
+  // Clean up watcher on app quit
+  stopWorkspaceWatcher();
+});

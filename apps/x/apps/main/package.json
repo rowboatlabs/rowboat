@@ -1,0 +1,19 @@
+{
+    "name": "@x/main",
+    "type": "module",
+    "main": "dist/main.js",
+    "scripts": {
+        "start": "electron .",
+        "build": "rm -rf dist && tsc"
+    },
+    "dependencies": {
+        "@x/core": "workspace:*",
+        "@x/shared": "workspace:*",
+        "chokidar": "^4.0.3",
+        "zod": "^4.2.1"
+    },
+    "devDependencies": {
+        "@types/node": "^25.0.3",
+        "electron": "^39.2.7"
+    }
+}
