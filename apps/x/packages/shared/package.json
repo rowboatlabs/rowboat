@@ -1,0 +1,14 @@
+{
+    "name": "@x/shared",
+    "private": true,
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "scripts": {
+      "build": "rm -rf dist && tsc",
+      "dev": "tsc -w"
+    },
+    "dependencies": {
+      "zod": "^4.2.1"
+    }
+}
