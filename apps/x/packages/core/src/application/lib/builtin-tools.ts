@@ -45,7 +45,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace:getRoot': {
+    'workspace-getRoot': {
         description: 'Get the workspace root directory path',
         inputSchema: z.object({}),
         execute: async () => {
@@ -59,7 +59,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace:exists': {
+    'workspace-exists': {
         description: 'Check if a file or directory exists in the workspace',
         inputSchema: z.object({
             path: z.string().min(1).describe('Workspace-relative path to check'),
@@ -75,7 +75,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace:stat': {
+    'workspace-stat': {
         description: 'Get file or directory statistics (size, modification time, etc.)',
         inputSchema: z.object({
             path: z.string().min(1).describe('Workspace-relative path to stat'),
@@ -91,7 +91,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace:readdir': {
+    'workspace-readdir': {
         description: 'List directory contents. Can recursively explore directory structure with options.',
         inputSchema: z.object({
             path: z.string().describe('Workspace-relative directory path (empty string for root)'),
@@ -129,7 +129,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace:readFile': {
+    'workspace-readFile': {
         description: 'Read file contents from the workspace. Supports utf8, base64, and binary encodings.',
         inputSchema: z.object({
             path: z.string().min(1).describe('Workspace-relative file path'),
@@ -146,7 +146,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace:writeFile': {
+    'workspace-writeFile': {
         description: 'Write or update file contents in the workspace. Automatically creates parent directories and supports atomic writes.',
         inputSchema: z.object({
             path: z.string().min(1).describe('Workspace-relative file path'),
@@ -186,7 +186,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace:mkdir': {
+    'workspace-mkdir': {
         description: 'Create a directory in the workspace',
         inputSchema: z.object({
             path: z.string().min(1).describe('Workspace-relative directory path'),
@@ -203,7 +203,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace:rename': {
+    'workspace-rename': {
         description: 'Rename or move a file or directory in the workspace',
         inputSchema: z.object({
             from: z.string().min(1).describe('Source workspace-relative path'),
@@ -221,7 +221,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace:copy': {
+    'workspace-copy': {
         description: 'Copy a file in the workspace (directories not supported)',
         inputSchema: z.object({
             from: z.string().min(1).describe('Source workspace-relative file path'),
@@ -239,7 +239,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace:remove': {
+    'workspace-remove': {
         description: 'Remove a file or directory from the workspace. Files are moved to trash by default for safety.',
         inputSchema: z.object({
             path: z.string().min(1).describe('Workspace-relative path to remove'),
@@ -413,7 +413,21 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         }),
         execute: async ({ command, cwd }: { command: string, cwd?: string }) => {
             try {
-                const workingDir = cwd ? path.join(WorkDir, cwd) : WorkDir;
+                const rootDir = path.resolve(WorkDir);
+                const workingDir = cwd ? path.resolve(rootDir, cwd) : rootDir;
+                const rootPrefix = rootDir.endsWith(path.sep)
+                    ? rootDir
+                    : `${rootDir}${path.sep}`;
+
+                if (workingDir !== rootDir && !workingDir.startsWith(rootPrefix)) {
+                    return {
+                        success: false,
+                        message: 'Invalid cwd: must be within workspace root.',
+                        command,
+                        workingDir,
+                    };
+                }
+
                 const result = await executeCommand(command, { cwd: workingDir });
                 
                 return {

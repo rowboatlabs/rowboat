@@ -560,7 +560,7 @@ export async function* streamAgent({
                 type: "tool-invocation",
                 toolCallId,
                 toolName: toolCall.toolName,
-                input: JSON.stringify(toolCall.arguments),
+                input: JSON.stringify(toolCall.arguments ?? {}),
                 subflow: [],
             });
             let result: unknown = null;
@@ -584,29 +584,28 @@ export async function* streamAgent({
             } else {
                 result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments);
             }
-            if (result) {
-                const resultMsg: z.infer<typeof ToolMessage> = {
-                    role: "tool",
-                    content: JSON.stringify(result),
-                    toolCallId: toolCall.toolCallId,
-                    toolName: toolCall.toolName,
-                };
-                yield* processEvent({
-                    runId,
-                    type: "tool-result",
-                    toolCallId: toolCall.toolCallId,
-                    toolName: toolCall.toolName,
-                    result: result,
-                    subflow: [],
-                });
-                yield* processEvent({
-                    runId,
-                    messageId: await idGenerator.next(),
-                    type: "message",
-                    message: resultMsg,
-                    subflow: [],
-                });
-            }
+            const resultPayload = result === undefined ? null : result;
+            const resultMsg: z.infer<typeof ToolMessage> = {
+                role: "tool",
+                content: JSON.stringify(resultPayload),
+                toolCallId: toolCall.toolCallId,
+                toolName: toolCall.toolName,
+            };
+            yield* processEvent({
+                runId,
+                type: "tool-result",
+                toolCallId: toolCall.toolCallId,
+                toolName: toolCall.toolName,
+                result: resultPayload,
+                subflow: [],
+            });
+            yield* processEvent({
+                runId,
+                messageId: await idGenerator.next(),
+                type: "message",
+                message: resultMsg,
+                subflow: [],
+            });
         }
 
         // if waiting on user permission or ask-human, exit
