@@ -3,6 +3,8 @@ import path from "node:path";
 import { setupIpcHandlers, startRunsWatcher, startWorkspaceWatcher, stopWorkspaceWatcher } from "./ipc.js";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
+import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
+import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -41,6 +43,12 @@ app.whenReady().then(() => {
 
   // start runs watcher
   startRunsWatcher();
+
+  // start gmail sync
+  initGmailSync();
+
+  // start calendar sync
+  initCalendarSync();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
