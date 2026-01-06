@@ -8,6 +8,7 @@ import { IMessageQueue, InMemoryMessageQueue } from "../application/lib/message-
 import { IBus, InMemoryBus } from "../application/lib/bus.js";
 import { IRunsLock, InMemoryRunsLock } from "../runs/lock.js";
 import { IAgentRuntime, AgentRuntime } from "../agents/runtime.js";
+import { FSOAuthRepo, IOAuthRepo } from "../auth/repo.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -25,6 +26,7 @@ container.register({
     modelConfigRepo: asClass<IModelConfigRepo>(FSModelConfigRepo).singleton(),
     agentsRepo: asClass<IAgentsRepo>(FSAgentsRepo).singleton(),
     runsRepo: asClass<IRunsRepo>(FSRunsRepo).singleton(),
+    oauthRepo: asClass<IOAuthRepo>(FSOAuthRepo).singleton(),
 });
 
 export default container;

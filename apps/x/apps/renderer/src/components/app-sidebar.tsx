@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ChevronRight, File, Folder } from "lucide-react"
+import { ChevronRight, File, Folder, Plug } from "lucide-react"
 import {
   Collapsible,
   CollapsibleContent,
@@ -19,6 +19,7 @@ import {
   SidebarMenuSub,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { ConnectedAccountsSidebar } from "@/components/connected-accounts-sidebar"
 
 type TreeNode = {
   name: string
@@ -27,11 +28,15 @@ type TreeNode = {
   children?: TreeNode[]
 }
 
+type SidebarView = 'files' | 'accounts'
+
 type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
   tree: TreeNode[]
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: 'file' | 'dir') => void
+  activeView: SidebarView
+  onViewChange: (view: SidebarView) => void
 }
 
 export function AppSidebar({ 
@@ -39,6 +44,8 @@ export function AppSidebar({
   selectedPath,
   expandedPaths,
   onSelectFile,
+  activeView,
+  onViewChange,
   ...props 
 }: AppSidebarProps) {
   const { setOpen } = useSidebar()
@@ -64,13 +71,28 @@ export function AppSidebar({
                   <SidebarMenuButton
                     tooltip="Files"
                     onClick={() => {
+                      onViewChange('files')
                       setOpen(true)
                     }}
-                    isActive={true}
+                    isActive={activeView === 'files'}
                     className="px-2.5 md:px-2"
                   >
                     <File />
                     <span>Files</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    tooltip="Connected Accounts"
+                    onClick={() => {
+                      onViewChange('accounts')
+                      setOpen(true)
+                    }}
+                    isActive={activeView === 'accounts'}
+                    className="px-2.5 md:px-2"
+                  >
+                    <Plug />
+                    <span>Connected Accounts</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -81,26 +103,30 @@ export function AppSidebar({
 
       {/* This is the second sidebar */}
       {/* We disable collapsible and let it fill remaining space */}
-      <Sidebar collapsible="none" className="hidden flex-1 md:flex">
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>Files</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {tree.map((item, index) => (
-                  <Tree 
-                    key={index} 
-                    item={item}
-                    selectedPath={selectedPath}
-                    expandedPaths={expandedPaths}
-                    onSelect={onSelectFile}
-                  />
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-      </Sidebar>
+      {activeView === 'files' ? (
+        <Sidebar collapsible="none" className="hidden flex-1 md:flex">
+          <SidebarContent>
+            <SidebarGroup>
+              <SidebarGroupLabel>Files</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {tree.map((item, index) => (
+                    <Tree 
+                      key={index} 
+                      item={item}
+                      selectedPath={selectedPath}
+                      expandedPaths={expandedPaths}
+                      onSelect={onSelectFile}
+                    />
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </SidebarContent>
+        </Sidebar>
+      ) : (
+        <ConnectedAccountsSidebar />
+      )}
     </Sidebar>
   )
 }

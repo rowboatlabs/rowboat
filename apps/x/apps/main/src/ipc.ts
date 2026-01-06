@@ -1,5 +1,12 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { ipc } from '@x/shared';
+import {
+  connectProvider,
+  disconnectProvider,
+  isConnected,
+  getConnectedProviders,
+  listProviders,
+} from './oauth-handler.js';
 import { watcher as watcherCore, workspace } from '@x/core';
 import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
@@ -277,6 +284,21 @@ export function setupIpcHandlers() {
     'runs:stop': async (_event, args) => {
       await runsCore.stop(args.runId);
       return { success: true };
+    },
+    'oauth:connect': async (_event, args) => {
+      return await connectProvider(args.provider);
+    },
+    'oauth:disconnect': async (_event, args) => {
+      return await disconnectProvider(args.provider);
+    },
+    'oauth:is-connected': async (_event, args) => {
+      return await isConnected(args.provider);
+    },
+    'oauth:list-providers': async () => {
+      return listProviders();
+    },
+    'oauth:get-connected-providers': async () => {
+      return await getConnectedProviders();
     },
   });
 }

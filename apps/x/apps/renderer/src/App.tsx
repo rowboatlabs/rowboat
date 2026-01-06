@@ -201,6 +201,9 @@ function buildTree(entries: DirEntry[]): TreeNode[] {
 }
 
 function App() {
+  // Sidebar view state
+  const [activeSidebarView, setActiveSidebarView] = useState<'files' | 'accounts'>('files')
+  
   // File browser state
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
@@ -577,6 +580,8 @@ function App() {
         selectedPath={selectedPath}
         expandedPaths={expandedPaths}
         onSelectFile={toggleExpand}
+        activeView={activeSidebarView}
+        onViewChange={setActiveSidebarView}
       />
       <SidebarInset>
         <header className="bg-background sticky top-0 z-20 flex shrink-0 items-center gap-2 border-b p-4 shadow-sm">

@@ -159,7 +159,44 @@ const ipcSchemas = {
   'runs:events': {
     req: z.null(),
     res: z.null(),
-  }
+  },
+  'oauth:connect': {
+    req: z.object({
+      provider: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'oauth:disconnect': {
+    req: z.object({
+      provider: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
+  'oauth:is-connected': {
+    req: z.object({
+      provider: z.string(),
+    }),
+    res: z.object({
+      isConnected: z.boolean(),
+    }),
+  },
+  'oauth:list-providers': {
+    req: z.null(),
+    res: z.object({
+      providers: z.array(z.string()),
+    }),
+  },
+  'oauth:get-connected-providers': {
+    req: z.null(),
+    res: z.object({
+      providers: z.array(z.string()),
+    }),
+  },
 } as const;
 
 // ============================================================================
