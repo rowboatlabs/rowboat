@@ -3,7 +3,7 @@ export interface IMonotonicallyIncreasingIdGenerator {
 }
 
 export class IdGen implements IMonotonicallyIncreasingIdGenerator {
-    private lastMs = 0;
+    private lastSecond = 0; // Track by second since ISO string drops milliseconds
     private seq = 0;
     private readonly pid: string;
     private readonly hostTag: string;
@@ -19,13 +19,28 @@ export class IdGen implements IMonotonicallyIncreasingIdGenerator {
      */
     async next(): Promise<string> {
         const now = Date.now();
-        const ms = now >= this.lastMs ? now : this.lastMs; // monotonic clamp
-        this.seq = ms === this.lastMs ? this.seq + 1 : 0;
-        this.lastMs = ms;
+        const nowSecond = Math.floor(now / 1000);
+
+        // Ensure monotonicity and handle sequence
+        if (nowSecond > this.lastSecond) {
+            // New second - reset sequence
+            this.lastSecond = nowSecond;
+            this.seq = 0;
+        } else if (nowSecond === this.lastSecond) {
+            // Same second - increment sequence
+            this.seq++;
+        } else {
+            // Clock went backwards (shouldn't happen, but handle it)
+            this.lastSecond = nowSecond;
+            this.seq = 0;
+        }
+
+        // Use the second timestamp (multiply by 1000 to get ms)
+        const ms = this.lastSecond * 1000;
 
         // Build ISO string (UTC) and remove milliseconds for cleaner filenames
-        const iso = new Date(ms).toISOString() // e.g. 2025-11-11T04:36:29.123Z
-            .replace(/\.\d{3}Z$/, "Z")           // drop .123 part
+        const iso = new Date(ms).toISOString() // e.g. 2025-11-11T04:36:29.000Z
+            .replace(/\.\d{3}Z$/, "Z")           // drop .000 part
             .replace(/:/g, "-");                 // safe for files: 2025-11-11T04-36-29Z
 
         const seqStr = String(this.seq).padStart(3, "0");
