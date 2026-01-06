@@ -9,6 +9,7 @@ import { IOAuthRepo } from '../auth/repo.js';
 import { getProviderConfig } from '../auth/providers.js';
 import { createOAuthService } from '../auth/oauth.js';
 import { OAuthTokens } from 'packages/shared/dist/auth.js';
+import { buildGraph } from './build_graph.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
@@ -385,6 +386,14 @@ async function performSync() {
         }
 
         console.log("Sync completed.");
+
+        // Build knowledge graph after successful sync
+        console.log("\nStarting knowledge graph build...");
+        try {
+            await buildGraph();
+        } catch (error) {
+            console.error("Error building knowledge graph:", error);
+        }
     } catch (error) {
         console.error("Error during sync:", error);
     }
