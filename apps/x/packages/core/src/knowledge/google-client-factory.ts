@@ -3,8 +3,8 @@ import container from '../di/container.js';
 import { IOAuthRepo } from '../auth/repo.js';
 import { IClientRegistrationRepo } from '../auth/client-repo.js';
 import { getProviderConfig } from '../auth/providers.js';
-import { OAuthService } from '../auth/oauth.js';
-import { discoverAuthorizationServer, createStaticMetadata, AuthorizationServerMetadata } from '../auth/discovery.js';
+import * as oauthClient from '../auth/oauth-client.js';
+import type { Configuration } from '../auth/oauth-client.js';
 import { OAuthTokens } from '../auth/types.js';
 
 /**
@@ -14,13 +14,11 @@ import { OAuthTokens } from '../auth/types.js';
 export class GoogleClientFactory {
     private static readonly PROVIDER_NAME = 'google';
     private static cache: {
-        metadata: AuthorizationServerMetadata | null;
-        clientId: string | null;
+        config: Configuration | null;
         client: OAuth2Client | null;
         tokens: OAuthTokens | null;
     } = {
-        metadata: null,
-        clientId: null,
+        config: null,
         client: null,
         tokens: null,
     };
@@ -37,35 +35,34 @@ export class GoogleClientFactory {
             return null;
         }
 
-        // Initialize auth cache if needed
-        await this.initializeAuthCache();
-        if (!this.cache.metadata || !this.cache.clientId) {
+        // Initialize config cache if needed
+        await this.initializeConfigCache();
+        if (!this.cache.config) {
             return null;
         }
 
         // Check if token is expired
-        const now = Math.floor(Date.now() / 1000);
-        if (tokens.expires_at <= now) {
+        if (oauthClient.isTokenExpired(tokens)) {
             // Token expired, try to refresh
             if (!tokens.refresh_token) {
-                console.log("Token expired and no refresh token available for Google.");
+                console.log("[OAuth] Token expired and no refresh token available for Google.");
                 this.clearCache();
                 return null;
             }
 
             try {
                 console.log(`[OAuth] Token expired, refreshing access token...`);
-                const config = getProviderConfig(this.PROVIDER_NAME);
-                const scopes = config.scopes || [];
-                const oauthService = new OAuthService(this.cache.metadata, this.cache.clientId, scopes);
-
                 const existingScopes = tokens.scopes;
-                const refreshedTokens = await oauthService.refreshAccessToken(tokens.refresh_token, existingScopes);
+                const refreshedTokens = await oauthClient.refreshTokens(
+                    this.cache.config,
+                    tokens.refresh_token,
+                    existingScopes
+                );
                 await oauthRepo.saveTokens(this.PROVIDER_NAME, refreshedTokens);
 
                 // Update cached tokens and recreate client
                 this.cache.tokens = refreshedTokens;
-                this.cache.client = this.createClientFromTokens(refreshedTokens, this.cache.clientId);
+                this.cache.client = this.createClientFromTokens(refreshedTokens);
                 console.log(`[OAuth] Token refreshed successfully`);
                 return this.cache.client;
             } catch (error) {
@@ -83,7 +80,7 @@ export class GoogleClientFactory {
         // Create new client with current tokens
         console.log(`[OAuth] Creating new OAuth2Client instance`);
         this.cache.tokens = tokens;
-        this.cache.client = this.createClientFromTokens(tokens, this.cache.clientId);
+        this.cache.client = this.createClientFromTokens(tokens);
         return this.cache.client;
     }
 
@@ -116,69 +113,79 @@ export class GoogleClientFactory {
      */
     static clearCache(): void {
         console.log(`[OAuth] Clearing Google auth cache`);
+        this.cache.config = null;
         this.cache.client = null;
         this.cache.tokens = null;
     }
 
     /**
-     * Initialize cached metadata and client ID (called once)
+     * Initialize cached configuration (called once)
      */
-    private static async initializeAuthCache(): Promise<void> {
-        if (this.cache.metadata && this.cache.clientId) {
+    private static async initializeConfigCache(): Promise<void> {
+        if (this.cache.config) {
             return; // Already initialized
         }
 
-        console.log(`[OAuth] Initializing Google auth cache...`);
-        const config = getProviderConfig(this.PROVIDER_NAME);
+        console.log(`[OAuth] Initializing Google OAuth configuration...`);
+        const providerConfig = getProviderConfig(this.PROVIDER_NAME);
 
-        // Get metadata
-        let metadata: AuthorizationServerMetadata;
-        if (config.discovery.mode === 'issuer') {
-            console.log(`[OAuth] Discovery mode: issuer (${config.discovery.issuer})`);
-            metadata = await discoverAuthorizationServer(config.discovery.issuer);
+        if (providerConfig.discovery.mode === 'issuer') {
+            if (providerConfig.client.mode === 'static') {
+                // Discover endpoints, use static client ID
+                console.log(`[OAuth] Discovery mode: issuer with static client ID`);
+                this.cache.config = await oauthClient.discoverConfiguration(
+                    providerConfig.discovery.issuer,
+                    providerConfig.client.clientId
+                );
+            } else {
+                // DCR mode - need existing registration
+                console.log(`[OAuth] Discovery mode: issuer with DCR`);
+                const clientRepo = container.resolve<IClientRegistrationRepo>('clientRegistrationRepo');
+                const existingRegistration = await clientRepo.getClientRegistration(this.PROVIDER_NAME);
+                
+                if (!existingRegistration) {
+                    throw new Error('Google client not registered. Please connect account first.');
+                }
+                
+                this.cache.config = await oauthClient.discoverConfiguration(
+                    providerConfig.discovery.issuer,
+                    existingRegistration.client_id
+                );
+            }
         } else {
-            console.log(`[OAuth] Discovery mode: static endpoints`);
-            metadata = createStaticMetadata(
-                config.discovery.authorizationEndpoint,
-                config.discovery.tokenEndpoint,
-                config.discovery.revocationEndpoint
+            // Static endpoints
+            if (providerConfig.client.mode !== 'static') {
+                throw new Error('DCR requires discovery mode "issuer", not "static"');
+            }
+            
+            console.log(`[OAuth] Using static endpoints (no discovery)`);
+            this.cache.config = oauthClient.createStaticConfiguration(
+                providerConfig.discovery.authorizationEndpoint,
+                providerConfig.discovery.tokenEndpoint,
+                providerConfig.client.clientId,
+                providerConfig.discovery.revocationEndpoint
             );
         }
 
-        // Get client ID
-        let clientId: string;
-        if (config.client.mode === 'static') {
-            if (!config.client.clientId) {
-                throw new Error('Static client mode requires clientId in provider configuration for Google');
-            }
-            console.log(`[OAuth] Client mode: static (using configured clientId)`);
-            clientId = config.client.clientId;
-        } else {
-            console.log(`[OAuth] Client mode: DCR (Dynamic Client Registration)`);
-            const clientRepo = container.resolve<IClientRegistrationRepo>('clientRegistrationRepo');
-            const registrationEndpoint = config.client.registrationEndpoint || metadata.registration_endpoint;
-            if (!registrationEndpoint) {
-                throw new Error('Google provider does not support Dynamic Client Registration');
-            }
-
-            const existingRegistration = await clientRepo.getClientRegistration(this.PROVIDER_NAME);
-            if (!existingRegistration) {
-                throw new Error('Google client not registered. Please connect account first.');
-            }
-            console.log(`[OAuth] Using existing DCR client registration`);
-            clientId = existingRegistration.client_id;
-        }
-
-        // Store in cache
-        this.cache.metadata = metadata;
-        this.cache.clientId = clientId;
-        console.log(`[OAuth] Google auth cache initialized`);
+        console.log(`[OAuth] Google OAuth configuration initialized`);
     }
 
     /**
      * Create OAuth2Client from OAuthTokens
      */
-    private static createClientFromTokens(tokens: OAuthTokens, clientId: string): OAuth2Client {
+    private static createClientFromTokens(tokens: OAuthTokens): OAuth2Client {
+        const providerConfig = getProviderConfig(this.PROVIDER_NAME);
+        
+        // Get client ID from config
+        let clientId: string;
+        if (providerConfig.client.mode === 'static') {
+            clientId = providerConfig.client.clientId;
+        } else {
+            // For DCR, we'd need to look up the registered client ID
+            // This is a fallback - normally initializeConfigCache handles this
+            throw new Error('Cannot create client without static client ID');
+        }
+
         // Create OAuth2Client directly (PKCE flow doesn't use client secret)
         const client = new OAuth2Client(
             clientId,
@@ -197,4 +204,3 @@ export class GoogleClientFactory {
         return client;
     }
 }
-

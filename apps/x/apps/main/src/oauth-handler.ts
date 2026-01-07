@@ -1,25 +1,20 @@
 import { BrowserWindow } from 'electron';
-import { randomBytes } from 'crypto';
 import { createAuthServer } from './auth-server.js';
-import { generateCodeVerifier, generateCodeChallenge } from '@x/core/dist/auth/pkce.js';
-import { OAuthService } from '@x/core/dist/auth/oauth.js';
+import * as oauthClient from '@x/core/dist/auth/oauth-client.js';
+import type { Configuration } from '@x/core/dist/auth/oauth-client.js';
 import { getProviderConfig, getAvailableProviders } from '@x/core/dist/auth/providers.js';
-import { discoverAuthorizationServer, createStaticMetadata, AuthorizationServerMetadata } from '@x/core/dist/auth/discovery.js';
 import container from '@x/core/dist/di/container.js';
 import { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
 
-// Store active OAuth flows (state -> { codeVerifier, provider })
-const activeFlows = new Map<string, { codeVerifier: string; provider: string }>();
-
-/**
- * Generate a random state string for CSRF protection
- */
-function generateState(): string {
-  return randomBytes(32).toString('hex');
-}
+// Store active OAuth flows (state -> { codeVerifier, provider, config })
+const activeFlows = new Map<string, { 
+  codeVerifier: string; 
+  provider: string;
+  config: Configuration;
+}>();
 
 /**
  * Get OAuth repository from DI container
@@ -36,70 +31,60 @@ function getClientRegistrationRepo(): IClientRegistrationRepo {
 }
 
 /**
- * Discover or get provider metadata
+ * Get or create OAuth configuration for a provider
  */
-async function getProviderMetadata(provider: string): Promise<AuthorizationServerMetadata> {
+async function getProviderConfiguration(provider: string): Promise<Configuration> {
   const config = getProviderConfig(provider);
 
   if (config.discovery.mode === 'issuer') {
-    // Discover endpoints from well-known
-    console.log(`[OAuth] Discovering metadata for ${provider} from issuer: ${config.discovery.issuer}`);
-    return await discoverAuthorizationServer(config.discovery.issuer);
+    if (config.client.mode === 'static') {
+      // Discover endpoints, use static client ID
+      console.log(`[OAuth] ${provider}: Discovery from issuer with static client ID`);
+      return await oauthClient.discoverConfiguration(
+        config.discovery.issuer,
+        config.client.clientId
+      );
+    } else {
+      // DCR mode - check for existing registration or register new
+      console.log(`[OAuth] ${provider}: Discovery from issuer with DCR`);
+      const clientRepo = getClientRegistrationRepo();
+      const existingRegistration = await clientRepo.getClientRegistration(provider);
+      
+      if (existingRegistration) {
+        console.log(`[OAuth] ${provider}: Using existing DCR registration`);
+        return await oauthClient.discoverConfiguration(
+          config.discovery.issuer,
+          existingRegistration.client_id
+        );
+      }
+
+      // Register new client
+      const scopes = config.scopes || [];
+      const { config: oauthConfig, registration } = await oauthClient.registerClient(
+        config.discovery.issuer,
+        [REDIRECT_URI],
+        scopes
+      );
+      
+      // Save registration for future use
+      await clientRepo.saveClientRegistration(provider, registration);
+      console.log(`[OAuth] ${provider}: DCR registration saved`);
+      
+      return oauthConfig;
+    }
   } else {
-    // Use static endpoints
-    console.log(`[OAuth] Using static metadata for ${provider} (no discovery)`);
-    return createStaticMetadata(
+    // Static endpoints mode
+    if (config.client.mode !== 'static') {
+      throw new Error('DCR requires discovery mode "issuer", not "static"');
+    }
+    
+    console.log(`[OAuth] ${provider}: Using static endpoints (no discovery)`);
+    return oauthClient.createStaticConfiguration(
       config.discovery.authorizationEndpoint,
       config.discovery.tokenEndpoint,
+      config.client.clientId,
       config.discovery.revocationEndpoint
     );
-  }
-}
-
-/**
- * Get or register client ID based on provider configuration
- */
-async function getOrRegisterClient(
-  provider: string,
-  metadata: AuthorizationServerMetadata,
-  scopes: string[]
-): Promise<string> {
-  const config = getProviderConfig(provider);
-  const clientRepo = getClientRegistrationRepo();
-
-  if (config.client.mode === 'static') {
-    // Use static client ID
-    if (!config.client.clientId) {
-      throw new Error('Static client mode requires clientId in provider configuration');
-    }
-    console.log(`[OAuth] Using static client ID for ${provider}`);
-    return config.client.clientId;
-  } else {
-    // DCR mode - check if registration endpoint exists
-    const registrationEndpoint = config.client.registrationEndpoint || metadata.registration_endpoint;
-    
-    if (!registrationEndpoint) {
-      throw new Error('Provider does not support Dynamic Client Registration (no registration_endpoint found)');
-    }
-
-    // Check for existing registered client
-    const existingRegistration = await clientRepo.getClientRegistration(provider);
-    if (existingRegistration) {
-      console.log(`[OAuth] Using existing DCR client registration for ${provider}`);
-      return existingRegistration.client_id;
-    }
-
-    // Register new client - create temporary service just for registration
-    // We need to pass a dummy clientId, but it won't be used for registration
-    console.log(`[OAuth] Registering new client via DCR for ${provider}...`);
-    const tempService = new OAuthService(metadata, 'temp', scopes);
-    const registration = await tempService.registerClient([REDIRECT_URI], scopes);
-    
-    // Save registration
-    await clientRepo.saveClientRegistration(provider, registration);
-    console.log(`[OAuth] DCR registration successful for ${provider}, client_id: ${registration.client_id}`);
-    
-    return registration.client_id;
   }
 }
 
@@ -110,32 +95,20 @@ export async function connectProvider(provider: string): Promise<{ success: bool
   try {
     console.log(`[OAuth] Starting connection flow for ${provider}...`);
     const oauthRepo = getOAuthRepo();
-    const config = getProviderConfig(provider);
+    const providerConfig = getProviderConfig(provider);
 
-    // Validate configuration combinations
-    if (config.discovery.mode === 'static' && config.client.mode === 'dcr') {
-      throw new Error('DCR requires discovery mode "issuer", not "static"');
-    }
-
-    // Get provider metadata (discover or use static)
-    const metadata = await getProviderMetadata(provider);
-
-    // Get scopes from config or use empty array
-    const scopes = config.scopes || [];
-
-    // Get or register client ID
-    const clientId = await getOrRegisterClient(provider, metadata, scopes);
-
-    // Create OAuth service with metadata and client ID
-    const oauthService = new OAuthService(metadata, clientId, scopes);
+    // Get or create OAuth configuration
+    const config = await getProviderConfiguration(provider);
 
     // Generate PKCE codes
-    const codeVerifier = generateCodeVerifier();
-    const codeChallenge = generateCodeChallenge(codeVerifier);
-    const state = generateState();
+    const { verifier: codeVerifier, challenge: codeChallenge } = await oauthClient.generatePKCE();
+    const state = oauthClient.generateState();
+
+    // Get scopes from config
+    const scopes = providerConfig.scopes || [];
 
     // Store flow state
-    activeFlows.set(state, { codeVerifier, provider });
+    activeFlows.set(state, { codeVerifier, provider, config });
 
     // Create callback server
     const { server } = await createAuthServer(8080, async (code, receivedState) => {
@@ -150,12 +123,16 @@ export async function connectProvider(provider: string): Promise<{ success: bool
       }
 
       try {
+        // Build callback URL for token exchange
+        const callbackUrl = new URL(`${REDIRECT_URI}?code=${code}&state=${receivedState}`);
+        
         // Exchange code for tokens
         console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);
-        const tokens = await oauthService.exchangeCodeForTokens(
-          code,
+        const tokens = await oauthClient.exchangeCodeForTokens(
+          flow.config,
+          callbackUrl,
           flow.codeVerifier,
-          REDIRECT_URI
+          state
         );
 
         // Save tokens
@@ -172,7 +149,12 @@ export async function connectProvider(provider: string): Promise<{ success: bool
     });
 
     // Build authorization URL
-    const authUrl = oauthService.buildAuthorizationUrl(codeChallenge, state, REDIRECT_URI);
+    const authUrl = oauthClient.buildAuthorizationUrl(config, {
+      redirectUri: REDIRECT_URI,
+      scope: scopes.join(' '),
+      codeChallenge,
+      state,
+    });
 
     // Open browser window
     const authWindow = new BrowserWindow({
@@ -185,7 +167,7 @@ export async function connectProvider(provider: string): Promise<{ success: bool
       },
     });
 
-    authWindow.loadURL(authUrl);
+    authWindow.loadURL(authUrl.toString());
 
     // Clean up on window close
     authWindow.on('closed', () => {
@@ -239,34 +221,26 @@ export async function isConnected(provider: string): Promise<{ isConnected: bool
 export async function getAccessToken(provider: string): Promise<string | null> {
   try {
     const oauthRepo = getOAuthRepo();
-    const config = getProviderConfig(provider);
     
     let tokens = await oauthRepo.getTokens(provider);
     if (!tokens) {
       return null;
     }
 
-    // Get provider metadata
-    const metadata = await getProviderMetadata(provider);
-    
-    // Get client ID (static or registered)
-    const clientId = await getOrRegisterClient(provider, metadata, config.scopes || []);
-    
-    // Create OAuth service
-    const scopes = config.scopes || [];
-    const oauthService = new OAuthService(metadata, clientId, scopes);
-
     // Check if token needs refresh
-    if (oauthService.isTokenExpired(tokens)) {
+    if (oauthClient.isTokenExpired(tokens)) {
       if (!tokens.refresh_token) {
         // No refresh token, need to reconnect
         return null;
       }
 
       try {
+        // Get configuration for refresh
+        const config = await getProviderConfiguration(provider);
+        
         // Refresh token, preserving existing scopes
         const existingScopes = tokens.scopes;
-        tokens = await oauthService.refreshAccessToken(tokens.refresh_token, existingScopes);
+        tokens = await oauthClient.refreshTokens(config, tokens.refresh_token, existingScopes);
         await oauthRepo.saveTokens(provider, tokens);
       } catch (error) {
         console.error('Token refresh failed:', error);
@@ -301,4 +275,3 @@ export async function getConnectedProviders(): Promise<{ providers: string[] }> 
 export function listProviders(): { providers: string[] } {
   return { providers: getAvailableProviders() };
 }
-

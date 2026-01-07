@@ -25,6 +25,7 @@
     "googleapis": "^169.0.0",
     "node-html-markdown": "^2.0.0",
     "ollama-ai-provider-v2": "^1.5.4",
+    "openid-client": "^6.8.1",
     "yaml": "^2.8.2",
     "zod": "^4.2.1"
   },
