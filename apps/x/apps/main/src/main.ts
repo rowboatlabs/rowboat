@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
+import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -49,6 +50,9 @@ app.whenReady().then(() => {
 
   // start calendar sync
   initCalendarSync();
+
+  // start fireflies sync
+  initFirefliesSync();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
