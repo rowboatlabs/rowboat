@@ -3,6 +3,14 @@ import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
+import {
+    loadState,
+    saveState,
+    getFilesToProcess,
+    markFileAsProcessed,
+    resetState,
+    type GraphState,
+} from './graph_state.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -13,24 +21,17 @@ const NOTES_OUTPUT_DIR = path.join(WorkDir, 'notes');
 const NOTE_CREATION_AGENT = 'note_creation';
 
 /**
- * Read all markdown files from the specified source directory
+ * Read content for specific files
  */
-async function getContentFiles(sourceDir: string): Promise<{ path: string; content: string }[]> {
-    if (!fs.existsSync(sourceDir)) {
-        console.log(`Knowledge source directory not found: ${sourceDir}`);
-        return [];
-    }
-
+async function readFileContents(filePaths: string[]): Promise<{ path: string; content: string }[]> {
     const files: { path: string; content: string }[] = [];
-    const entries = fs.readdirSync(sourceDir);
 
-    for (const entry of entries) {
-        const fullPath = path.join(sourceDir, entry);
-        const stat = fs.statSync(fullPath);
-
-        if (stat.isFile() && entry.endsWith('.md')) {
-            const content = fs.readFileSync(fullPath, 'utf-8');
-            files.push({ path: fullPath, content });
+    for (const filePath of filePaths) {
+        try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            files.push({ path: filePath, content });
+        } catch (error) {
+            console.error(`Error reading file ${filePath}:`, error);
         }
     }
 
@@ -92,21 +93,41 @@ async function createNotesFromBatch(files: { path: string; content: string }[], 
 
 /**
  * Build the knowledge graph from all content files in the specified source directory
+ * Only processes new or changed files based on state tracking
  */
 export async function buildGraph(sourceDir: string): Promise<void> {
-    const contentFiles = await getContentFiles(sourceDir);
+    console.log(`[buildGraph] Starting build for directory: ${sourceDir}`);
 
-    if (contentFiles.length === 0) {
-        console.log(`No files found in ${sourceDir}`);
+    // Load current state
+    const state = loadState();
+    const previouslyProcessedCount = Object.keys(state.processedFiles).length;
+    console.log(`[buildGraph] State loaded. Previously processed: ${previouslyProcessedCount} files`);
+
+    // Get files that need processing (new or changed)
+    const filesToProcess = getFilesToProcess(sourceDir, state);
+
+    if (filesToProcess.length === 0) {
+        console.log(`[buildGraph] No new or changed files to process in ${path.basename(sourceDir)}`);
         return;
     }
 
-    const BATCH_SIZE = 10; // Process 10 emails per agent run
+    console.log(`[buildGraph] Found ${filesToProcess.length} new/changed files to process in ${path.basename(sourceDir)}`);
+
+    // Read file contents
+    const contentFiles = await readFileContents(filesToProcess);
+
+    if (contentFiles.length === 0) {
+        console.log(`No files could be read from ${sourceDir}`);
+        return;
+    }
+
+    const BATCH_SIZE = 25; // Process 25 files per agent run
     const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
 
-    console.log(`Processing ${contentFiles.length} files from ${path.basename(sourceDir)} in ${totalBatches} batches (${BATCH_SIZE} files per batch)...`);
+    console.log(`Processing ${contentFiles.length} files in ${totalBatches} batches (${BATCH_SIZE} files per batch)...`);
 
     // Process files in batches
+    const processedFiles: string[] = [];
     for (let i = 0; i < contentFiles.length; i += BATCH_SIZE) {
         const batch = contentFiles.slice(i, i + BATCH_SIZE);
         const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
@@ -115,13 +136,27 @@ export async function buildGraph(sourceDir: string): Promise<void> {
             console.log(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
             await createNotesFromBatch(batch, batchNumber);
             console.log(`Batch ${batchNumber}/${totalBatches} complete`);
+
+            // Mark files in this batch as processed
+            for (const file of batch) {
+                markFileAsProcessed(file.path, state);
+                processedFiles.push(file.path);
+            }
+
+            // Save state after each successful batch
+            // This ensures partial progress is saved even if later batches fail
+            saveState(state);
         } catch (error) {
             console.error(`Error processing batch ${batchNumber}:`, error);
-            // Continue with next batch
+            // Continue with next batch (without saving state for failed batch)
         }
     }
 
-    console.log('Knowledge graph build complete');
+    // Update state with last build time and save
+    state.lastBuildTime = new Date().toISOString();
+    saveState(state);
+
+    console.log(`Knowledge graph build complete. Processed ${processedFiles.length} files.`);
 }
 
 /**
@@ -130,4 +165,14 @@ export async function buildGraph(sourceDir: string): Promise<void> {
 export async function init() {
     const defaultSourceDir = path.join(WorkDir, 'gmail_sync');
     await buildGraph(defaultSourceDir);
+}
+
+/**
+ * Reset the knowledge graph state - forces reprocessing of all files on next run
+ * Useful for debugging or when you want to rebuild everything from scratch
+ */
+export function resetGraphState(): void {
+    console.log('Resetting knowledge graph state...');
+    resetState();
+    console.log('State reset complete. All files will be reprocessed on next build.');
 }
