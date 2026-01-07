@@ -438,7 +438,7 @@ async function syncMeetings() {
         if (newCount > 0) {
             console.log('\n[Fireflies] Starting knowledge graph build...');
             try {
-                await buildGraph();
+                await buildGraph(SYNC_DIR);
             } catch (error) {
                 console.error('[Fireflies] Error building knowledge graph:', error);
             }

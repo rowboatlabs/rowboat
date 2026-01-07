@@ -285,7 +285,7 @@ async function performSync() {
         // Build knowledge graph after successful sync
         console.log("\nStarting knowledge graph build...");
         try {
-            await buildGraph();
+            await buildGraph(SYNC_DIR);
         } catch (error) {
             console.error("Error building knowledge graph:", error);
         }

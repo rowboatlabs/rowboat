@@ -9,24 +9,23 @@ import { bus } from '../runs/bus.js';
  * and note creation agents sequentially on content files
  */
 
-const KNOWLEDGE_SOURCE_DIR = path.join(WorkDir, 'gmail_sync');
 const NOTES_OUTPUT_DIR = path.join(WorkDir, 'notes');
 const NOTE_CREATION_AGENT = 'note_creation';
 
 /**
- * Read all markdown files from the knowledge source directory
+ * Read all markdown files from the specified source directory
  */
-async function getContentFiles(): Promise<{ path: string; content: string }[]> {
-    if (!fs.existsSync(KNOWLEDGE_SOURCE_DIR)) {
-        console.log(`Knowledge source directory not found: ${KNOWLEDGE_SOURCE_DIR}`);
+async function getContentFiles(sourceDir: string): Promise<{ path: string; content: string }[]> {
+    if (!fs.existsSync(sourceDir)) {
+        console.log(`Knowledge source directory not found: ${sourceDir}`);
         return [];
     }
 
     const files: { path: string; content: string }[] = [];
-    const entries = fs.readdirSync(KNOWLEDGE_SOURCE_DIR);
+    const entries = fs.readdirSync(sourceDir);
 
     for (const entry of entries) {
-        const fullPath = path.join(KNOWLEDGE_SOURCE_DIR, entry);
+        const fullPath = path.join(sourceDir, entry);
         const stat = fs.statSync(fullPath);
 
         if (stat.isFile() && entry.endsWith('.md')) {
@@ -53,9 +52,9 @@ async function waitForRunCompletion(runId: string): Promise<void> {
 }
 
 /**
- * Run note creation agent on content to extract entities and create/update notes
+ * Run note creation agent on a batch of files to extract entities and create/update notes
  */
-async function createNotes(content: string, sourceFile: string): Promise<string> {
+async function createNotesFromBatch(files: { path: string; content: string }[], batchNumber: number): Promise<string> {
     // Ensure notes output directory exists
     if (!fs.existsSync(NOTES_OUTPUT_DIR)) {
         fs.mkdirSync(NOTES_OUTPUT_DIR, { recursive: true });
@@ -66,19 +65,22 @@ async function createNotes(content: string, sourceFile: string): Promise<string>
         agentId: NOTE_CREATION_AGENT,
     });
 
-    // Pass the content and source file info to the agent
-    const message = `Process the following source file and create/update obsidian notes.
+    // Build message with all files in the batch
+    let message = `Process the following ${files.length} source files and create/update obsidian notes.\n\n`;
+    message += `**Instructions:**\n`;
+    message += `- Extract entities (people, organizations, projects, topics) from ALL files below\n`;
+    message += `- Create or update notes in "notes" directory (workspace-relative paths like "notes/People/Name.md")\n`;
+    message += `- If the same entity appears in multiple files, merge the information into a single note\n`;
+    message += `- Use workspace tools to read existing notes and write updates\n`;
+    message += `- Follow the note templates and guidelines in your instructions\n\n`;
+    message += `---\n\n`;
 
-**Source file:** ${path.basename(sourceFile)}
-
-**Instructions:**
-- Extract entities (people, organizations, projects, topics)
-- Create or update notes in "notes" directory (workspace-relative paths like "notes/People/Name.md")
-- Use workspace tools to read existing notes and write updates
-- Follow the note templates and guidelines in your instructions
-
-**Content:**
-${content}`;
+    // Add each file's content
+    files.forEach((file, idx) => {
+        message += `## Source File ${idx + 1}: ${path.basename(file.path)}\n\n`;
+        message += file.content;
+        message += `\n\n---\n\n`;
+    });
 
     await createMessage(run.id, message);
 
@@ -89,26 +91,33 @@ ${content}`;
 }
 
 /**
- * Build the knowledge graph from all content files
+ * Build the knowledge graph from all content files in the specified source directory
  */
-export async function buildGraph(): Promise<void> {
-    const contentFiles = await getContentFiles();
+export async function buildGraph(sourceDir: string): Promise<void> {
+    const contentFiles = await getContentFiles(sourceDir);
 
     if (contentFiles.length === 0) {
+        console.log(`No files found in ${sourceDir}`);
         return;
     }
 
-    console.log(`Processing ${contentFiles.length} files for knowledge graph...`);
+    const BATCH_SIZE = 10; // Process 10 emails per agent run
+    const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
 
-    // Process each file with the note creation agent
-    // The agent will extract entities and create/update notes
-    for (const file of contentFiles) {
+    console.log(`Processing ${contentFiles.length} files from ${path.basename(sourceDir)} in ${totalBatches} batches (${BATCH_SIZE} files per batch)...`);
+
+    // Process files in batches
+    for (let i = 0; i < contentFiles.length; i += BATCH_SIZE) {
+        const batch = contentFiles.slice(i, i + BATCH_SIZE);
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+
         try {
-            console.log(`Processing ${path.basename(file.path)}...`);
-            await createNotes(file.content, file.path);
+            console.log(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
+            await createNotesFromBatch(batch, batchNumber);
+            console.log(`Batch ${batchNumber}/${totalBatches} complete`);
         } catch (error) {
-            console.error(`Error processing ${path.basename(file.path)}:`, error);
-            // Continue with next file
+            console.error(`Error processing batch ${batchNumber}:`, error);
+            // Continue with next batch
         }
     }
 
@@ -116,8 +125,9 @@ export async function buildGraph(): Promise<void> {
 }
 
 /**
- * Main entry point
+ * Main entry point - processes gmail_sync directory by default
  */
 export async function init() {
-    await buildGraph();
+    const defaultSourceDir = path.join(WorkDir, 'gmail_sync');
+    await buildGraph(defaultSourceDir);
 }
