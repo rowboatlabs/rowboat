@@ -66,6 +66,19 @@ const providerConfigs: ProviderConfig = {
       'https://www.googleapis.com/auth/drive.readonly',
     ],
   },
+  'fireflies-ai': {
+    discovery: {
+      mode: 'issuer',
+      issuer: 'https://api.fireflies.ai/.well-known/oauth-authorization-server',
+    },
+    client: {
+      mode: 'dcr',
+    },
+    scopes: [
+      'profile',
+      'email',
+    ]
+  }
 };
 
 /**
