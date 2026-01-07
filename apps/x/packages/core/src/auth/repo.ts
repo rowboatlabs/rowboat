@@ -1,7 +1,7 @@
 import { WorkDir } from '../config/config.js';
 import fs from 'fs/promises';
 import path from 'path';
-import { OAuthTokens } from '@x/shared/dist/auth.js';
+import { OAuthTokens } from './types.js';
 
 export interface IOAuthRepo {
   getTokens(provider: string): Promise<OAuthTokens | null>;

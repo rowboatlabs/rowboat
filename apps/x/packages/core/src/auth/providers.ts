@@ -1,52 +1,95 @@
-/**
- * OAuth 2.0 provider configuration
- */
-export interface OAuthProviderConfig {
-  name: string;
-  clientId: string;
-  authorizationEndpoint: string;
-  tokenEndpoint: string;
-  scopes: string[];
-}
+import { z } from 'zod';
 
 /**
- * Get Google OAuth provider configuration
+ * Discovery configuration - how to get OAuth endpoints
  */
-export function getGoogleProviderConfig(): OAuthProviderConfig {
-  // TODO: Replace with actual Google OAuth client ID
-  const GOOGLE_CLIENT_ID = '797410052581-ibmmvqec0l68stv5fmgh0juqfvbg08fc.apps.googleusercontent.com'
+const DiscoverySchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('issuer'),
+    issuer: z.url().describe('The issuer base url. To discover the endpoints, the client will fetch the .well-known/oauth-authorization-server from this url.'),
+  }),
+  z.object({
+    mode: z.literal('static'),
+    authorizationEndpoint: z.url(),
+    tokenEndpoint: z.url(),
+    revocationEndpoint: z.url().optional(),
+  }),
+]);
 
-  return {
-    name: 'google',
-    clientId: GOOGLE_CLIENT_ID,
-    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+/**
+ * Client configuration - how to get client credentials
+ */
+const ClientSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('static'),
+    clientId: z.string().min(1),
+  }),
+  z.object({
+    mode: z.literal('dcr'),
+    // If omitted, should be discovered from auth-server metadata as `registration_endpoint`
+    registrationEndpoint: z.url().optional(),
+  }),
+]);
+
+/**
+ * Provider configuration schema
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const ProviderConfigSchema = z.record(
+  z.string(),
+  z.object({
+    discovery: DiscoverySchema,
+    client: ClientSchema,
+    scopes: z.array(z.string()).optional(),
+  })
+);
+
+export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
+export type ProviderConfigEntry = ProviderConfig[string];
+
+/**
+ * All configured OAuth providers
+ */
+const providerConfigs: ProviderConfig = {
+  google: {
+    discovery: {
+      mode: 'issuer',
+      issuer: 'https://accounts.google.com',
+    },
+    client: {
+      mode: 'static',
+      clientId: '797410052581-ibmmvqec0l68stv5fmgh0juqfvbg08fc.apps.googleusercontent.com',
+    },
     scopes: [
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/calendar.readonly',
       'https://www.googleapis.com/auth/drive.readonly',
     ],
-  };
+  },
+};
+
+/**
+ * Get provider configuration by name
+ */
+export function getProviderConfig(providerName: string): ProviderConfigEntry {
+  const config = providerConfigs[providerName];
+  if (!config) {
+    throw new Error(`Unknown OAuth provider: ${providerName}`);
+  }
+  return config;
+}
+
+/**
+ * Get all provider configurations
+ */
+export function getAllProviderConfigs(): ProviderConfig {
+  return providerConfigs;
 }
 
 /**
  * Get list of all configured OAuth providers
  */
 export function getAvailableProviders(): string[] {
-  return ['google'];
-  // Future: Add more providers here
-  // return ['google', 'github', 'microsoft'];
-}
-
-/**
- * Get provider configuration by name
- */
-export function getProviderConfig(providerName: string): OAuthProviderConfig {
-  switch (providerName) {
-    case 'google':
-      return getGoogleProviderConfig();
-    default:
-      throw new Error(`Unknown OAuth provider: ${providerName}`);
-  }
+  return Object.keys(providerConfigs);
 }
 

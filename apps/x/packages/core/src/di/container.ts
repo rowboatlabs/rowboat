@@ -9,6 +9,7 @@ import { IBus, InMemoryBus } from "../application/lib/bus.js";
 import { IRunsLock, InMemoryRunsLock } from "../runs/lock.js";
 import { IAgentRuntime, AgentRuntime } from "../agents/runtime.js";
 import { FSOAuthRepo, IOAuthRepo } from "../auth/repo.js";
+import { FSClientRegistrationRepo, IClientRegistrationRepo } from "../auth/client-repo.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -27,6 +28,7 @@ container.register({
     agentsRepo: asClass<IAgentsRepo>(FSAgentsRepo).singleton(),
     runsRepo: asClass<IRunsRepo>(FSRunsRepo).singleton(),
     oauthRepo: asClass<IOAuthRepo>(FSOAuthRepo).singleton(),
+    clientRegistrationRepo: asClass<IClientRegistrationRepo>(FSClientRegistrationRepo).singleton(),
 });
 
 export default container;

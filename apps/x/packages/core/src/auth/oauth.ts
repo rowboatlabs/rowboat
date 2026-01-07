@@ -1,11 +1,15 @@
-import { OAuthProviderConfig, getProviderConfig } from './providers.js';
-import { OAuthTokens } from '@x/shared/dist/auth.js';
+import { AuthorizationServerMetadata } from './discovery.js';
+import { OAuthTokens, ClientRegistrationRequest, ClientRegistrationResponse } from './types.js';
 
 /**
  * Generic OAuth 2.0 service with PKCE support
  */
 export class OAuthService {
-  constructor(private config: OAuthProviderConfig) {}
+  constructor(
+    private metadata: AuthorizationServerMetadata,
+    private clientId: string,
+    private scopes: string[]
+  ) {}
 
   /**
    * Build authorization URL with PKCE parameters
@@ -16,16 +20,16 @@ export class OAuthService {
     redirectUri: string
   ): string {
     const params = new URLSearchParams({
-      client_id: this.config.clientId,
+      client_id: this.clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      scope: this.config.scopes.join(' '),
+      scope: this.scopes.join(' '),
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
     });
 
-    return `${this.config.authorizationEndpoint}?${params.toString()}`;
+    return `${this.metadata.authorization_endpoint}?${params.toString()}`;
   }
 
   /**
@@ -37,14 +41,14 @@ export class OAuthService {
     redirectUri: string
   ): Promise<OAuthTokens> {
     const params = new URLSearchParams({
-      client_id: this.config.clientId,
+      client_id: this.clientId,
       code,
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
       code_verifier: codeVerifier,
     });
 
-    const response = await fetch(this.config.tokenEndpoint, {
+    const response = await fetch(this.metadata.token_endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -88,12 +92,12 @@ export class OAuthService {
    */
   async refreshAccessToken(refreshToken: string, existingScopes?: string[]): Promise<OAuthTokens> {
     const params = new URLSearchParams({
-      client_id: this.config.clientId,
+      client_id: this.clientId,
       refresh_token: refreshToken,
       grant_type: 'refresh_token',
     });
 
-    const response = await fetch(this.config.tokenEndpoint, {
+    const response = await fetch(this.metadata.token_endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -138,13 +142,43 @@ export class OAuthService {
     const now = Math.floor(Date.now() / 1000);
     return tokens.expires_at <= now;
   }
-}
 
-/**
- * Factory function to create OAuth service for a provider
- */
-export function createOAuthService(providerName: string): OAuthService {
-  const config = getProviderConfig(providerName);
-  return new OAuthService(config);
+  /**
+   * Register client using Dynamic Client Registration (RFC 7591)
+   */
+  async registerClient(
+    redirectUris: string[],
+    scopes: string[]
+  ): Promise<ClientRegistrationResponse> {
+    if (!this.metadata.registration_endpoint) {
+      throw new Error('Provider does not support Dynamic Client Registration');
+    }
+
+    const registrationRequest: ClientRegistrationRequest = {
+      redirect_uris: redirectUris,
+      token_endpoint_auth_method: 'none', // PKCE doesn't need client secret
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      client_name: 'RowboatX Desktop App',
+      scope: scopes.join(' '),
+    };
+
+    const response = await fetch(this.metadata.registration_endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(registrationRequest),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Client registration failed: ${response.status} ${errorText}`);
+    }
+
+    const data = await response.json();
+    return ClientRegistrationResponse.parse(data);
+  }
 }
 

@@ -3,12 +3,8 @@ import path from 'path';
 import { google, calendar_v3 as cal, drive_v3 as drive } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { NodeHtmlMarkdown } from 'node-html-markdown'
-import container from '../di/container.js';
-import { IOAuthRepo } from '../auth/repo.js';
-import { getProviderConfig } from '../auth/providers.js';
-import { createOAuthService } from '../auth/oauth.js';
 import { WorkDir } from '../config/config.js';
-import { OAuthTokens } from 'packages/shared/dist/auth.js';
+import { GoogleClientFactory } from './google-client-factory.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'calendar_sync');
@@ -18,110 +14,8 @@ const REQUIRED_SCOPES = [
     'https://www.googleapis.com/auth/calendar.readonly',
     'https://www.googleapis.com/auth/drive.readonly'
 ];
-const PROVIDER_NAME = 'google';
 
 const nhm = new NodeHtmlMarkdown();
-
-// --- Auth Functions ---
-
-/**
- * Get OAuth repository from DI container
- */
-function getOAuthRepo(): IOAuthRepo {
-    return container.resolve<IOAuthRepo>('oauthRepo');
-}
-
-/**
- * Check if all required scopes are present in the granted scopes
- */
-function hasRequiredScopes(grantedScopes?: string[]): boolean {
-    if (!grantedScopes || grantedScopes.length === 0) {
-        return false;
-    }
-    // Check if all required scopes are present
-    return REQUIRED_SCOPES.every(scope => grantedScopes.includes(scope));
-}
-
-/**
- * Convert OAuthTokens to OAuth2Client for use with googleapis
- */
-async function createOAuth2Client(): Promise<OAuth2Client | null> {
-    const oauthRepo = getOAuthRepo();
-    const tokens = await oauthRepo.getTokens(PROVIDER_NAME);
-
-    if (!tokens) {
-        return null;
-    }
-
-    // Check if token is expired
-    const now = Math.floor(Date.now() / 1000);
-    if (tokens.expires_at <= now) {
-        // Token expired, try to refresh
-        if (!tokens.refresh_token) {
-            console.log("Token expired and no refresh token available.");
-            return null;
-        }
-
-        try {
-            const oauthService = createOAuthService(PROVIDER_NAME);
-            const existingScopes = tokens.scopes;
-            const refreshedTokens = await oauthService.refreshAccessToken(tokens.refresh_token, existingScopes);
-            await oauthRepo.saveTokens(PROVIDER_NAME, refreshedTokens);
-
-            // Use refreshed tokens
-            return createClientFromTokens(refreshedTokens);
-        } catch (error) {
-            console.error("Failed to refresh token:", error);
-            return null;
-        }
-    }
-
-    return createClientFromTokens(tokens);
-}
-
-/**
- * Create OAuth2Client from OAuthTokens
- */
-function createClientFromTokens(tokens: OAuthTokens): OAuth2Client {
-    const providerConfig = getProviderConfig(PROVIDER_NAME);
-
-    // Create OAuth2Client directly (PKCE flow doesn't use client secret)
-    const client = new OAuth2Client(
-        providerConfig.clientId,
-        undefined, // client_secret not needed for PKCE
-        undefined  // redirect_uri not needed for token usage
-    );
-
-    // Set credentials
-    client.setCredentials({
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token || undefined,
-        expiry_date: tokens.expires_at * 1000, // Convert from seconds to milliseconds
-        scope: tokens.scopes?.join(' ') || undefined,
-    });
-
-    return client;
-}
-
-/**
- * Check if Google OAuth credentials are available with required scopes
- */
-async function hasValidCredentials(): Promise<boolean> {
-    const oauthRepo = getOAuthRepo();
-    const isConnected = await oauthRepo.isConnected(PROVIDER_NAME);
-
-    if (!isConnected) {
-        return false;
-    }
-
-    const tokens = await oauthRepo.getTokens(PROVIDER_NAME);
-    if (!tokens) {
-        return false;
-    }
-
-    // Check if all required scopes are present
-    return hasRequiredScopes(tokens.scopes);
-}
 
 // --- Helper Functions ---
 
@@ -281,9 +175,8 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
         // If 401, clear tokens to force re-auth next run
         const e = error as { response?: { status?: number } };
         if (e.response?.status === 401) {
-            console.log("401 Unauthorized. Clearing tokens to force re-authentication.");
-            const oauthRepo = getOAuthRepo();
-            await oauthRepo.clearTokens(PROVIDER_NAME);
+            console.log("401 Unauthorized, clearing cache");
+            GoogleClientFactory.clearCache();
         }
         throw error; // Re-throw to be handled by performSync
     }
@@ -296,7 +189,7 @@ async function performSync(syncDir: string, lookbackDays: number) {
             fs.mkdirSync(SYNC_DIR, { recursive: true });
         }
 
-        const auth = await createOAuth2Client();
+        const auth = await GoogleClientFactory.getClient();
         if (!auth) {
             console.log("No valid OAuth credentials available.");
             return;
@@ -310,9 +203,8 @@ async function performSync(syncDir: string, lookbackDays: number) {
         // If 401, clear tokens to force re-auth next run
         const e = error as { response?: { status?: number } };
         if (e.response?.status === 401) {
-            console.log("401 Unauthorized. Clearing tokens to force re-authentication.");
-            const oauthRepo = getOAuthRepo();
-            await oauthRepo.clearTokens(PROVIDER_NAME);
+            console.log("401 Unauthorized, clearing cache");
+            GoogleClientFactory.clearCache();
         }
     }
 }
@@ -324,7 +216,7 @@ export async function init() {
     while (true) {
         try {
             // Check if credentials are available with required scopes
-            const hasCredentials = await hasValidCredentials();
+            const hasCredentials = await GoogleClientFactory.hasValidCredentials(REQUIRED_SCOPES);
 
             if (!hasCredentials) {
                 console.log("Google OAuth credentials not available or missing required Calendar/Drive scopes. Sleeping...");
