@@ -12,11 +12,11 @@ const configCache = new Map<string, client.Configuration>();
 function toOAuthTokens(response: client.TokenEndpointResponse): OAuthTokens {
   const accessToken = response.access_token;
   const refreshToken = response.refresh_token ?? null;
-  
+
   // Calculate expires_at from expires_in
   const expiresIn = response.expires_in ?? 3600;
   const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
-  
+
   // Parse scopes from space-separated string
   let scopes: string[] | undefined;
   if (response.scope) {
@@ -40,7 +40,7 @@ export async function discoverConfiguration(
   clientId: string
 ): Promise<client.Configuration> {
   const cacheKey = `${issuerUrl}:${clientId}`;
-  
+
   const cached = configCache.get(cacheKey);
   if (cached) {
     console.log(`[OAuth] Using cached configuration for ${issuerUrl}`);
@@ -54,7 +54,7 @@ export async function discoverConfiguration(
     undefined, // no client_secret (PKCE flow)
     client.None() // PKCE doesn't require client authentication
   );
-  
+
   configCache.set(cacheKey, config);
   console.log(`[OAuth] Discovery complete for ${issuerUrl}`);
   return config;
@@ -70,9 +70,9 @@ export function createStaticConfiguration(
   revocationEndpoint?: string
 ): client.Configuration {
   console.log(`[OAuth] Creating static configuration (no discovery)`);
-  
+
   const issuer = new URL(authorizationEndpoint).origin;
-  
+
   // Create Configuration with static metadata
   const serverMetadata: client.ServerMetadata = {
     issuer,
@@ -100,7 +100,6 @@ export async function registerClient(
   clientName: string = 'RowboatX Desktop App'
 ): Promise<{ config: client.Configuration; registration: ClientRegistrationResponse }> {
   console.log(`[OAuth] Registering client via DCR at ${issuerUrl}...`);
-  
   const config = await client.dynamicClientRegistration(
     new URL(issuerUrl),
     {
@@ -113,10 +112,10 @@ export async function registerClient(
     },
     client.None()
   );
-  
+
   const metadata = config.clientMetadata();
   console.log(`[OAuth] DCR complete, client_id: ${metadata.client_id}`);
-  
+
   // Extract registration response for persistence
   const registration = ClientRegistrationResponse.parse({
     client_id: metadata.client_id,
@@ -179,12 +178,12 @@ export async function exchangeCodeForTokens(
   expectedState: string
 ): Promise<OAuthTokens> {
   console.log(`[OAuth] Exchanging authorization code for tokens...`);
-  
+
   const response = await client.authorizationCodeGrant(config, callbackUrl, {
     pkceCodeVerifier: codeVerifier,
     expectedState,
   });
-  
+
   console.log(`[OAuth] Token exchange successful`);
   return toOAuthTokens(response);
 }
@@ -199,16 +198,16 @@ export async function refreshTokens(
   existingScopes?: string[]
 ): Promise<OAuthTokens> {
   console.log(`[OAuth] Refreshing access token...`);
-  
+
   const response = await client.refreshTokenGrant(config, refreshToken);
-  
+
   const tokens = toOAuthTokens(response);
-  
+
   // Preserve existing scopes if server didn't return them
   if (!tokens.scopes && existingScopes) {
     tokens.scopes = existingScopes;
   }
-  
+
   console.log(`[OAuth] Token refresh successful`);
   return tokens;
 }
