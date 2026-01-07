@@ -3,8 +3,6 @@ import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
-import container from '../di/container.js';
-import { IRunsRepo } from '../runs/repo.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -13,7 +11,6 @@ import { IRunsRepo } from '../runs/repo.js';
 
 const KNOWLEDGE_SOURCE_DIR = path.join(WorkDir, 'gmail_sync');
 const NOTES_OUTPUT_DIR = path.join(WorkDir, 'notes');
-const TOPIC_EXTRACTION_AGENT = 'topic_extraction';
 const NOTE_CREATION_AGENT = 'note_creation';
 
 /**
@@ -53,25 +50,6 @@ async function waitForRunCompletion(runId: string): Promise<void> {
             }
         });
     });
-}
-
-/**
- * Run topic extraction agent on content
- */
-async function extractTopics(content: string, sourceFile: string): Promise<string> {
-    // Create a run for the topic extraction agent
-    const run = await createRun({
-        agentId: TOPIC_EXTRACTION_AGENT,
-    });
-
-    // Send the content as a message to the agent
-    // The agent will extract topics and write them to ~/.rowboat/topics file
-    await createMessage(run.id, content);
-
-    // Wait for the run to complete
-    await waitForRunCompletion(run.id);
-
-    return run.id;
 }
 
 /**
