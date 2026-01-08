@@ -197,6 +197,20 @@ const ipcSchemas = {
       providers: z.array(z.string()),
     }),
   },
+  'granola:getConfig': {
+    req: z.null(),
+    res: z.object({
+      enabled: z.boolean(),
+    }),
+  },
+  'granola:setConfig': {
+    req: z.object({
+      enabled: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
 } as const;
 
 // ============================================================================

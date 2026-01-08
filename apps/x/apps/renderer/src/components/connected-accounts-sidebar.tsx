@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Loader2, Plug } from "lucide-react"
+import { useState, useEffect, useCallback } from "react"
+import { Loader2, Plug, Database } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -14,12 +15,59 @@ import {
 } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
 import { useOAuth, useAvailableProviders } from "@/hooks/useOAuth"
+import { toast } from "@/lib/toast"
 
 type ConnectedAccountsSidebarProps = React.ComponentProps<typeof Sidebar>
 
+/**
+ * Hook for managing Granola sync config
+ */
+function useGranolaConfig() {
+  const [enabled, setEnabled] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const result = await window.ipc.invoke('granola:getConfig', null);
+      setEnabled(result.enabled);
+    } catch (error) {
+      console.error('Failed to load Granola config:', error);
+      setEnabled(false);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  const updateConfig = useCallback(async (newEnabled: boolean) => {
+    try {
+      setIsLoading(true);
+      await window.ipc.invoke('granola:setConfig', { enabled: newEnabled });
+      setEnabled(newEnabled);
+      toast(
+        newEnabled ? 'Granola sync enabled' : 'Granola sync disabled',
+        'success'
+      );
+    } catch (error) {
+      console.error('Failed to update Granola config:', error);
+      toast('Failed to update Granola sync settings', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return { enabled, isLoading, updateConfig };
+}
+
 export function ConnectedAccountsSidebar({ ...props }: ConnectedAccountsSidebarProps) {
   const { providers, isLoading: providersLoading } = useAvailableProviders()
+  const { enabled: granolaEnabled, isLoading: granolaLoading, updateConfig: updateGranolaConfig } = useGranolaConfig()
 
   return (
     <Sidebar collapsible="none" className="hidden flex-1 md:flex" {...props}>
@@ -46,6 +94,33 @@ export function ConnectedAccountsSidebar({ ...props }: ConnectedAccountsSidebarP
                   <ProviderItem key={provider} provider={provider} />
                 ))
               )}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Data Sources</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <div className="flex items-center gap-2 px-2 py-1.5 w-full">
+                  <Switch
+                    checked={granolaEnabled}
+                    onCheckedChange={updateGranolaConfig}
+                    disabled={granolaLoading}
+                    className="shrink-0"
+                  />
+                  <Database className="size-4 shrink-0" />
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className="truncate text-sm">Granola Sync</span>
+                    <span className="text-xs text-muted-foreground truncate">
+                      Sync notes from Granola
+                    </span>
+                  </div>
+                  {granolaLoading && (
+                    <Loader2 className="size-3 animate-spin shrink-0" />
+                  )}
+                </div>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

@@ -16,6 +16,8 @@ import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
 import z from 'zod';
 import { RunEvent } from 'packages/shared/dist/runs.js';
+import container from '@x/core/dist/di/container.js';
+import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -299,6 +301,16 @@ export function setupIpcHandlers() {
     },
     'oauth:get-connected-providers': async () => {
       return await getConnectedProviders();
+    },
+    'granola:getConfig': async () => {
+      const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
+      const config = await repo.getConfig();
+      return { enabled: config.enabled };
+    },
+    'granola:setConfig': async (_event, args) => {
+      const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
+      await repo.setConfig({ enabled: args.enabled });
+      return { success: true };
     },
   });
 }
