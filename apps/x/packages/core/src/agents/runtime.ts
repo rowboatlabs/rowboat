@@ -22,6 +22,7 @@ import { IMessageQueue } from "../application/lib/message-queue.js";
 import { IRunsRepo } from "../runs/repo.js";
 import { IRunsLock } from "../runs/lock.js";
 import { PrefixLogger } from "@x/shared";
+import { parse } from "yaml";
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -243,6 +244,38 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     if (id === "copilot" || id === "rowboatx") {
         return CopilotAgent;
     }
+
+    // Special case: load note_creation agent from checked-in file
+    if (id === "note_creation") {
+        const currentDir = path.dirname(new URL(import.meta.url).pathname);
+        // File is copied to dist/knowledge during build
+        const agentFilePath = path.join(currentDir, "../knowledge/note_creation.md");
+        const raw = fs.readFileSync(agentFilePath, "utf8");
+
+        let agent: z.infer<typeof Agent> = {
+            name: "note_creation",
+            instructions: raw,
+        };
+
+        // Parse frontmatter if present
+        if (raw.startsWith("---")) {
+            const end = raw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = raw.slice(3, end).trim();
+                const content = raw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
     const repo = container.resolve<IAgentsRepo>('agentsRepo');
     return await repo.fetch(id);
 }
@@ -655,7 +688,10 @@ export async function* streamAgent({
             agent.instructions,
             tools,
         )) {
-            loopLogger.log('got llm-stream-event:', event.type)
+            // Only log significant events (not text-delta to reduce noise)
+            if (event.type !== 'text-delta') {
+                loopLogger.log('got llm-stream-event:', event.type);
+            }
             messageBuilder.ingest(event);
             yield* processEvent({
                 runId,

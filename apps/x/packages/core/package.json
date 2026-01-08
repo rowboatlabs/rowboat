@@ -5,7 +5,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "rm -rf dist && tsc",
+    "build": "rm -rf dist && tsc && mkdir -p dist/knowledge && cp src/knowledge/note_creation.md dist/knowledge/",
     "dev": "tsc -w"
   },
   "dependencies": {

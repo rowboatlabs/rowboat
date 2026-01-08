@@ -101,7 +101,7 @@ export function markFileAsProcessed(filePath: string, state: GraphState): void {
 
 /**
  * Get list of files that need processing from a source directory
- * Returns only new or changed files
+ * Returns only new or changed files, recursively traversing subdirectories
  */
 export function getFilesToProcess(
     sourceDir: string,
@@ -112,19 +112,27 @@ export function getFilesToProcess(
     }
 
     const filesToProcess: string[] = [];
-    const entries = fs.readdirSync(sourceDir);
 
-    for (const entry of entries) {
-        const fullPath = path.join(sourceDir, entry);
-        const stat = fs.statSync(fullPath);
+    // Recursive function to traverse directories
+    function traverseDirectory(dir: string) {
+        const entries = fs.readdirSync(dir);
 
-        if (stat.isFile() && entry.endsWith('.md')) {
-            if (hasFileChanged(fullPath, state)) {
-                filesToProcess.push(fullPath);
+        for (const entry of entries) {
+            const fullPath = path.join(dir, entry);
+            const stat = fs.statSync(fullPath);
+
+            if (stat.isDirectory()) {
+                // Recurse into subdirectories
+                traverseDirectory(fullPath);
+            } else if (stat.isFile() && entry.endsWith('.md')) {
+                if (hasFileChanged(fullPath, state)) {
+                    filesToProcess.push(fullPath);
+                }
             }
         }
     }
 
+    traverseDirectory(sourceDir);
     return filesToProcess;
 }
 
