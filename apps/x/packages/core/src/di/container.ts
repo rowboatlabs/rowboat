@@ -10,6 +10,7 @@ import { IRunsLock, InMemoryRunsLock } from "../runs/lock.js";
 import { IAgentRuntime, AgentRuntime } from "../agents/runtime.js";
 import { FSOAuthRepo, IOAuthRepo } from "../auth/repo.js";
 import { FSClientRegistrationRepo, IClientRegistrationRepo } from "../auth/client-repo.js";
+import { FSGranolaConfigRepo, IGranolaConfigRepo } from "../knowledge/granola/repo.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -29,6 +30,7 @@ container.register({
     runsRepo: asClass<IRunsRepo>(FSRunsRepo).singleton(),
     oauthRepo: asClass<IOAuthRepo>(FSOAuthRepo).singleton(),
     clientRegistrationRepo: asClass<IClientRegistrationRepo>(FSClientRegistrationRepo).singleton(),
+    granolaConfigRepo: asClass<IGranolaConfigRepo>(FSGranolaConfigRepo).singleton(),
 });
 
 export default container;
