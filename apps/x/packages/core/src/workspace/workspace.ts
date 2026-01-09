@@ -95,7 +95,7 @@ export async function ensureWorkspaceRoot(): Promise<void> {
 
 export async function getRoot(): Promise<{ root: string }> {
   await ensureWorkspaceRoot();
-  return { root: '' };
+  return { root: WorkDir };
 }
 
 export async function exists(relPath: string): Promise<{ exists: boolean }> {
@@ -284,10 +284,25 @@ export async function rename(
   const fromPath = resolveWorkspacePath(from);
   const toPath = resolveWorkspacePath(to);
 
-  // Check if destination exists
+  // Check if source exists
+  await fs.access(fromPath);
+
+  // Check if destination exists (only if overwrite is false)
   if (!overwrite) {
-    await fs.access(toPath);
-    throw new Error('Destination already exists');
+    try {
+      await fs.access(toPath);
+      // If we get here, destination exists
+      throw new Error('Destination already exists');
+    } catch (err: unknown) {
+      // ENOENT means destination doesn't exist, which is what we want
+      if (err && typeof err === 'object' && 'code' in err && err.code !== 'ENOENT') {
+        throw err;
+      }
+      // If it's "Destination already exists", re-throw it
+      if (err instanceof Error && err.message === 'Destination already exists') {
+        throw err;
+      }
+    }
   }
 
   // Create parent directory for destination

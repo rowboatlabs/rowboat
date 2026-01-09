@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  Copy,
   Database,
   File,
   FilePlus,
@@ -19,8 +20,10 @@ import {
   MessageSquarePlus,
   Microscope,
   Network,
+  Pencil,
   Plug,
   Plus,
+  Trash2,
 } from "lucide-react"
 
 import {
@@ -49,6 +52,14 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import { Input } from "@/components/ui/input"
 import { useSidebarSection } from "@/contexts/sidebar-context"
 import { useOAuth, useAvailableProviders } from "@/hooks/useOAuth"
 import { toast } from "@/lib/toast"
@@ -61,11 +72,22 @@ interface TreeNode {
   loaded?: boolean
 }
 
+type KnowledgeActions = {
+  createNote: (parentPath?: string) => void
+  createFolder: (parentPath?: string) => void
+  expandAll: () => void
+  collapseAll: () => void
+  rename: (path: string, newName: string, isDir: boolean) => Promise<void>
+  remove: (path: string) => Promise<void>
+  copyPath: (path: string) => void
+}
+
 type SidebarContentPanelProps = {
   tree: TreeNode[]
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
+  knowledgeActions: KnowledgeActions
   chats: { id: string; title: string; preview: string; time: string }[]
 } & React.ComponentProps<typeof Sidebar>
 
@@ -75,12 +97,6 @@ const sectionTitles = {
   agents: "Agents",
 }
 
-const quickActions = [
-  { icon: FilePlus, label: "New Note", action: () => console.log("New note") },
-  { icon: FolderPlus, label: "New Folder", action: () => console.log("New folder") },
-  { icon: Network, label: "Graph View", action: () => console.log("Graph view") },
-  { icon: ArrowDownAZ, label: "Sort", action: () => console.log("Sort") },
-]
 
 const agentPresets = [
   {
@@ -149,15 +165,11 @@ export function SidebarContentPanel({
   selectedPath,
   expandedPaths,
   onSelectFile,
+  knowledgeActions,
   chats,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection } = useSidebarSection()
-  const [allExpanded, setAllExpanded] = React.useState(false)
-
-  const toggleExpandAll = () => {
-    setAllExpanded(!allExpanded)
-  }
 
   return (
     <Sidebar className="border-r-0" {...props}>
@@ -176,8 +188,7 @@ export function SidebarContentPanel({
             selectedPath={selectedPath}
             expandedPaths={expandedPaths}
             onSelectFile={onSelectFile}
-            allExpanded={allExpanded}
-            onToggleExpandAll={toggleExpandAll}
+            actions={knowledgeActions}
           />
         )}
         {activeSection === "agents" && (
@@ -232,64 +243,86 @@ function KnowledgeSection({
   selectedPath,
   expandedPaths,
   onSelectFile,
-  allExpanded,
-  onToggleExpandAll,
+  actions,
 }: {
   tree: TreeNode[]
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
-  allExpanded: boolean
-  onToggleExpandAll: () => void
+  actions: KnowledgeActions
 }) {
+  const isExpanded = expandedPaths.size > 0
+  
+  const quickActions = [
+    { icon: FilePlus, label: "New Note", action: () => actions.createNote() },
+    { icon: FolderPlus, label: "New Folder", action: () => actions.createFolder() },
+    { icon: Network, label: "Graph View", action: () => {} },
+    { icon: ArrowDownAZ, label: "Sort", action: () => {} },
+  ]
+
   return (
-    <SidebarGroup>
-      <div className="flex items-center justify-center gap-1 py-1">
-        {quickActions.map((action) => (
-          <Tooltip key={action.label}>
-            <TooltipTrigger asChild>
-              <button
-                onClick={action.action}
-                className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
-              >
-                <action.icon className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{action.label}</TooltipContent>
-          </Tooltip>
-        ))}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={onToggleExpandAll}
-              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
-            >
-              {allExpanded ? (
-                <ChevronsDownUp className="size-4" />
-              ) : (
-                <ChevronsUpDown className="size-4" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {allExpanded ? "Collapse All" : "Expand All"}
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {tree.map((item, index) => (
-            <Tree
-              key={index}
-              item={item}
-              selectedPath={selectedPath}
-              expandedPaths={expandedPaths}
-              onSelect={onSelectFile}
-            />
-          ))}
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <SidebarGroup className="flex-1 flex flex-col">
+          <div className="flex items-center justify-center gap-1 py-1">
+            {quickActions.map((action) => (
+              <Tooltip key={action.label}>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={action.action}
+                    className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+                  >
+                    <action.icon className="size-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{action.label}</TooltipContent>
+              </Tooltip>
+            ))}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={isExpanded ? actions.collapseAll : actions.expandAll}
+                  className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+                >
+                  {isExpanded ? (
+                    <ChevronsDownUp className="size-4" />
+                  ) : (
+                    <ChevronsUpDown className="size-4" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {isExpanded ? "Collapse All" : "Expand All"}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <SidebarGroupContent className="flex-1">
+            <SidebarMenu>
+              {tree.map((item, index) => (
+                <Tree
+                  key={index}
+                  item={item}
+                  selectedPath={selectedPath}
+                  expandedPaths={expandedPaths}
+                  onSelect={onSelectFile}
+                  actions={actions}
+                />
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onClick={() => actions.createNote()}>
+          <FilePlus className="mr-2 size-4" />
+          New Note
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => actions.createFolder()}>
+          <FolderPlus className="mr-2 size-4" />
+          New Folder
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -299,59 +332,193 @@ function Tree({
   selectedPath,
   expandedPaths,
   onSelect,
+  actions,
 }: {
   item: TreeNode
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelect: (path: string, kind: "file" | "dir") => void
+  actions: KnowledgeActions
 }) {
-  const hasChildren = item.children && item.children.length > 0
+  const isDir = item.kind === 'dir'
   const isExpanded = expandedPaths.has(item.path)
   const isSelected = selectedPath === item.path
+  const [isRenaming, setIsRenaming] = useState(false)
+  const isSubmittingRef = React.useRef(false)
 
-  if (!hasChildren) {
+  // For files, strip .md extension for editing
+  const baseName = !isDir && item.name.endsWith('.md')
+    ? item.name.slice(0, -3)
+    : item.name
+  const [newName, setNewName] = useState(baseName)
+
+  // Sync newName when baseName changes (e.g., after external rename)
+  React.useEffect(() => {
+    setNewName(baseName)
+  }, [baseName])
+
+  const handleRename = async () => {
+    // Prevent double submission
+    if (isSubmittingRef.current) return
+    isSubmittingRef.current = true
+
+    const trimmedName = newName.trim()
+    if (trimmedName && trimmedName !== baseName) {
+      try {
+        await actions.rename(item.path, trimmedName, isDir)
+        toast('Renamed successfully', 'success')
+      } catch (err) {
+        toast('Failed to rename', 'error')
+      }
+    }
+    setIsRenaming(false)
+    // Reset after a small delay to prevent blur from re-triggering
+    setTimeout(() => {
+      isSubmittingRef.current = false
+    }, 100)
+  }
+
+  const handleDelete = async () => {
+    try {
+      await actions.remove(item.path)
+      toast('Moved to trash', 'success')
+    } catch (err) {
+      toast('Failed to delete', 'error')
+    }
+  }
+
+  const handleCopyPath = () => {
+    actions.copyPath(item.path)
+    toast('Path copied', 'success')
+  }
+
+  const cancelRename = () => {
+    isSubmittingRef.current = true // Prevent blur from triggering rename
+    setIsRenaming(false)
+    setNewName(baseName) // Reset to original name
+    setTimeout(() => {
+      isSubmittingRef.current = false
+    }, 100)
+  }
+
+  const contextMenuContent = (
+    <ContextMenuContent className="w-48">
+      {isDir && (
+        <>
+          <ContextMenuItem onClick={() => actions.createNote(item.path)}>
+            <FilePlus className="mr-2 size-4" />
+            New Note
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => actions.createFolder(item.path)}>
+            <FolderPlus className="mr-2 size-4" />
+            New Folder
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      )}
+      <ContextMenuItem onClick={handleCopyPath}>
+        <Copy className="mr-2 size-4" />
+        Copy Path
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onClick={() => { setNewName(baseName); isSubmittingRef.current = false; setIsRenaming(true) }}>
+        <Pencil className="mr-2 size-4" />
+        Rename
+      </ContextMenuItem>
+      <ContextMenuItem variant="destructive" onClick={handleDelete}>
+        <Trash2 className="mr-2 size-4" />
+        Delete
+      </ContextMenuItem>
+    </ContextMenuContent>
+  )
+
+  // Inline rename input
+  if (isRenaming) {
     return (
       <SidebarMenuItem>
-        <SidebarMenuButton
-          isActive={isSelected}
-          onClick={() => onSelect(item.path, item.kind)}
-        >
-          <File className="size-4" />
-          <span>{item.name}</span>
-        </SidebarMenuButton>
+        <div className="flex items-center gap-2 px-2 py-1">
+          {isDir ? <Folder className="size-4 shrink-0" /> : <File className="size-4 shrink-0" />}
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={async (e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                await handleRename()
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                cancelRename()
+              }
+            }}
+            onBlur={() => {
+              // Only trigger rename if not already submitting
+              if (!isSubmittingRef.current) {
+                handleRename()
+              }
+            }}
+            className="h-6 text-sm flex-1"
+            autoFocus
+          />
+        </div>
       </SidebarMenuItem>
     )
   }
 
+  if (!isDir) {
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={isSelected}
+              onClick={() => onSelect(item.path, item.kind)}
+            >
+              <File className="size-4" />
+              <span>{item.name}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </ContextMenuTrigger>
+        {contextMenuContent}
+      </ContextMenu>
+    )
+  }
+
   return (
-    <SidebarMenuItem>
-      <Collapsible
-        open={isExpanded}
-        onOpenChange={() => onSelect(item.path, item.kind)}
-        className="group/collapsible [&[data-state=open]>button>svg:first-child]:rotate-90"
-      >
-        <CollapsibleTrigger asChild>
-          <SidebarMenuButton>
-            <ChevronRight className="transition-transform size-4" />
-            <Folder className="size-4" />
-            <span>{item.name}</span>
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <SidebarMenuSub>
-            {item.children!.map((subItem, index) => (
-              <Tree
-                key={index}
-                item={subItem}
-                selectedPath={selectedPath}
-                expandedPaths={expandedPaths}
-                onSelect={onSelect}
-              />
-            ))}
-          </SidebarMenuSub>
-        </CollapsibleContent>
-      </Collapsible>
-    </SidebarMenuItem>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <SidebarMenuItem>
+          <Collapsible
+            open={isExpanded}
+            onOpenChange={() => onSelect(item.path, item.kind)}
+            className="group/collapsible [&[data-state=open]>button>svg:first-child]:rotate-90"
+          >
+            <CollapsibleTrigger asChild>
+              <SidebarMenuButton>
+                <ChevronRight className="transition-transform size-4" />
+                <Folder className="size-4" />
+                <span>{item.name}</span>
+              </SidebarMenuButton>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <SidebarMenuSub>
+                {(item.children ?? []).map((subItem, index) => (
+                  <Tree
+                    key={index}
+                    item={subItem}
+                    selectedPath={selectedPath}
+                    expandedPaths={expandedPaths}
+                    onSelect={onSelect}
+                    actions={actions}
+                  />
+                ))}
+              </SidebarMenuSub>
+            </CollapsibleContent>
+          </Collapsible>
+        </SidebarMenuItem>
+      </ContextMenuTrigger>
+      {contextMenuContent}
+    </ContextMenu>
   )
 }
 

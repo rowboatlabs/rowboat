@@ -10,6 +10,7 @@ function ensureDirs() {
     ensure(WorkDir);
     ensure(path.join(WorkDir, "agents"));
     ensure(path.join(WorkDir, "config"));
+    ensure(path.join(WorkDir, "knowledge"));
 }
 
 ensureDirs();

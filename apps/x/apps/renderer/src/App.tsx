@@ -222,7 +222,6 @@ const chatHistory = [
 
 function App() {
   // File browser state (for Knowledge section)
-  const [_knowledgeContent, setKnowledgeContent] = useState<string>('')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string>('')
   const [tree, setTree] = useState<TreeNode[]>([])
@@ -238,65 +237,40 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [agentId] = useState<string>('copilot')
 
-  // Load directory and merge into tree
-  const loadDirectory = useCallback(async (path: string = '') => {
+  // Load directory tree
+  const loadDirectory = useCallback(async () => {
     try {
       const result = await window.ipc.invoke('workspace:readdir', {
-        path,
+        path: 'knowledge',
         opts: { recursive: true, includeHidden: false }
       })
-      const tree = buildTree(result)
-      return tree
+      return buildTree(result)
     } catch (err) {
       console.error('Failed to load directory:', err)
       return []
     }
   }, [])
 
-  // Load knowledge file content
-  const loadKnowledge = useCallback(async () => {
-    try {
-      const result = await window.ipc.invoke('workspace:readFile', {
-        path: 'knowledge',
-        encoding: 'utf8'
-      })
-      return result.data
-    } catch (err) {
-      console.error('Failed to load knowledge file:', err)
-      return ''
-    }
-  }, [])
-
-  // Load initial tree and knowledge content
+  // Load initial tree
   useEffect(() => {
-    async function process() {
-      const [treeData, content] = await Promise.all([
-        loadDirectory(),
-        loadKnowledge()
-      ]);
-      setTree(treeData)
-      setKnowledgeContent(content)
-    }
-    process();
-  }, [loadDirectory, loadKnowledge])
+    loadDirectory().then(setTree)
+  }, [loadDirectory])
 
   // Listen to workspace change events
   useEffect(() => {
     const cleanup = window.ipc.on('workspace:didChange', () => {
-      // Reload tree and knowledge on any change
-      loadDirectory().then(result => setTree(result))
-      loadKnowledge().then(result => setKnowledgeContent(result))
+      loadDirectory().then(setTree)
     })
     return cleanup
-  }, [loadDirectory, loadKnowledge])
+  }, [loadDirectory])
 
   // Load file content when selected
   useEffect(() => {
-    async function process() {
-      if (!selectedPath) {
-        setFileContent('')
-        return
-      }
+    if (!selectedPath) {
+      setFileContent('')
+      return
+    }
+    (async () => {
       try {
         const stat = await window.ipc.invoke('workspace:stat', { path: selectedPath })
         if (stat.kind === 'file') {
@@ -307,9 +281,9 @@ function App() {
         }
       } catch (err) {
         console.error('Failed to load file:', err)
+        setFileContent('')
       }
-    }
-    process();
+    })()
   }, [selectedPath])
 
   // Listen to run events
@@ -520,6 +494,76 @@ function App() {
     setExpandedPaths(newExpanded)
   }
 
+  // Knowledge quick actions
+  const collectDirPaths = (nodes: TreeNode[]): string[] => 
+    nodes.flatMap(n => n.kind === 'dir' ? [n.path, ...(n.children ? collectDirPaths(n.children) : [])] : [])
+
+  // Get workspace root for full paths
+  const [workspaceRoot, setWorkspaceRoot] = useState<string>('')
+  useEffect(() => {
+    window.ipc.invoke('workspace:getRoot', null).then(result => {
+      setWorkspaceRoot(result.root)
+    })
+  }, [])
+
+  const knowledgeActions = React.useMemo(() => ({
+    createNote: async (parentPath: string = 'knowledge') => {
+      try {
+        const name = `untitled-${Date.now()}.md`
+        const fullPath = `${parentPath}/${name}`
+        await window.ipc.invoke('workspace:writeFile', {
+          path: fullPath,
+          data: `# New Note\n\n`,
+          opts: { encoding: 'utf8' }
+        })
+        setSelectedPath(fullPath)
+      } catch (err) {
+        console.error('Failed to create note:', err)
+        throw err
+      }
+    },
+    createFolder: async (parentPath: string = 'knowledge') => {
+      try {
+        await window.ipc.invoke('workspace:mkdir', {
+          path: `${parentPath}/new-folder-${Date.now()}`,
+          recursive: true
+        })
+      } catch (err) {
+        console.error('Failed to create folder:', err)
+        throw err
+      }
+    },
+    expandAll: () => setExpandedPaths(new Set(collectDirPaths(tree))),
+    collapseAll: () => setExpandedPaths(new Set()),
+    rename: async (oldPath: string, newName: string, isDir: boolean) => {
+      try {
+        const parts = oldPath.split('/')
+        // For files, ensure .md extension
+        const finalName = isDir ? newName : (newName.endsWith('.md') ? newName : `${newName}.md`)
+        parts[parts.length - 1] = finalName
+        const newPath = parts.join('/')
+        await window.ipc.invoke('workspace:rename', { from: oldPath, to: newPath })
+        if (selectedPath === oldPath) setSelectedPath(newPath)
+      } catch (err) {
+        console.error('Failed to rename:', err)
+        throw err
+      }
+    },
+    remove: async (path: string) => {
+      try {
+        await window.ipc.invoke('workspace:remove', { path, opts: { trash: true } })
+        if (selectedPath === path) setSelectedPath(null)
+      } catch (err) {
+        console.error('Failed to remove:', err)
+        throw err
+      }
+    },
+    copyPath: (path: string) => {
+      const fullPath = workspaceRoot ? `${workspaceRoot}/${path}` : path
+      navigator.clipboard.writeText(fullPath)
+    },
+  }), [tree, selectedPath, workspaceRoot, collectDirPaths])
+
   const renderConversationItem = (item: ConversationItem) => {
     if (isChatMessage(item)) {
       return (
@@ -629,6 +673,7 @@ function App() {
               selectedPath={selectedPath}
               expandedPaths={expandedPaths}
               onSelectFile={toggleExpand}
+              knowledgeActions={knowledgeActions}
               chats={chatHistory}
             />
             <SidebarInset>
