@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
@@ -6,7 +7,9 @@ import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
 import { MessageSquare } from 'lucide-react';
-import { AppSidebar } from '@/components/app-sidebar';
+import { SidebarIcon } from '@/components/sidebar-icon';
+import { SidebarContentPanel } from '@/components/sidebar-content';
+import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   Conversation,
   ConversationContent,
@@ -42,19 +45,12 @@ import {
   ContextTrigger,
 } from '@/components/ai-elements/context';
 import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { Separator } from "@/components/ui/separator"
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -114,6 +110,8 @@ const toToolState = (status: ToolCall['status']): ToolState => {
       return 'input-available'
   }
 }
+
+const DEFAULT_SIDEBAR_WIDTH = 256
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
@@ -200,15 +198,35 @@ function buildTree(entries: DirEntry[]): TreeNode[] {
   return sortNodes(roots)
 }
 
+// Sample chat history (will be replaced with real data later)
+const chatHistory = [
+  {
+    id: 'project-kickoff',
+    title: 'Project kickoff',
+    preview: 'Scope, roles, and milestones.',
+    time: 'Today',
+  },
+  {
+    id: 'design-review',
+    title: 'Design review',
+    preview: 'UI polish and sidebar UX.',
+    time: 'Yesterday',
+  },
+  {
+    id: 'tools-audit',
+    title: 'Tools audit',
+    preview: 'MCP inventory and tool gaps.',
+    time: 'Mon',
+  },
+]
+
 function App() {
-  // Sidebar view state
-  const [activeSidebarView, setActiveSidebarView] = useState<'files' | 'accounts'>('files')
-  
-  // File browser state
-  const [tree, setTree] = useState<TreeNode[]>([])
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
+  // File browser state (for Knowledge section)
+  const [_knowledgeContent, setKnowledgeContent] = useState<string>('')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string>('')
+  const [tree, setTree] = useState<TreeNode[]>([])
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
 
   // Chat state
   const [message, setMessage] = useState<string>('')
@@ -235,23 +253,42 @@ function App() {
     }
   }, [])
 
-  // Load initial tree
+  // Load knowledge file content
+  const loadKnowledge = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('workspace:readFile', {
+        path: 'knowledge',
+        encoding: 'utf8'
+      })
+      return result.data
+    } catch (err) {
+      console.error('Failed to load knowledge file:', err)
+      return ''
+    }
+  }, [])
+
+  // Load initial tree and knowledge content
   useEffect(() => {
     async function process() {
-      const tree = await loadDirectory();
-      setTree(tree)
+      const [treeData, content] = await Promise.all([
+        loadDirectory(),
+        loadKnowledge()
+      ]);
+      setTree(treeData)
+      setKnowledgeContent(content)
     }
     process();
-  }, [loadDirectory])
+  }, [loadDirectory, loadKnowledge])
 
   // Listen to workspace change events
   useEffect(() => {
     const cleanup = window.ipc.on('workspace:didChange', () => {
-      // Reload tree on any change
+      // Reload tree and knowledge on any change
       loadDirectory().then(result => setTree(result))
+      loadKnowledge().then(result => setKnowledgeContent(result))
     })
     return cleanup
-  }, [loadDirectory])
+  }, [loadDirectory, loadKnowledge])
 
   // Load file content when selected
   useEffect(() => {
@@ -346,7 +383,7 @@ function App() {
             setCurrentAssistantMessage(currentMsg => {
               if (currentMsg) {
                 setConversation(prev => {
-                  const exists = prev.some(m => 
+                  const exists = prev.some(m =>
                     m.id === event.messageId && 'role' in m && m.role === 'assistant'
                   )
                   if (exists) return prev
@@ -564,152 +601,151 @@ function App() {
   } as LanguageModelUsage
 
   const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
+  const conversationContentClassName = hasConversation
+    ? "mx-auto w-full max-w-4xl pb-28"
+    : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
   const submitStatus: ChatStatus = isProcessing ? 'streaming' : 'ready'
   const canSubmit = Boolean(message.trim()) && !isProcessing
 
   return (
-    <SidebarProvider
-      style={
-        {
-          "--sidebar-width": "calc(16rem + var(--sidebar-width-icon))",
-        } as React.CSSProperties
-      }
-    >
-      <AppSidebar 
-        tree={tree}
-        selectedPath={selectedPath}
-        expandedPaths={expandedPaths}
-        onSelectFile={toggleExpand}
-        activeView={activeSidebarView}
-        onViewChange={setActiveSidebarView}
-      />
-      <SidebarInset>
-        <header className="bg-background sticky top-0 z-20 flex shrink-0 items-center gap-2 border-b p-4 shadow-sm">
-          <SidebarTrigger className="-ml-1" />
-          <Separator
-            orientation="vertical"
-            className="mr-2 data-[orientation=vertical]:h-4"
-          />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem className="hidden md:block">
-                <BreadcrumbLink href="#">Workspace</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator className="hidden md:block" />
-              <BreadcrumbItem>
-                <BreadcrumbPage>
+    <TooltipProvider delayDuration={0}>
+      <SidebarSectionProvider defaultSection="ask-ai">
+        <div className="flex min-h-svh w-full">
+          {/* Icon sidebar - always visible, fixed position */}
+          <SidebarIcon />
+
+          {/* Spacer for the fixed icon sidebar */}
+          <div className="w-14 shrink-0" />
+
+          {/* Content sidebar with SidebarProvider for collapse functionality */}
+          <SidebarProvider
+            style={{
+              "--sidebar-offset": "3.5rem",
+              "--sidebar-width": `${DEFAULT_SIDEBAR_WIDTH}px`,
+            } as React.CSSProperties}
+          >
+            <SidebarContentPanel
+              tree={tree}
+              selectedPath={selectedPath}
+              expandedPaths={expandedPaths}
+              onSelectFile={toggleExpand}
+              chats={chatHistory}
+            />
+            <SidebarInset>
+              {/* Header with sidebar trigger */}
+              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+                <SidebarTrigger className="-ml-1" />
+                <Separator orientation="vertical" className="h-4" />
+                <span className="text-sm font-medium text-muted-foreground">
                   {selectedPath ? selectedPath : 'Chat'}
-                </BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </header>
-        
-        {selectedPath ? (
-          <>
-            <div className="border-b border-border p-2 bg-muted flex items-center justify-between">
-              <div className="text-sm text-muted-foreground">{selectedPath}</div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelectedPath(null)}
-                className="text-foreground"
-              >
-                <MessageSquare className="h-4 w-4 mr-2" />
-                Back to Chat
-              </Button>
-            </div>
-            <div className="flex-1 overflow-auto p-4">
-              <pre className="text-sm font-mono text-foreground whitespace-pre-wrap">
-                {fileContent || 'Loading...'}
-              </pre>
-            </div>
-          </>
-        ) : (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <Conversation className="relative flex-1 overflow-y-auto">
-              <ConversationContent className="mx-auto w-full max-w-4xl pb-28">
-                {!hasConversation ? (
-                  <ConversationEmptyState
-                    description="Type a message below to begin chatting with the agent."
-                    icon={<MessageSquare className="size-6" />}
-                    title="Start a conversation"
-                  />
-                ) : (
-                  <>
-                    {conversation.map(item => renderConversationItem(item))}
-
-                    {currentReasoning && (
-                      <Reasoning isStreaming>
-                        <ReasoningTrigger />
-                        <ReasoningContent>{currentReasoning}</ReasoningContent>
-                      </Reasoning>
-                    )}
-
-                    {currentAssistantMessage && (
-                      <Message from="assistant">
-                        <MessageContent>
-                          <MessageResponse>{currentAssistantMessage}</MessageResponse>
-                        </MessageContent>
-                      </Message>
-                    )}
-
-                    {isProcessing && !currentAssistantMessage && !currentReasoning && (
-                      <Message from="assistant">
-                        <MessageContent>
-                          <Shimmer duration={1}>Thinking...</Shimmer>
-                        </MessageContent>
-                      </Message>
-                    )}
-                  </>
+                </span>
+                {selectedPath && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedPath(null)}
+                    className="ml-auto text-foreground"
+                  >
+                    <MessageSquare className="h-4 w-4 mr-2" />
+                    Back to Chat
+                  </Button>
                 )}
-              </ConversationContent>
-              <ConversationScrollButton className="bottom-24" />
-            </Conversation>
+              </header>
 
-            <div className="relative sticky bottom-0 z-10 bg-background pb-4 pt-6 shadow-lg">
-              <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-background to-transparent" />
-              <div className="mx-auto w-full max-w-4xl">
-                <PromptInput onSubmit={handlePromptSubmit}>
-                  <PromptInputBody>
-                    <PromptInputTextarea
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      placeholder="Type your message..."
-                      disabled={isProcessing}
-                    />
-                  </PromptInputBody>
-                  <PromptInputFooter>
-                    <PromptInputTools>
-                      <Context
-                        maxTokens={maxTokens}
-                        usedTokens={usedTokens}
-                        usage={contextUsage}
-                      >
-                        <ContextTrigger size="sm" />
-                        <ContextContent>
-                          <ContextContentHeader />
-                          <ContextContentBody>
-                            <ContextInputUsage />
-                            <ContextOutputUsage />
-                            <ContextReasoningUsage />
-                            <ContextCacheUsage />
-                          </ContextContentBody>
-                        </ContextContent>
-                      </Context>
-                    </PromptInputTools>
-                    <PromptInputSubmit
-                      disabled={!canSubmit}
-                      status={submitStatus}
-                    />
-                  </PromptInputFooter>
-                </PromptInput>
+              {selectedPath ? (
+                <div className="flex-1 overflow-auto p-4">
+                  <pre className="text-sm font-mono text-foreground whitespace-pre-wrap">
+                    {fileContent || 'Loading...'}
+                  </pre>
+                </div>
+              ) : (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <Conversation className="relative flex-1 overflow-y-auto">
+                  <ConversationContent className={conversationContentClassName}>
+                    {!hasConversation ? (
+                      <ConversationEmptyState className="h-auto">
+                        <div className="text-4xl font-semibold tracking-tight text-foreground/80 sm:text-5xl md:text-6xl">
+                          RowboatX
+                        </div>
+                      </ConversationEmptyState>
+                    ) : (
+                      <>
+                        {conversation.map(item => renderConversationItem(item))}
+
+                        {currentReasoning && (
+                          <Reasoning isStreaming>
+                            <ReasoningTrigger />
+                            <ReasoningContent>{currentReasoning}</ReasoningContent>
+                          </Reasoning>
+                        )}
+
+                        {currentAssistantMessage && (
+                          <Message from="assistant">
+                            <MessageContent>
+                              <MessageResponse>{currentAssistantMessage}</MessageResponse>
+                            </MessageContent>
+                          </Message>
+                        )}
+
+                        {isProcessing && !currentAssistantMessage && !currentReasoning && (
+                          <Message from="assistant">
+                            <MessageContent>
+                              <Shimmer duration={1}>Thinking...</Shimmer>
+                            </MessageContent>
+                          </Message>
+                        )}
+                      </>
+                    )}
+                  </ConversationContent>
+                  <ConversationScrollButton className="bottom-24" />
+                </Conversation>
+
+                <div className="relative sticky bottom-0 z-10 bg-background pb-4 pt-6 shadow-lg">
+                  <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-background to-transparent" />
+                  <div className="mx-auto w-full max-w-4xl px-4">
+                    <PromptInput onSubmit={handlePromptSubmit}>
+                      <PromptInputBody>
+                        <PromptInputTextarea
+                          value={message}
+                          onChange={(e) => setMessage(e.target.value)}
+                          placeholder="Type your message..."
+                          disabled={isProcessing}
+                        />
+                      </PromptInputBody>
+                      <PromptInputFooter>
+                        <PromptInputTools>
+                          <Context
+                            maxTokens={maxTokens}
+                            usedTokens={usedTokens}
+                            usage={contextUsage}
+                          >
+                            <ContextTrigger size="sm" />
+                            <ContextContent>
+                              <ContextContentHeader />
+                              <ContextContentBody>
+                                <ContextInputUsage />
+                                <ContextOutputUsage />
+                                <ContextReasoningUsage />
+                                <ContextCacheUsage />
+                              </ContextContentBody>
+                            </ContextContent>
+                          </Context>
+                        </PromptInputTools>
+                        <PromptInputSubmit
+                          disabled={!canSubmit}
+                          status={submitStatus}
+                        />
+                      </PromptInputFooter>
+                    </PromptInput>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
-      </SidebarInset>
-    </SidebarProvider>
+              )}
+            </SidebarInset>
+          </SidebarProvider>
+        </div>
+      </SidebarSectionProvider>
+    </TooltipProvider>
   )
 }
 

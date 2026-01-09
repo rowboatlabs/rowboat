@@ -1,0 +1,101 @@
+"use client"
+
+import * as React from "react"
+import {
+  Bot,
+  Brain,
+  HelpCircle,
+  Settings,
+  Ship,
+  Sparkles,
+  Trash2,
+} from "lucide-react"
+
+import { cn } from "@/lib/utils"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
+
+type NavItem = {
+  id: ActiveSection
+  title: string
+  icon: React.ElementType
+}
+
+type SecondaryItem = {
+  id: string
+  title: string
+  icon: React.ElementType
+  action?: () => void
+}
+
+const navItems: NavItem[] = [
+  { id: "ask-ai", title: "Ask AI", icon: Sparkles },
+  { id: "knowledge", title: "Knowledge", icon: Brain },
+  { id: "agents", title: "Agents", icon: Bot },
+]
+
+const secondaryItems: SecondaryItem[] = [
+  { id: "settings", title: "Settings", icon: Settings },
+  { id: "trash", title: "Trash", icon: Trash2 },
+  { id: "help", title: "Help", icon: HelpCircle },
+]
+
+export function SidebarIcon() {
+  const { activeSection, setActiveSection } = useSidebarSection()
+
+  return (
+    <div className="bg-sidebar border-r border-sidebar-border flex h-svh w-14 flex-col items-center py-2 fixed left-0 top-0 z-50 shrink-0">
+      {/* Logo */}
+      <div className="flex h-10 w-10 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground mb-4">
+        <Ship className="size-5" />
+      </div>
+
+      {/* Main navigation */}
+      <nav className="flex flex-1 flex-col items-center gap-1">
+        {navItems.map((item) => (
+          <Tooltip key={item.id}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setActiveSection(item.id)}
+                className={cn(
+                  "flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+                  activeSection === item.id
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <item.icon className="size-5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>
+              {item.title}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </nav>
+
+      {/* Secondary navigation (bottom) */}
+      <nav className="flex flex-col items-center gap-1">
+        {secondaryItems.map((item) => (
+          <Tooltip key={item.id}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={item.action}
+                className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+              >
+                <item.icon className="size-5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>
+              {item.title}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </nav>
+    </div>
+  )
+}
