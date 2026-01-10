@@ -7,6 +7,7 @@ import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
+import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -57,6 +58,9 @@ app.whenReady().then(() => {
 
   // start granola sync
   initGranolaSync();
+
+  // start knowledge graph builder
+  initGraphBuilder();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

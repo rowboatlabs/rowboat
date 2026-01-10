@@ -20,6 +20,16 @@ import {
 const NOTES_OUTPUT_DIR = path.join(WorkDir, 'notes');
 const NOTE_CREATION_AGENT = 'note_creation';
 
+// Configuration for the graph builder service
+const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes (reduced frequency)
+const SOURCE_FOLDERS = [
+    'gmail_sync',
+    'fireflies_transcripts',
+    'granola_notes'  // Corrected from 'granola_meetings'
+];
+const MAX_CONCURRENT_BATCHES = 1; // Process only 1 batch at a time to avoid overwhelming the agent
+const BATCH_DELAY_MS = 5000; // 5 second delay between batches to avoid overwhelming the system
+
 /**
  * Read content for specific files
  */
@@ -121,7 +131,7 @@ export async function buildGraph(sourceDir: string): Promise<void> {
         return;
     }
 
-    const BATCH_SIZE = 25; // Process 25 files per agent run
+    const BATCH_SIZE = 10; // Reduced from 25 to 10 files per agent run for faster processing
     const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
 
     console.log(`Processing ${contentFiles.length} files in ${totalBatches} batches (${BATCH_SIZE} files per batch)...`);
@@ -136,6 +146,12 @@ export async function buildGraph(sourceDir: string): Promise<void> {
             console.log(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
             await createNotesFromBatch(batch, batchNumber);
             console.log(`Batch ${batchNumber}/${totalBatches} complete`);
+
+            // Add delay between batches to avoid overwhelming the system
+            if (i + BATCH_SIZE < contentFiles.length) {
+                console.log(`Waiting ${BATCH_DELAY_MS/1000} seconds before next batch...`);
+                await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+            }
 
             // Mark files in this batch as processed
             for (const file of batch) {
@@ -160,11 +176,66 @@ export async function buildGraph(sourceDir: string): Promise<void> {
 }
 
 /**
- * Main entry point - processes gmail_sync directory by default
+ * Process all configured source directories
+ */
+async function processAllSources(): Promise<void> {
+    console.log('[GraphBuilder] Checking for new content in all sources...');
+
+    let anyFilesProcessed = false;
+
+    for (const folder of SOURCE_FOLDERS) {
+        const sourceDir = path.join(WorkDir, folder);
+
+        // Skip if folder doesn't exist
+        if (!fs.existsSync(sourceDir)) {
+            // Don't log this every time - it's noisy
+            continue;
+        }
+
+        try {
+            // Quick check if there are any files to process before doing the full build
+            const state = loadState();
+            const filesToProcess = getFilesToProcess(sourceDir, state);
+
+            if (filesToProcess.length > 0) {
+                console.log(`[GraphBuilder] Found ${filesToProcess.length} new/changed files in ${folder}`);
+                await buildGraph(sourceDir);
+                anyFilesProcessed = true;
+            }
+        } catch (error) {
+            console.error(`[GraphBuilder] Error processing ${folder}:`, error);
+            // Continue with other folders even if one fails
+        }
+    }
+
+    if (!anyFilesProcessed) {
+        console.log('[GraphBuilder] No new content to process');
+    } else {
+        console.log('[GraphBuilder] Completed processing all sources');
+    }
+}
+
+/**
+ * Main entry point - runs as independent service monitoring all source folders
  */
 export async function init() {
-    const defaultSourceDir = path.join(WorkDir, 'gmail_sync');
-    await buildGraph(defaultSourceDir);
+    console.log('[GraphBuilder] Starting Knowledge Graph Builder Service...');
+    console.log(`[GraphBuilder] Monitoring folders: ${SOURCE_FOLDERS.join(', ')}`);
+    console.log(`[GraphBuilder] Will check for new content every ${SYNC_INTERVAL_MS / 1000} seconds`);
+
+    // Initial run
+    await processAllSources();
+
+    // Set up periodic processing
+    while (true) {
+        await new Promise(resolve => setTimeout(resolve, SYNC_INTERVAL_MS));
+
+        try {
+            await processAllSources();
+        } catch (error) {
+            console.error('[GraphBuilder] Error in main loop:', error);
+        }
+    }
 }
 
 /**

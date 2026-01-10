@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 import { WorkDir } from '../../config/config.js';
-import { buildGraph } from '../build_graph.js';
 import container from '../../di/container.js';
 import { IGranolaConfigRepo } from './repo.js';
 import {
@@ -314,12 +313,7 @@ async function syncNotes(): Promise<void> {
     
     // Build knowledge graph if there were changes
     if (newCount > 0 || updatedCount > 0) {
-        console.log('[Granola] Starting knowledge graph build...');
-        try {
-            await buildGraph(SYNC_DIR);
-        } catch (error) {
-            console.error('[Granola] Error building knowledge graph:', error);
-        }
+        // Graph building is now handled by the independent graph builder service
     }
 }
 

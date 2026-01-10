@@ -4,7 +4,6 @@ import { google, gmail_v1 as gmail } from 'googleapis';
 import { NodeHtmlMarkdown } from 'node-html-markdown'
 import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
-import { buildGraph } from './build_graph.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 
 // Configuration
@@ -281,14 +280,6 @@ async function performSync() {
         }
 
         console.log("Sync completed.");
-
-        // Build knowledge graph after successful sync
-        console.log("\nStarting knowledge graph build...");
-        try {
-            await buildGraph(SYNC_DIR);
-        } catch (error) {
-            console.error("Error building knowledge graph:", error);
-        }
     } catch (error) {
         console.error("Error during sync:", error);
     }
