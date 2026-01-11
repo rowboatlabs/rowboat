@@ -1,12 +1,14 @@
 import * as React from 'react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ChatStatus, LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, CheckIcon, LoaderIcon } from 'lucide-react';
+import { MarkdownEditor } from './components/markdown-editor';
+import { useDebounce } from './hooks/use-debounce';
 import { SidebarIcon } from '@/components/sidebar-icon';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
@@ -224,8 +226,15 @@ function App() {
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string>('')
+  const [editorContent, setEditorContent] = useState<string>('')
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
+
+  // Auto-save state
+  const [isSaving, setIsSaving] = useState(false)
+  const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const debouncedContent = useDebounce(editorContent, 500)
+  const initialContentRef = useRef<string>('')
 
   // Chat state
   const [message, setMessage] = useState<string>('')
@@ -268,6 +277,9 @@ function App() {
   useEffect(() => {
     if (!selectedPath) {
       setFileContent('')
+      setEditorContent('')
+      initialContentRef.current = ''
+      setLastSaved(null)
       return
     }
     (async () => {
@@ -276,15 +288,47 @@ function App() {
         if (stat.kind === 'file') {
           const result = await window.ipc.invoke('workspace:readFile', { path: selectedPath })
           setFileContent(result.data)
+          setEditorContent(result.data)
+          initialContentRef.current = result.data
+          setLastSaved(null)
         } else {
           setFileContent('')
+          setEditorContent('')
+          initialContentRef.current = ''
         }
       } catch (err) {
         console.error('Failed to load file:', err)
         setFileContent('')
+        setEditorContent('')
+        initialContentRef.current = ''
       }
     })()
   }, [selectedPath])
+
+  // Auto-save when content changes
+  useEffect(() => {
+    if (!selectedPath || !selectedPath.endsWith('.md')) return
+    if (debouncedContent === initialContentRef.current) return
+    if (!debouncedContent) return
+
+    const saveFile = async () => {
+      setIsSaving(true)
+      try {
+        await window.ipc.invoke('workspace:writeFile', {
+          path: selectedPath,
+          data: debouncedContent,
+          opts: { encoding: 'utf8' }
+        })
+        initialContentRef.current = debouncedContent
+        setLastSaved(new Date())
+      } catch (err) {
+        console.error('Failed to save file:', err)
+      } finally {
+        setIsSaving(false)
+      }
+    }
+    saveFile()
+  }, [debouncedContent, selectedPath])
 
   // Listen to run events
   useEffect(() => {
@@ -685,24 +729,48 @@ function App() {
                   {selectedPath ? selectedPath : 'Chat'}
                 </span>
                 {selectedPath && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSelectedPath(null)}
-                    className="ml-auto text-foreground"
-                  >
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    Back to Chat
-                  </Button>
+                  <>
+                    {/* Save status indicator */}
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      {isSaving ? (
+                        <>
+                          <LoaderIcon className="h-3 w-3 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : lastSaved ? (
+                        <>
+                          <CheckIcon className="h-3 w-3 text-green-500" />
+                          <span>Saved</span>
+                        </>
+                      ) : null}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedPath(null)}
+                      className="ml-auto text-foreground"
+                    >
+                      <MessageSquare className="h-4 w-4 mr-2" />
+                      Back to Chat
+                    </Button>
+                  </>
                 )}
               </header>
 
               {selectedPath ? (
-                <div className="flex-1 overflow-auto p-4">
-                  <pre className="text-sm font-mono text-foreground whitespace-pre-wrap">
-                    {fileContent || 'Loading...'}
-                  </pre>
-                </div>
+                selectedPath.endsWith('.md') ? (
+                  <MarkdownEditor
+                    content={editorContent}
+                    onChange={setEditorContent}
+                    placeholder="Start writing..."
+                  />
+                ) : (
+                  <div className="flex-1 overflow-auto p-4">
+                    <pre className="text-sm font-mono text-foreground whitespace-pre-wrap">
+                      {fileContent || 'Loading...'}
+                    </pre>
+                  </div>
+                )
               ) : (
               <div className="flex min-h-0 flex-1 flex-col">
                 <Conversation className="relative flex-1 overflow-y-auto">
