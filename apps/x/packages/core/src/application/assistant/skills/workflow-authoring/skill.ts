@@ -110,8 +110,9 @@ Internal Rowboat tools (executeCommand, file operations, MCP queries, etc.)
 
 **Available builtin tools:**
 - \`executeCommand\` - Execute shell commands
-- \`readFile\`, \`createFile\`, \`updateFile\`, \`deleteFile\` - File operations
-- \`listFiles\`, \`exploreDirectory\` - Directory operations
+- \`workspace-readFile\`, \`workspace-writeFile\`, \`workspace-remove\` - File operations
+- \`workspace-readdir\`, \`workspace-exists\`, \`workspace-stat\` - Directory operations
+- \`workspace-mkdir\`, \`workspace-rename\`, \`workspace-copy\` - File/directory management
 - \`analyzeAgent\` - Analyze agent structure
 - \`addMcpServer\`, \`listMcpServers\`, \`listMcpTools\` - MCP management
 - \`loadSkill\` - Load skill guidance
@@ -280,8 +281,8 @@ Reference other agents as tools to build multi-agent workflows
 - Invalid agents will fail to load and prevent workflow execution
 
 ### File Creation/Update Process
-1. When creating an agent, use \`createFile\` with complete, valid JSON
-2. When updating an agent, read it first with \`readFile\`, modify, then use \`updateFile\`
+1. When creating an agent, use \`workspace-writeFile\` with complete, valid JSON
+2. When updating an agent, read it first with \`workspace-readFile\`, modify, then use \`workspace-writeFile\`
 3. Validate JSON syntax before writing—malformed JSON breaks the agent
 4. Test agent loading after creation/update by using \`analyzeAgent\`
 

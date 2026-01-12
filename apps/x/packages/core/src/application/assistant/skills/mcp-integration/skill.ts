@@ -36,7 +36,7 @@ export const skill = String.raw`
 
 **ALWAYS use the \`addMcpServer\` builtin tool** to add or update MCP server configurations. This tool validates the configuration before saving and prevents startup errors.
 
-**NEVER manually create or edit \`config/mcp.json\`** using \`createFile\` or \`updateFile\` for MCP servers—this bypasses validation and will cause errors.
+**NEVER manually create or edit \`config/mcp.json\`** using \`workspace-writeFile\` for MCP servers—this bypasses validation and will cause errors.
 
 ### MCP Server Configuration Schema
 

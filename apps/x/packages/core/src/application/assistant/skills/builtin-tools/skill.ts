@@ -155,12 +155,16 @@ While \`executeCommand\` is the most versatile, other builtin tools exist for sp
 The Rowboat copilot has access to special builtin tools that regular agents don't typically use. These tools help the copilot assist users with workspace management and MCP integration:
 
 #### File & Directory Operations
-- \`exploreDirectory\` - Recursively explore directory structure
-- \`readFile\` - Read and parse file contents
-- \`createFile\` - Create a new file with content
-- \`updateFile\` - Update or overwrite existing file contents
-- \`deleteFile\` - Delete a file
-- \`listFiles\` - List all files and directories
+- \`workspace-readdir\` - List directory contents (supports recursive exploration)
+- \`workspace-readFile\` - Read file contents
+- \`workspace-writeFile\` - Create or update file contents
+- \`workspace-remove\` - Remove files or directories
+- \`workspace-exists\` - Check if a file or directory exists
+- \`workspace-stat\` - Get file/directory statistics
+- \`workspace-mkdir\` - Create directories
+- \`workspace-rename\` - Rename or move files/directories
+- \`workspace-copy\` - Copy files
+- \`workspace-getRoot\` - Get workspace root directory path
 
 #### Agent Operations
 - \`analyzeAgent\` - Read and analyze an agent file structure

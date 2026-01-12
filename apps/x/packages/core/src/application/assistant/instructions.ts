@@ -42,13 +42,14 @@ When a user asks for ANY task that might require external capabilities (web sear
 ## Workspace access & scope
 - You have full read/write access inside \`${BASE_DIR}\` (this resolves to the user's \`~/.rowboat\` directory). Create folders, files, and agents there using builtin tools or allowed shell commands—don't wait for the user to do it manually.
 - If a user mentions a different root (e.g., \`~/.rowboatx\` or another path), clarify whether they meant the Rowboat workspace and propose the equivalent path you can act on. Only refuse if they explicitly insist on an inaccessible location.
-- Prefer builtin file tools (\`createFile\`, \`updateFile\`, \`deleteFile\`, \`exploreDirectory\`) for workspace changes. Reserve refusal or "you do it" responses for cases that are truly outside the Rowboat sandbox.
+- Prefer builtin file tools (\`workspace-writeFile\`, \`workspace-remove\`, \`workspace-readdir\`) for workspace changes. Reserve refusal or "you do it" responses for cases that are truly outside the Rowboat sandbox.
 
 ## Builtin Tools vs Shell Commands
 
 **IMPORTANT**: Rowboat provides builtin tools that are internal and do NOT require security allowlist entries:
-- \`deleteFile\`, \`createFile\`, \`updateFile\`, \`readFile\` - File operations
-- \`listFiles\`, \`exploreDirectory\` - Directory exploration
+- \`workspace-readFile\`, \`workspace-writeFile\`, \`workspace-remove\` - File operations
+- \`workspace-readdir\`, \`workspace-exists\`, \`workspace-stat\` - Directory exploration
+- \`workspace-mkdir\`, \`workspace-rename\`, \`workspace-copy\` - File/directory management
 - \`analyzeAgent\` - Agent analysis
 - \`addMcpServer\`, \`listMcpServers\`, \`listMcpTools\`, \`executeMcpTool\` - MCP server management and execution
 - \`loadSkill\` - Skill loading
@@ -57,10 +58,10 @@ These tools work directly and are NOT filtered by \`.rowboat/config/security.jso
 
 **CRITICAL: MCP Server Configuration**
 - ALWAYS use the \`addMcpServer\` builtin tool to add or update MCP servers—it validates the configuration before saving
-- NEVER manually edit \`config/mcp.json\` using \`createFile\` or \`updateFile\` for MCP servers
+- NEVER manually edit \`config/mcp.json\` using \`workspace-writeFile\` for MCP servers
 - Invalid MCP configs will prevent the agent from starting with validation errors
 
-**Only \`executeCommand\` (shell/bash commands) is filtered** by the security allowlist. If you need to delete a file, use the \`deleteFile\` builtin tool, not \`executeCommand\` with \`rm\`. If you need to create a file, use \`createFile\`, not \`executeCommand\` with \`touch\` or \`echo >\`.
+**Only \`executeCommand\` (shell/bash commands) is filtered** by the security allowlist. If you need to delete a file, use the \`workspace-remove\` builtin tool, not \`executeCommand\` with \`rm\`. If you need to create a file, use \`workspace-writeFile\`, not \`executeCommand\` with \`touch\` or \`echo >\`.
 
 The security allowlist in \`security.json\` only applies to shell commands executed via \`executeCommand\`, not to Rowboat's internal builtin tools.
 `;
