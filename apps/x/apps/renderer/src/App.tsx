@@ -705,7 +705,7 @@ function App() {
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="ask-ai" onSectionChange={handleSectionChange}>
-        <div className="flex min-h-svh w-full">
+        <div className="flex h-svh w-full">
           {/* Icon sidebar - always visible, fixed position */}
           <SidebarIcon />
 
@@ -727,9 +727,9 @@ function App() {
               knowledgeActions={knowledgeActions}
               chats={chatHistory}
             />
-            <SidebarInset>
+            <SidebarInset className="!overflow-hidden min-h-0">
               {/* Header with sidebar trigger */}
-              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 bg-background">
                 <SidebarTrigger className="-ml-1" />
                 <Separator orientation="vertical" className="h-4" />
                 <span className="text-sm font-medium text-muted-foreground">
@@ -766,11 +766,13 @@ function App() {
 
               {selectedPath ? (
                 selectedPath.endsWith('.md') ? (
-                  <MarkdownEditor
-                    content={editorContent}
-                    onChange={setEditorContent}
-                    placeholder="Start writing..."
-                  />
+                  <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                    <MarkdownEditor
+                      content={editorContent}
+                      onChange={setEditorContent}
+                      placeholder="Start writing..."
+                    />
+                  </div>
                 ) : (
                   <div className="flex-1 overflow-auto p-4">
                     <pre className="text-sm font-mono text-foreground whitespace-pre-wrap">

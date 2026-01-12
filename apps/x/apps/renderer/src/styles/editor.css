@@ -3,14 +3,21 @@
 .tiptap-editor {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* This wrapper is the scroll container */
+.editor-content-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .tiptap-editor .ProseMirror {
-  flex: 1;
   padding: 1rem;
   outline: none;
-  overflow-y: auto;
 }
 
 .tiptap-editor .ProseMirror:focus {
@@ -195,6 +202,7 @@
   padding: 0.5rem;
   border-bottom: 1px solid var(--border);
   background-color: var(--background);
+  flex-shrink: 0;
 }
 
 .editor-toolbar .separator {

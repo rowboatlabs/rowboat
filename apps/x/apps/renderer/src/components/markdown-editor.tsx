@@ -76,7 +76,9 @@ export function MarkdownEditor({ content, onChange, placeholder = 'Start writing
   return (
     <div className="tiptap-editor" onKeyDown={handleKeyDown}>
       <EditorToolbar editor={editor} />
-      <EditorContent editor={editor} />
+      <div className="editor-content-wrapper">
+        <EditorContent editor={editor} />
+      </div>
     </div>
   )
 }

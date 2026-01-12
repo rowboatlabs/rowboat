@@ -263,8 +263,8 @@ function KnowledgeSection({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <SidebarGroup className="flex-1 flex flex-col">
-          <div className="flex items-center justify-center gap-1 py-1">
+        <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex items-center justify-center gap-1 py-1 sticky top-0 z-10 bg-sidebar border-b border-sidebar-border">
             {quickActions.map((action) => (
               <Tooltip key={action.label}>
                 <TooltipTrigger asChild>
@@ -296,7 +296,7 @@ function KnowledgeSection({
               </TooltipContent>
             </Tooltip>
           </div>
-          <SidebarGroupContent className="flex-1">
+          <SidebarGroupContent className="flex-1 overflow-y-auto">
             <SidebarMenu>
               {tree.map((item, index) => (
                 <Tree
