@@ -21,19 +21,26 @@ export function useSidebarSection() {
 
 export function SidebarSectionProvider({
   defaultSection = "ask-ai",
+  onSectionChange,
   children,
 }: {
   defaultSection?: ActiveSection
+  onSectionChange?: (section: ActiveSection) => void
   children: React.ReactNode
 }) {
-  const [activeSection, setActiveSection] = React.useState<ActiveSection>(defaultSection)
+  const [activeSection, setActiveSectionState] = React.useState<ActiveSection>(defaultSection)
+
+  const setActiveSection = React.useCallback((section: ActiveSection) => {
+    setActiveSectionState(section)
+    onSectionChange?.(section)
+  }, [onSectionChange])
 
   const contextValue = React.useMemo<SidebarSectionContextProps>(
     () => ({
       activeSection,
       setActiveSection,
     }),
-    [activeSection]
+    [activeSection, setActiveSection]
   )
 
   return (

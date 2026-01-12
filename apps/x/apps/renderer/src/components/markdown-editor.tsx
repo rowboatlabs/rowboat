@@ -35,6 +35,7 @@ export function MarkdownEditor({ content, onChange, placeholder = 'Start writing
       }),
       Markdown.configure({
         html: false,
+        breaks: true,
         transformCopiedText: true,
         transformPastedText: true,
       }),

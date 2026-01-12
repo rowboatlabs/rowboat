@@ -11,7 +11,7 @@ import { MarkdownEditor } from './components/markdown-editor';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarIcon } from '@/components/sidebar-icon';
 import { SidebarContentPanel } from '@/components/sidebar-content';
-import { SidebarSectionProvider } from '@/contexts/sidebar-context';
+import { SidebarSectionProvider, type ActiveSection } from '@/contexts/sidebar-context';
 import {
   Conversation,
   ConversationContent,
@@ -538,6 +538,13 @@ function App() {
     setExpandedPaths(newExpanded)
   }
 
+  // Handle sidebar section changes - switch to chat view for ask-ai and agents
+  const handleSectionChange = useCallback((section: ActiveSection) => {
+    if (section === 'ask-ai' || section === 'agents') {
+      setSelectedPath(null)
+    }
+  }, [])
+
   // Knowledge quick actions
   const collectDirPaths = (nodes: TreeNode[]): string[] => 
     nodes.flatMap(n => n.kind === 'dir' ? [n.path, ...(n.children ? collectDirPaths(n.children) : [])] : [])
@@ -697,7 +704,7 @@ function App() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <SidebarSectionProvider defaultSection="ask-ai">
+      <SidebarSectionProvider defaultSection="ask-ai" onSectionChange={handleSectionChange}>
         <div className="flex min-h-svh w-full">
           {/* Icon sidebar - always visible, fixed position */}
           <SidebarIcon />
