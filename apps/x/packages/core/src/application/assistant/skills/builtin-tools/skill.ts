@@ -5,21 +5,19 @@ Load this skill when creating or modifying agents that need access to Rowboat's 
 
 ## Available Builtin Tools
 
-Agents can use builtin tools by declaring them in the \`"tools"\` object with \`"type": "builtin"\` and the appropriate \`"name"\`.
+Agents can use builtin tools by declaring them in the YAML frontmatter \`tools\` section with \`type: builtin\` and the appropriate \`name\`.
 
 ### executeCommand
 **The most powerful and versatile builtin tool** - Execute any bash/shell command and get the output.
 
 **Security note:** Commands are filtered through \`.rowboat/config/security.json\`. Populate this file with allowed command names (array or dictionary entries). Any command not present is blocked and returns exit code 126 so the agent knows it violated the policy.
 
-**Agent tool declaration:**
-\`\`\`json
-"tools": {
-  "bash": {
-    "type": "builtin",
-    "name": "executeCommand"
-  }
-}
+**Agent tool declaration (YAML frontmatter):**
+\`\`\`yaml
+tools:
+  bash:
+    type: builtin
+    name: executeCommand
 \`\`\`
 
 **What it can do:**
@@ -51,66 +49,78 @@ Agents can use builtin tools by declaring them in the \`"tools"\` object with \`
 - Full bash shell features are available (variables, loops, conditionals, etc.)
 - Tools like jq, yq, awk, sed can parse and transform data
 
-**Example agent with executeCommand:**
-\`\`\`json
-{
-  "name": "arxiv-feed-reader",
-  "description": "A feed reader for the arXiv",
-  "model": "gpt-5.1",
-  "instructions": "Extract latest papers from the arXiv feed and summarize them. Use curl to fetch the RSS feed, then parse it with yq and jq:\n\ncurl -s https://rss.arxiv.org/rss/cs.AI | yq -p=xml -o=json | jq -r '.rss.channel.item[] | select(.title | test(\"agent\"; \"i\")) | \"\\(.title)\\n\\(.link)\\n\\(.description)\\n\"'\n\nThis will give you papers containing 'agent' in the title.",
-  "tools": {
-    "bash": {
-      "type": "builtin",
-      "name": "executeCommand"
-    }
-  }
-}
+**Example agent with executeCommand** (\`agents/arxiv-feed-reader.md\`):
+\`\`\`markdown
+---
+model: gpt-5.1
+tools:
+  bash:
+    type: builtin
+    name: executeCommand
+---
+# arXiv Feed Reader
+
+Extract latest papers from the arXiv feed and summarize them.
+
+Use curl to fetch the RSS feed, then parse it with yq and jq:
+
+\\\`\\\`\\\`bash
+curl -s https://rss.arxiv.org/rss/cs.AI | yq -p=xml -o=json | jq -r '.rss.channel.item[] | select(.title | test("agent"; "i")) | "\\(.title)\\n\\(.link)\\n\\(.description)\\n"'
+\\\`\\\`\\\`
+
+This will give you papers containing 'agent' in the title.
 \`\`\`
 
-**Another example - System monitoring agent:**
-\`\`\`json
-{
-  "name": "system-monitor",
-  "description": "Monitor system resources and processes",
-  "model": "gpt-5.1",
-  "instructions": "Monitor system resources using bash commands. Use 'df -h' for disk usage, 'free -h' for memory, 'top -bn1' for processes, 'ps aux' for process list. Parse the output and report any issues.",
-  "tools": {
-    "bash": {
-      "type": "builtin",
-      "name": "executeCommand"
-    }
-  }
-}
+**Another example - System monitoring agent** (\`agents/system-monitor.md\`):
+\`\`\`markdown
+---
+model: gpt-5.1
+tools:
+  bash:
+    type: builtin
+    name: executeCommand
+---
+# System Monitor
+
+Monitor system resources using bash commands:
+- Use 'df -h' for disk usage
+- Use 'free -h' for memory
+- Use 'top -bn1' for processes
+- Use 'ps aux' for process list
+
+Parse the output and report any issues.
 \`\`\`
 
-**Another example - Git automation agent:**
-\`\`\`json
-{
-  "name": "git-helper",
-  "description": "Automate git operations",
-  "model": "gpt-5.1",
-  "instructions": "Help with git operations. Use commands like 'git status', 'git log --oneline -10', 'git diff', 'git branch -a' to inspect the repository. Can also run 'git add', 'git commit', 'git push' when instructed.",
-  "tools": {
-    "bash": {
-      "type": "builtin",
-      "name": "executeCommand"
-    }
-  }
-}
+**Another example - Git automation agent** (\`agents/git-helper.md\`):
+\`\`\`markdown
+---
+model: gpt-5.1
+tools:
+  bash:
+    type: builtin
+    name: executeCommand
+---
+# Git Helper
+
+Help with git operations. Use commands like:
+- 'git status' - Check working tree status
+- 'git log --oneline -10' - View recent commits
+- 'git diff' - See changes
+- 'git branch -a' - List branches
+
+Can also run 'git add', 'git commit', 'git push' when instructed.
 \`\`\`
 
 ## Agent-to-Agent Calling
 
 Agents can call other agents as tools to create complex multi-step workflows. This is the core mechanism for building multi-agent systems in the CLI.
 
-**Tool declaration:**
-\`\`\`json
-"tools": {
-  "summariser": {
-    "type": "agent",
-    "name": "summariser_agent"
-  }
-}
+**Tool declaration (YAML frontmatter):**
+\`\`\`yaml
+tools:
+  summariser:
+    type: agent
+    name: summariser_agent
 \`\`\`
 
 **When to use:**
@@ -125,19 +135,19 @@ Agents can call other agents as tools to create complex multi-step workflows. Th
 - Results are returned as tool output
 - The calling agent can then continue processing or delegate further
 
-**Example - Agent that delegates to a summarizer:**
-\`\`\`json
-{
-  "name": "paper_analyzer",
-  "model": "gpt-5.1",
-  "instructions": "Pick 2 interesting papers and summarise each using the summariser tool. Pass the paper URL to the summariser. Don't ask for human input.",
-  "tools": {
-    "summariser": {
-      "type": "agent",
-      "name": "summariser_agent"
-    }
-  }
-}
+**Example - Agent that delegates to a summarizer** (\`agents/paper_analyzer.md\`):
+\`\`\`markdown
+---
+model: gpt-5.1
+tools:
+  summariser:
+    type: agent
+    name: summariser_agent
+---
+# Paper Analyzer
+
+Pick 2 interesting papers and summarise each using the summariser tool.
+Pass the paper URL to the summariser. Don't ask for human input.
 \`\`\`
 
 **Tips for agent chaining:**
@@ -198,18 +208,18 @@ The \`executeMcpTool\` builtin allows the copilot to directly execute MCP tools 
 
 - **Use builtin executeCommand** when you need: CLI tools, system operations, data processing, git operations, any shell command
 - **Use MCP tools** when you need: Web scraping (firecrawl), text-to-speech (elevenlabs), specialized APIs, external service integrations
-- **Use agent tools (\`"type": "agent"\`)** when you need: Complex multi-step logic, task delegation, specialized processing that benefits from LLM reasoning
+- **Use agent tools (\`type: agent\`)** when you need: Complex multi-step logic, task delegation, specialized processing that benefits from LLM reasoning
 
 Many tasks can be accomplished with just \`executeCommand\` and common Unix tools - it's incredibly powerful!
 
 ## Key Insight: Multi-Agent Workflows
 
 In the CLI, multi-agent workflows are built by:
-1. Creating specialized agents for specific tasks (in \`agents/\` directory)
-2. Creating an orchestrator agent that has other agents in its \`tools\`
+1. Creating specialized agents as Markdown files in the \`agents/\` directory
+2. Creating an orchestrator agent that has other agents in its \`tools\` (YAML frontmatter)
 3. Running the orchestrator with \`rowboatx --agent orchestrator_name\`
 
-There are no separate "workflow" files - everything is an agent!
+There are no separate "workflow" files - everything is an agent defined in Markdown!
 `;
 
 export default skill;

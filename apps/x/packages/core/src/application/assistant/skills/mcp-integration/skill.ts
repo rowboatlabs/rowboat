@@ -359,70 +359,67 @@ Always use \`listMcpServers\` and \`listMcpTools\` to discover what's actually a
 
 ## Adding MCP Tools to Agents
 
-Once an MCP server is configured, add its tools to agent definitions:
+Once an MCP server is configured, add its tools to agent definitions (Markdown files with YAML frontmatter):
 
-### MCP Tool Format in Agent
-\`\`\`json
-"tools": {
-  "descriptive_key": {
-    "type": "mcp",
-    "name": "actual_tool_name_from_server",
-    "description": "What the tool does",
-    "mcpServerName": "server_name_from_config",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "param1": {"type": "string", "description": "What param1 means"}
-      },
-      "required": ["param1"]
-    }
-  }
-}
+### MCP Tool Format in Agent (YAML frontmatter)
+\`\`\`yaml
+tools:
+  descriptive_key:
+    type: mcp
+    name: actual_tool_name_from_server
+    description: What the tool does
+    mcpServerName: server_name_from_config
+    inputSchema:
+      type: object
+      properties:
+        param1:
+          type: string
+          description: What param1 means
+      required:
+        - param1
 \`\`\`
 
 ### Tool Schema Rules
 - Use \`listMcpTools\` to get the exact \`inputSchema\` from the server
 - Copy the schema exactly as provided by the MCP server
-- Only include \`"required"\` array if parameters are truly mandatory
+- Only include \`required\` array if parameters are truly mandatory
 - Add descriptions to help the agent understand parameter usage
 
 ### Example snippets to reference
 - Firecrawl search (required param):
-\`\`\`json
-"tools": {
-  "search": {
-    "type": "mcp",
-    "name": "firecrawl_search",
-    "description": "Search the web",
-    "mcpServerName": "firecrawl",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "query": {"type": "string", "description": "Search query"},
-        "limit": {"type": "number", "description": "Number of results"}
-      },
-      "required": ["query"]
-    }
-  }
-}
+\`\`\`yaml
+tools:
+  search:
+    type: mcp
+    name: firecrawl_search
+    description: Search the web
+    mcpServerName: firecrawl
+    inputSchema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Search query
+        limit:
+          type: number
+          description: Number of results
+      required:
+        - query
 \`\`\`
 
 - ElevenLabs text-to-speech (no required array):
-\`\`\`json
-"tools": {
-  "text_to_speech": {
-    "type": "mcp",
-    "name": "text_to_speech",
-    "description": "Generate audio from text",
-    "mcpServerName": "elevenLabs",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "text": {"type": "string"}
-      }
-    }
-  }
-}
+\`\`\`yaml
+tools:
+  text_to_speech:
+    type: mcp
+    name: text_to_speech
+    description: Generate audio from text
+    mcpServerName: elevenLabs
+    inputSchema:
+      type: object
+      properties:
+        text:
+          type: string
 \`\`\`
 
 
