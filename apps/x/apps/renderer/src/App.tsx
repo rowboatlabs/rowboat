@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
+import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -200,6 +201,12 @@ function buildTree(entries: DirEntry[]): TreeNode[] {
   return sortNodes(roots)
 }
 
+const collectDirPaths = (nodes: TreeNode[]): string[] =>
+  nodes.flatMap(n => n.kind === 'dir' ? [n.path, ...(n.children ? collectDirPaths(n.children) : [])] : [])
+
+const collectFilePaths = (nodes: TreeNode[]): string[] =>
+  nodes.flatMap(n => n.kind === 'file' ? [n.path] : (n.children ? collectFilePaths(n.children) : []))
+
 // Sample chat history (will be replaced with real data later)
 const chatHistory = [
   {
@@ -229,6 +236,7 @@ function App() {
   const [editorContent, setEditorContent] = useState<string>('')
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
+  const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
 
   // Auto-save state
   const [isSaving, setIsSaving] = useState(false)
@@ -303,6 +311,16 @@ function App() {
         initialContentRef.current = ''
       }
     })()
+  }, [selectedPath])
+
+  // Track recently opened markdown files for wiki links
+  useEffect(() => {
+    if (!selectedPath || !selectedPath.endsWith('.md')) return
+    const wikiPath = stripKnowledgePrefix(selectedPath)
+    setRecentWikiFiles((prev) => {
+      const next = [wikiPath, ...prev.filter((path) => path !== wikiPath)]
+      return next.slice(0, 50)
+    })
   }, [selectedPath])
 
   // Auto-save when content changes
@@ -546,8 +564,10 @@ function App() {
   }, [])
 
   // Knowledge quick actions
-  const collectDirPaths = (nodes: TreeNode[]): string[] => 
-    nodes.flatMap(n => n.kind === 'dir' ? [n.path, ...(n.children ? collectDirPaths(n.children) : [])] : [])
+  const knowledgeFiles = React.useMemo(() => {
+    const files = collectFilePaths(tree).filter((path) => path.endsWith('.md'))
+    return Array.from(new Set(files.map(stripKnowledgePrefix)))
+  }, [tree])
 
   // Get workspace root for full paths
   const [workspaceRoot, setWorkspaceRoot] = useState<string>('')
@@ -614,6 +634,42 @@ function App() {
       navigator.clipboard.writeText(fullPath)
     },
   }), [tree, selectedPath, workspaceRoot, collectDirPaths])
+
+  const ensureWikiFile = useCallback(async (wikiPath: string) => {
+    const resolvedPath = toKnowledgePath(wikiPath)
+    if (!resolvedPath) return null
+    try {
+      const exists = await window.ipc.invoke('workspace:exists', { path: resolvedPath })
+      if (!exists.exists) {
+        const title = wikiLabel(wikiPath) || 'New Note'
+        await window.ipc.invoke('workspace:writeFile', {
+          path: resolvedPath,
+          data: `# ${title}\n\n`,
+          opts: { encoding: 'utf8', mkdirp: true },
+        })
+      }
+      return resolvedPath
+    } catch (err) {
+      console.error('Failed to ensure wiki link target:', err)
+      return null
+    }
+  }, [])
+
+  const openWikiLink = useCallback(async (wikiPath: string) => {
+    const resolvedPath = await ensureWikiFile(wikiPath)
+    if (resolvedPath) {
+      setSelectedPath(resolvedPath)
+    }
+  }, [ensureWikiFile, setSelectedPath])
+
+  const wikiLinkConfig = React.useMemo(() => ({
+    files: knowledgeFiles,
+    recent: recentWikiFiles,
+    onOpen: (path: string) => {
+      void openWikiLink(path)
+    },
+    onCreate: (path: string) => ensureWikiFile(path),
+  }), [knowledgeFiles, recentWikiFiles, openWikiLink, ensureWikiFile])
 
   const renderConversationItem = (item: ConversationItem) => {
     if (isChatMessage(item)) {
@@ -771,6 +827,7 @@ function App() {
                       content={editorContent}
                       onChange={setEditorContent}
                       placeholder="Start writing..."
+                      wikiLinks={wikiLinkConfig}
                     />
                   </div>
                 ) : (

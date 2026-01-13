@@ -13,6 +13,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  position: relative;
 }
 
 .tiptap-editor .ProseMirror {
@@ -219,4 +220,11 @@
   margin-right: 20%;
   padding-left: 1rem;
   padding-right: 1rem;
+}
+
+.wiki-link-anchor {
+  position: absolute;
+  height: 0;
+  width: 0;
+  pointer-events: none;
 }
