@@ -17,7 +17,7 @@ import {
  * and note creation agents sequentially on content files
  */
 
-const NOTES_OUTPUT_DIR = path.join(WorkDir, 'notes');
+const NOTES_OUTPUT_DIR = path.join(WorkDir, 'knowledge');
 const NOTE_CREATION_AGENT = 'note_creation';
 
 // Configuration for the graph builder service
@@ -80,7 +80,7 @@ async function createNotesFromBatch(files: { path: string; content: string }[], 
     let message = `Process the following ${files.length} source files and create/update obsidian notes.\n\n`;
     message += `**Instructions:**\n`;
     message += `- Extract entities (people, organizations, projects, topics) from ALL files below\n`;
-    message += `- Create or update notes in "notes" directory (workspace-relative paths like "notes/People/Name.md")\n`;
+    message += `- Create or update notes in "knowledge" directory (workspace-relative paths like "knowledge/People/Name.md")\n`;
     message += `- If the same entity appears in multiple files, merge the information into a single note\n`;
     message += `- Use workspace tools to read existing notes and write updates\n`;
     message += `- Follow the note templates and guidelines in your instructions\n\n`;

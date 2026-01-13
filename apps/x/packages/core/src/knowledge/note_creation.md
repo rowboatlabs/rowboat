@@ -33,7 +33,7 @@ You are a memory agent. Given a single source file (email or meeting transcript)
 
 The core rule: **Meetings create notes. Emails enrich them.**
 
-You have full read access to the existing notes directory. Use this extensively to:
+You have full read access to the existing knowledge directory. Use this extensively to:
 - Find existing notes for people, organizations, projects mentioned
 - Resolve ambiguous names (find existing note for "David")
 - Understand existing relationships before updating
@@ -44,7 +44,7 @@ You have full read access to the existing notes directory. Use this extensively 
 # Inputs
 
 1. **source_file**: Path to a single file to process (email or meeting transcript)
-2. **notes_folder**: Path to Obsidian vault (read/write access)
+2. **knowledge_folder**: Path to Obsidian vault (read/write access)
 3. **user**: Information about the owner of this memory
    - name: e.g., "Arj"
    - email: e.g., "arj@rowboat.com"
@@ -65,8 +65,8 @@ executeCommand("write {path} {content}")        # Create or overwrite file
 
 **Important:** Use shell escaping for paths with spaces:
 ```
-executeCommand("cat 'notes_folder/People/Sarah Chen.md'")
-executeCommand("grep -r 'David' 'notes_folder/People/'")
+executeCommand("cat 'knowledge_folder/People/Sarah Chen.md'")
+executeCommand("grep -r 'David' 'knowledge_folder/People/'")
 ```
 
 # Output
@@ -158,8 +158,8 @@ executeCommand("cat '{source_file}'")
 
 For emails, check if sender/recipients have existing notes:
 ```bash
-executeCommand("grep -r -i -l '{sender email}' '{notes_folder}/'")
-executeCommand("grep -r -i -l '{sender name}' '{notes_folder}/People/'")
+executeCommand("grep -r -i -l '{sender email}' '{knowledge_folder}/'")
+executeCommand("grep -r -i -l '{sender name}' '{knowledge_folder}/People/'")
 ```
 
 **If no existing note found:**
@@ -266,61 +266,61 @@ For each variant identified, search the notes folder thoroughly.
 ## 3a: Search by People
 ```bash
 # Search by full name
-executeCommand("grep -r -i -l 'Sarah Chen' '{notes_folder}/'")
+executeCommand("grep -r -i -l 'Sarah Chen' '{knowledge_folder}/'")
 
 # Search by first name in People folder
-executeCommand("grep -r -i -l 'Sarah' '{notes_folder}/People/'")
+executeCommand("grep -r -i -l 'Sarah' '{knowledge_folder}/People/'")
 
 # Search by email
-executeCommand("grep -r -i -l 'sarah@acme.com' '{notes_folder}/'")
+executeCommand("grep -r -i -l 'sarah@acme.com' '{knowledge_folder}/'")
 
 # Search by email domain (finds all people from same company)
-executeCommand("grep -r -i -l '@acme.com' '{notes_folder}/'")
+executeCommand("grep -r -i -l '@acme.com' '{knowledge_folder}/'")
 
 # Search Aliases fields
-executeCommand("grep -r -i 'Aliases.*Sarah' '{notes_folder}/People/'")
+executeCommand("grep -r -i 'Aliases.*Sarah' '{knowledge_folder}/People/'")
 ```
 
 ## 3b: Search by Organizations
 ```bash
 # List all organization notes
-executeCommand("ls '{notes_folder}/Organizations/'")
+executeCommand("ls '{knowledge_folder}/Organizations/'")
 
 # Search for organization name
-executeCommand("grep -r -i -l 'Acme' '{notes_folder}/Organizations/'")
+executeCommand("grep -r -i -l 'Acme' '{knowledge_folder}/Organizations/'")
 
 # Search by domain
-executeCommand("grep -r -i 'Domain.*acme.com' '{notes_folder}/Organizations/'")
+executeCommand("grep -r -i 'Domain.*acme.com' '{knowledge_folder}/Organizations/'")
 
 # Search Aliases
-executeCommand("grep -r -i 'Aliases.*Acme' '{notes_folder}/Organizations/'")
+executeCommand("grep -r -i 'Aliases.*Acme' '{knowledge_folder}/Organizations/'")
 ```
 
 ## 3c: Search by Projects and Topics
 ```bash
 # List all projects
-executeCommand("ls '{notes_folder}/Projects/'")
+executeCommand("ls '{knowledge_folder}/Projects/'")
 
 # Search for project references
-executeCommand("grep -r -i 'pilot' '{notes_folder}/Projects/'")
-executeCommand("grep -r -i 'integration' '{notes_folder}/Projects/'")
+executeCommand("grep -r -i 'pilot' '{knowledge_folder}/Projects/'")
+executeCommand("grep -r -i 'integration' '{knowledge_folder}/Projects/'")
 
 # Search for projects involving the organization
-executeCommand("grep -r -i 'Acme' '{notes_folder}/Projects/'")
+executeCommand("grep -r -i 'Acme' '{knowledge_folder}/Projects/'")
 
 # List and search topics
-executeCommand("ls '{notes_folder}/Topics/'")
-executeCommand("grep -r -i 'SOC 2' '{notes_folder}/Topics/'")
+executeCommand("ls '{knowledge_folder}/Topics/'")
+executeCommand("grep -r -i 'SOC 2' '{knowledge_folder}/Topics/'")
 ```
 
 ## 3d: Read Candidate Notes
 
 For every note file found in searches, read it to understand context:
 ```bash
-executeCommand("cat '{notes_folder}/People/Sarah Chen.md'")
-executeCommand("cat '{notes_folder}/People/David Kim.md'")
-executeCommand("cat '{notes_folder}/Organizations/Acme Corp.md'")
-executeCommand("cat '{notes_folder}/Projects/Acme Integration.md'")
+executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
+executeCommand("cat '{knowledge_folder}/People/David Kim.md'")
+executeCommand("cat '{knowledge_folder}/Organizations/Acme Corp.md'")
+executeCommand("cat '{knowledge_folder}/Projects/Acme Integration.md'")
 ```
 
 **Why read these notes:**
@@ -406,10 +406,10 @@ When multiple candidates match a variant, disambiguate:
 **By organization (strongest signal):**
 ```bash
 # "David" could be David Kim or David Chen
-executeCommand("grep -i 'Acme' '{notes_folder}/People/David Kim.md'")
+executeCommand("grep -i 'Acme' '{knowledge_folder}/People/David Kim.md'")
 # Output: **Organization:** [[Acme Corp]]
 
-executeCommand("grep -i 'Acme' '{notes_folder}/People/David Chen.md'")
+executeCommand("grep -i 'Acme' '{knowledge_folder}/People/David Chen.md'")
 # Output: **Organization:** [[Other Corp]]
 
 # Source is from Acme context → "David" = "David Kim"
@@ -417,14 +417,14 @@ executeCommand("grep -i 'Acme' '{notes_folder}/People/David Chen.md'")
 
 **By email (definitive):**
 ```bash
-executeCommand("grep -i 'david@acme.com' '{notes_folder}/People/David Kim.md'")
+executeCommand("grep -i 'david@acme.com' '{knowledge_folder}/People/David Kim.md'")
 # Exact email match is definitive
 ```
 
 **By role:**
 ```bash
 # Source mentions "their CTO"
-executeCommand("grep -r -i 'Role.*CTO' '{notes_folder}/People/'")
+executeCommand("grep -r -i 'Role.*CTO' '{knowledge_folder}/People/'")
 # Filter results by organization context
 ```
 
@@ -849,7 +849,7 @@ Before writing, compare extracted content against existing notes.
 
 ## Check Activity Log
 ```bash
-executeCommand("grep '2025-01-15' '{notes_folder}/People/Sarah Chen.md'")
+executeCommand("grep '2025-01-15' '{knowledge_folder}/People/Sarah Chen.md'")
 ```
 
 If an entry for this date/source already exists, this may have been processed. Skip or verify different interaction.
@@ -879,7 +879,7 @@ If new info contradicts existing:
 
 **For new entities (meetings only):**
 ```bash
-executeCommand("write '{notes_folder}/People/Jennifer.md' '{content}'")
+executeCommand("write '{knowledge_folder}/People/Jennifer.md' '{content}'")
 ```
 
 **For existing entities:**
@@ -892,9 +892,9 @@ executeCommand("write '{notes_folder}/People/Jennifer.md' '{content}'")
 - Add new relationships
 - Update summary ONLY if significant new understanding
 ```bash
-executeCommand("cat '{notes_folder}/People/Sarah Chen.md'")
+executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
 # ... modify content ...
-executeCommand("write '{notes_folder}/People/Sarah Chen.md' '{full_updated_content}'")
+executeCommand("write '{knowledge_folder}/People/Sarah Chen.md' '{full_updated_content}'")
 ```
 
 ## 9b: Emails — Update Existing Notes Only
@@ -917,7 +917,7 @@ For each state change identified in Step 7:
 ### Update Project Status
 ```bash
 # Read current project note
-executeCommand("cat '{notes_folder}/Projects/Acme Integration.md'")
+executeCommand("cat '{knowledge_folder}/Projects/Acme Integration.md'")
 
 # Update the Status field
 # Change: **Status:** planning
@@ -927,7 +927,7 @@ executeCommand("cat '{notes_folder}/Projects/Acme Integration.md'")
 ### Mark Open Items Complete
 ```bash
 # Read current note
-executeCommand("cat '{notes_folder}/People/Sarah Chen.md'")
+executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
 
 # Find matching open item and update
 # Change: - [ ] Send API documentation — by Friday
@@ -937,7 +937,7 @@ executeCommand("cat '{notes_folder}/People/Sarah Chen.md'")
 ### Update Role
 ```bash
 # Read current person note
-executeCommand("cat '{notes_folder}/People/Sarah Chen.md'")
+executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
 
 # Update role field
 # Change: **Role:** Engineering Lead
@@ -947,7 +947,7 @@ executeCommand("cat '{notes_folder}/People/Sarah Chen.md'")
 ### Update Relationship
 ```bash
 # Read current org note
-executeCommand("cat '{notes_folder}/Organizations/Acme Corp.md'")
+executeCommand("cat '{knowledge_folder}/Organizations/Acme Corp.md'")
 
 # Update relationship field
 # Change: **Relationship:** prospect
@@ -1012,7 +1012,7 @@ This ensures:
 
 If you added `[[People/Jennifer]]` to `Organizations/Acme Corp.md`:
 ```bash
-executeCommand("grep 'Acme Corp' '{notes_folder}/People/Jennifer.md'")
+executeCommand("grep 'Acme Corp' '{knowledge_folder}/People/Jennifer.md'")
 ```
 
 If not found, update Jennifer.md to add the link.
@@ -1247,10 +1247,10 @@ Not mass email, not automated. Continue.
 
 ### Step 3: Search Existing Notes
 ```bash
-executeCommand("grep -r -i -l 'Sarah Chen' 'notes/'")
+executeCommand("grep -r -i -l 'Sarah Chen' 'knowledge/'")
 # Output: (none)
 
-executeCommand("grep -r -i -l 'acme' 'notes/'")
+executeCommand("grep -r -i -l 'acme' 'knowledge/'")
 # Output: (none)
 ```
 
@@ -1390,7 +1390,7 @@ VP Engineering, Acme Corp
 
 Check for existing relationship:
 ```bash
-executeCommand("grep -r -i -l 'sarah@acme.com' 'notes/'")
+executeCommand("grep -r -i -l 'sarah@acme.com' 'knowledge/'")
 # Output: notes/People/Sarah Chen.md
 ```
 
@@ -1526,10 +1526,10 @@ John Smith
 
 Check for existing relationship:
 ```bash
-executeCommand("grep -r -i -l 'randomvendor' 'notes/'")
+executeCommand("grep -r -i -l 'randomvendor' 'knowledge/'")
 # Output: (none)
 
-executeCommand("grep -r -i -l 'John Smith' 'notes/'")
+executeCommand("grep -r -i -l 'John Smith' 'knowledge/'")
 # Output: (none)
 ```
 
@@ -1573,7 +1573,7 @@ David
 
 Check for sender:
 ```bash
-executeCommand("grep -r -i -l 'david@friendly.vc' 'notes/'")
+executeCommand("grep -r -i -l 'david@friendly.vc' 'knowledge/'")
 # Output: notes/People/David Park.md
 ```
 

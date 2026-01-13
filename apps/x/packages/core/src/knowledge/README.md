@@ -69,7 +69,7 @@ This is efficient (only hashes potentially changed files) and reliable (confirms
 
 3. **Agent processes batch**
    - Extracts entities (people, orgs, projects, topics)
-   - Creates/updates notes in `~/.rowboat/notes/`
+   - Creates/updates notes in `~/.rowboat/knowledge/`
    - Merges information for entities appearing in multiple files
 
 ## Replacing the Change Detection Logic
