@@ -164,3 +164,33 @@
     @apply bg-background text-foreground;
   }
 }
+
+.graph-view {
+  background-color: var(--background);
+  user-select: none;
+}
+
+.graph-view::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--border) 0.6px, transparent 0.6px);
+  background-size: 22px 22px;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.graph-view > svg {
+  position: relative;
+  z-index: 1;
+  cursor: grab;
+}
+
+.graph-view:active > svg {
+  cursor: grabbing;
+}
+
+.graph-view text {
+  pointer-events: none;
+  user-select: none;
+}

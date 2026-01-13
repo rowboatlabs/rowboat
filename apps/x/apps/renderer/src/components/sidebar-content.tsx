@@ -75,6 +75,7 @@ interface TreeNode {
 type KnowledgeActions = {
   createNote: (parentPath?: string) => void
   createFolder: (parentPath?: string) => void
+  openGraph: () => void
   expandAll: () => void
   collapseAll: () => void
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
@@ -256,7 +257,7 @@ function KnowledgeSection({
   const quickActions = [
     { icon: FilePlus, label: "New Note", action: () => actions.createNote() },
     { icon: FolderPlus, label: "New Folder", action: () => actions.createFolder() },
-    { icon: Network, label: "Graph View", action: () => {} },
+    { icon: Network, label: "Graph View", action: () => actions.openGraph() },
     { icon: ArrowDownAZ, label: "Sort", action: () => {} },
   ]
 

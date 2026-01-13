@@ -8,6 +8,7 @@ import z from 'zod';
 import { Button } from './components/ui/button';
 import { MessageSquare, CheckIcon, LoaderIcon } from 'lucide-react';
 import { MarkdownEditor } from './components/markdown-editor';
+import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarIcon } from '@/components/sidebar-icon';
 import { SidebarContentPanel } from '@/components/sidebar-content';
@@ -115,6 +116,20 @@ const toToolState = (status: ToolCall['status']): ToolState => {
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 256
+const wikiLinkRegex = /\[\[([^[\]]+)\]\]/g
+const graphPalette = [
+  { hue: 210, sat: 72, light: 52 },
+  { hue: 28, sat: 78, light: 52 },
+  { hue: 120, sat: 62, light: 48 },
+  { hue: 170, sat: 66, light: 46 },
+  { hue: 280, sat: 70, light: 56 },
+  { hue: 330, sat: 68, light: 54 },
+  { hue: 55, sat: 80, light: 52 },
+  { hue: 0, sat: 72, light: 52 },
+]
+
+const clampNumber = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value))
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
@@ -237,6 +252,13 @@ function App() {
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
+  const [isGraphOpen, setIsGraphOpen] = useState(false)
+  const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
+    nodes: [],
+    edges: [],
+  })
+  const [graphStatus, setGraphStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [graphError, setGraphError] = useState<string | null>(null)
 
   // Auto-save state
   const [isSaving, setIsSaving] = useState(false)
@@ -544,6 +566,7 @@ function App() {
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
       setSelectedPath(path)
+      setIsGraphOpen(false)
       return
     }
 
@@ -560,6 +583,7 @@ function App() {
   const handleSectionChange = useCallback((section: ActiveSection) => {
     if (section === 'ask-ai' || section === 'agents') {
       setSelectedPath(null)
+      setIsGraphOpen(false)
     }
   }, [])
 
@@ -568,6 +592,13 @@ function App() {
     const files = collectFilePaths(tree).filter((path) => path.endsWith('.md'))
     return Array.from(new Set(files.map(stripKnowledgePrefix)))
   }, [tree])
+  const knowledgeFilePaths = React.useMemo(() => (
+    knowledgeFiles.reduce<string[]>((acc, filePath) => {
+      const resolved = toKnowledgePath(filePath)
+      if (resolved) acc.push(resolved)
+      return acc
+    }, [])
+  ), [knowledgeFiles])
 
   // Get workspace root for full paths
   const [workspaceRoot, setWorkspaceRoot] = useState<string>('')
@@ -587,6 +618,7 @@ function App() {
           data: `# New Note\n\n`,
           opts: { encoding: 'utf8' }
         })
+        setIsGraphOpen(false)
         setSelectedPath(fullPath)
       } catch (err) {
         console.error('Failed to create note:', err)
@@ -603,6 +635,10 @@ function App() {
         console.error('Failed to create folder:', err)
         throw err
       }
+    },
+    openGraph: () => {
+      setSelectedPath(null)
+      setIsGraphOpen(true)
     },
     expandAll: () => setExpandedPaths(new Set(collectDirPaths(tree))),
     collapseAll: () => setExpandedPaths(new Set()),
@@ -670,6 +706,119 @@ function App() {
     },
     onCreate: (path: string) => ensureWikiFile(path),
   }), [knowledgeFiles, recentWikiFiles, openWikiLink, ensureWikiFile])
+
+  useEffect(() => {
+    if (!isGraphOpen) return
+    let cancelled = false
+
+    const buildGraph = async () => {
+      setGraphStatus('loading')
+      setGraphError(null)
+
+      if (knowledgeFilePaths.length === 0) {
+        setGraphData({ nodes: [], edges: [] })
+        setGraphStatus('ready')
+        return
+      }
+
+      const nodeSet = new Set(knowledgeFilePaths)
+      const edges: GraphEdge[] = []
+      const edgeKeys = new Set<string>()
+
+      const contents = await Promise.all(
+        knowledgeFilePaths.map(async (path) => {
+          try {
+            const result = await window.ipc.invoke('workspace:readFile', { path })
+            return { path, data: result.data as string }
+          } catch (err) {
+            console.error('Failed to read file for graph:', path, err)
+            return { path, data: '' }
+          }
+        })
+      )
+
+      for (const { path, data } of contents) {
+        for (const match of data.matchAll(wikiLinkRegex)) {
+          const rawTarget = match[1]?.trim() ?? ''
+          const targetPath = toKnowledgePath(rawTarget)
+          if (!targetPath || targetPath === path) continue
+          if (!nodeSet.has(targetPath)) continue
+          const edgeKey = path < targetPath ? `${path}|${targetPath}` : `${targetPath}|${path}`
+          if (edgeKeys.has(edgeKey)) continue
+          edgeKeys.add(edgeKey)
+          edges.push({ source: path, target: targetPath })
+        }
+      }
+
+      const degreeMap = new Map<string, number>()
+      edges.forEach((edge) => {
+        degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1)
+        degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1)
+      })
+
+      const groupIndexMap = new Map<string, number>()
+      const getGroupIndex = (group: string) => {
+        const existing = groupIndexMap.get(group)
+        if (existing !== undefined) return existing
+        const nextIndex = groupIndexMap.size
+        groupIndexMap.set(group, nextIndex)
+        return nextIndex
+      }
+      const getNodeGroup = (path: string) => {
+        const normalized = stripKnowledgePrefix(path)
+        const parts = normalized.split('/').filter(Boolean)
+        if (parts.length <= 1) {
+          return { group: 'root', depth: 0 }
+        }
+        return {
+          group: parts[0],
+          depth: Math.max(0, parts.length - 2),
+        }
+      }
+      const getNodeColors = (groupIndex: number, depth: number) => {
+        const base = graphPalette[groupIndex % graphPalette.length]
+        const light = clampNumber(base.light + depth * 6, 36, 72)
+        const strokeLight = clampNumber(light - 12, 28, 60)
+        return {
+          fill: `hsl(${base.hue} ${base.sat}% ${light}%)`,
+          stroke: `hsl(${base.hue} ${Math.min(80, base.sat + 8)}% ${strokeLight}%)`,
+        }
+      }
+
+      const nodes = knowledgeFilePaths.map((path) => {
+        const degree = degreeMap.get(path) ?? 0
+        const radius = 6 + Math.min(18, degree * 2)
+        const { group, depth } = getNodeGroup(path)
+        const groupIndex = getGroupIndex(group)
+        const colors = getNodeColors(groupIndex, depth)
+        return {
+          id: path,
+          label: wikiLabel(path) || path,
+          degree,
+          radius,
+          group,
+          color: colors.fill,
+          stroke: colors.stroke,
+        }
+      })
+
+      if (!cancelled) {
+        setGraphData({ nodes, edges })
+        setGraphStatus('ready')
+      }
+    }
+
+    buildGraph().catch((err) => {
+      if (cancelled) return
+      console.error('Failed to build graph:', err)
+      setGraphStatus('error')
+      setGraphError(err instanceof Error ? err.message : 'Failed to build graph')
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isGraphOpen, knowledgeFilePaths])
 
   const renderConversationItem = (item: ConversationItem) => {
     if (isChatMessage(item)) {
@@ -757,6 +906,7 @@ function App() {
     : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
   const submitStatus: ChatStatus = isProcessing ? 'streaming' : 'ready'
   const canSubmit = Boolean(message.trim()) && !isProcessing
+  const headerTitle = selectedPath ? selectedPath : (isGraphOpen ? 'Graph View' : 'Chat')
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -789,7 +939,7 @@ function App() {
                 <SidebarTrigger className="-ml-1" />
                 <Separator orientation="vertical" className="h-4" />
                 <span className="text-sm font-medium text-muted-foreground">
-                  {selectedPath ? selectedPath : 'Chat'}
+                  {headerTitle}
                 </span>
                 {selectedPath && (
                   <>
@@ -818,9 +968,32 @@ function App() {
                     </Button>
                   </>
                 )}
+                {!selectedPath && isGraphOpen && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsGraphOpen(false)}
+                    className="ml-auto text-foreground"
+                  >
+                    Close Graph
+                  </Button>
+                )}
               </header>
 
-              {selectedPath ? (
+              {isGraphOpen ? (
+                <div className="flex-1 min-h-0">
+                  <GraphView
+                    nodes={graphData.nodes}
+                    edges={graphData.edges}
+                    isLoading={graphStatus === 'loading'}
+                    error={graphStatus === 'error' ? (graphError ?? 'Failed to build graph') : null}
+                    onSelectNode={(path) => {
+                      setIsGraphOpen(false)
+                      setSelectedPath(path)
+                    }}
+                  />
+                </div>
+              ) : selectedPath ? (
                 selectedPath.endsWith('.md') ? (
                   <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                     <MarkdownEditor
