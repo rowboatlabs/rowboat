@@ -439,15 +439,15 @@ If still ambiguous, prefer the person with more recent activity in notes.
 
 Final resolution map before proceeding:
 ```
-RESOLVED (use canonical name):
-- "Sarah", "Sarah Chen", "sarah@acme.com" → [[Sarah Chen]]
-- "David" → [[David Kim]]
-- "Acme", "Acme Corp", "@acme.com" → [[Acme Corp]]
-- "the pilot", "the integration" → [[Acme Integration]]
+RESOLVED (use canonical name with absolute path):
+- "Sarah", "Sarah Chen", "sarah@acme.com" → [[People/Sarah Chen]]
+- "David" → [[People/David Kim]]
+- "Acme", "Acme Corp", "@acme.com" → [[Organizations/Acme Corp]]
+- "the pilot", "the integration" → [[Projects/Acme Integration]]
 
 NEW ENTITIES (meetings only — create notes):
-- "Jennifer" (CTO, Acme Corp) → Create [[Jennifer]] or [[Jennifer (Acme Corp)]]
-- "SOC 2" → Create [[Security Compliance]]
+- "Jennifer" (CTO, Acme Corp) → Create [[People/Jennifer]] or [[People/Jennifer (Acme Corp)]]
+- "SOC 2" → Create [[Topics/Security Compliance]]
 
 NEW ENTITIES (emails — do not create):
 - "Random Person" → Skip, no existing relationship
@@ -690,20 +690,20 @@ The summary should answer: **"Who is this person and why do I know them?"**
 **Good summaries:**
 ```markdown
 ## Summary
-Product contact at [[Eight Sleep]] exploring an AI copilot for their app. 
-Initial discussions covered sales assistance, onboarding, and coaching use cases. 
+Product contact at [[Organizations/Eight Sleep]] exploring an AI copilot for their app.
+Initial discussions covered sales assistance, onboarding, and coaching use cases.
 Currently evaluating fit with their product roadmap.
 ```
 ```markdown
 ## Summary
-VP Engineering at [[Acme Corp]] leading their integration project. 
+VP Engineering at [[Organizations/Acme Corp]] leading their integration project.
 Key technical decision-maker. Working toward Q2 pilot launch.
 ```
 
 **Bad summaries:**
 ```markdown
 ## Summary
-Contact at [[Eight Sleep]]; received an outbound pitch from [[Arjun Maheswaran]] 
+Contact at [[Organizations/Eight Sleep]]; received an outbound pitch from [[People/Arjun Maheswaran]]
 about an in-app AI copilot concept.
 ```
 ```markdown
@@ -727,13 +727,14 @@ One line summarizing this source's relevance to the entity:
 **{YYYY-MM-DD}** ({meeting|email}): {Summary with [[links]]}
 ```
 
-**Important:** Use canonical names from resolution map in all summaries:
+**Important:** Use canonical names with absolute paths from resolution map in all summaries:
 ```
-# Correct (uses canonical names):
-**2025-01-15** (meeting): [[Sarah Chen]] confirmed timeline with [[David Kim]]. Blocked on [[Security Compliance]].
+# Correct (uses absolute paths):
+**2025-01-15** (meeting): [[People/Sarah Chen]] confirmed timeline with [[People/David Kim]]. Blocked on [[Topics/Security Compliance]].
 
-# Incorrect (uses variants):
+# Incorrect (uses variants or relative links):
 **2025-01-15** (meeting): Sarah confirmed timeline with David. Blocked on SOC 2.
+**2025-01-15** (meeting): [[Sarah Chen]] confirmed timeline with [[David Kim]]. Blocked on [[Security Compliance]].
 ```
 
 ---
@@ -834,10 +835,10 @@ Update to: **Relationship:** customer
 Before writing, compile all detected state changes:
 ```
 STATE CHANGES:
-- [[Acme Integration]]: Status planning → active (leadership approved)
-- [[Sarah Chen]]: Role "Engineering Lead" → "VP Engineering" (signature)
-- [[Sarah Chen]]: Open item "Send API documentation" → completed
-- [[Acme Corp]]: Relationship prospect → customer (contract signed)
+- [[Projects/Acme Integration]]: Status planning → active (leadership approved)
+- [[People/Sarah Chen]]: Role "Engineering Lead" → "VP Engineering" (signature)
+- [[People/Sarah Chen]]: Open item "Send API documentation" → completed
+- [[Organizations/Acme Corp]]: Relationship prospect → customer (contract signed)
 ```
 
 ---
@@ -977,7 +978,7 @@ If you discovered new name variants during resolution, add them to Aliases field
 
 ## 9e: Writing Rules
 
-- **Always use canonical names** from resolution map for all `[[links]]`
+- **Always use absolute paths** with format `[[Folder/Name]]` for all links
 - Use YYYY-MM-DD format for dates
 - Be concise: one line per activity entry
 - Note state changes with `[Field → value]` in activity
@@ -989,9 +990,27 @@ If you discovered new name variants during resolution, add them to Aliases field
 
 After writing, verify links go both ways.
 
+## Absolute Link Format
+
+**IMPORTANT:** Always use absolute links with the folder path to avoid ambiguity:
+
+```markdown
+[[People/Sarah Chen]]
+[[Organizations/Acme Corp]]
+[[Projects/Acme Integration]]
+[[Topics/Security Compliance]]
+```
+
+Format: `[[Folder/Note Name]]`
+
+This ensures:
+- No ambiguity when names overlap across folders
+- Clear navigation in any Obsidian-compatible tool
+- Consistent linking throughout the vault
+
 ## Check Each New Link
 
-If you added `[[Jennifer]]` to `Acme Corp.md`:
+If you added `[[People/Jennifer]]` to `Organizations/Acme Corp.md`:
 ```bash
 executeCommand("grep 'Acme Corp' '{notes_folder}/People/Jennifer.md'")
 ```
@@ -1018,7 +1037,7 @@ If not found, update Jennifer.md to add the link.
 
 ## Info
 **Role:** {role, or inferred role with qualifier, or leave blank if truly unknown}
-**Organization:** [[{organization}]] or leave blank
+**Organization:** [[Organizations/{organization}]] or leave blank
 **Email:** {email or leave blank}
 **Aliases:** {comma-separated: first name, nicknames, email}
 **First met:** {YYYY-MM-DD}
@@ -1028,12 +1047,12 @@ If not found, update Jennifer.md to add the link.
 {2-3 sentences: Who they are, why you know them, what you're working on together. Focus on relationship and context, not communication method.}
 
 ## Connected to
-- [[{Organization}]] — works at
-- [[{Person}]] — {colleague, introduced by, reports to}
-- [[{Project}]] — {role}
+- [[Organizations/{Organization}]] — works at
+- [[People/{Person}]] — {colleague, introduced by, reports to}
+- [[Projects/{Project}]] — {role}
 
 ## Activity
-- **{YYYY-MM-DD}** ({meeting|email}): {Summary with [[links]]} {[State changes if any]}
+- **{YYYY-MM-DD}** ({meeting|email}): {Summary with [[Folder/Name]] links} {[State changes if any]}
 
 ## Key facts
 {Substantive facts only. Leave empty if none. Never include data gap commentary.}
@@ -1060,17 +1079,17 @@ If not found, update Jennifer.md to add the link.
 {2-3 sentences: What this org is, what your relationship is, what you're working on together.}
 
 ## People
-- [[{Person}]] — {role}
+- [[People/{Person}]] — {role}
 
 ## Contacts
 {For transactional contacts who don't get their own notes}
 - {Name} — {role}, {context}
 
 ## Projects
-- [[{Project}]] — {relationship}
+- [[Projects/{Project}]] — {relationship}
 
 ## Activity
-- **{YYYY-MM-DD}** ({meeting|email}): {Summary} {[State changes if any]}
+- **{YYYY-MM-DD}** ({meeting|email}): {Summary with [[Folder/Name]] links} {[State changes if any]}
 
 ## Key facts
 {Substantive facts only. Leave empty if none.}
@@ -1093,17 +1112,18 @@ If not found, update Jennifer.md to add the link.
 {2-3 sentences: What this project is, goal, current state.}
 
 ## People
-- [[{Person}]] — {role}
+- [[People/{Person}]] — {role}
 
 ## Organizations
-- [[{Org}]] — {customer|partner|etc.}
+- [[Organizations/{Org}]] — {customer|partner|etc.}
 
 ## Related
-- [[{Topic or Project}]] — {relationship}
+- [[Topics/{Topic}]] — {relationship}
+- [[Projects/{Project}]] — {relationship}
 
 ## Timeline
 **{YYYY-MM-DD}** ({meeting|email})
-{What happened. Key points.} {[Status → new status] if changed}
+{What happened. Key points with [[Folder/Name]] links.} {[Status → new status] if changed}
 
 ## Decisions
 - **{YYYY-MM-DD}**: {Decision}. {Rationale}.
@@ -1128,11 +1148,13 @@ If not found, update Jennifer.md to add the link.
 **Last mentioned:** {YYYY-MM-DD}
 
 ## Related
-- [[{Entity}]] — {relationship}
+- [[People/{Person}]] — {relationship}
+- [[Organizations/{Org}]] — {relationship}
+- [[Projects/{Project}]] — {relationship}
 
 ## Log
 **{YYYY-MM-DD}** ({meeting|email}: {title})
-{Summary with [[links]]}
+{Summary with [[Folder/Name]] links}
 
 ## Decisions
 - **{YYYY-MM-DD}**: {Decision}
@@ -1239,11 +1261,11 @@ No existing notes. This is a new relationship.
 **Resolution Map:**
 ```
 NEW ENTITIES (meeting — create):
-- "Sarah Chen" → Create [[Sarah Chen]]
-- "David Kim" → Create [[David Kim]]
-- "Jennifer" (CTO) → Create [[Jennifer]]
-- "Acme" → Create [[Acme Corp]]
-- "the pilot" → Create [[Acme Integration]]
+- "Sarah Chen" → Create [[People/Sarah Chen]]
+- "David Kim" → Create [[People/David Kim]]
+- "Jennifer" (CTO) → Create [[People/Jennifer]]
+- "Acme" → Create [[Organizations/Acme Corp]]
+- "the pilot" → Create [[Projects/Acme Integration]]
 ```
 
 ### Step 5: Identify New Entities
@@ -1275,24 +1297,24 @@ Create all notes with extracted content, ensure bidirectional links.
 
 ## Info
 **Role:** Engineering (led technical discussion in kickoff meeting)
-**Organization:** [[Acme Corp]]
+**Organization:** [[Organizations/Acme Corp]]
 **Email:** sarah@acme.com
 **Aliases:** Sarah, sarah@acme.com
 **First met:** 2025-01-15
 **Last seen:** 2025-01-15
 
 ## Summary
-Key contact at [[Acme Corp]] for the [[Acme Integration]] pilot. 
-Leading the technical evaluation. Reports to [[Jennifer]] (CTO).
+Key contact at [[Organizations/Acme Corp]] for the [[Projects/Acme Integration]] pilot.
+Leading the technical evaluation. Reports to [[People/Jennifer]] (CTO).
 
 ## Connected to
-- [[Acme Corp]] — works at
-- [[David Kim]] — colleague
-- [[Jennifer]] — reports to (CTO)
-- [[Acme Integration]] — key contact
+- [[Organizations/Acme Corp]] — works at
+- [[People/David Kim]] — colleague
+- [[People/Jennifer]] — reports to (CTO)
+- [[Projects/Acme Integration]] — key contact
 
 ## Activity
-- **2025-01-15** (meeting): Kickoff meeting for [[Acme Integration]]. Excited about pilot. [[David Kim]] needs API access first. [[Jennifer]] (CTO) joining next call.
+- **2025-01-15** (meeting): Kickoff meeting for [[Projects/Acme Integration]]. Excited about pilot. [[People/David Kim]] needs API access first. [[People/Jennifer]] (CTO) joining next call.
 
 ## Key facts
 - Leading technical evaluation for pilot
@@ -1300,8 +1322,8 @@ Leading the technical evaluation. Reports to [[Jennifer]] (CTO).
 - CTO Jennifer involved in next steps
 
 ## Open items
-- [ ] Provide API access to [[David Kim]]
-- [ ] Schedule follow-up call with [[Jennifer]]
+- [ ] Provide API access to [[People/David Kim]]
+- [ ] Schedule follow-up call with [[People/Jennifer]]
 ```
 
 **Example output for Acme Integration:**
@@ -1315,24 +1337,24 @@ Leading the technical evaluation. Reports to [[Jennifer]] (CTO).
 **Last activity:** 2025-01-15
 
 ## Summary
-Pilot integration project with [[Acme Corp]]. 
+Pilot integration project with [[Organizations/Acme Corp]].
 Technical evaluation phase, working toward Q2 launch.
 
 ## People
-- [[Sarah Chen]] — key contact
-- [[David Kim]] — technical lead
-- [[Jennifer]] — CTO sponsor
+- [[People/Sarah Chen]] — key contact
+- [[People/David Kim]] — technical lead
+- [[People/Jennifer]] — CTO sponsor
 
 ## Organizations
-- [[Acme Corp]] — prospect
+- [[Organizations/Acme Corp]] — prospect
 
 ## Timeline
 **2025-01-15** (meeting)
-Kickoff meeting. Team excited about pilot. API access needed first. CTO [[Jennifer]] joining next call.
+Kickoff meeting. Team excited about pilot. API access needed first. CTO [[People/Jennifer]] joining next call.
 
 ## Open items
-- [ ] Provide API access to [[David Kim]]
-- [ ] Schedule follow-up call with [[Jennifer]]
+- [ ] Provide API access to [[People/David Kim]]
+- [ ] Schedule follow-up call with [[People/Jennifer]]
 ```
 
 ---
@@ -1379,8 +1401,8 @@ Existing note found. Continue.
 **Resolution Map:**
 ```
 RESOLVED:
-- "Sarah", "sarah@acme.com" → [[Sarah Chen]]
-- "Acme" → [[Acme Corp]]
+- "Sarah", "sarah@acme.com" → [[People/Sarah Chen]]
+- "Acme" → [[Organizations/Acme Corp]]
 ```
 
 ### Step 6: Extract Content
@@ -1411,9 +1433,9 @@ RESOLVED:
 **State Change List:**
 ```
 STATE CHANGES:
-- [[Acme Integration]]: Status planning → active
-- [[Sarah Chen]]: Role "Engineering" → "VP Engineering"
-- [[Sarah Chen]]: Open item "Provide API access" → completed (they sent docs)
+- [[Projects/Acme Integration]]: Status planning → active
+- [[People/Sarah Chen]]: Role "Engineering" → "VP Engineering"
+- [[People/Sarah Chen]]: Open item "Provide API access" → completed (they sent docs)
 ```
 
 ### Steps 8-10: Check, Write, Link
@@ -1424,25 +1446,25 @@ STATE CHANGES:
 
 ## Info
 **Role:** VP Engineering
-**Organization:** [[Acme Corp]]
+**Organization:** [[Organizations/Acme Corp]]
 **Email:** sarah@acme.com
 **Aliases:** Sarah, sarah@acme.com
 **First met:** 2025-01-15
 **Last seen:** 2025-01-20
 
 ## Summary
-VP Engineering at [[Acme Corp]] leading the [[Acme Integration]] pilot. 
+VP Engineering at [[Organizations/Acme Corp]] leading the [[Projects/Acme Integration]] pilot.
 Key technical decision-maker. Recently promoted.
 
 ## Connected to
-- [[Acme Corp]] — works at
-- [[David Kim]] — colleague
-- [[Jennifer]] — reports to (CTO)
-- [[Acme Integration]] — key contact
+- [[Organizations/Acme Corp]] — works at
+- [[People/David Kim]] — colleague
+- [[People/Jennifer]] — reports to (CTO)
+- [[Projects/Acme Integration]] — key contact
 
 ## Activity
 - **2025-01-20** (email): Leadership approved pilot. [Status → active] Legal drafting contract. Kickoff by end of month. Sent API documentation. [Role → VP Engineering]
-- **2025-01-15** (meeting): Kickoff meeting for [[Acme Integration]]. Excited about pilot. [[David Kim]] needs API access first. [[Jennifer]] (CTO) joining next call.
+- **2025-01-15** (meeting): Kickoff meeting for [[Projects/Acme Integration]]. Excited about pilot. [[People/David Kim]] needs API access first. [[People/Jennifer]] (CTO) joining next call.
 
 ## Key facts
 - Leading technical evaluation for pilot
@@ -1450,8 +1472,8 @@ Key technical decision-maker. Recently promoted.
 - Legal drafting contract
 
 ## Open items
-- [x] Provide API access to [[David Kim]] — completed 2025-01-20
-- [ ] Schedule follow-up call with [[Jennifer]]
+- [x] Provide API access to [[People/David Kim]] — completed 2025-01-20
+- [ ] Schedule follow-up call with [[People/Jennifer]]
 ```
 
 **Update Acme Integration.md:**
@@ -1465,7 +1487,7 @@ Key technical decision-maker. Recently promoted.
 **Last activity:** 2025-01-20
 
 ## Summary
-Pilot integration project with [[Acme Corp]]. 
+Pilot integration project with [[Organizations/Acme Corp]].
 Leadership approved, contract in progress. Targeting end of month kickoff.
 
 ## Timeline
@@ -1473,7 +1495,7 @@ Leadership approved, contract in progress. Targeting end of month kickoff.
 Leadership approved pilot. [Status → active] Legal drafting contract. Targeting end of month kickoff.
 
 **2025-01-15** (meeting)
-Kickoff meeting. Team excited about pilot. API access needed first. CTO [[Jennifer]] joining next call.
+Kickoff meeting. Team excited about pilot. API access needed first. CTO [[People/Jennifer]] joining next call.
 ```
 
 ---
@@ -1567,11 +1589,11 @@ Sender exists in memory. Check if this is a warm intro:
 **Resolution Map:**
 ```
 RESOLVED:
-- "David" → [[David Park]] (sender, exists)
+- "David" → [[People/David Park]] (sender, exists)
 
 NEW ENTITIES (warm intro exception — create):
-- "Jennifer Lee" → Create [[Jennifer Lee]]
-- "NewCo" → Create [[NewCo]]
+- "Jennifer Lee" → Create [[People/Jennifer Lee]]
+- "NewCo" → Create [[Organizations/NewCo]]
 ```
 
 ### Step 5: Create Notes (Exception)
@@ -1584,7 +1606,7 @@ No existing notes for Jennifer Lee / NewCo → No state changes.
 
 ### Output
 
-Creates 2 new notes (Jennifer Lee, NewCo). Updates David Park.md with activity.
+Creates 2 new notes ([[People/Jennifer Lee]], [[Organizations/NewCo]]). Updates [[People/David Park]] with activity.
 
 ---
 
@@ -1712,7 +1734,7 @@ Before completing, verify:
 - [ ] Extracted all name variants from source
 - [ ] Searched notes including Aliases fields
 - [ ] Built resolution map before writing
-- [ ] Used canonical names in ALL links and text
+- [ ] Used absolute paths `[[Folder/Name]]` in ALL links
 - [ ] Updated Aliases fields with new variants discovered
 
 **Filtering:**
@@ -1738,7 +1760,7 @@ Before completing, verify:
 - [ ] Only applied clear, unambiguous state changes
 
 **Structure:**
-- [ ] All entity mentions are `[[linked]]` with canonical names
+- [ ] All entity mentions use `[[Folder/Name]]` absolute links
 - [ ] Activity entries are reverse chronological
 - [ ] No duplicate activity entries
 - [ ] Dates are YYYY-MM-DD
