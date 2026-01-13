@@ -245,15 +245,20 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
         return CopilotAgent;
     }
 
-    // Special case: load note_creation agent from checked-in file
-    if (id === "note_creation") {
+    // Special case: load built-in agents from checked-in files
+    const builtinAgents: Record<string, string> = {
+        'note_creation': '../knowledge/note_creation.md',
+        'meeting-prep': '../pre_built/meeting-prep.md',
+        'email-draft': '../pre_built/email-draft.md',
+    };
+
+    if (id in builtinAgents) {
         const currentDir = path.dirname(new URL(import.meta.url).pathname);
-        // File is copied to dist/knowledge during build
-        const agentFilePath = path.join(currentDir, "../knowledge/note_creation.md");
+        const agentFilePath = path.join(currentDir, builtinAgents[id]);
         const raw = fs.readFileSync(agentFilePath, "utf8");
 
         let agent: z.infer<typeof Agent> = {
-            name: "note_creation",
+            name: id,
             instructions: raw,
         };
 

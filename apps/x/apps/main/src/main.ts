@@ -8,6 +8,7 @@ import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.j
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
+import { init as initPreBuiltRunner } from "@x/core/dist/pre_built/runner.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -61,6 +62,9 @@ app.whenReady().then(() => {
 
   // start knowledge graph builder
   initGraphBuilder();
+
+  // start pre-built agent runner
+  initPreBuiltRunner();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
