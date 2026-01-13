@@ -131,6 +131,33 @@ const graphPalette = [
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
 
+const untitledBaseName = 'untitled'
+
+const getHeadingTitle = (markdown: string) => {
+  const lines = markdown.split('\n')
+  for (const line of lines) {
+    const match = line.match(/^#\s+(.+)$/)
+    if (match) return match[1].trim()
+    if (line.trim() !== '') return null
+  }
+  return null
+}
+
+const sanitizeHeadingForFilename = (heading: string) => {
+  let name = heading.trim()
+  if (!name) return null
+  if (name.toLowerCase().endsWith('.md')) {
+    name = name.slice(0, -3)
+  }
+  name = name.replace(/[\\/]/g, '-').replace(/\s+/g, ' ').trim()
+  return name || null
+}
+
+const getBaseName = (path: string) => {
+  const file = path.split('/').pop() ?? ''
+  return file.replace(/\.md$/i, '')
+}
+
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
   const hasNumbers = Object.values(usage).some((value) => typeof value === 'number')
@@ -265,6 +292,7 @@ function App() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const debouncedContent = useDebounce(editorContent, 500)
   const initialContentRef = useRef<string>('')
+  const renameInProgressRef = useRef(false)
 
   // Chat state
   const [message, setMessage] = useState<string>('')
@@ -353,9 +381,28 @@ function App() {
 
     const saveFile = async () => {
       setIsSaving(true)
+      let pathToSave = selectedPath
       try {
+        if (!renameInProgressRef.current && selectedPath.startsWith('knowledge/')) {
+          const headingTitle = getHeadingTitle(debouncedContent)
+          const desiredName = headingTitle ? sanitizeHeadingForFilename(headingTitle) : null
+          const currentBase = getBaseName(selectedPath)
+          if (desiredName && desiredName !== currentBase) {
+            const parentDir = selectedPath.split('/').slice(0, -1).join('/')
+            const targetPath = `${parentDir}/${desiredName}.md`
+            if (targetPath !== selectedPath) {
+              const exists = await window.ipc.invoke('workspace:exists', { path: targetPath })
+              if (!exists.exists) {
+                renameInProgressRef.current = true
+                await window.ipc.invoke('workspace:rename', { from: selectedPath, to: targetPath })
+                pathToSave = targetPath
+                setSelectedPath(targetPath)
+              }
+            }
+          }
+        }
         await window.ipc.invoke('workspace:writeFile', {
-          path: selectedPath,
+          path: pathToSave,
           data: debouncedContent,
           opts: { encoding: 'utf8' }
         })
@@ -364,6 +411,7 @@ function App() {
       } catch (err) {
         console.error('Failed to save file:', err)
       } finally {
+        renameInProgressRef.current = false
         setIsSaving(false)
       }
     }
@@ -611,11 +659,19 @@ function App() {
   const knowledgeActions = React.useMemo(() => ({
     createNote: async (parentPath: string = 'knowledge') => {
       try {
-        const name = `untitled-${Date.now()}.md`
-        const fullPath = `${parentPath}/${name}`
+        let index = 0
+        let name = untitledBaseName
+        let fullPath = `${parentPath}/${name}.md`
+        while (index < 1000) {
+          const exists = await window.ipc.invoke('workspace:exists', { path: fullPath })
+          if (!exists.exists) break
+          index += 1
+          name = `${untitledBaseName}-${index}`
+          fullPath = `${parentPath}/${name}.md`
+        }
         await window.ipc.invoke('workspace:writeFile', {
           path: fullPath,
-          data: `# New Note\n\n`,
+          data: `# ${name}\n\n`,
           opts: { encoding: 'utf8' }
         })
         setIsGraphOpen(false)
