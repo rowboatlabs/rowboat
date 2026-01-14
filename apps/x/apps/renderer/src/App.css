@@ -174,9 +174,9 @@
   content: '';
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(var(--border) 0.6px, transparent 0.6px);
-  background-size: 22px 22px;
-  opacity: 0.45;
+  background-image: radial-gradient(#1f2937 1px, transparent 1px);
+  background-size: 40px 40px;
+  opacity: 1;
   pointer-events: none;
 }
 

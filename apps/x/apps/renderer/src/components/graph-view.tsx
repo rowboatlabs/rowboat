@@ -489,6 +489,24 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
         onWheel={handleWheel}
       >
         <rect width={viewport.width} height={viewport.height} fill="transparent" />
+        <defs>
+          {Array.from(new Set(nodes.map((n) => n.color))).map((color) => (
+            <filter
+              key={color}
+              id={`glow-${color.replace('#', '')}`}
+              x="-50%"
+              y="-50%"
+              width="200%"
+              height="200%"
+            >
+              <feGaussianBlur stdDeviation="4" result="coloredBlur" />
+              <feMerge>
+                <feMergeNode in="coloredBlur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          ))}
+        </defs>
         <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
           {edgeList.map((edge, index) => {
             const source = displayPositions.get(edge.source)
@@ -497,19 +515,23 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
             const isActiveEdge = activeNodeId
               ? edge.source === activeNodeId || edge.target === activeNodeId
               : false
-            const strokeOpacity = activeNodeId ? (isActiveEdge ? 0.9 : 0.08) : 0.38
-            const strokeWidth = activeNodeId ? (isActiveEdge ? 1.6 : 0.7) : 1
-            const stroke = 'var(--foreground)'
+            const strokeOpacity = activeNodeId ? (isActiveEdge ? 0.8 : 0.1) : 0.4
+            const strokeWidth = activeNodeId ? (isActiveEdge ? 2 : 1) : 1
+            const activeNode = activeNodeId ? nodes.find((n) => n.id === activeNodeId) : null
+            const stroke = isActiveEdge && activeNode ? activeNode.color : '#333'
+            const dx = target.x - source.x
+            const dy = target.y - source.y
+            const dr = Math.sqrt(dx * dx + dy * dy) * 1.5
+            const pathD = `M${source.x},${source.y}A${dr},${dr} 0 0,1 ${target.x},${target.y}`
             return (
-              <line
+              <path
                 key={`${edge.source}-${edge.target}-${index}`}
-                x1={source.x}
-                y1={source.y}
-                x2={target.x}
-                y2={target.y}
+                d={pathD}
+                fill="none"
                 stroke={stroke}
                 strokeOpacity={strokeOpacity}
                 strokeWidth={strokeWidth}
+                style={{ transition: 'stroke 0.2s, stroke-opacity 0.2s, stroke-width 0.2s' }}
               />
             )
           })}
@@ -520,6 +542,7 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
             const isConnected = connectedNodes ? connectedNodes.has(node.id) : true
             const isPrimary = activeNodeId === node.id
             const nodeOpacity = activeNodeId ? (isConnected ? 1 : 0.3) : 1
+            const glowFilterId = `glow-${node.color.replace('#', '')}`
             return (
               <g
                 key={node.id}
@@ -528,23 +551,30 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
                 onPointerEnter={() => setHoveredNodeId(node.id)}
                 onPointerLeave={() => setHoveredNodeId(null)}
                 onPointerDown={(event) => startDragNode(event, node.id)}
+                style={{ transition: 'opacity 0.2s' }}
                 opacity={nodeOpacity}
               >
                 <circle
+                  r={30}
+                  fill={node.color}
+                  opacity={isPrimary ? 0.4 : 0}
+                  style={{ transition: 'opacity 0.2s' }}
+                />
+                <circle
                   r={node.radius}
                   fill={node.color}
-                  stroke={node.stroke}
-                  strokeWidth={isPrimary ? 1.8 : 1.2}
+                  stroke="#0a0a0a"
+                  strokeWidth={2}
+                  filter={isPrimary ? `url(#${glowFilterId})` : undefined}
+                  style={{ transition: 'filter 0.2s' }}
                 />
                 <text
-                  x={node.radius + 6}
-                  y={4}
-                  className="text-xs"
+                  y={node.radius + 16}
+                  textAnchor="middle"
+                  className="text-[10px]"
                   style={{
-                    fill: node.stroke,
-                    paintOrder: 'stroke',
-                    stroke: 'var(--background)',
-                    strokeWidth: 3,
+                    fill: '#9ca3af',
+                    fontWeight: 500,
                   }}
                 >
                   {node.label}
