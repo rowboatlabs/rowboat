@@ -19,6 +19,13 @@ function ensureDir(dirPath: string): void {
     }
 }
 
+function ensureConfigFile(): void {
+    if (!fs.existsSync(CONFIG_PATH)) {
+        ensureDir(path.dirname(CONFIG_PATH));
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(getDefaultConfig(), null, 2));
+    }
+}
+
 // --- Config Management ---
 
 export function getDefaultConfig(): PreBuiltConfig {
@@ -33,16 +40,15 @@ export function getDefaultConfig(): PreBuiltConfig {
 }
 
 export function loadConfig(): PreBuiltConfig {
+    ensureConfigFile();
     try {
-        if (fs.existsSync(CONFIG_PATH)) {
-            const content = fs.readFileSync(CONFIG_PATH, 'utf-8');
-            const parsed = JSON.parse(content);
-            return PreBuiltConfig.parse(parsed);
-        }
+        const content = fs.readFileSync(CONFIG_PATH, 'utf-8');
+        const parsed = JSON.parse(content);
+        return PreBuiltConfig.parse(parsed);
     } catch (error) {
         console.error('[PreBuilt] Error loading config:', error);
+        return getDefaultConfig();
     }
-    return getDefaultConfig();
 }
 
 export function saveConfig(config: PreBuiltConfig): void {
