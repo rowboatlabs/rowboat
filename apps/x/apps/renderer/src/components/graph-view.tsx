@@ -71,6 +71,7 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
   const [zoom, setZoom] = useState(1)
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
   const [, forceRender] = useState(0)
 
   const edgeList = useMemo(
@@ -83,11 +84,12 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
     return map
   }, [nodes])
   const legendItems = useMemo(() => {
-    const grouped = new Map<string, { label: string; color: string; stroke: string }>()
+    const grouped = new Map<string, { group: string; label: string; color: string; stroke: string }>()
     nodes.forEach((node) => {
       const group = node.group || 'root'
       if (grouped.has(group)) return
       grouped.set(group, {
+        group,
         label: group === 'root' ? 'knowledge' : group,
         color: node.color,
         stroke: node.stroke,
@@ -483,16 +485,26 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
           <div className="mb-2 text-[0.7rem] font-semibold uppercase tracking-wide text-muted-foreground">
             Folders
           </div>
-          <div className="grid gap-1.5">
-            {legendItems.map((item) => (
-              <div key={item.label} className="flex items-center gap-2">
-                <span
-                  className="inline-flex h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: item.color, boxShadow: `0 0 0 1px ${item.stroke}` }}
-                />
-                <span className="truncate">{item.label}</span>
-              </div>
-            ))}
+          <div className="grid gap-1">
+            {legendItems.map((item) => {
+              const isSelected = selectedGroup === item.group
+              return (
+                <button
+                  key={item.group}
+                  onClick={() => setSelectedGroup(isSelected ? null : item.group)}
+                  className={`flex items-center gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-foreground/10 ${
+                    isSelected ? 'bg-foreground/15' : ''
+                  }`}
+                >
+                  <span
+                    className="inline-flex h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: item.color, boxShadow: `0 0 0 1px ${item.stroke}` }}
+                  />
+                  <span className="truncate">{item.label}</span>
+                  {isSelected && <X className="ml-auto size-3 text-muted-foreground" />}
+                </button>
+              )
+            })}
           </div>
         </div>
       ) : null}
@@ -532,15 +544,23 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
             const source = displayPositions.get(edge.source)
             const target = displayPositions.get(edge.target)
             if (!source || !target) return null
+            const sourceGroup = nodeGroupMap.get(edge.source) ?? 'root'
+            const targetGroup = nodeGroupMap.get(edge.target) ?? 'root'
             const isActiveEdge = activeNodeId
               ? edge.source === activeNodeId || edge.target === activeNodeId
               : false
             const isSearchEdge = searchMatchingNodes
               ? searchMatchingNodes.matches.has(edge.source) && searchMatchingNodes.matches.has(edge.target)
               : false
+            const isGroupEdge = selectedGroup
+              ? sourceGroup === selectedGroup && targetGroup === selectedGroup
+              : false
             let strokeOpacity = 0.4
             let strokeWidth = 1
-            if (searchMatchingNodes) {
+            if (selectedGroup) {
+              strokeOpacity = isGroupEdge ? 0.6 : 0.05
+              strokeWidth = isGroupEdge ? 1.5 : 1
+            } else if (searchMatchingNodes) {
               strokeOpacity = isSearchEdge ? 0.6 : 0.05
               strokeWidth = isSearchEdge ? 1.5 : 1
             } else if (activeNodeId) {
@@ -569,12 +589,16 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
           {nodes.map((node) => {
             const pos = displayPositions.get(node.id)
             if (!pos) return null
+            const nodeGroup = node.group || 'root'
             const isConnected = connectedNodes ? connectedNodes.has(node.id) : true
             const isSearchMatch = searchMatchingNodes ? searchMatchingNodes.matches.has(node.id) : true
             const isDirectMatch = searchMatchingNodes ? searchMatchingNodes.directMatches.has(node.id) : false
-            const isPrimary = activeNodeId === node.id || isDirectMatch
+            const isGroupMatch = selectedGroup ? nodeGroup === selectedGroup : true
+            const isPrimary = activeNodeId === node.id || isDirectMatch || (selectedGroup && isGroupMatch)
             let nodeOpacity = 1
-            if (searchMatchingNodes) {
+            if (selectedGroup) {
+              nodeOpacity = isGroupMatch ? 1 : 0.1
+            } else if (searchMatchingNodes) {
               if (isDirectMatch) {
                 nodeOpacity = 1
               } else if (isSearchMatch) {
