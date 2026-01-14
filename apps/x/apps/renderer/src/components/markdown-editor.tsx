@@ -75,7 +75,8 @@ export function MarkdownEditor({
     content: '',
     onUpdate: ({ editor }) => {
       if (isInternalUpdate.current) return
-      const markdown = editor.storage.markdown.getMarkdown()
+      const storage = editor.storage as unknown as Record<string, { getMarkdown?: () => string }>
+      const markdown = storage.markdown?.getMarkdown?.() ?? ''
       onChange(markdown)
     },
     editorProps: {
@@ -173,7 +174,8 @@ export function MarkdownEditor({
   // Update editor content when prop changes (e.g., file selection changes)
   useEffect(() => {
     if (editor && content !== undefined) {
-      const currentContent = editor.storage.markdown?.getMarkdown() || ''
+      const storage = editor.storage as unknown as Record<string, { getMarkdown?: () => string }>
+      const currentContent = storage.markdown?.getMarkdown?.() ?? ''
       if (currentContent !== content) {
         isInternalUpdate.current = true
         editor.commands.setContent(content)

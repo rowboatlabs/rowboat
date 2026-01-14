@@ -3,7 +3,6 @@
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
 import {
-  ArrowDownAZ,
   CalendarDays,
   ChevronRight,
   ChevronsDownUp,
@@ -258,7 +257,6 @@ function KnowledgeSection({
     { icon: FilePlus, label: "New Note", action: () => actions.createNote() },
     { icon: FolderPlus, label: "New Folder", action: () => actions.createFolder() },
     { icon: Network, label: "Graph View", action: () => actions.openGraph() },
-    { icon: ArrowDownAZ, label: "Sort", action: () => {} },
   ]
 
   return (

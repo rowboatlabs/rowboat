@@ -119,12 +119,12 @@ export const WikiLink = Node.create<WikiLinkOptions>({
   addStorage() {
     return {
       markdown: {
-        serialize(state, node) {
+        serialize(state: { write: (text: string) => void }, node: { attrs: { path?: string } }) {
           const path = node.attrs.path ?? ''
           state.write(`[[${path}]]`)
         },
         parse: {
-          updateDOM(element) {
+          updateDOM(element: HTMLElement) {
             replaceWikiLinksInTextNodes(element)
           },
         },

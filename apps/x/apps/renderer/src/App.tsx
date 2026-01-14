@@ -6,8 +6,10 @@ import type { ChatStatus, LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { MessageSquare, CheckIcon, LoaderIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon } from 'lucide-react';
 import { MarkdownEditor } from './components/markdown-editor';
+import { ChatButton } from './components/chat-button';
+import { ChatSidebar } from './components/chat-sidebar';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarIcon } from '@/components/sidebar-icon';
@@ -286,6 +288,7 @@ function App() {
   })
   const [graphStatus, setGraphStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [graphError, setGraphError] = useState<string | null>(null)
+  const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(false)
 
   // Auto-save state
   const [isSaving, setIsSaving] = useState(false)
@@ -760,7 +763,9 @@ function App() {
     onOpen: (path: string) => {
       void openWikiLink(path)
     },
-    onCreate: (path: string) => ensureWikiFile(path),
+    onCreate: (path: string) => {
+      void ensureWikiFile(path)
+    },
   }), [knowledgeFiles, recentWikiFiles, openWikiLink, ensureWikiFile])
 
   useEffect(() => {
@@ -998,31 +1003,19 @@ function App() {
                   {headerTitle}
                 </span>
                 {selectedPath && (
-                  <>
-                    {/* Save status indicator */}
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      {isSaving ? (
-                        <>
-                          <LoaderIcon className="h-3 w-3 animate-spin" />
-                          <span>Saving...</span>
-                        </>
-                      ) : lastSaved ? (
-                        <>
-                          <CheckIcon className="h-3 w-3 text-green-500" />
-                          <span>Saved</span>
-                        </>
-                      ) : null}
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSelectedPath(null)}
-                      className="ml-auto text-foreground"
-                    >
-                      <MessageSquare className="h-4 w-4 mr-2" />
-                      Back to Chat
-                    </Button>
-                  </>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground ml-auto">
+                    {isSaving ? (
+                      <>
+                        <LoaderIcon className="h-3 w-3 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : lastSaved ? (
+                      <>
+                        <CheckIcon className="h-3 w-3 text-green-500" />
+                        <span>Saved</span>
+                      </>
+                    ) : null}
+                  </div>
                 )}
                 {!selectedPath && isGraphOpen && (
                   <Button
@@ -1150,7 +1143,30 @@ function App() {
               </div>
               )}
             </SidebarInset>
+
+            {/* Chat sidebar - shown when viewing files/graph */}
+            {isChatSidebarOpen && (selectedPath || isGraphOpen) && (
+              <ChatSidebar
+                width={400}
+                onClose={() => setIsChatSidebarOpen(false)}
+                conversation={conversation}
+                currentAssistantMessage={currentAssistantMessage}
+                currentReasoning={currentReasoning}
+                isProcessing={isProcessing}
+                message={message}
+                onMessageChange={setMessage}
+                onSubmit={handlePromptSubmit}
+                contextUsage={contextUsage}
+                maxTokens={maxTokens}
+                usedTokens={usedTokens}
+              />
+            )}
           </SidebarProvider>
+
+          {/* Floating chat button - shown when viewing files/graph and chat sidebar is closed */}
+          {(selectedPath || isGraphOpen) && !isChatSidebarOpen && (
+            <ChatButton onClick={() => setIsChatSidebarOpen(true)} />
+          )}
         </div>
       </SidebarSectionProvider>
     </TooltipProvider>
