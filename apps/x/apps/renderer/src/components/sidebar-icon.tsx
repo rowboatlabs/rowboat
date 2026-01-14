@@ -7,7 +7,6 @@ import {
   HelpCircle,
   Settings,
   Ship,
-  Sparkles,
   Trash2,
 } from "lucide-react"
 
@@ -33,7 +32,6 @@ type SecondaryItem = {
 }
 
 const navItems: NavItem[] = [
-  { id: "ask-ai", title: "Ask AI", icon: Sparkles },
   { id: "knowledge", title: "Knowledge", icon: Brain },
   { id: "agents", title: "Agents", icon: Bot },
 ]

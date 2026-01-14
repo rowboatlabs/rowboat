@@ -15,8 +15,6 @@ import {
   FolderPlus,
   Loader2,
   Mail,
-  MessageSquare,
-  MessageSquarePlus,
   Microscope,
   Network,
   Pencil,
@@ -88,11 +86,9 @@ type SidebarContentPanelProps = {
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
   knowledgeActions: KnowledgeActions
-  chats: { id: string; title: string; preview: string; time: string }[]
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTitles = {
-  "ask-ai": "Ask AI",
   knowledge: "Knowledge",
   agents: "Agents",
 }
@@ -166,7 +162,6 @@ export function SidebarContentPanel({
   expandedPaths,
   onSelectFile,
   knowledgeActions,
-  chats,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection } = useSidebarSection()
@@ -179,9 +174,6 @@ export function SidebarContentPanel({
         </div>
       </SidebarHeader>
       <SidebarContent>
-        {activeSection === "ask-ai" && (
-          <ChatSection chats={chats} />
-        )}
         {activeSection === "knowledge" && (
           <KnowledgeSection
             tree={tree}
@@ -197,43 +189,6 @@ export function SidebarContentPanel({
       </SidebarContent>
       <SidebarRail />
     </Sidebar>
-  )
-}
-
-// Chat Section
-function ChatSection({ chats }: { chats: { id: string; title: string; preview: string; time: string }[] }) {
-  return (
-    <SidebarGroup>
-      <SidebarGroupLabel className="flex items-center justify-between">
-        <span>Recent Chats</span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1 transition-colors">
-              <MessageSquarePlus className="size-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">New Chat</TooltipContent>
-        </Tooltip>
-      </SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {chats.map((chat) => (
-            <SidebarMenuItem key={chat.id}>
-              <SidebarMenuButton className="h-auto items-start gap-2 py-2">
-                <MessageSquare className="mt-0.5 size-4" />
-                <div className="flex flex-1 flex-col gap-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">{chat.title}</span>
-                    <span className="text-xs text-muted-foreground">{chat.time}</span>
-                  </div>
-                  <span className="truncate text-xs text-muted-foreground">{chat.preview}</span>
-                </div>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
   )
 }
 

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 
-export type ActiveSection = "ask-ai" | "knowledge" | "agents"
+export type ActiveSection = "knowledge" | "agents"
 
 type SidebarSectionContextProps = {
   activeSection: ActiveSection
@@ -20,7 +20,7 @@ export function useSidebarSection() {
 }
 
 export function SidebarSectionProvider({
-  defaultSection = "ask-ai",
+  defaultSection = "knowledge",
   onSectionChange,
   children,
 }: {

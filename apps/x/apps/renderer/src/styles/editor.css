@@ -175,17 +175,41 @@
 .tiptap-editor .ProseMirror ul[data-type="taskList"] {
   list-style: none;
   padding-left: 0;
+  margin: 0.5em 0;
 }
 
 .tiptap-editor .ProseMirror ul[data-type="taskList"] li {
   display: flex;
   align-items: flex-start;
   gap: 0.5em;
+  margin: 0.25em 0;
 }
 
 .tiptap-editor .ProseMirror ul[data-type="taskList"] li > label {
   flex-shrink: 0;
   margin-top: 0.25em;
+  cursor: pointer;
+}
+
+.tiptap-editor .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
+  width: 1em;
+  height: 1em;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+.tiptap-editor .ProseMirror ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+
+.tiptap-editor .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* Nested task lists */
+.tiptap-editor .ProseMirror ul[data-type="taskList"] ul[data-type="taskList"] {
+  margin-left: 1.5em;
 }
 
 /* Selection */
@@ -227,4 +251,33 @@
   height: 0;
   width: 0;
   pointer-events: none;
+}
+
+/* Wiki Links */
+.tiptap-editor .ProseMirror .wiki-link,
+.tiptap-editor .ProseMirror a[data-type="wiki-link"] {
+  color: var(--primary);
+  background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+  padding: 0.1em 0.3em;
+  border-radius: 0.25em;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.tiptap-editor .ProseMirror .wiki-link:hover,
+.tiptap-editor .ProseMirror a[data-type="wiki-link"]:hover {
+  background-color: color-mix(in srgb, var(--primary) 20%, transparent);
+}
+
+/* Disabled button state */
+.editor-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Selection highlight for when editor loses focus (e.g., link popover open) */
+.tiptap-editor .ProseMirror .selection-highlight {
+  background-color: color-mix(in srgb, var(--primary) 25%, transparent);
+  border-radius: 2px;
 }

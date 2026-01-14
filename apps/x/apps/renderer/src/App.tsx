@@ -251,28 +251,6 @@ const collectDirPaths = (nodes: TreeNode[]): string[] =>
 const collectFilePaths = (nodes: TreeNode[]): string[] =>
   nodes.flatMap(n => n.kind === 'file' ? [n.path] : (n.children ? collectFilePaths(n.children) : []))
 
-// Sample chat history (will be replaced with real data later)
-const chatHistory = [
-  {
-    id: 'project-kickoff',
-    title: 'Project kickoff',
-    preview: 'Scope, roles, and milestones.',
-    time: 'Today',
-  },
-  {
-    id: 'design-review',
-    title: 'Design review',
-    preview: 'UI polish and sidebar UX.',
-    time: 'Yesterday',
-  },
-  {
-    id: 'tools-audit',
-    title: 'Tools audit',
-    preview: 'MCP inventory and tool gaps.',
-    time: 'Mon',
-  },
-]
-
 function App() {
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -630,9 +608,9 @@ function App() {
     setExpandedPaths(newExpanded)
   }
 
-  // Handle sidebar section changes - switch to chat view for ask-ai and agents
+  // Handle sidebar section changes - switch to chat view for agents
   const handleSectionChange = useCallback((section: ActiveSection) => {
-    if (section === 'ask-ai' || section === 'agents') {
+    if (section === 'agents') {
       setSelectedPath(null)
       setIsGraphOpen(false)
     }
@@ -971,7 +949,7 @@ function App() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <SidebarSectionProvider defaultSection="ask-ai" onSectionChange={handleSectionChange}>
+      <SidebarSectionProvider defaultSection="knowledge" onSectionChange={handleSectionChange}>
         <div className="flex h-svh w-full">
           {/* Icon sidebar - always visible, fixed position */}
           <SidebarIcon />
@@ -992,7 +970,6 @@ function App() {
               expandedPaths={expandedPaths}
               onSelectFile={toggleExpand}
               knowledgeActions={knowledgeActions}
-              chats={chatHistory}
             />
             <SidebarInset className="!overflow-hidden min-h-0">
               {/* Header with sidebar trigger */}

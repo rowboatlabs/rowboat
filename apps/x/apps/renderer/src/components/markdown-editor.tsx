@@ -1,7 +1,11 @@
-import { useEditor, EditorContent } from '@tiptap/react'
+import { useEditor, EditorContent, Extension } from '@tiptap/react'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
 import { Markdown } from 'tiptap-markdown'
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
 import { EditorToolbar } from './editor-toolbar'
@@ -30,6 +34,41 @@ type WikiLinkMatch = {
   query: string
 }
 
+type SelectionHighlightRange = { from: number; to: number } | null
+
+// Plugin key for the selection highlight
+const selectionHighlightKey = new PluginKey('selectionHighlight')
+
+// Create the selection highlight extension
+const createSelectionHighlightExtension = (getRange: () => SelectionHighlightRange) => {
+  return Extension.create({
+    name: 'selectionHighlight',
+    addProseMirrorPlugins() {
+      return [
+        new Plugin({
+          key: selectionHighlightKey,
+          props: {
+            decorations(state) {
+              const range = getRange()
+              if (!range) return DecorationSet.empty
+
+              const { from, to } = range
+              if (from >= to || from < 0 || to > state.doc.content.size) {
+                return DecorationSet.empty
+              }
+
+              const decoration = Decoration.inline(from, to, {
+                class: 'selection-highlight',
+              })
+              return DecorationSet.create(state.doc, [decoration])
+            },
+          },
+        }),
+      ]
+    },
+  })
+}
+
 export function MarkdownEditor({
   content,
   onChange,
@@ -40,6 +79,17 @@ export function MarkdownEditor({
   const wrapperRef = useRef<HTMLDivElement>(null)
   const [activeWikiLink, setActiveWikiLink] = useState<WikiLinkMatch | null>(null)
   const [anchorPosition, setAnchorPosition] = useState<{ left: number; top: number } | null>(null)
+  const [selectionHighlight, setSelectionHighlight] = useState<SelectionHighlightRange>(null)
+  const selectionHighlightRef = useRef<SelectionHighlightRange>(null)
+
+  // Keep ref in sync with state for the plugin to access
+  selectionHighlightRef.current = selectionHighlight
+
+  // Memoize the selection highlight extension
+  const selectionHighlightExtension = useMemo(
+    () => createSelectionHighlightExtension(() => selectionHighlightRef.current),
+    []
+  )
 
   const editor = useEditor({
     extensions: [
@@ -62,6 +112,10 @@ export function MarkdownEditor({
             }
           : undefined,
       }),
+      TaskList,
+      TaskItem.configure({
+        nested: true,
+      }),
       Placeholder.configure({
         placeholder,
       }),
@@ -71,6 +125,7 @@ export function MarkdownEditor({
         transformCopiedText: true,
         transformPastedText: true,
       }),
+      selectionHighlightExtension,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -184,6 +239,14 @@ export function MarkdownEditor({
     }
   }, [editor, content])
 
+  // Force re-render decorations when selection highlight changes
+  useEffect(() => {
+    if (editor) {
+      // Trigger a transaction to force decoration re-render
+      editor.view.dispatch(editor.state.tr)
+    }
+  }, [editor, selectionHighlight])
+
   const normalizedQuery = normalizeWikiPath(activeWikiLink?.query ?? '').toLowerCase()
   const filteredFiles = useMemo(() => {
     if (!activeWikiLink) return []
@@ -237,7 +300,7 @@ export function MarkdownEditor({
 
   return (
     <div className="tiptap-editor" onKeyDown={handleKeyDown}>
-      <EditorToolbar editor={editor} />
+      <EditorToolbar editor={editor} onSelectionHighlight={setSelectionHighlight} />
       <div className="editor-content-wrapper" ref={wrapperRef} onScroll={handleScroll}>
         <EditorContent editor={editor} />
         {wikiLinks ? (

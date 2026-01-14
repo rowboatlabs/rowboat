@@ -1,5 +1,12 @@
+import { useState, useCallback } from 'react'
 import type { Editor } from '@tiptap/react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import {
   BoldIcon,
   ItalicIcon,
@@ -10,42 +17,104 @@ import {
   Heading3Icon,
   ListIcon,
   ListOrderedIcon,
+  ListTodoIcon,
   QuoteIcon,
   MinusIcon,
   LinkIcon,
   CodeSquareIcon,
+  Undo2Icon,
+  Redo2Icon,
+  ExternalLinkIcon,
+  Trash2Icon,
 } from 'lucide-react'
 
 interface EditorToolbarProps {
   editor: Editor | null
+  onSelectionHighlight?: (range: { from: number; to: number } | null) => void
 }
 
-export function EditorToolbar({ editor }: EditorToolbarProps) {
-  if (!editor) return null
+export function EditorToolbar({ editor, onSelectionHighlight }: EditorToolbarProps) {
+  const [linkUrl, setLinkUrl] = useState('')
+  const [isLinkPopoverOpen, setIsLinkPopoverOpen] = useState(false)
 
-  const setLink = () => {
-    const previousUrl = editor.getAttributes('link').href
-    const url = window.prompt('URL', previousUrl)
+  const openLinkPopover = useCallback(() => {
+    if (!editor) return
+    const previousUrl = editor.getAttributes('link').href || ''
+    setLinkUrl(previousUrl)
 
-    if (url === null) return
-
-    if (url === '') {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run()
-      return
+    // Highlight the current selection while popover is open
+    const { from, to } = editor.state.selection
+    if (from !== to && onSelectionHighlight) {
+      onSelectionHighlight({ from, to })
     }
 
-    editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
-  }
+    setIsLinkPopoverOpen(true)
+  }, [editor, onSelectionHighlight])
+
+  const closeLinkPopover = useCallback(() => {
+    setIsLinkPopoverOpen(false)
+    setLinkUrl('')
+    onSelectionHighlight?.(null)
+  }, [onSelectionHighlight])
+
+  const applyLink = useCallback(() => {
+    if (!editor) return
+
+    if (linkUrl === '') {
+      editor.chain().focus().extendMarkRange('link').unsetLink().run()
+    } else {
+      // Ensure URL has protocol
+      let url = linkUrl.trim()
+      if (url && !url.match(/^https?:\/\//i) && !url.startsWith('mailto:')) {
+        url = 'https://' + url
+      }
+      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+    }
+    closeLinkPopover()
+  }, [editor, linkUrl, closeLinkPopover])
+
+  const removeLink = useCallback(() => {
+    if (!editor) return
+    editor.chain().focus().extendMarkRange('link').unsetLink().run()
+    closeLinkPopover()
+  }, [editor, closeLinkPopover])
+
+  if (!editor) return null
+
+  const isLinkActive = editor.isActive('link')
 
   return (
     <div className="editor-toolbar">
+      {/* Undo / Redo */}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => editor.chain().focus().undo().run()}
+        disabled={!editor.can().undo()}
+        title="Undo (Ctrl+Z)"
+      >
+        <Undo2Icon className="size-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => editor.chain().focus().redo().run()}
+        disabled={!editor.can().redo()}
+        title="Redo (Ctrl+Shift+Z)"
+      >
+        <Redo2Icon className="size-4" />
+      </Button>
+
+      <div className="separator" />
+
+      {/* Text formatting */}
       <Button
         variant="ghost"
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleBold().run()}
         data-active={editor.isActive('bold') || undefined}
         className="data-[active]:bg-accent"
-        title="Bold"
+        title="Bold (Ctrl+B)"
       >
         <BoldIcon className="size-4" />
       </Button>
@@ -55,7 +124,7 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
         onClick={() => editor.chain().focus().toggleItalic().run()}
         data-active={editor.isActive('italic') || undefined}
         className="data-[active]:bg-accent"
-        title="Italic"
+        title="Italic (Ctrl+I)"
       >
         <ItalicIcon className="size-4" />
       </Button>
@@ -82,6 +151,7 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
 
       <div className="separator" />
 
+      {/* Headings */}
       <Button
         variant="ghost"
         size="icon-sm"
@@ -115,6 +185,7 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
 
       <div className="separator" />
 
+      {/* Lists */}
       <Button
         variant="ghost"
         size="icon-sm"
@@ -135,9 +206,20 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
       >
         <ListOrderedIcon className="size-4" />
       </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => editor.chain().focus().toggleTaskList().run()}
+        data-active={editor.isActive('taskList') || undefined}
+        className="data-[active]:bg-accent"
+        title="Task List"
+      >
+        <ListTodoIcon className="size-4" />
+      </Button>
 
       <div className="separator" />
 
+      {/* Blocks */}
       <Button
         variant="ghost"
         size="icon-sm"
@@ -166,16 +248,78 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
       >
         <MinusIcon className="size-4" />
       </Button>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        onClick={setLink}
-        data-active={editor.isActive('link') || undefined}
-        className="data-[active]:bg-accent"
-        title="Link"
+
+      {/* Link with popover */}
+      <Popover
+        open={isLinkPopoverOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeLinkPopover()
+          }
+        }}
       >
-        <LinkIcon className="size-4" />
-      </Button>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={openLinkPopover}
+            data-active={isLinkActive || undefined}
+            className="data-[active]:bg-accent"
+            title="Link"
+          >
+            <LinkIcon className="size-4" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-80 p-3" align="start">
+          <div className="flex flex-col gap-3">
+            <div className="text-sm font-medium">
+              {isLinkActive ? 'Edit Link' : 'Add Link'}
+            </div>
+            <Input
+              placeholder="https://example.com"
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  applyLink()
+                }
+                if (e.key === 'Escape') {
+                  setIsLinkPopoverOpen(false)
+                }
+              }}
+              autoFocus
+            />
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={applyLink} className="flex-1">
+                {isLinkActive ? 'Update' : 'Apply'}
+              </Button>
+              {isLinkActive && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      window.open(linkUrl, '_blank')
+                    }}
+                    title="Open link"
+                  >
+                    <ExternalLinkIcon className="size-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={removeLink}
+                    title="Remove link"
+                  >
+                    <Trash2Icon className="size-4" />
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }
