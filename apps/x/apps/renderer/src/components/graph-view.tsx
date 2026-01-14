@@ -437,14 +437,20 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
   const searchMatchingNodes = useMemo(() => {
     if (!searchQuery.trim()) return null
     const query = searchQuery.toLowerCase()
-    const set = new Set<string>()
+    const directMatches = new Set<string>()
     nodes.forEach((node) => {
       if (node.label.toLowerCase().includes(query) || node.id.toLowerCase().includes(query)) {
-        set.add(node.id)
+        directMatches.add(node.id)
       }
     })
-    return set
-  }, [searchQuery, nodes])
+    // Include immediate connections of matching nodes
+    const withConnections = new Set(directMatches)
+    edgeList.forEach((edge) => {
+      if (directMatches.has(edge.source)) withConnections.add(edge.target)
+      if (directMatches.has(edge.target)) withConnections.add(edge.source)
+    })
+    return { matches: withConnections, directMatches }
+  }, [searchQuery, nodes, edgeList])
 
   return (
     <div ref={containerRef} className="graph-view relative h-full w-full">
@@ -530,7 +536,7 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
               ? edge.source === activeNodeId || edge.target === activeNodeId
               : false
             const isSearchEdge = searchMatchingNodes
-              ? searchMatchingNodes.has(edge.source) && searchMatchingNodes.has(edge.target)
+              ? searchMatchingNodes.matches.has(edge.source) && searchMatchingNodes.matches.has(edge.target)
               : false
             let strokeOpacity = 0.4
             let strokeWidth = 1
@@ -564,11 +570,18 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
             const pos = displayPositions.get(node.id)
             if (!pos) return null
             const isConnected = connectedNodes ? connectedNodes.has(node.id) : true
-            const isSearchMatch = searchMatchingNodes ? searchMatchingNodes.has(node.id) : true
-            const isPrimary = activeNodeId === node.id || (searchMatchingNodes && isSearchMatch)
+            const isSearchMatch = searchMatchingNodes ? searchMatchingNodes.matches.has(node.id) : true
+            const isDirectMatch = searchMatchingNodes ? searchMatchingNodes.directMatches.has(node.id) : false
+            const isPrimary = activeNodeId === node.id || isDirectMatch
             let nodeOpacity = 1
             if (searchMatchingNodes) {
-              nodeOpacity = isSearchMatch ? 1 : 0.15
+              if (isDirectMatch) {
+                nodeOpacity = 1
+              } else if (isSearchMatch) {
+                nodeOpacity = 0.5
+              } else {
+                nodeOpacity = 0.1
+              }
             } else if (activeNodeId) {
               nodeOpacity = isConnected ? 1 : 0.3
             }
@@ -593,10 +606,10 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
                 <circle
                   r={node.radius}
                   fill={node.color}
-                  stroke="#0a0a0a"
-                  strokeWidth={2}
+                  stroke={isDirectMatch ? '#fff' : '#0a0a0a'}
+                  strokeWidth={isDirectMatch ? 3 : 2}
                   filter={isPrimary ? `url(#${glowFilterId})` : undefined}
-                  style={{ transition: 'filter 0.2s' }}
+                  style={{ transition: 'filter 0.2s, stroke 0.2s, stroke-width 0.2s' }}
                 />
                 <text
                   y={node.radius + 16}
@@ -631,7 +644,7 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
           <div className="absolute right-3 flex items-center gap-2">
             {searchMatchingNodes && (
               <span className="text-xs text-muted-foreground">
-                {searchMatchingNodes.size}
+                {searchMatchingNodes.directMatches.size}
               </span>
             )}
             {searchQuery && (
