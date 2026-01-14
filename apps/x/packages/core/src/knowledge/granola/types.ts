@@ -9,32 +9,36 @@ export type GranolaConfig = z.infer<typeof GranolaConfig>;
 
 // --- API Schemas ---
 
+// ProseMirror node (recursive structure)
+export const ProseMirrorNode: z.ZodType<{
+    type: string;
+    attrs?: Record<string, unknown>;
+    content?: unknown[];
+    text?: string;
+}> = z.object({
+    type: z.string(),
+    attrs: z.record(z.string(), z.unknown()).optional(),
+    content: z.array(z.lazy(() => ProseMirrorNode)).optional(),
+    text: z.string().optional(),
+}).passthrough();
+
 export const Document = z.object({
     id: z.string(),
     created_at: z.string(),
-    updated_at: z.string().nullable(),
-    deleted_at: z.string().nullable(),
-    notes: z.object({
-        type: z.string(),
-        content: z.array(z.object({
-            type: z.string(),
-            attrs: z.object({
-                id: z.string(),
-            }).optional(),
-            content: z.array(z.object({
-                type: z.string(),
-                text: z.string().optional(),
-            })).optional(),
-        })),
-    }).optional(),
-    title: z.string().nullable(),
-    type: z.string(),
-    user_id: z.string(),
-    notes_plain: z.string().optional(),
-    notes_markdown: z.string().optional(),
-    workspace_id: z.string().nullable(),
-    public: z.boolean(),
-});
+    updated_at: z.string().nullable().optional(),
+    deleted_at: z.string().nullable().optional(),
+    title: z.string().nullable().optional(),
+    type: z.string().nullable().optional(),
+    user_id: z.string().optional(),
+    workspace_id: z.string().nullable().optional(),
+    public: z.boolean().optional(),
+    notes: ProseMirrorNode.optional().nullable(),
+    notes_plain: z.string().nullable().optional(),
+    notes_markdown: z.string().nullable().optional(),
+    last_viewed_panel: z.object({
+        content: z.union([ProseMirrorNode, z.string()]).optional().nullable(),
+    }).passthrough().optional().nullable(),
+}).passthrough(); // Allow additional fields
 export type Document = z.infer<typeof Document>;
 
 export const GetWorkspacesResponse = z.object({
@@ -76,12 +80,17 @@ export const GetDocumentTranscriptResponse = z.array(z.object({
 }));
 export type GetDocumentTranscriptResponse = z.infer<typeof GetDocumentTranscriptResponse>;
 
+// Document reference in a list (may be partial, we only need id)
+export const DocumentRef = z.object({
+    id: z.string(),
+}).passthrough(); // Allow additional fields
+
 export const DocumentListItem = z.object({
     id: z.string(),
     title: z.string(),
     created_at: z.string(),
     updated_at: z.string(),
-    documents: z.array(Document),
+    documents: z.array(DocumentRef),
 });
 export type DocumentListItem = z.infer<typeof DocumentListItem>;
 
