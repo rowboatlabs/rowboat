@@ -1,6 +1,7 @@
 import type * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Search, X } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 
 export type GraphNode = {
   id: string
@@ -69,6 +70,7 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
   const [, forceRender] = useState(0)
 
   const edgeList = useMemo(
@@ -432,6 +434,18 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
     return set
   }, [activeNodeId, edgeList])
 
+  const searchMatchingNodes = useMemo(() => {
+    if (!searchQuery.trim()) return null
+    const query = searchQuery.toLowerCase()
+    const set = new Set<string>()
+    nodes.forEach((node) => {
+      if (node.label.toLowerCase().includes(query) || node.id.toLowerCase().includes(query)) {
+        set.add(node.id)
+      }
+    })
+    return set
+  }, [searchQuery, nodes])
+
   return (
     <div ref={containerRef} className="graph-view relative h-full w-full">
       {isLoading ? (
@@ -515,8 +529,18 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
             const isActiveEdge = activeNodeId
               ? edge.source === activeNodeId || edge.target === activeNodeId
               : false
-            const strokeOpacity = activeNodeId ? (isActiveEdge ? 0.8 : 0.1) : 0.4
-            const strokeWidth = activeNodeId ? (isActiveEdge ? 2 : 1) : 1
+            const isSearchEdge = searchMatchingNodes
+              ? searchMatchingNodes.has(edge.source) && searchMatchingNodes.has(edge.target)
+              : false
+            let strokeOpacity = 0.4
+            let strokeWidth = 1
+            if (searchMatchingNodes) {
+              strokeOpacity = isSearchEdge ? 0.6 : 0.05
+              strokeWidth = isSearchEdge ? 1.5 : 1
+            } else if (activeNodeId) {
+              strokeOpacity = isActiveEdge ? 0.8 : 0.1
+              strokeWidth = isActiveEdge ? 2 : 1
+            }
             const activeNode = activeNodeId ? nodes.find((n) => n.id === activeNodeId) : null
             const stroke = isActiveEdge && activeNode ? activeNode.color : '#333'
             const dx = target.x - source.x
@@ -540,8 +564,14 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
             const pos = displayPositions.get(node.id)
             if (!pos) return null
             const isConnected = connectedNodes ? connectedNodes.has(node.id) : true
-            const isPrimary = activeNodeId === node.id
-            const nodeOpacity = activeNodeId ? (isConnected ? 1 : 0.3) : 1
+            const isSearchMatch = searchMatchingNodes ? searchMatchingNodes.has(node.id) : true
+            const isPrimary = activeNodeId === node.id || (searchMatchingNodes && isSearchMatch)
+            let nodeOpacity = 1
+            if (searchMatchingNodes) {
+              nodeOpacity = isSearchMatch ? 1 : 0.15
+            } else if (activeNodeId) {
+              nodeOpacity = isConnected ? 1 : 0.3
+            }
             const glowFilterId = `glow-${node.color.replace('#', '')}`
             return (
               <g
@@ -584,6 +614,37 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
           })}
         </g>
       </svg>
+
+      <div
+        className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div className="relative flex items-center">
+          <Search className="absolute left-3 size-4 text-muted-foreground" />
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search nodes..."
+            className="w-64 pl-9 pr-20 shadow-lg backdrop-blur"
+          />
+          <div className="absolute right-3 flex items-center gap-2">
+            {searchMatchingNodes && (
+              <span className="text-xs text-muted-foreground">
+                {searchMatchingNodes.size}
+              </span>
+            )}
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
