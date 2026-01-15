@@ -9,6 +9,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -23,9 +28,10 @@ interface ProviderState {
 
 interface ConnectorsPopoverProps {
   children: React.ReactNode
+  tooltip?: string
 }
 
-export function ConnectorsPopover({ children }: ConnectorsPopoverProps) {
+export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps) {
   const [open, setOpen] = useState(false)
   const [providers, setProviders] = useState<string[]>([])
   const [providersLoading, setProvidersLoading] = useState(true)
@@ -199,9 +205,22 @@ export function ConnectorsPopover({ children }: ConnectorsPopoverProps) {
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        {children}
-      </PopoverTrigger>
+      {tooltip ? (
+        <Tooltip open={open ? false : undefined}>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              {children}
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>
+            {tooltip}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        <PopoverTrigger asChild>
+          {children}
+        </PopoverTrigger>
+      )}
       <PopoverContent
         side="right"
         align="end"

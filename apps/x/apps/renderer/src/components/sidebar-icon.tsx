@@ -8,7 +8,6 @@ import {
   Plug,
   Settings,
   Ship,
-  Trash2,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -19,6 +18,7 @@ import {
 } from "@/components/ui/tooltip"
 import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
 import { ConnectorsPopover } from "@/components/connectors-popover"
+import { HelpPopover } from "@/components/help-popover"
 
 type NavItem = {
   id: ActiveSection
@@ -26,21 +26,9 @@ type NavItem = {
   icon: React.ElementType
 }
 
-type SecondaryItem = {
-  id: string
-  title: string
-  icon: React.ElementType
-  action?: () => void
-}
-
 const navItems: NavItem[] = [
   { id: "knowledge", title: "Knowledge", icon: Brain },
   { id: "agents", title: "Agents", icon: Bot },
-]
-
-const secondaryItems: SecondaryItem[] = [
-  { id: "trash", title: "Trash", icon: Trash2 },
-  { id: "help", title: "Help", icon: HelpCircle },
 ]
 
 export function SidebarIcon() {
@@ -80,7 +68,7 @@ export function SidebarIcon() {
       {/* Secondary navigation (bottom) */}
       <nav className="flex flex-col items-center gap-1">
         {/* Connectors */}
-        <ConnectorsPopover>
+        <ConnectorsPopover tooltip="Connectors">
           <button
             className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
           >
@@ -102,21 +90,14 @@ export function SidebarIcon() {
           </TooltipContent>
         </Tooltip>
 
-        {secondaryItems.map((item) => (
-          <Tooltip key={item.id}>
-            <TooltipTrigger asChild>
-              <button
-                onClick={item.action}
-                className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-              >
-                <item.icon className="size-5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" sideOffset={8}>
-              {item.title}
-            </TooltipContent>
-          </Tooltip>
-        ))}
+        {/* Help */}
+        <HelpPopover tooltip="Help">
+          <button
+            className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          >
+            <HelpCircle className="size-5" />
+          </button>
+        </HelpPopover>
       </nav>
     </div>
   )
