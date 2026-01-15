@@ -7,7 +7,6 @@ import {
   HelpCircle,
   Plug,
   Settings,
-  Ship,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -36,11 +35,6 @@ export function SidebarIcon() {
 
   return (
     <div className="bg-sidebar border-r border-sidebar-border flex h-svh w-14 flex-col items-center py-2 fixed left-0 top-0 z-50 shrink-0">
-      {/* Logo */}
-      <div className="flex h-10 w-10 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground mb-4">
-        <Ship className="size-5" />
-      </div>
-
       {/* Main navigation */}
       <nav className="flex flex-1 flex-col items-center gap-1">
         {navItems.map((item) => (

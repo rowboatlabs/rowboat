@@ -1124,7 +1124,7 @@ function App() {
             {/* Chat sidebar - shown when viewing files/graph */}
             {isChatSidebarOpen && (selectedPath || isGraphOpen) && (
               <ChatSidebar
-                width={400}
+                defaultWidth={400}
                 onClose={() => setIsChatSidebarOpen(false)}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}

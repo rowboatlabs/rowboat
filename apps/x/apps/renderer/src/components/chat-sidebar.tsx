@@ -1,6 +1,8 @@
+import { useCallback, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import type { ChatStatus, LanguageModelUsage, ToolUIPart } from 'ai'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import {
   Conversation,
   ConversationContent,
@@ -105,8 +107,12 @@ const normalizeToolOutput = (output: ToolCall['result'] | undefined, status: Too
   return output
 }
 
+const MIN_WIDTH = 300
+const MAX_WIDTH = 700
+const DEFAULT_WIDTH = 400
+
 interface ChatSidebarProps {
-  width?: number
+  defaultWidth?: number
   onClose: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
@@ -121,7 +127,7 @@ interface ChatSidebarProps {
 }
 
 export function ChatSidebar({
-  width = 400,
+  defaultWidth = DEFAULT_WIDTH,
   onClose,
   conversation,
   currentAssistantMessage,
@@ -134,6 +140,33 @@ export function ChatSidebar({
   maxTokens,
   usedTokens,
 }: ChatSidebarProps) {
+  const [width, setWidth] = useState(defaultWidth)
+  const [isResizing, setIsResizing] = useState(false)
+  const startXRef = useRef(0)
+  const startWidthRef = useRef(0)
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    startXRef.current = e.clientX
+    startWidthRef.current = width
+    setIsResizing(true)
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // Since sidebar is on right, dragging left increases width
+      const delta = startXRef.current - e.clientX
+      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidthRef.current + delta))
+      setWidth(newWidth)
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [width])
   const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
   const submitStatus: ChatStatus = isProcessing ? 'streaming' : 'ready'
   const canSubmit = Boolean(message.trim()) && !isProcessing
@@ -188,9 +221,19 @@ export function ChatSidebar({
 
   return (
     <div
-      className="flex flex-col border-l border-border bg-background shrink-0"
+      className="relative flex flex-col border-l border-border bg-background shrink-0"
       style={{ width }}
     >
+      {/* Resize handle */}
+      <div
+        onMouseDown={handleMouseDown}
+        className={cn(
+          "absolute inset-y-0 left-0 z-20 w-4 -translate-x-1/2 cursor-col-resize",
+          "after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] after:transition-colors",
+          "hover:after:bg-sidebar-border",
+          isResizing && "after:bg-primary"
+        )}
+      />
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-3">
         <span className="text-sm font-medium">Chat</span>
