@@ -5,6 +5,7 @@ import {
   Bot,
   Brain,
   HelpCircle,
+  Plug,
   Settings,
   Ship,
   Trash2,
@@ -17,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
+import { ConnectorsPopover } from "@/components/connectors-popover"
 
 type NavItem = {
   id: ActiveSection
@@ -37,7 +39,6 @@ const navItems: NavItem[] = [
 ]
 
 const secondaryItems: SecondaryItem[] = [
-  { id: "settings", title: "Settings", icon: Settings },
   { id: "trash", title: "Trash", icon: Trash2 },
   { id: "help", title: "Help", icon: HelpCircle },
 ]
@@ -78,6 +79,29 @@ export function SidebarIcon() {
 
       {/* Secondary navigation (bottom) */}
       <nav className="flex flex-col items-center gap-1">
+        {/* Connectors */}
+        <ConnectorsPopover>
+          <button
+            className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          >
+            <Plug className="size-5" />
+          </button>
+        </ConnectorsPopover>
+
+        {/* Settings */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <Settings className="size-5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>
+            Settings
+          </TooltipContent>
+        </Tooltip>
+
         {secondaryItems.map((item) => (
           <Tooltip key={item.id}>
             <TooltipTrigger asChild>
