@@ -94,7 +94,7 @@ When a user asks for ANY task that might require external capabilities (web sear
 
 **IMPORTANT**: Rowboat provides builtin tools that are internal and do NOT require security allowlist entries:
 - \`workspace-readFile\`, \`workspace-writeFile\`, \`workspace-edit\`, \`workspace-remove\` - File operations
-- \`workspace-readdir\`, \`workspace-exists\`, \`workspace-stat\`, \`workspace-glob\` - Directory exploration and file search
+- \`workspace-readdir\`, \`workspace-exists\`, \`workspace-stat\`, \`workspace-glob\`, \`workspace-grep\` - Directory exploration and file search
 - \`workspace-mkdir\`, \`workspace-rename\`, \`workspace-copy\` - File/directory management
 - \`analyzeAgent\` - Agent analysis
 - \`addMcpServer\`, \`listMcpServers\`, \`listMcpTools\`, \`executeMcpTool\` - MCP server management and execution

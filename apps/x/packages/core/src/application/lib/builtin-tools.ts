@@ -1,5 +1,6 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
+import { execSync } from "child_process";
 import { glob } from "glob";
 import { executeCommand } from "./command-executor.js";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
@@ -340,6 +341,119 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     pattern,
                     cwd: cwd || '.',
                 };
+            } catch (error) {
+                return { error: error instanceof Error ? error.message : 'Unknown error' };
+            }
+        },
+    },
+
+    'workspace-grep': {
+        description: 'Search file contents using regex. Returns matching files and lines. Uses ripgrep if available, falls back to grep.',
+        inputSchema: z.object({
+            pattern: z.string().describe('Regex pattern to search for'),
+            searchPath: z.string().optional().describe('Directory or file to search, relative to workspace root (default: workspace root)'),
+            fileGlob: z.string().optional().describe('File pattern filter (e.g., "*.ts", "*.md")'),
+            contextLines: z.number().optional().describe('Lines of context around matches (default: 0)'),
+            maxResults: z.number().optional().describe('Maximum results to return (default: 100)'),
+        }),
+        execute: async ({
+            pattern,
+            searchPath,
+            fileGlob,
+            contextLines = 0,
+            maxResults = 100
+        }: {
+            pattern: string;
+            searchPath?: string;
+            fileGlob?: string;
+            contextLines?: number;
+            maxResults?: number;
+        }) => {
+            try {
+                const targetPath = searchPath ? path.join(WorkDir, searchPath) : WorkDir;
+
+                // Ensure target path is within workspace
+                const resolvedTargetPath = path.resolve(targetPath);
+                if (!resolvedTargetPath.startsWith(WorkDir)) {
+                    return { error: 'Search path must be within workspace' };
+                }
+
+                // Try ripgrep first
+                try {
+                    const rgArgs = [
+                        '--json',
+                        '-e', JSON.stringify(pattern),
+                        contextLines > 0 ? `-C ${contextLines}` : '',
+                        fileGlob ? `--glob ${JSON.stringify(fileGlob)}` : '',
+                        `--max-count ${maxResults}`,
+                        '--ignore-case',
+                        JSON.stringify(resolvedTargetPath),
+                    ].filter(Boolean).join(' ');
+
+                    const output = execSync(`rg ${rgArgs}`, {
+                        encoding: 'utf8',
+                        maxBuffer: 10 * 1024 * 1024,
+                        cwd: WorkDir,
+                    });
+
+                    const matches = output.trim().split('\n')
+                        .filter(Boolean)
+                        .map(line => {
+                            try {
+                                return JSON.parse(line);
+                            } catch {
+                                return null;
+                            }
+                        })
+                        .filter(m => m && m.type === 'match');
+
+                    return {
+                        matches: matches.map(m => ({
+                            file: path.relative(WorkDir, m.data.path.text),
+                            line: m.data.line_number,
+                            content: m.data.lines.text.trim(),
+                        })),
+                        count: matches.length,
+                        tool: 'ripgrep',
+                    };
+                } catch (rgError) {
+                    // Fallback to basic grep if ripgrep not available or failed
+                    const grepArgs = [
+                        '-rn',
+                        fileGlob ? `--include=${JSON.stringify(fileGlob)}` : '',
+                        JSON.stringify(pattern),
+                        JSON.stringify(resolvedTargetPath),
+                        `| head -${maxResults}`,
+                    ].filter(Boolean).join(' ');
+
+                    try {
+                        const output = execSync(`grep ${grepArgs}`, {
+                            encoding: 'utf8',
+                            maxBuffer: 10 * 1024 * 1024,
+                            shell: '/bin/sh',
+                        });
+
+                        const lines = output.trim().split('\n').filter(Boolean);
+                        return {
+                            matches: lines.map(line => {
+                                const match = line.match(/^(.+?):(\d+):(.*)$/);
+                                if (match) {
+                                    return {
+                                        file: path.relative(WorkDir, match[1]),
+                                        line: parseInt(match[2], 10),
+                                        content: match[3].trim(),
+                                    };
+                                }
+                                return { file: '', line: 0, content: line };
+                            }),
+                            count: lines.length,
+                            tool: 'grep',
+                        };
+                    } catch {
+                        // No matches found (grep returns non-zero on no matches)
+                        return { matches: [], count: 0, tool: 'grep' };
+                    }
+                }
             } catch (error) {
                 return { error: error instanceof Error ? error.message : 'Unknown error' };
             }
