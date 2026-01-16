@@ -1,0 +1,16 @@
+{
+  "name": "@x/preload",
+  "private": true,
+  "type": "module",
+  "main": "dist/preload.js",
+  "scripts": {
+    "build": "rm -rf dist && tsc && esbuild dist/preload.js --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.bundle.js && mv dist/preload.bundle.js dist/preload.js"
+  },
+  "dependencies": {
+    "@x/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "^39.2.7",
+    "esbuild": "^0.24.2"
+  }
+}

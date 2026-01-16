@@ -1,0 +1,197 @@
+.json-editor-wrapper {
+  height: 100%;
+  min-height: 240px;
+  max-height: 70vh;
+  overflow: auto;
+  border-radius: 0.375rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  position: relative;
+  display: flex;
+}
+
+/* Dark mode wrapper */
+.dark .json-editor-wrapper {
+  background: hsl(var(--background));
+  border-color: hsl(var(--border));
+}
+
+@media (prefers-color-scheme: dark) {
+  .json-editor-wrapper {
+    background: hsl(var(--background));
+    border-color: hsl(var(--border));
+  }
+}
+
+.json-editor-line-numbers {
+  position: sticky;
+  left: 0;
+  top: 0;
+  width: 3.5rem;
+  flex-shrink: 0;
+  border-right: 1px solid hsl(var(--border) / 0.3);
+  background: hsl(var(--muted) / 0.03);
+  padding: 1rem 0.75rem 1rem 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.875rem;
+  line-height: 1.75;
+  user-select: none;
+  z-index: 1;
+}
+
+.json-editor-line-number {
+  color: hsl(var(--muted-foreground) / 0.6);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  height: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Dark mode line numbers */
+.dark .json-editor-line-numbers {
+  background: hsl(var(--muted) / 0.15);
+  border-right-color: hsl(var(--border) / 0.5);
+}
+
+.dark .json-editor-line-number {
+  color: hsl(var(--muted-foreground) / 0.7);
+}
+
+@media (prefers-color-scheme: dark) {
+  .json-editor-line-numbers {
+    background: hsl(var(--muted) / 0.15);
+    border-right-color: hsl(var(--border) / 0.5);
+  }
+  
+  .json-editor-line-number {
+    color: hsl(var(--muted-foreground) / 0.7);
+  }
+}
+
+.json-editor-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  height: 100%;
+  outline: none;
+}
+
+.json-editor-content:focus-visible {
+  outline: 2px solid hsl(var(--ring) / 0.6);
+  outline-offset: 2px;
+}
+
+/* Code block styling */
+.json-editor-content pre {
+  margin: 0;
+  padding: 1rem 1rem 1rem 0.5rem;
+  background: transparent !important;
+  color: hsl(var(--foreground));
+  overflow-x: auto;
+  white-space: pre;
+  word-wrap: normal;
+  tab-size: 2;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.875rem;
+  line-height: 1.75;
+  position: relative;
+}
+
+.json-editor-content pre code {
+  background: transparent !important;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  display: block;
+  white-space: pre;
+  word-wrap: normal;
+  min-height: 1.75rem;
+}
+
+/* Syntax highlighting for JSON - Light theme */
+.json-editor-content .hljs-attr {
+  color: #0969da;
+  font-weight: 500;
+}
+
+.json-editor-content .hljs-string {
+  color: #0a3069;
+}
+
+.json-editor-content .hljs-number,
+.json-editor-content .hljs-literal {
+  color: #0550ae;
+}
+
+.json-editor-content .hljs-punctuation {
+  color: hsl(var(--foreground) / 0.7);
+}
+
+.json-editor-content .hljs-keyword {
+  color: #cf222e;
+}
+
+.json-editor-content .hljs-comment {
+  color: #6e7781;
+  font-style: italic;
+}
+
+/* Dark mode support - Class-based */
+.dark .json-editor-content .hljs-attr {
+  color: #79c0ff;
+  font-weight: 500;
+}
+
+.dark .json-editor-content .hljs-string {
+  color: #a5d6ff;
+}
+
+.dark .json-editor-content .hljs-number,
+.dark .json-editor-content .hljs-literal {
+  color: #79c0ff;
+}
+
+.dark .json-editor-content .hljs-punctuation {
+  color: #c9d1d9;
+}
+
+.dark .json-editor-content .hljs-keyword {
+  color: #ff7b72;
+}
+
+.dark .json-editor-content .hljs-comment {
+  color: #8b949e;
+}
+
+/* Dark mode support - Media query */
+@media (prefers-color-scheme: dark) {
+  .json-editor-content .hljs-attr {
+    color: #79c0ff;
+    font-weight: 500;
+  }
+
+  .json-editor-content .hljs-string {
+    color: #a5d6ff;
+  }
+
+  .json-editor-content .hljs-number,
+  .json-editor-content .hljs-literal {
+    color: #79c0ff;
+  }
+
+  .json-editor-content .hljs-punctuation {
+    color: #c9d1d9;
+  }
+
+  .json-editor-content .hljs-keyword {
+    color: #ff7b72;
+  }
+
+  .json-editor-content .hljs-comment {
+    color: #8b949e;
+  }
+}
+

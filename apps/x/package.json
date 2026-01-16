@@ -1,0 +1,28 @@
+{
+  "name": "x",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run deps && concurrently -k \"npm:renderer\" \"npm:main\"",
+    "renderer": "cd apps/renderer && npm run dev",
+    "shared": "cd packages/shared && npm run build",
+    "core": "cd packages/core && npm run build",
+    "preload": "cd apps/preload && npm run build",
+    "deps": "npm run shared && npm run core && npm run preload",
+    "main": "wait-on http://localhost:5173 && cd apps/main && npm run build && npm run start",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^25.0.3",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.2",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "globals": "^16.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.50.1",
+    "wait-on": "^9.0.3"
+  }
+}

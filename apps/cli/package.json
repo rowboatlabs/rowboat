@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "rm -rf dist && tsc",
-    "copilot": "npm run build && node dist/x.js"
+    "server": "node dist/server.js",
+    "migrate-agents": "node dist/scripts/migrate-agents.js"
   },
   "files": [
     "dist",
@@ -21,7 +22,7 @@
   "description": "",
   "devDependencies": {
     "@types/node": "^24.9.1",
-    "ts-node": "^10.9.2",
+    "@types/react": "^18.3.12",
     "typescript": "^5.9.3"
   },
   "dependencies": {
@@ -30,12 +31,28 @@
     "@ai-sdk/openai": "^2.0.53",
     "@ai-sdk/openai-compatible": "^1.0.27",
     "@ai-sdk/provider": "^2.0.0",
+    "@google-cloud/local-auth": "^3.0.1",
+    "@hono/node-server": "^1.19.6",
+    "@hono/standard-validator": "^0.1.5",
     "@modelcontextprotocol/sdk": "^1.20.2",
     "@openrouter/ai-sdk-provider": "^1.2.6",
     "ai": "^5.0.102",
+    "awilix": "^12.0.5",
+    "eventsource-parser": "^1.1.2",
+    "google-auth-library": "^10.5.0",
+    "googleapis": "^169.0.0",
+    "hono": "^4.10.7",
+    "hono-openapi": "^1.1.1",
+    "ink": "^5.1.0",
+    "ink-select-input": "^6.2.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
     "json-schema-to-zod": "^2.6.1",
     "nanoid": "^5.1.6",
+    "node-html-markdown": "^2.0.0",
     "ollama-ai-provider-v2": "^1.5.4",
+    "react": "^18.3.1",
+    "yaml": "^2.8.2",
     "yargs": "^18.0.0",
     "zod": "^4.1.12"
   }

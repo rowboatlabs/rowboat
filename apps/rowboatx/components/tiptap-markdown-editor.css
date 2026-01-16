@@ -1,0 +1,290 @@
+.tiptap-markdown-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  min-height: 0;
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid hsl(var(--border));
+  background:
+    radial-gradient(circle at 14% 20%, hsl(var(--primary) / 0.08), transparent 32%),
+    radial-gradient(circle at 86% 10%, hsl(var(--primary) / 0.06), transparent 30%),
+    hsl(var(--background));
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  min-height: 460px;
+}
+
+.tiptap-markdown-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid hsl(var(--border));
+  background: linear-gradient(120deg, hsl(var(--background)), hsl(var(--muted) / 0.4));
+  backdrop-filter: blur(10px);
+  flex-wrap: wrap;
+}
+
+.tiptap-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.tiptap-toolbar-separator {
+  width: 1px;
+  height: 28px;
+  background: hsl(var(--border));
+  opacity: 0.65;
+}
+
+.tiptap-toolbar-button {
+  display: grid;
+  place-items: center;
+  height: 32px;
+  width: 32px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: hsl(var(--muted) / 0.4);
+  color: hsl(var(--foreground));
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.tiptap-toolbar-button:hover:not(:disabled) {
+  border-color: hsl(var(--primary) / 0.65);
+  color: hsl(var(--primary));
+  box-shadow: 0 4px 16px hsl(var(--primary) / 0.2);
+}
+
+.tiptap-toolbar-button.is-active {
+  background: hsl(var(--primary) / 0.12);
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+}
+
+.tiptap-toolbar-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tiptap-toolbar-pill {
+  margin-left: auto;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.65rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.4);
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+}
+
+.tiptap-editor-pane {
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  background: linear-gradient(180deg, hsl(var(--background)), hsl(var(--muted) / 0.2));
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 360px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 72vh;
+  overflow: auto;
+  position: relative;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+
+.tiptap-editor-surface {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+}
+
+.tiptap-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.tiptap-pane-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+  color: hsl(var(--foreground));
+}
+
+.tiptap-pane-hint {
+  font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.tiptap-pill {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
+  border: 1px solid hsl(var(--primary) / 0.4);
+  font-size: 0.75rem;
+}
+
+.tiptap-markdown-editor-content {
+  flex: 1 1 auto;
+  min-height: 300px;
+  max-height: 100%;
+  width: 100%;
+  padding: 0.35rem 0.35rem 0.75rem;
+  font-size: 0.96rem;
+  line-height: 1.8;
+  color: hsl(var(--foreground));
+  outline: none;
+  background: transparent;
+  max-width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  caret-color: hsl(var(--foreground));
+  min-height: 0;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+  box-sizing: border-box;
+}
+
+.tiptap-editor-surface .tiptap-markdown-editor-content,
+.tiptap-editor-surface .ProseMirror {
+  height: 100%;
+  max-height: 100%;
+}
+
+.tiptap-markdown-editor-content::selection,
+.tiptap-markdown-editor-content *::selection {
+  background: rgba(99, 102, 241, 0.55);
+  color: #ffffff;
+}
+
+.tiptap-markdown-editor-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tiptap-markdown-editor-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tiptap-markdown-editor-content::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 999px;
+}
+
+.tiptap-markdown-editor-content::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--border) / 0.9);
+}
+
+.tiptap-markdown-editor-content p {
+  margin: 0.35rem 0;
+}
+
+.tiptap-markdown-editor-content h1,
+.tiptap-markdown-editor-content h2,
+.tiptap-markdown-editor-content h3 {
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 1.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.tiptap-markdown-editor-content h1 {
+  font-size: 1.8rem;
+  letter-spacing: -0.02em;
+}
+
+.tiptap-markdown-editor-content h2 {
+  font-size: 1.4rem;
+}
+
+.tiptap-markdown-editor-content h3 {
+  font-size: 1.15rem;
+}
+
+.tiptap-markdown-editor-content strong {
+  font-weight: 700;
+}
+
+.tiptap-markdown-editor-content em {
+  font-style: italic;
+}
+
+.tiptap-markdown-editor-content ul,
+.tiptap-markdown-editor-content ol {
+  padding-left: 1.3rem;
+  margin: 0.6rem 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.tiptap-markdown-editor-content li {
+  margin: 0;
+}
+
+.tiptap-markdown-editor-content code {
+  background: hsl(var(--muted));
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+  color: hsl(var(--foreground));
+}
+
+.tiptap-markdown-editor-content pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 1rem;
+  border-radius: 12px;
+  overflow-x: auto;
+  margin: 1.1rem 0;
+  border: 1px solid hsl(var(--border));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.tiptap-markdown-editor-content pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  display: block;
+}
+
+.tiptap-markdown-editor-content blockquote {
+  border-left: 4px solid hsl(var(--primary));
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+.tiptap-markdown-editor-content hr {
+  border: none;
+  border-top: 2px solid hsl(var(--border));
+  margin: 1.5rem 0;
+}
+
+.tiptap-markdown-editor-content a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}
+
+.tiptap-markdown-editor-content a:hover {
+  color: hsl(var(--primary) / 0.9);
+}
+
+.tiptap-markdown-editor-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+  height: 0;
+}

@@ -1,41 +1,21 @@
-import { AgentState, streamAgent } from "./application/lib/agent.js";
+import { AgentState, streamAgent } from "./agents/runtime.js";
 import { StreamRenderer } from "./application/lib/stream-renderer.js";
 import { stdin as input, stdout as output } from "node:process";
 import fs from "fs";
 import { promises as fsp } from "fs";
 import path from "path";
-import { WorkDir, getModelConfig, updateModelConfig } from "./application/config/config.js";
-import { RunEvent } from "./application/entities/run-events.js";
+import { WorkDir } from "./config/config.js";
+import { RunEvent } from "./entities/run-events.js";
 import { createInterface, Interface } from "node:readline/promises";
-import { ToolCallPart } from "./application/entities/message.js";
-import { Agent } from "./application/entities/agent.js";
-import { McpServerConfig, McpServerDefinition } from "./application/entities/mcp.js";
-import { Example } from "./application/entities/example.js";
+import { ToolCallPart } from "./entities/message.js";
+import { Agent } from "./agents/agents.js";
+import { McpServerConfig, McpServerDefinition } from "./mcp/schema.js";
+import { Example } from "./entities/example.js";
 import { z } from "zod";
-import { Flavor } from "./application/entities/models.js";
+import { Flavor } from "./models/models.js";
 import { examples } from "./examples/index.js";
-import { modelMessageSchema } from "ai";
-
-export async function updateState(agent: string, runId: string) {
-    const state = new AgentState(agent, runId);
-    // If running in a TTY, read run events from stdin line-by-line
-    if (!input.isTTY) {
-        return;
-    }
-
-    const rl = createInterface({ input, crlfDelay: Infinity });
-    try {
-        for await (const line of rl) {
-            if (line.trim() === "") {
-                continue;
-            }
-            const event = RunEvent.parse(JSON.parse(line));
-            state.ingestAndLog(event);
-        }
-    } finally {
-        rl.close();
-    }
-}
+import container from "./di/container.js";
+import { IModelConfigRepo } from "./models/repo.js";
 
 function renderGreeting() {
     const logo = `
@@ -61,12 +41,8 @@ export async function app(opts: {
     input?: string;
     noInteractive?: boolean;
 }) {
-    // check if model config is required
-    const c = await getModelConfig();
-    if (!c) {
-        await modelConfig();
-    }
-
+    throw new Error("Not implemented");
+    /*
     const renderer = new StreamRenderer();
     const state = new AgentState(opts.agent, opts.runId);
 
@@ -172,6 +148,7 @@ export async function app(opts: {
     } finally {
         rl?.close();
     }
+    */
 }
 
 async function getToolCallPermission(
@@ -219,7 +196,8 @@ async function getUserInput(
 
 export async function modelConfig() {
     // load existing model config
-    const config = await getModelConfig();
+    const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+    const config = await repo.getConfig();
 
     const rl = createInterface({ input, output });
     try {
@@ -333,14 +311,7 @@ export async function modelConfig() {
             );
             const model = modelAns.trim() || modelDefault;
 
-            const newConfig = {
-                providers: { ...(config?.providers || {}) },
-                defaults: {
-                    provider: providerName!,
-                    model,
-                },
-            };
-            await updateModelConfig(newConfig as any);
+            await repo.setDefault(providerName!, model);
             console.log(`Model configuration updated. Provider set to '${providerName}'.`);
             return;
         }
@@ -391,24 +362,13 @@ export async function modelConfig() {
         );
         const model = modelAns.trim() || modelDefault;
 
-        const mergedProviders = {
-            ...(config?.providers || {}),
-            [providerName]: {
-                flavor: selectedFlavor,
-                ...(apiKey ? { apiKey } : {}),
-                ...(baseURL ? { baseURL } : {}),
-                ...(headers ? { headers } : {}),
-            },
-        };
-        const newConfig = {
-            providers: mergedProviders,
-            defaults: {
-                provider: providerName,
-                model,
-            },
-        };
-
-        await updateModelConfig(newConfig as any);
+        await repo.upsert(providerName, {
+            flavor: selectedFlavor,
+            apiKey,
+            baseURL,
+            headers,
+        });
+        await repo.setDefault(providerName, model);
         renderCurrentModel(providerName, selectedFlavor, model);
         console.log(`Configuration written to ${WorkDir}/config/models.json. You can also edit this file manually`);
     } finally {
