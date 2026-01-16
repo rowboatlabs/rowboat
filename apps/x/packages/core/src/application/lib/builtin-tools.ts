@@ -1,5 +1,6 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
+import { glob } from "glob";
 import { executeCommand } from "./command-executor.js";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
@@ -307,6 +308,40 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
                 };
+            }
+        },
+    },
+
+    'workspace-glob': {
+        description: 'Find files matching a glob pattern (e.g., "**/*.ts", "src/**/*.json"). Much faster than recursive readdir for finding files.',
+        inputSchema: z.object({
+            pattern: z.string().describe('Glob pattern to match files'),
+            cwd: z.string().optional().describe('Subdirectory to search in, relative to workspace root (default: workspace root)'),
+        }),
+        execute: async ({ pattern, cwd }: { pattern: string; cwd?: string }) => {
+            try {
+                const searchDir = cwd ? path.join(WorkDir, cwd) : WorkDir;
+
+                // Ensure search directory is within workspace
+                const resolvedSearchDir = path.resolve(searchDir);
+                if (!resolvedSearchDir.startsWith(WorkDir)) {
+                    return { error: 'Search directory must be within workspace' };
+                }
+
+                const files = await glob(pattern, {
+                    cwd: searchDir,
+                    nodir: true,
+                    ignore: ['node_modules/**', '.git/**'],
+                });
+
+                return {
+                    files,
+                    count: files.length,
+                    pattern,
+                    cwd: cwd || '.',
+                };
+            } catch (error) {
+                return { error: error instanceof Error ? error.message : 'Unknown error' };
             }
         },
     },

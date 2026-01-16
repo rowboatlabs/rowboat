@@ -176,6 +176,7 @@ The Rowboat copilot has access to special builtin tools that regular agents don'
 - \`workspace-rename\` - Rename or move files/directories
 - \`workspace-copy\` - Copy files
 - \`workspace-getRoot\` - Get workspace root directory path
+- \`workspace-glob\` - Find files matching a glob pattern (e.g., "**/*.ts", "agents/*.md")
 
 #### Agent Operations
 - \`analyzeAgent\` - Read and analyze an agent file structure
