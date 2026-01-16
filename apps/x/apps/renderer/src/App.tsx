@@ -140,7 +140,8 @@ const getHeadingTitle = (markdown: string) => {
   for (const line of lines) {
     const match = line.match(/^#\s+(.+)$/)
     if (match) return match[1].trim()
-    if (line.trim() !== '') return null
+    const trimmed = line.trim()
+    if (trimmed !== '') return trimmed
   }
   return null
 }
@@ -604,7 +605,7 @@ function App() {
   const handleChatInputSubmit = (text: string) => {
     setIsChatSidebarOpen(true)
     // Submit immediately - the sidebar will open and show the message
-    handlePromptSubmit({ text })
+    handlePromptSubmit({ text, files: [] })
   }
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
@@ -986,7 +987,7 @@ function App() {
               onSelectFile={toggleExpand}
               knowledgeActions={knowledgeActions}
             />
-            <SidebarInset className="!overflow-hidden min-h-0">
+            <SidebarInset className="overflow-hidden! min-h-0">
               {/* Header with sidebar trigger */}
               <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 bg-background">
                 <SidebarTrigger className="-ml-1" />
@@ -1093,8 +1094,8 @@ function App() {
                   <ConversationScrollButton className="bottom-24" />
                 </Conversation>
 
-                <div className="relative sticky bottom-0 z-10 bg-background pb-4 pt-6 shadow-lg">
-                  <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-background to-transparent" />
+                <div className="sticky bottom-0 z-10 bg-background pb-4 pt-6 shadow-lg">
+                  <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                   <div className="mx-auto w-full max-w-4xl px-4">
                     <PromptInput onSubmit={handlePromptSubmit}>
                       <PromptInputBody>

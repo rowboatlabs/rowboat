@@ -106,7 +106,7 @@ interface ChatSidebarProps {
   isProcessing: boolean
   message: string
   onMessageChange: (message: string) => void
-  onSubmit: (message: { text: string }) => void
+  onSubmit: (message: { text: string; files: never[] }) => void
   contextUsage: LanguageModelUsage
   maxTokens: number
   usedTokens: number
@@ -163,7 +163,7 @@ export function ChatSidebar({
   const handleSubmit = () => {
     const trimmed = message.trim()
     if (trimmed && !isProcessing) {
-      onSubmit({ text: trimmed })
+      onSubmit({ text: trimmed, files: [] })
     }
   }
 
