@@ -168,6 +168,7 @@ The Rowboat copilot has access to special builtin tools that regular agents don'
 - \`workspace-readdir\` - List directory contents (supports recursive exploration)
 - \`workspace-readFile\` - Read file contents
 - \`workspace-writeFile\` - Create or update file contents
+- \`workspace-edit\` - Make precise edits by replacing specific text (safer than full rewrites)
 - \`workspace-remove\` - Remove files or directories
 - \`workspace-exists\` - Check if a file or directory exists
 - \`workspace-stat\` - Get file/directory statistics

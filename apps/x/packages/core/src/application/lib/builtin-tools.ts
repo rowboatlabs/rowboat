@@ -156,14 +156,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             mkdirp: z.boolean().optional().describe('Create parent directories if needed (default: true)'),
             expectedEtag: z.string().optional().describe('ETag to check for concurrent modifications (conflict detection)'),
         }),
-        execute: async ({ 
-            path: relPath, 
-            data, 
-            encoding, 
-            atomic, 
-            mkdirp, 
-            expectedEtag 
-        }: { 
+        execute: async ({
+            path: relPath,
+            data,
+            encoding,
+            atomic,
+            mkdirp,
+            expectedEtag
+        }: {
             path: string;
             data: string;
             encoding?: 'utf8' | 'base64' | 'binary';
@@ -182,6 +182,57 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
                 };
+            }
+        },
+    },
+
+    'workspace-edit': {
+        description: 'Make precise edits to a file by replacing specific text. Safer than rewriting entire files - produces smaller diffs and reduces risk of data loss.',
+        inputSchema: z.object({
+            path: z.string().min(1).describe('Workspace-relative file path'),
+            oldString: z.string().describe('Exact text to find and replace'),
+            newString: z.string().describe('Replacement text'),
+            replaceAll: z.boolean().optional().describe('Replace all occurrences (default: false, fails if not unique)'),
+        }),
+        execute: async ({
+            path: relPath,
+            oldString,
+            newString,
+            replaceAll = false
+        }: {
+            path: string;
+            oldString: string;
+            newString: string;
+            replaceAll?: boolean;
+        }) => {
+            try {
+                const result = await workspace.readFile(relPath, 'utf8');
+                const content = result.data;
+
+                const occurrences = content.split(oldString).length - 1;
+
+                if (occurrences === 0) {
+                    return { error: 'oldString not found in file' };
+                }
+
+                if (occurrences > 1 && !replaceAll) {
+                    return {
+                        error: `oldString found ${occurrences} times. Use replaceAll: true or provide more context to make it unique.`
+                    };
+                }
+
+                const newContent = replaceAll
+                    ? content.replaceAll(oldString, newString)
+                    : content.replace(oldString, newString);
+
+                await workspace.writeFile(relPath, newContent, { encoding: 'utf8' });
+
+                return {
+                    success: true,
+                    replacements: replaceAll ? occurrences : 1
+                };
+            } catch (error) {
+                return { error: error instanceof Error ? error.message : 'Unknown error' };
             }
         },
     },
