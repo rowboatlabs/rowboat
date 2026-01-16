@@ -1,8 +1,13 @@
 import { useCallback, useRef, useState } from 'react'
-import { X } from 'lucide-react'
-import type { ChatStatus, LanguageModelUsage, ToolUIPart } from 'ai'
+import { ArrowUp, PanelRightClose, Plus } from 'lucide-react'
+import type { LanguageModelUsage, ToolUIPart } from 'ai'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   Conversation,
   ConversationContent,
@@ -14,29 +19,9 @@ import {
   MessageContent,
   MessageResponse,
 } from '@/components/ai-elements/message'
-import {
-  PromptInput,
-  PromptInputBody,
-  PromptInputFooter,
-  type PromptInputMessage,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
-} from '@/components/ai-elements/prompt-input'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
-import {
-  Context,
-  ContextCacheUsage,
-  ContextContent,
-  ContextContentBody,
-  ContextContentHeader,
-  ContextInputUsage,
-  ContextOutputUsage,
-  ContextReasoningUsage,
-  ContextTrigger,
-} from '@/components/ai-elements/context'
 
 interface ChatMessage {
   id: string
@@ -114,13 +99,14 @@ const DEFAULT_WIDTH = 400
 interface ChatSidebarProps {
   defaultWidth?: number
   onClose: () => void
+  onNewChat: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
   currentReasoning: string
   isProcessing: boolean
   message: string
   onMessageChange: (message: string) => void
-  onSubmit: (message: PromptInputMessage) => void
+  onSubmit: (message: { text: string }) => void
   contextUsage: LanguageModelUsage
   maxTokens: number
   usedTokens: number
@@ -129,6 +115,7 @@ interface ChatSidebarProps {
 export function ChatSidebar({
   defaultWidth = DEFAULT_WIDTH,
   onClose,
+  onNewChat,
   conversation,
   currentAssistantMessage,
   currentReasoning,
@@ -136,14 +123,12 @@ export function ChatSidebar({
   message,
   onMessageChange,
   onSubmit,
-  contextUsage,
-  maxTokens,
-  usedTokens,
 }: ChatSidebarProps) {
   const [width, setWidth] = useState(defaultWidth)
   const [isResizing, setIsResizing] = useState(false)
   const startXRef = useRef(0)
   const startWidthRef = useRef(0)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -152,7 +137,6 @@ export function ChatSidebar({
     setIsResizing(true)
 
     const handleMouseMove = (e: MouseEvent) => {
-      // Since sidebar is on right, dragging left increases width
       const delta = startXRef.current - e.clientX
       const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidthRef.current + delta))
       setWidth(newWidth)
@@ -167,9 +151,23 @@ export function ChatSidebar({
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
   }, [width])
+
   const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
-  const submitStatus: ChatStatus = isProcessing ? 'streaming' : 'ready'
   const canSubmit = Boolean(message.trim()) && !isProcessing
+
+  const handleSubmit = () => {
+    const trimmed = message.trim()
+    if (trimmed && !isProcessing) {
+      onSubmit({ text: trimmed })
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit()
+    }
+  }
 
   const renderConversationItem = (item: ConversationItem) => {
     if (isChatMessage(item)) {
@@ -234,22 +232,37 @@ export function ChatSidebar({
           isResizing && "after:bg-primary"
         )}
       />
-      {/* Header */}
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-3">
-        <span className="text-sm font-medium">Chat</span>
-        <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
-          <X className="h-4 w-4" />
-        </Button>
+
+      {/* Header - minimal, no border */}
+      <header className="flex h-12 shrink-0 items-center justify-between px-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-muted-foreground hover:text-foreground">
+              <PanelRightClose className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Close</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" onClick={onNewChat} className="h-8 w-8 text-muted-foreground hover:text-foreground">
+              <Plus className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">New chat</TooltipContent>
+        </Tooltip>
       </header>
 
       {/* Conversation area */}
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col relative">
         <Conversation className="relative flex-1 overflow-y-auto">
-          <ConversationContent className={hasConversation ? "px-3 pb-24" : "px-3 min-h-full items-center justify-center"}>
+          <ConversationContent className={hasConversation ? "px-4 pb-24" : "px-4 min-h-full items-center justify-center"}>
             {!hasConversation ? (
               <ConversationEmptyState className="h-auto">
-                <div className="text-lg font-medium text-muted-foreground">
-                  Ask anything...
+                <div className="flex flex-col items-center gap-1 text-center">
+                  <div className="text-sm text-muted-foreground">
+                    Ask anything...
+                  </div>
                 </div>
               </ConversationEmptyState>
             ) : (
@@ -281,46 +294,36 @@ export function ChatSidebar({
               </>
             )}
           </ConversationContent>
-          <ConversationScrollButton className="bottom-20" />
+          <ConversationScrollButton className="bottom-24" />
         </Conversation>
 
-        {/* Prompt input */}
-        <div className="relative sticky bottom-0 z-10 bg-background pb-3 pt-4 px-3 border-t border-border">
-          <PromptInput onSubmit={onSubmit}>
-            <PromptInputBody>
-              <PromptInputTextarea
-                value={message}
-                onChange={(e) => onMessageChange(e.target.value)}
-                placeholder="Type your message..."
-                disabled={isProcessing}
-                className="min-h-[60px] max-h-[120px]"
-              />
-            </PromptInputBody>
-            <PromptInputFooter>
-              <PromptInputTools>
-                <Context
-                  maxTokens={maxTokens}
-                  usedTokens={usedTokens}
-                  usage={contextUsage}
-                >
-                  <ContextTrigger size="sm" />
-                  <ContextContent>
-                    <ContextContentHeader />
-                    <ContextContentBody>
-                      <ContextInputUsage />
-                      <ContextOutputUsage />
-                      <ContextReasoningUsage />
-                      <ContextCacheUsage />
-                    </ContextContentBody>
-                  </ContextContent>
-                </Context>
-              </PromptInputTools>
-              <PromptInputSubmit
-                disabled={!canSubmit}
-                status={submitStatus}
-              />
-            </PromptInputFooter>
-          </PromptInput>
+        {/* Input area - responsive to sidebar width, matches floating bar position exactly */}
+        <div className="absolute bottom-6 left-14 right-6 z-10">
+          <div className="flex items-center gap-2 bg-background border border-border rounded-full shadow-xl px-4 py-2.5">
+            <input
+              ref={inputRef}
+              type="text"
+              value={message}
+              onChange={(e) => onMessageChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask anything..."
+              disabled={isProcessing}
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
+            />
+            <Button
+              size="icon"
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              className={cn(
+                "h-7 w-7 rounded-full shrink-0 transition-all",
+                canSubmit
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                  : "bg-muted text-muted-foreground"
+              )}
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

@@ -8,7 +8,7 @@ import z from 'zod';
 import { Button } from './components/ui/button';
 import { CheckIcon, LoaderIcon } from 'lucide-react';
 import { MarkdownEditor } from './components/markdown-editor';
-import { ChatButton } from './components/chat-button';
+import { ChatInputBar } from './components/chat-button';
 import { ChatSidebar } from './components/chat-sidebar';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { useDebounce } from './hooks/use-debounce';
@@ -592,6 +592,21 @@ function App() {
     }
   }
 
+  const handleNewChat = useCallback(() => {
+    setConversation([])
+    setCurrentAssistantMessage('')
+    setCurrentReasoning('')
+    setRunId(null)
+    setMessage('')
+    setModelUsage(null)
+  }, [])
+
+  const handleChatInputSubmit = (text: string) => {
+    setIsChatSidebarOpen(true)
+    // Submit immediately - the sidebar will open and show the message
+    handlePromptSubmit({ text })
+  }
+
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
       setSelectedPath(path)
@@ -1126,6 +1141,7 @@ function App() {
               <ChatSidebar
                 defaultWidth={400}
                 onClose={() => setIsChatSidebarOpen(false)}
+                onNewChat={handleNewChat}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
                 currentReasoning={currentReasoning}
@@ -1140,9 +1156,12 @@ function App() {
             )}
           </SidebarProvider>
 
-          {/* Floating chat button - shown when viewing files/graph and chat sidebar is closed */}
+          {/* Floating chat input - shown when viewing files/graph and chat sidebar is closed */}
           {(selectedPath || isGraphOpen) && !isChatSidebarOpen && (
-            <ChatButton onClick={() => setIsChatSidebarOpen(true)} />
+            <ChatInputBar
+              onSubmit={handleChatInputSubmit}
+              onOpen={() => setIsChatSidebarOpen(true)}
+            />
           )}
         </div>
       </SidebarSectionProvider>
