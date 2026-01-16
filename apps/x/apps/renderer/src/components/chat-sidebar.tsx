@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUp, PanelRightClose, Plus } from 'lucide-react'
 import type { LanguageModelUsage, ToolUIPart } from 'ai'
 import { Button } from '@/components/ui/button'
@@ -151,6 +151,11 @@ export function ChatSidebar({
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
   }, [width])
+
+  // Auto-focus input when sidebar opens
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
 
   const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
   const canSubmit = Boolean(message.trim()) && !isProcessing
