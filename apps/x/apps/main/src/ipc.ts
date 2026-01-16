@@ -287,6 +287,12 @@ export function setupIpcHandlers() {
       await runsCore.stop(args.runId);
       return { success: true };
     },
+    'runs:fetch': async (_event, args) => {
+      return runsCore.fetchRun(args.runId);
+    },
+    'runs:list': async (_event, args) => {
+      return runsCore.listRuns(args.cursor);
+    },
     'oauth:connect': async (_event, args) => {
       return await connectProvider(args.provider);
     },

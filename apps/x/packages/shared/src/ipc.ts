@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
-import { AskHumanResponsePayload, CreateRunOptions, Run, ToolPermissionAuthorizePayload } from './runs.js';
+import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -155,6 +155,18 @@ const ipcSchemas = {
     res: z.object({
       success: z.literal(true),
     }),
+  },
+  'runs:fetch': {
+    req: z.object({
+      runId: z.string(),
+    }),
+    res: Run,
+  },
+  'runs:list': {
+    req: z.object({
+      cursor: z.string().optional(),
+    }),
+    res: ListRunsResponse,
   },
   'runs:events': {
     req: z.null(),
