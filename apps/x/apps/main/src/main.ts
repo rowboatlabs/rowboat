@@ -1,7 +1,7 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, protocol, net } from "electron";
 import path from "node:path";
 import { setupIpcHandlers, startRunsWatcher, startWorkspaceWatcher, stopWorkspaceWatcher } from "./ipc.js";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
@@ -13,8 +13,41 @@ import { init as initPreBuiltRunner } from "@x/core/dist/pre_built/runner.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const preloadPath = path.join(__dirname, "../../preload/dist/preload.js");
+// Path resolution differs between development and production:
+// - Development: main.js runs from dist/, preload is at ../../preload/dist/ (sibling dir)
+// - Production: main.js runs from .package/dist-bundle/, preload is at ../preload/dist/ (copied into .package/)
+const preloadPath = app.isPackaged
+  ? path.join(__dirname, "../preload/dist/preload.js")      // Production
+  : path.join(__dirname, "../../preload/dist/preload.js");  // Development
 console.log("preloadPath", preloadPath);
+
+// Register custom protocol for serving built renderer files in production
+function registerAppProtocol() {
+  protocol.handle('app', (request) => {
+    // Remove 'app://' prefix and get the path
+    let urlPath = request.url.slice('app://'.length);
+    
+    // Remove leading './' if present
+    if (urlPath.startsWith('./')) {
+      urlPath = urlPath.slice(2);
+    }
+    
+    // Default to index.html for root or SPA routes (no file extension)
+    if (!urlPath || urlPath === '/' || !path.extname(urlPath)) {
+      urlPath = 'index.html';
+    }
+    
+    // Resolve to the renderer dist directory
+    // - Development: main.js at dist/, renderer at ../../renderer/dist/ (sibling dir)
+    // - Production: main.js at .package/dist-bundle/, renderer at ../renderer/dist/ (copied into .package/)
+    const rendererDistPath = app.isPackaged
+      ? path.join(__dirname, '../renderer/dist')
+      : path.join(__dirname, '../../renderer/dist');
+    const filePath = path.join(rendererDistPath, urlPath);
+    
+    return net.fetch(pathToFileURL(filePath).toString());
+  });
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -29,10 +62,19 @@ function createWindow() {
     },
   });
 
-  win.loadURL("http://localhost:5173"); // load the dev server
+  if (app.isPackaged) {
+    // Production: load from custom protocol (serves built renderer files)
+    win.loadURL('app://./');
+  } else {
+    // Development: load from Vite dev server
+    win.loadURL('http://localhost:5173');
+  }
 }
 
 app.whenReady().then(() => {
+  // Register custom protocol before creating window (for production builds)
+  registerAppProtocol();
+  
   setupIpcHandlers();
 
   createWindow();

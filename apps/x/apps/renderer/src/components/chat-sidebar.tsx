@@ -22,6 +22,7 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
+import { type PromptInputMessage } from '@/components/ai-elements/prompt-input'
 
 interface ChatMessage {
   id: string
@@ -106,7 +107,7 @@ interface ChatSidebarProps {
   isProcessing: boolean
   message: string
   onMessageChange: (message: string) => void
-  onSubmit: (message: { text: string; files: never[] }) => void
+  onSubmit: (message: PromptInputMessage) => void
   contextUsage: LanguageModelUsage
   maxTokens: number
   usedTokens: number

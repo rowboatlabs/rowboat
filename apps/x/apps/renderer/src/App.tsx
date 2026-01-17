@@ -558,9 +558,10 @@ function App() {
     }
   }
 
-  const handlePromptSubmit = async ({ text }: PromptInputMessage) => {
+  const handlePromptSubmit = async (message: PromptInputMessage) => {
     if (isProcessing) return
 
+    const { text } = message;
     const userMessage = text.trim()
     if (!userMessage) return
 
