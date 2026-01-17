@@ -151,7 +151,11 @@ module.exports = {
             
             // buildPath is the app directory inside the packaged output
             // e.g., out/Rowboat-darwin-arm64/Rowboat.app/Contents/Resources/app
+            // App bundle root is 3 levels up: buildPath/../../.. = Rowboat.app
+            const appBundleRoot = path.resolve(buildPath, '../../..');
             console.log('Fixing packaged app at:', buildPath);
+            console.log('App bundle root:', appBundleRoot);
+            
 
             // 1. Remove the unbundled dist/ directory (it has imports to @x/core, @x/shared)
             const distDir = path.join(buildPath, 'dist');
@@ -203,6 +207,15 @@ module.exports = {
             const srcDir = path.join(buildPath, 'src');
             if (fs.existsSync(srcDir)) {
                 fs.rmSync(srcDir, { recursive: true });
+            }
+
+            // 7. Remove any signature metadata AFTER all file modifications
+            // This prevents "code has no resources but signature indicates they must be present" error
+            // which occurs when _CodeSignature exists but files it references have been moved/modified
+            const codeSignatureDir = path.join(appBundleRoot, 'Contents', '_CodeSignature');
+            if (fs.existsSync(codeSignatureDir)) {
+                console.log('Removing _CodeSignature directory (files were modified after packaging)...');
+                fs.rmSync(codeSignatureDir, { recursive: true });
             }
 
             console.log('✅ Packaged app fixed with bundled code');
