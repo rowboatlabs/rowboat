@@ -58,7 +58,7 @@ jobs:
         working-directory: apps/x
 
       - name: Build distributables
-        run: pnpm run make
+        run: npm run make
         working-directory: apps/x/apps/main
 
       - name: Upload workflow artifacts
