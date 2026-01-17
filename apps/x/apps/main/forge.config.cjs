@@ -218,6 +218,67 @@ module.exports = {
                 fs.rmSync(codeSignatureDir, { recursive: true });
             }
 
+            // 8. Remove adhoc signatures from app bundle, executable, and helpers
+            // The app bundle has an adhoc signature (linker-signed) that references resources
+            // When we modify the bundle structure, this signature becomes invalid
+            // Removing it ensures the app is completely unsigned
+            try {
+                const { execSync } = require('child_process');
+                
+                // Remove signature from the app bundle itself (this is the key step)
+                // This removes the bundle-level signature that causes the "code has no resources" error
+                execSync(`codesign --remove-signature "${appBundleRoot}"`, { stdio: 'ignore' });
+                
+                // Also remove signature from main executable
+                const executablePath = path.join(appBundleRoot, 'Contents', 'MacOS', 'rowboat');
+                if (fs.existsSync(executablePath)) {
+                    execSync(`codesign --remove-signature "${executablePath}"`, { stdio: 'ignore' });
+                }
+                
+                // Remove signatures from helper apps in Frameworks
+                const frameworksDir = path.join(appBundleRoot, 'Contents', 'Frameworks');
+                if (fs.existsSync(frameworksDir)) {
+                    const helpers = fs.readdirSync(frameworksDir, { withFileTypes: true })
+                        .filter(dirent => dirent.isDirectory())
+                        .map(dirent => {
+                            const helperApp = path.join(frameworksDir, dirent.name, 'Contents', 'MacOS');
+                            if (fs.existsSync(helperApp)) {
+                                const helpers = fs.readdirSync(helperApp, { withFileTypes: true })
+                                    .filter(f => f.isFile())
+                                    .map(f => path.join(helperApp, f.name));
+                                return helpers;
+                            }
+                            return [];
+                        })
+                        .flat();
+                    
+                    for (const helperExec of helpers) {
+                        try {
+                            execSync(`codesign --remove-signature "${helperExec}"`, { stdio: 'ignore' });
+                        } catch (e) {
+                            // Ignore errors for helpers
+                        }
+                    }
+                }
+                
+                console.log('Removed adhoc signatures from app bundle, executable, and helpers');
+            } catch (e) {
+                // Ignore errors - codesign might fail if signatures don't exist
+            }
+
+            // 9. Clear any signature-related extended attributes
+            // Even without _CodeSignature or embedded signatures, extended attributes can contain invalid signature metadata
+            // This prevents "code has no resources but signature indicates they must be present" error
+            try {
+                const { execSync } = require('child_process');
+                // Clear extended attributes from the entire app bundle
+                // This removes any signature metadata that might be stored in xattrs
+                execSync(`xattr -cr "${appBundleRoot}"`, { stdio: 'ignore' });
+                console.log('Cleared extended attributes from app bundle');
+            } catch (e) {
+                // Ignore errors - xattr might not be available or might fail silently
+            }
+
             console.log('✅ Packaged app fixed with bundled code');
         }
     }

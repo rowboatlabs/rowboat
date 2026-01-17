@@ -75,6 +75,17 @@ jobs:
               echo "=== Code Signing Check ==="
               codesign --verify --deep --strict --verbose=2 "$APP_PATH" || echo "App is not signed (this is OK if code signing secrets are not configured)"
               echo ""
+              echo "=== _CodeSignature Check ==="
+              if [ -d "$APP_PATH/Contents/_CodeSignature" ]; then
+                echo "WARNING: _CodeSignature directory still exists!"
+                ls -la "$APP_PATH/Contents/_CodeSignature" || true
+              else
+                echo "✓ No _CodeSignature directory (expected for unsigned app)"
+              fi
+              echo ""
+              echo "=== Extended Attributes Check ==="
+              xattr -l "$APP_PATH" | head -5 || echo "No extended attributes (or not on macOS)"
+              echo ""
               echo "=== Gatekeeper Check ==="
               spctl --assess --type execute --verbose "$APP_PATH" || echo "Gatekeeper assessment failed (expected for unsigned apps)"
             else
