@@ -218,52 +218,20 @@ module.exports = {
                 fs.rmSync(codeSignatureDir, { recursive: true });
             }
 
-            // 8. Remove adhoc signatures from app bundle, executable, and helpers
-            // The app bundle has an adhoc signature (linker-signed) that references resources
-            // When we modify the bundle structure, this signature becomes invalid
-            // Removing it ensures the app is completely unsigned
+            // 8. Re-sign the app bundle with adhoc signature after file modifications
+            // The original bundle signature references resources that we've moved/modified
+            // Re-signing with adhoc signature creates a new signature that matches the current bundle structure
+            // This prevents "code has no resources but signature indicates they must be present" error
             try {
                 const { execSync } = require('child_process');
                 
-                // Remove signature from the app bundle itself (this is the key step)
-                // This removes the bundle-level signature that causes the "code has no resources" error
-                execSync(`codesign --remove-signature "${appBundleRoot}"`, { stdio: 'ignore' });
-                
-                // Also remove signature from main executable
-                const executablePath = path.join(appBundleRoot, 'Contents', 'MacOS', 'rowboat');
-                if (fs.existsSync(executablePath)) {
-                    execSync(`codesign --remove-signature "${executablePath}"`, { stdio: 'ignore' });
-                }
-                
-                // Remove signatures from helper apps in Frameworks
-                const frameworksDir = path.join(appBundleRoot, 'Contents', 'Frameworks');
-                if (fs.existsSync(frameworksDir)) {
-                    const helpers = fs.readdirSync(frameworksDir, { withFileTypes: true })
-                        .filter(dirent => dirent.isDirectory())
-                        .map(dirent => {
-                            const helperApp = path.join(frameworksDir, dirent.name, 'Contents', 'MacOS');
-                            if (fs.existsSync(helperApp)) {
-                                const helpers = fs.readdirSync(helperApp, { withFileTypes: true })
-                                    .filter(f => f.isFile())
-                                    .map(f => path.join(helperApp, f.name));
-                                return helpers;
-                            }
-                            return [];
-                        })
-                        .flat();
-                    
-                    for (const helperExec of helpers) {
-                        try {
-                            execSync(`codesign --remove-signature "${helperExec}"`, { stdio: 'ignore' });
-                        } catch (e) {
-                            // Ignore errors for helpers
-                        }
-                    }
-                }
-                
-                console.log('Removed adhoc signatures from app bundle, executable, and helpers');
+                // Re-sign the entire app bundle with an adhoc signature
+                // This creates a fresh signature that matches the modified bundle structure
+                execSync(`codesign --force --deep --sign - "${appBundleRoot}"`, { stdio: 'ignore' });
+                console.log('Re-signed app bundle with adhoc signature (matches modified structure)');
             } catch (e) {
-                // Ignore errors - codesign might fail if signatures don't exist
+                // Ignore errors - codesign might fail, but app should still work
+                console.log('Warning: Failed to re-sign app bundle:', e.message);
             }
 
             // 9. Clear any signature-related extended attributes
