@@ -57,28 +57,38 @@ module.exports = {
             }
             fs.mkdirSync(packageDir, { recursive: true });
 
-            // Build shared (TypeScript compilation)
+            // Build order matters! Dependencies must be built before dependents:
+            // shared → core → (renderer, preload, main)
+
+            // Build shared (TypeScript compilation) - no dependencies
             console.log('Building shared...');
             execSync('pnpm run build', {
                 cwd: path.join(__dirname, '../../packages/shared'),
                 stdio: 'inherit'
             });
 
-            // Build renderer (Vite build)
+            // Build core (TypeScript compilation) - depends on shared
+            console.log('Building core...');
+            execSync('pnpm run build', {
+                cwd: path.join(__dirname, '../../packages/core'),
+                stdio: 'inherit'
+            });
+
+            // Build renderer (Vite build) - depends on shared
             console.log('Building renderer...');
             execSync('pnpm run build', {
                 cwd: path.join(__dirname, '../renderer'),
                 stdio: 'inherit'
             });
 
-            // Build preload (TypeScript compilation)
+            // Build preload (TypeScript compilation) - depends on shared
             console.log('Building preload...');
             execSync('pnpm run build', {
                 cwd: path.join(__dirname, '../preload'),
                 stdio: 'inherit'
             });
 
-            // Build main (TypeScript compilation)
+            // Build main (TypeScript compilation) - depends on core, shared
             console.log('Building main (tsc)...');
             execSync('pnpm run build', {
                 cwd: __dirname,
