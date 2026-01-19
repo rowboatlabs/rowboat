@@ -14,7 +14,7 @@
         "@x/core": "workspace:*",
         "@x/shared": "workspace:*",
         "chokidar": "^4.0.3",
-        "update-electron-app": "^3.0.0",
+        "update-electron-app": "^3.1.2",
         "zod": "^4.2.1"
     },
     "devDependencies": {
