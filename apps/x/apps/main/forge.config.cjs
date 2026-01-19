@@ -153,9 +153,11 @@ module.exports = {
             // This tells Electron where to find the entry point
             // Note: No "type": "module" since we bundle as CommonJS for compatibility
             // with dependencies that use dynamic require()
+            // Read version from source package.json (updated by CI from git tag)
+            const sourcePackageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
             const packageJson = {
                 name: '@x/main',
-                version: '0.1.0',
+                version: sourcePackageJson.version,
                 main: 'dist-bundle/main.js',
             };
             fs.writeFileSync(
@@ -220,9 +222,11 @@ module.exports = {
             const packageJsonPath = path.join(appResourcesPath, 'package.json');
             if (fs.existsSync(packageJsonPath)) {
                 console.log('Updating package.json...');
+                // Read version from source package.json (updated by CI from git tag)
+                const sourcePackageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
                 const packageJson = {
                     name: '@x/main',
-                    version: '0.1.0',
+                    version: sourcePackageJson.version,
                     main: 'dist-bundle/main.js',
                     // Note: No "type": "module" since we bundle as CommonJS
                     // No dependencies/devDependencies since everything is bundled
