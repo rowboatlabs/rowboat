@@ -3,6 +3,8 @@ import path from "node:path";
 import { setupIpcHandlers, startRunsWatcher, startWorkspaceWatcher, stopWorkspaceWatcher } from "./ipc.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
+import { existsSync } from "node:fs";
+import { updateElectronApp, UpdateSourceType } from "update-electron-app";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
@@ -13,6 +15,10 @@ import { init as initPreBuiltRunner } from "@x/core/dist/pre_built/runner.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// #region agent log
+fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:14',message:'__dirname resolved',data:{__dirname,__filename,isPackaged:app.isPackaged},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+// #endregion
+
 // Path resolution differs between development and production:
 // - Development: main.js runs from dist/, preload is at ../../preload/dist/ (sibling dir)
 // - Production: main.js runs from .package/dist-bundle/, preload is at ../preload/dist/ (copied into .package/)
@@ -21,9 +27,17 @@ const preloadPath = app.isPackaged
   : path.join(__dirname, "../../preload/dist/preload.js");  // Development
 console.log("preloadPath", preloadPath);
 
+// #region agent log
+fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:22',message:'preloadPath computed',data:{preloadPath,exists:existsSync(preloadPath)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+// #endregion
+
 // Register custom protocol for serving built renderer files in production
 function registerAppProtocol() {
   protocol.handle('app', (request) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:26',message:'protocol handler called',data:{url:request.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    
     // Remove 'app://' prefix and get the path
     let urlPath = request.url.slice('app://'.length);
     
@@ -45,6 +59,10 @@ function registerAppProtocol() {
       : path.join(__dirname, '../../renderer/dist');
     const filePath = path.join(rendererDistPath, urlPath);
     
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:46',message:'renderer path resolution',data:{rendererDistPath,filePath,urlPath,exists:existsSync(filePath),rendererDistExists:existsSync(rendererDistPath)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    
     return net.fetch(pathToFileURL(filePath).toString());
   });
 }
@@ -62,9 +80,23 @@ function createWindow() {
     },
   });
 
+  // #region agent log
+  const loadURL = app.isPackaged ? 'app://./' : 'http://localhost:5173';
+  fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:65',message:'createWindow called',data:{isPackaged:app.isPackaged,loadURL,preloadPath},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+  // #endregion
+
   if (app.isPackaged) {
     // Production: load from custom protocol (serves built renderer files)
     win.loadURL('app://./');
+    
+    // #region agent log
+    win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+      fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:69',message:'window load failed',data:{errorCode,errorDescription,validatedURL},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    });
+    win.webContents.on('did-finish-load', () => {
+      fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:72',message:'window load finished',data:{url:win.webContents.getURL()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    });
+    // #endregion
   } else {
     // Development: load from Vite dev server
     win.loadURL('http://localhost:5173');
@@ -72,8 +104,27 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:74',message:'app.whenReady triggered',data:{isPackaged:app.isPackaged},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+  
   // Register custom protocol before creating window (for production builds)
   registerAppProtocol();
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:77',message:'protocol registered',data:{isPackaged:app.isPackaged},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
+  
+  // Initialize auto-updater (only in production)
+  if (app.isPackaged) {
+    updateElectronApp({
+      updateSource: {
+        type: UpdateSourceType.StaticStorage,
+        baseUrl: `https://rowboat-desktop-app-releases.s3.amazonaws.com/releases/${process.platform}/${process.arch}`
+      },
+      notifyUser: true  // Shows native dialog when update is available
+    });
+  }
   
   setupIpcHandlers();
 

@@ -11,6 +11,15 @@ module.exports = {
         icon: './icons/icon',  // .icns extension added automatically
         appBundleId: 'com.rowboat.app',
         appCategoryType: 'public.app-category.productivity',
+        osxSign: {},
+        osxNotarize: {
+            appleId: process.env.APPLE_ID,
+            appleIdPassword: process.env.APPLE_PASSWORD,
+            teamId: process.env.APPLE_TEAM_ID
+        },
+        // NOTE: Electron Forge ignores packagerConfig.dir and always packages from the
+        // config file's directory. We use packageAfterCopy hook instead to customize output.
+        // dir: path.join(__dirname, '.package'),  // Not supported by Forge
         // Since we bundle everything with esbuild, we don't need node_modules at all.
         // These settings prevent Forge's dependency walker (flora-colossus) from trying
         // to analyze/copy node_modules, which fails with pnpm's symlinked workspaces.
@@ -39,6 +48,21 @@ module.exports = {
             name: '@electron-forge/maker-zip',
             platforms: ['darwin'],
             // ZIP is used by Squirrel.Mac for auto-updates
+            config: (arch) => ({
+                // Path must match S3 publisher's folder structure: releases/darwin/{arch}
+                macUpdateManifestBaseUrl: `https://rowboat-desktop-app-releases.s3.amazonaws.com/releases/darwin/${arch}`
+            })
+        }
+    ],
+    publishers: [
+        {
+            name: '@electron-forge/publisher-s3',
+            config: {
+                bucket: 'rowboat-desktop-app-releases',
+                region: 'us-east-1',
+                public: true,
+                folder: 'releases'  // Creates structure: releases/darwin/arm64/files
+            }
         }
     ],
     hooks: {
@@ -141,113 +165,82 @@ module.exports = {
 
             console.log('✅ All assets staged in .package/');
         },
-
-        // Hook runs after Forge copies source to output directory
-        // We use this to replace the unbundled code with our bundled version
-        // Hook signature: (forgeConfig, buildPath, electronVersion, platform, arch)
-        packageAfterCopy: async (forgeConfig, buildPath, electronVersion, platform, arch) => {
+        // Hook signature: async (config, buildPath, electronVersion, platform, arch)
+        // Called after Forge copies source directory to build output
+        // This is where we replace source files with bundled/staged files
+        packageAfterCopy: async (config, buildPath, electronVersion, platform, arch) => {
             const fs = require('fs');
             const packageDir = path.join(__dirname, '.package');
-            
-            // buildPath is the app directory inside the packaged output
-            // e.g., out/Rowboat-darwin-arm64/Rowboat.app/Contents/Resources/app
-            // App bundle root is 3 levels up: buildPath/../../.. = Rowboat.app
-            const appBundleRoot = path.resolve(buildPath, '../../..');
-            console.log('Fixing packaged app at:', buildPath);
-            console.log('App bundle root:', appBundleRoot);
-            
+            // buildPath already points to the app directory (Contents/Resources/app)
+            const appResourcesPath = buildPath;
 
-            // 1. Remove the unbundled dist/ directory (it has imports to @x/core, @x/shared)
-            const distDir = path.join(buildPath, 'dist');
-            if (fs.existsSync(distDir)) {
+            console.log('📦 Copying staged files from .package/ to packaged app...');
+
+            // Remove unbundled dist/ directory (source TypeScript output)
+            const unbundledDist = path.join(appResourcesPath, 'dist');
+            if (fs.existsSync(unbundledDist)) {
                 console.log('Removing unbundled dist/...');
-                fs.rmSync(distDir, { recursive: true });
+                fs.rmSync(unbundledDist, { recursive: true });
             }
 
-            // 2. Copy the bundled dist-bundle/ from staging
-            console.log('Copying bundled dist-bundle/...');
-            const bundleSrc = path.join(packageDir, 'dist-bundle');
-            const bundleDest = path.join(buildPath, 'dist-bundle');
-            fs.cpSync(bundleSrc, bundleDest, { recursive: true });
+            // Copy bundled dist-bundle/ from staging
+            const distBundleSrc = path.join(packageDir, 'dist-bundle');
+            const distBundleDest = path.join(appResourcesPath, 'dist-bundle');
+            if (fs.existsSync(distBundleSrc)) {
+                console.log('Copying dist-bundle/...');
+                fs.mkdirSync(distBundleDest, { recursive: true });
+                fs.cpSync(distBundleSrc, distBundleDest, { recursive: true });
+            }
 
-            // 3. Copy preload from staging
-            console.log('Copying preload/...');
+            // Copy preload/ from staging
             const preloadSrc = path.join(packageDir, 'preload');
-            const preloadDest = path.join(buildPath, 'preload');
-            fs.cpSync(preloadSrc, preloadDest, { recursive: true });
+            const preloadDest = path.join(appResourcesPath, 'preload');
+            if (fs.existsSync(preloadSrc)) {
+                console.log('Copying preload/...');
+                // Remove old preload if it exists
+                if (fs.existsSync(preloadDest)) {
+                    fs.rmSync(preloadDest, { recursive: true });
+                }
+                fs.cpSync(preloadSrc, preloadDest, { recursive: true });
+            }
 
-            // 4. Copy renderer from staging
-            console.log('Copying renderer/...');
+            // Copy renderer/ from staging
             const rendererSrc = path.join(packageDir, 'renderer');
-            const rendererDest = path.join(buildPath, 'renderer');
-            fs.cpSync(rendererSrc, rendererDest, { recursive: true });
+            const rendererDest = path.join(appResourcesPath, 'renderer');
+            if (fs.existsSync(rendererSrc)) {
+                console.log('Copying renderer/...');
+                // Remove old renderer if it exists
+                if (fs.existsSync(rendererDest)) {
+                    fs.rmSync(rendererDest, { recursive: true });
+                }
+                fs.cpSync(rendererSrc, rendererDest, { recursive: true });
+            }
 
-            // 5. Update package.json to point to bundled entry
-            console.log('Updating package.json...');
-            const packageJsonPath = path.join(buildPath, 'package.json');
-            const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-            packageJson.main = 'dist-bundle/main.js';
-            // Remove workspace dependencies (they're bundled now)
-            delete packageJson.dependencies;
-            delete packageJson.devDependencies;
-            delete packageJson.scripts;
-            // Remove "type": "module" - we bundle as CommonJS for compatibility
-            // with dependencies that use dynamic require()
-            delete packageJson.type;
-            fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
+            // Update package.json to point to bundled entry point
+            const packageJsonPath = path.join(appResourcesPath, 'package.json');
+            if (fs.existsSync(packageJsonPath)) {
+                console.log('Updating package.json...');
+                const packageJson = {
+                    name: '@x/main',
+                    version: '0.1.0',
+                    main: 'dist-bundle/main.js',
+                    // Note: No "type": "module" since we bundle as CommonJS
+                    // No dependencies/devDependencies since everything is bundled
+                };
+                fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
+            }
 
-            // 6. Clean up source files that shouldn't be in production
-            const filesToRemove = ['tsconfig.json', 'forge.config.cjs', 'agents.md'];
+            // Clean up source files that shouldn't be in packaged app
+            const filesToRemove = ['src', 'tsconfig.json', 'forge.config.cjs', 'agents.md', '.gitignore', 'bundle.mjs'];
             for (const file of filesToRemove) {
-                const filePath = path.join(buildPath, file);
+                const filePath = path.join(appResourcesPath, file);
                 if (fs.existsSync(filePath)) {
-                    fs.rmSync(filePath);
+                    console.log(`Removing ${file}...`);
+                    fs.rmSync(filePath, { recursive: true, force: true });
                 }
             }
-            const srcDir = path.join(buildPath, 'src');
-            if (fs.existsSync(srcDir)) {
-                fs.rmSync(srcDir, { recursive: true });
-            }
 
-            // 7. Remove any signature metadata AFTER all file modifications
-            // This prevents "code has no resources but signature indicates they must be present" error
-            // which occurs when _CodeSignature exists but files it references have been moved/modified
-            const codeSignatureDir = path.join(appBundleRoot, 'Contents', '_CodeSignature');
-            if (fs.existsSync(codeSignatureDir)) {
-                console.log('Removing _CodeSignature directory (files were modified after packaging)...');
-                fs.rmSync(codeSignatureDir, { recursive: true });
-            }
-
-            // 8. Re-sign the app bundle with adhoc signature after file modifications
-            // The original bundle signature references resources that we've moved/modified
-            // Re-signing with adhoc signature creates a new signature that matches the current bundle structure
-            // This prevents "code has no resources but signature indicates they must be present" error
-            try {
-                const { execSync } = require('child_process');
-                
-                // Re-sign the entire app bundle with an adhoc signature
-                // This creates a fresh signature that matches the modified bundle structure
-                execSync(`codesign --force --deep --sign - "${appBundleRoot}"`, { stdio: 'ignore' });
-                console.log('Re-signed app bundle with adhoc signature (matches modified structure)');
-            } catch (e) {
-                // Ignore errors - codesign might fail, but app should still work
-                console.log('Warning: Failed to re-sign app bundle:', e.message);
-            }
-
-            // 9. Clear any signature-related extended attributes
-            // Even without _CodeSignature or embedded signatures, extended attributes can contain invalid signature metadata
-            // This prevents "code has no resources but signature indicates they must be present" error
-            try {
-                const { execSync } = require('child_process');
-                // Clear extended attributes from the entire app bundle
-                // This removes any signature metadata that might be stored in xattrs
-                execSync(`xattr -cr "${appBundleRoot}"`, { stdio: 'ignore' });
-                console.log('Cleared extended attributes from app bundle');
-            } catch (e) {
-                // Ignore errors - xattr might not be available or might fail silently
-            }
-
-            console.log('✅ Packaged app fixed with bundled code');
+            console.log('✅ Staged files copied to packaged app');
         }
     }
 };
