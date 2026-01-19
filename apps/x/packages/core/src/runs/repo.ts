@@ -20,6 +20,8 @@ export class FSRunsRepo implements IRunsRepo {
         idGenerator: IMonotonicallyIncreasingIdGenerator;
     }) {
         this.idGenerator = idGenerator;
+        // ensure runs directory exists
+        fsp.mkdir(path.join(WorkDir, 'runs'), { recursive: true });
     }
 
     async appendEvents(runId: string, events: z.infer<typeof RunEvent>[]): Promise<void> {
