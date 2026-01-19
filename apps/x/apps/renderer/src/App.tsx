@@ -31,9 +31,12 @@ import {
   PromptInputBody,
   PromptInputFooter,
   type PromptInputMessage,
+  PromptInputProvider,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
+  usePromptInputController,
+  type FileMention,
 } from '@/components/ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import { Shimmer } from '@/components/ai-elements/shimmer';
@@ -251,6 +254,99 @@ const collectDirPaths = (nodes: TreeNode[]): string[] =>
 
 const collectFilePaths = (nodes: TreeNode[]): string[] =>
   nodes.flatMap(n => n.kind === 'file' ? [n.path] : (n.children ? collectFilePaths(n.children) : []))
+
+// Inner component that uses the controller to access mentions
+interface ChatInputInnerProps {
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
+  isProcessing: boolean
+  contextUsage: LanguageModelUsage
+  maxTokens: number
+  usedTokens: number
+}
+
+function ChatInputInner({
+  onSubmit,
+  isProcessing,
+  contextUsage,
+  maxTokens,
+  usedTokens,
+}: ChatInputInnerProps) {
+  const controller = usePromptInputController()
+  const message = controller.textInput.value
+  const canSubmit = Boolean(message.trim()) && !isProcessing
+  const submitStatus: ChatStatus = isProcessing ? 'streaming' : 'ready'
+
+  const handleSubmit = useCallback((msg: PromptInputMessage) => {
+    onSubmit(msg, controller.mentions.mentions)
+    controller.mentions.clearMentions()
+  }, [onSubmit, controller.mentions])
+
+  return (
+    <PromptInput onSubmit={handleSubmit}>
+      <PromptInputBody>
+        <PromptInputTextarea
+          placeholder="Type your message..."
+          disabled={isProcessing}
+        />
+      </PromptInputBody>
+      <PromptInputFooter>
+        <PromptInputTools>
+          <Context
+            maxTokens={maxTokens}
+            usedTokens={usedTokens}
+            usage={contextUsage}
+          >
+            <ContextTrigger size="sm" />
+            <ContextContent>
+              <ContextContentHeader />
+              <ContextContentBody>
+                <ContextInputUsage />
+                <ContextOutputUsage />
+                <ContextReasoningUsage />
+                <ContextCacheUsage />
+              </ContextContentBody>
+            </ContextContent>
+          </Context>
+        </PromptInputTools>
+        <PromptInputSubmit
+          disabled={!canSubmit}
+          status={submitStatus}
+        />
+      </PromptInputFooter>
+    </PromptInput>
+  )
+}
+
+// Wrapper component with PromptInputProvider
+interface ChatInputWithMentionsProps {
+  knowledgeFiles: string[]
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
+  isProcessing: boolean
+  contextUsage: LanguageModelUsage
+  maxTokens: number
+  usedTokens: number
+}
+
+function ChatInputWithMentions({
+  knowledgeFiles,
+  onSubmit,
+  isProcessing,
+  contextUsage,
+  maxTokens,
+  usedTokens,
+}: ChatInputWithMentionsProps) {
+  return (
+    <PromptInputProvider knowledgeFiles={knowledgeFiles}>
+      <ChatInputInner
+        onSubmit={onSubmit}
+        isProcessing={isProcessing}
+        contextUsage={contextUsage}
+        maxTokens={maxTokens}
+        usedTokens={usedTokens}
+      />
+    </PromptInputProvider>
+  )
+}
 
 function App() {
   // File browser state (for Knowledge section)
@@ -577,7 +673,7 @@ function App() {
     }
   }
 
-  const handlePromptSubmit = async (message: PromptInputMessage) => {
+  const handlePromptSubmit = async (message: PromptInputMessage, mentions?: FileMention[]) => {
     if (isProcessing) return
 
     const { text } = message;
@@ -604,9 +700,32 @@ function App() {
         setRunId(currentRunId)
       }
 
+      // Read mentioned file contents and format message with XML context
+      let formattedMessage = userMessage
+      if (mentions && mentions.length > 0) {
+        const attachedFiles = await Promise.all(
+          mentions.map(async (m) => {
+            try {
+              const result = await window.ipc.invoke('workspace:readFile', { path: m.path })
+              return { path: m.path, content: result.data as string }
+            } catch (err) {
+              console.error('Failed to read mentioned file:', m.path, err)
+              return { path: m.path, content: `[Error reading file: ${m.path}]` }
+            }
+          })
+        )
+
+        if (attachedFiles.length > 0) {
+          const filesXml = attachedFiles
+            .map(f => `<file path="${f.path}">\n${f.content}\n</file>`)
+            .join('\n')
+          formattedMessage = `<attached-files>\n${filesXml}\n</attached-files>\n\n${userMessage}`
+        }
+      }
+
       await window.ipc.invoke('runs:createMessage', {
         runId: currentRunId,
-        message: userMessage,
+        message: formattedMessage,
       })
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -979,8 +1098,6 @@ function App() {
   const conversationContentClassName = hasConversation
     ? "mx-auto w-full max-w-4xl pb-28"
     : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
-  const submitStatus: ChatStatus = isProcessing ? 'streaming' : 'ready'
-  const canSubmit = Boolean(message.trim()) && !isProcessing
   const headerTitle = selectedPath ? selectedPath : (isGraphOpen ? 'Graph View' : 'Chat')
 
   return (
@@ -1117,40 +1234,14 @@ function App() {
                 <div className="sticky bottom-0 z-10 bg-background pb-4 pt-6 shadow-lg">
                   <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                   <div className="mx-auto w-full max-w-4xl px-4">
-                    <PromptInput onSubmit={handlePromptSubmit}>
-                      <PromptInputBody>
-                        <PromptInputTextarea
-                          value={message}
-                          onChange={(e) => setMessage(e.target.value)}
-                          placeholder="Type your message..."
-                          disabled={isProcessing}
-                        />
-                      </PromptInputBody>
-                      <PromptInputFooter>
-                        <PromptInputTools>
-                          <Context
-                            maxTokens={maxTokens}
-                            usedTokens={usedTokens}
-                            usage={contextUsage}
-                          >
-                            <ContextTrigger size="sm" />
-                            <ContextContent>
-                              <ContextContentHeader />
-                              <ContextContentBody>
-                                <ContextInputUsage />
-                                <ContextOutputUsage />
-                                <ContextReasoningUsage />
-                                <ContextCacheUsage />
-                              </ContextContentBody>
-                            </ContextContent>
-                          </Context>
-                        </PromptInputTools>
-                        <PromptInputSubmit
-                          disabled={!canSubmit}
-                          status={submitStatus}
-                        />
-                      </PromptInputFooter>
-                    </PromptInput>
+                    <ChatInputWithMentions
+                      knowledgeFiles={knowledgeFiles}
+                      onSubmit={handlePromptSubmit}
+                      isProcessing={isProcessing}
+                      contextUsage={contextUsage}
+                      maxTokens={maxTokens}
+                      usedTokens={usedTokens}
+                    />
                   </div>
                 </div>
               </div>
@@ -1173,6 +1264,8 @@ function App() {
                 contextUsage={contextUsage}
                 maxTokens={maxTokens}
                 usedTokens={usedTokens}
+                knowledgeFiles={knowledgeFiles}
+                selectedPath={selectedPath}
               />
             )}
           </SidebarProvider>

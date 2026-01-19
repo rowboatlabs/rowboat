@@ -22,7 +22,10 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
-import { type PromptInputMessage } from '@/components/ai-elements/prompt-input'
+import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
+import { useMentionDetection } from '@/hooks/use-mention-detection'
+import { MentionPopover } from '@/components/mention-popover'
+import { toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 
 interface ChatMessage {
   id: string
@@ -107,10 +110,12 @@ interface ChatSidebarProps {
   isProcessing: boolean
   message: string
   onMessageChange: (message: string) => void
-  onSubmit: (message: PromptInputMessage) => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
   contextUsage: LanguageModelUsage
   maxTokens: number
   usedTokens: number
+  knowledgeFiles?: string[]
+  selectedPath?: string | null
 }
 
 export function ChatSidebar({
@@ -124,12 +129,51 @@ export function ChatSidebar({
   message,
   onMessageChange,
   onSubmit,
+  knowledgeFiles = [],
+  selectedPath,
 }: ChatSidebarProps) {
   const [width, setWidth] = useState(defaultWidth)
   const [isResizing, setIsResizing] = useState(false)
   const startXRef = useRef(0)
   const startWidthRef = useRef(0)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [mentions, setMentions] = useState<FileMention[]>([])
+
+  const { activeMention, cursorCoords } = useMentionDetection(
+    textareaRef,
+    message,
+    knowledgeFiles.length > 0
+  )
+
+  const handleMentionSelect = useCallback(
+    (path: string, displayName: string) => {
+      if (!activeMention) return
+
+      const beforeAt = message.substring(0, activeMention.triggerIndex)
+      const afterQuery = message.substring(
+        activeMention.triggerIndex + 1 + activeMention.query.length
+      )
+
+      const newText = `${beforeAt}@${displayName} ${afterQuery}`
+      onMessageChange(newText)
+
+      const fullPath = toKnowledgePath(path)
+      if (fullPath) {
+        setMentions(prev => {
+          if (prev.some(m => m.path === fullPath)) return prev
+          return [...prev, { id: `mention-${Date.now()}`, path: fullPath, displayName }]
+        })
+      }
+
+      textareaRef.current?.focus()
+    },
+    [activeMention, message, onMessageChange]
+  )
+
+  const handleMentionClose = useCallback(() => {
+    // The popover handles its own closing
+  }, [])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -153,10 +197,24 @@ export function ChatSidebar({
     document.addEventListener('mouseup', handleMouseUp)
   }, [width])
 
-  // Auto-focus input when sidebar opens
+  // Auto-focus textarea when sidebar opens and auto-populate with current file if applicable
   useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
+    textareaRef.current?.focus()
+
+    // Auto-populate with @currentfile if opening from a knowledge file
+    if (selectedPath && selectedPath.startsWith('knowledge/') && selectedPath.endsWith('.md')) {
+      // Only auto-populate if there's no existing message
+      if (!message.trim()) {
+        const displayName = wikiLabel(selectedPath)
+        onMessageChange(`@${displayName} `)
+        setMentions([{
+          id: `mention-auto-${Date.now()}`,
+          path: selectedPath,
+          displayName,
+        }])
+      }
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
   const canSubmit = Boolean(message.trim()) && !isProcessing
@@ -164,14 +222,27 @@ export function ChatSidebar({
   const handleSubmit = () => {
     const trimmed = message.trim()
     if (trimmed && !isProcessing) {
-      onSubmit({ text: trimmed, files: [] })
+      onSubmit({ text: trimmed, files: [] }, mentions)
+      setMentions([])
     }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
+    // If mention popover is open, let it handle navigation keys
+    if (activeMention && ['ArrowDown', 'ArrowUp', 'Tab', 'Escape'].includes(e.key)) {
+      return
+    }
+
+    if (e.key === 'Enter') {
+      // If mention popover is open, Enter should select the item
+      if (activeMention) {
+        return
+      }
+
+      if (!e.shiftKey) {
+        e.preventDefault()
+        handleSubmit()
+      }
     }
   }
 
@@ -304,24 +375,25 @@ export function ChatSidebar({
         </Conversation>
 
         {/* Input area - responsive to sidebar width, matches floating bar position exactly */}
-        <div className="absolute bottom-6 left-14 right-6 z-10">
-          <div className="flex items-center gap-2 bg-background border border-border rounded-full shadow-xl px-4 py-2.5">
-            <input
-              ref={inputRef}
-              type="text"
+        <div className="absolute bottom-6 left-14 right-6 z-10" ref={containerRef}>
+          <div className="flex items-center gap-2 bg-background border border-border rounded-2xl shadow-xl px-4 py-2.5">
+            <textarea
+              ref={textareaRef}
               value={message}
               onChange={(e) => onMessageChange(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask anything..."
               disabled={isProcessing}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
+              rows={1}
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-32 min-h-[1.5rem]"
+              style={{ fieldSizing: 'content' } as React.CSSProperties}
             />
             <Button
               size="icon"
               onClick={handleSubmit}
               disabled={!canSubmit}
               className={cn(
-                "h-7 w-7 rounded-full shrink-0 transition-all",
+                "h-7 w-7 rounded-full shrink-0 transition-all self-end",
                 canSubmit
                   ? "bg-primary text-primary-foreground hover:bg-primary/90"
                   : "bg-muted text-muted-foreground"
@@ -330,6 +402,17 @@ export function ChatSidebar({
               <ArrowUp className="h-4 w-4" />
             </Button>
           </div>
+          {knowledgeFiles.length > 0 && (
+            <MentionPopover
+              files={knowledgeFiles}
+              query={activeMention?.query ?? ''}
+              position={cursorCoords}
+              containerRef={containerRef}
+              onSelect={handleMentionSelect}
+              onClose={handleMentionClose}
+              open={Boolean(activeMention)}
+            />
+          )}
         </div>
       </div>
     </div>
