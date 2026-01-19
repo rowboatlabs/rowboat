@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Plus } from 'lucide-react'
+import { ArrowUp, Expand, Plus } from 'lucide-react'
 import type { ToolUIPart } from 'ai'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -105,6 +105,7 @@ interface ChatSidebarProps {
   defaultWidth?: number
   isOpen?: boolean
   onNewChat: () => void
+  onOpenFullScreen?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
   currentReasoning: string
@@ -122,6 +123,7 @@ export function ChatSidebar({
   defaultWidth = DEFAULT_WIDTH,
   isOpen = true,
   onNewChat,
+  onOpenFullScreen,
   conversation,
   currentAssistantMessage,
   currentReasoning,
@@ -136,6 +138,17 @@ export function ChatSidebar({
 }: ChatSidebarProps) {
   const [width, setWidth] = useState(defaultWidth)
   const [isResizing, setIsResizing] = useState(false)
+  const [showContent, setShowContent] = useState(isOpen)
+
+  // Delay showing content when opening, hide immediately when closing
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => setShowContent(true), 150)
+      return () => clearTimeout(timer)
+    } else {
+      setShowContent(false)
+    }
+  }, [isOpen])
   const startXRef = useRef(0)
   const startWidthRef = useRef(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -414,17 +427,30 @@ export function ChatSidebar({
         )}
       />
 
-      {/* Header - minimal, just new chat button */}
-      <header className="flex h-12 shrink-0 items-center justify-end px-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={onNewChat} className="h-8 w-8 text-muted-foreground hover:text-foreground">
-              <Plus className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">New chat</TooltipContent>
-        </Tooltip>
-      </header>
+      {/* Content - delayed on open, hidden immediately on close to avoid layout issues during animation */}
+      {showContent && (
+        <>
+          {/* Header - minimal, expand and new chat buttons */}
+          <header className="flex h-12 shrink-0 items-center justify-end gap-1 px-2">
+            {onOpenFullScreen && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={onOpenFullScreen} className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                    <Expand className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Full screen chat</TooltipContent>
+              </Tooltip>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={onNewChat} className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">New chat</TooltipContent>
+            </Tooltip>
+          </header>
 
       {/* Conversation area */}
       <div className="flex min-h-0 flex-1 flex-col relative">
@@ -536,6 +562,8 @@ export function ChatSidebar({
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   )
 }

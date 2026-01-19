@@ -80,11 +80,6 @@ type ConversationItem = ChatMessage | ToolCall | ReasoningBlock;
 
 type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
 
-const estimateTokens = (text: string) => {
-  if (!text) return 0
-  return Math.ceil(text.trim().length / 4)
-}
-
 const isChatMessage = (item: ConversationItem): item is ChatMessage => 'role' in item
 const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
 const isReasoningBlock = (item: ConversationItem): item is ReasoningBlock =>
@@ -274,7 +269,7 @@ function ChatInputInner({
         placeholder="Type your message..."
         disabled={isProcessing}
         onKeyDown={handleKeyDown}
-        className="min-h-[1.5rem] py-0 border-0 shadow-none focus-visible:ring-0 rounded-none"
+        className="min-h-6 py-0 border-0 shadow-none focus-visible:ring-0 rounded-none"
       />
       <Button
         size="icon"
@@ -348,7 +343,7 @@ function App() {
   const [conversation, setConversation] = useState<ConversationItem[]>([])
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>('')
   const [currentReasoning, setCurrentReasoning] = useState<string>('')
-  const [modelUsage, setModelUsage] = useState<LanguageModelUsage | null>(null)
+  const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [agentId] = useState<string>('copilot')
@@ -718,6 +713,11 @@ function App() {
     handlePromptSubmit({ text, files: [] })
   }
 
+  const handleOpenFullScreenChat = useCallback(() => {
+    setSelectedPath(null)
+    setIsGraphOpen(false)
+  }, [])
+
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
       setSelectedPath(path)
@@ -1057,38 +1057,6 @@ function App() {
     return null
   }
 
-  const chatMessages = conversation.filter(isChatMessage)
-  const reasoningBlocks = conversation.filter(isReasoningBlock)
-  const estimatedInputTokens = chatMessages
-    .filter((item) => item.role === 'user')
-    .reduce((total, item) => total + estimateTokens(item.content), 0)
-  const estimatedOutputTokens = chatMessages
-    .filter((item) => item.role === 'assistant')
-    .reduce((total, item) => total + estimateTokens(item.content), 0)
-    + estimateTokens(currentAssistantMessage)
-  const estimatedReasoningTokens = reasoningBlocks
-    .reduce((total, item) => total + estimateTokens(item.content), 0)
-    + estimateTokens(currentReasoning)
-  const estimatedTotalTokens = estimatedInputTokens + estimatedOutputTokens + estimatedReasoningTokens
-  const maxTokens = 128_000
-  const estimatedUsage = {
-    inputTokens: estimatedInputTokens,
-    outputTokens: estimatedOutputTokens,
-    totalTokens: estimatedTotalTokens,
-    cachedInputTokens: 0,
-    reasoningTokens: estimatedReasoningTokens,
-  } as LanguageModelUsage
-  const effectiveUsage = modelUsage ?? estimatedUsage
-  const effectiveTotalTokens = effectiveUsage.totalTokens
-    ?? (effectiveUsage.inputTokens ?? 0)
-      + (effectiveUsage.outputTokens ?? 0)
-      + (effectiveUsage.reasoningTokens ?? 0)
-  const usedTokens = Math.min(effectiveTotalTokens, maxTokens)
-  const contextUsage = {
-    ...effectiveUsage,
-    totalTokens: effectiveTotalTokens,
-  } as LanguageModelUsage
-
   const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
   const conversationContentClassName = hasConversation
     ? "mx-auto w-full max-w-4xl pb-28"
@@ -1262,6 +1230,7 @@ function App() {
                 defaultWidth={400}
                 isOpen={isChatSidebarOpen}
                 onNewChat={handleNewChat}
+                onOpenFullScreen={handleOpenFullScreenChat}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
                 currentReasoning={currentReasoning}
