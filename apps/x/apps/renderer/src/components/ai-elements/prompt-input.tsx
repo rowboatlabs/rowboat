@@ -1026,6 +1026,46 @@ export const PromptInputTextarea = ({
       form?.requestSubmit();
     }
 
+    // Handle backspace to delete entire mention at once
+    if (e.key === "Backspace" && controller) {
+      const textarea = e.currentTarget;
+      const cursorPos = textarea.selectionStart;
+      const selectionEnd = textarea.selectionEnd;
+
+      // Only handle if no text is selected (cursor is at a single position)
+      if (cursorPos === selectionEnd) {
+        // Check if cursor is right after a mention
+        for (const label of mentionLabels) {
+          const mentionText = `@${label}`;
+          const startPos = cursorPos - mentionText.length;
+          if (startPos >= 0) {
+            const textBefore = currentValue.substring(startPos, cursorPos);
+            if (textBefore === mentionText) {
+              // Check if it's at word boundary (start of string or preceded by whitespace)
+              if (startPos === 0 || /\s/.test(currentValue[startPos - 1])) {
+                e.preventDefault();
+                const newText = currentValue.substring(0, startPos) + currentValue.substring(cursorPos);
+                controller.textInput.setInput(newText);
+                // Remove the mention from state
+                if (mentionsCtx) {
+                  const mentionToRemove = mentionsCtx.mentions.find(m => m.displayName === label);
+                  if (mentionToRemove) {
+                    mentionsCtx.removeMention(mentionToRemove.id);
+                  }
+                }
+                // Set cursor position after React updates
+                setTimeout(() => {
+                  textarea.selectionStart = startPos;
+                  textarea.selectionEnd = startPos;
+                }, 0);
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Remove last attachment when Backspace is pressed and textarea is empty
     if (
       e.key === "Backspace" &&
@@ -1094,7 +1134,7 @@ export const PromptInputTextarea = ({
             segment.highlighted ? (
               <span
                 key={`mention-${index}`}
-                className="rounded bg-primary/20 text-transparent ring-1 ring-primary/15 px-1 py-0.5 [box-decoration-break:clone]"
+                className="rounded bg-primary/20 text-transparent [box-decoration-break:clone] shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.15),-3px_0_0_hsl(var(--primary)/0.2),3px_0_0_hsl(var(--primary)/0.2),0_-2px_0_hsl(var(--primary)/0.2),0_2px_0_hsl(var(--primary)/0.2)]"
               >
                 {segment.text}
               </span>

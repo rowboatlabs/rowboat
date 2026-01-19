@@ -294,7 +294,7 @@ export function ChatSidebar({
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // If mention popover is open, let it handle navigation keys
     if (activeMention && ['ArrowDown', 'ArrowUp', 'Tab', 'Escape'].includes(e.key)) {
       return
@@ -309,6 +309,41 @@ export function ChatSidebar({
       if (!e.shiftKey) {
         e.preventDefault()
         handleSubmit()
+      }
+    }
+
+    // Handle backspace to delete entire mention at once
+    if (e.key === 'Backspace') {
+      const textarea = e.currentTarget
+      const cursorPos = textarea.selectionStart
+      const selectionEnd = textarea.selectionEnd
+
+      // Only handle if no text is selected (cursor is at a single position)
+      if (cursorPos !== selectionEnd) return
+
+      // Check if cursor is right after a mention
+      for (const label of mentionLabels) {
+        const mentionText = `@${label}`
+        const startPos = cursorPos - mentionText.length
+        if (startPos >= 0) {
+          const textBefore = message.substring(startPos, cursorPos)
+          if (textBefore === mentionText) {
+            // Check if it's at word boundary (start of string or preceded by whitespace)
+            if (startPos === 0 || /\s/.test(message[startPos - 1])) {
+              e.preventDefault()
+              const newText = message.substring(0, startPos) + message.substring(cursorPos)
+              onMessageChange(newText)
+              // Remove the mention from state
+              setMentions(prev => prev.filter(m => m.displayName !== label))
+              // Set cursor position after React updates
+              setTimeout(() => {
+                textarea.selectionStart = startPos
+                textarea.selectionEnd = startPos
+              }, 0)
+              return
+            }
+          }
+        }
       }
     }
   }
