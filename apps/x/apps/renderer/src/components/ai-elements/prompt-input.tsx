@@ -49,7 +49,8 @@ import {
 import { nanoid } from "nanoid";
 import { useMentionDetection } from "@/hooks/use-mention-detection";
 import { MentionPopover } from "@/components/mention-popover";
-import { toKnowledgePath } from "@/lib/wiki-links";
+import { toKnowledgePath, wikiLabel } from "@/lib/wiki-links";
+import { getMentionHighlightSegments } from "@/lib/mention-highlights";
 import {
   type ChangeEvent,
   type ChangeEventHandler,
@@ -165,6 +166,8 @@ const useOptionalProviderMentions = () => useContext(ProviderMentionsContext);
 
 export type KnowledgeFilesContext = {
   files: string[];
+  recentFiles: string[];
+  visibleFiles: string[];
 };
 
 const ProviderKnowledgeFilesContext = createContext<KnowledgeFilesContext | null>(null);
@@ -176,6 +179,8 @@ export const useProviderKnowledgeFiles = () => {
 export type PromptInputProviderProps = PropsWithChildren<{
   initialInput?: string;
   knowledgeFiles?: string[];
+  recentFiles?: string[];
+  visibleFiles?: string[];
 }>;
 
 /**
@@ -185,6 +190,8 @@ export type PromptInputProviderProps = PropsWithChildren<{
 export function PromptInputProvider({
   initialInput: initialTextInput = "",
   knowledgeFiles = [],
+  recentFiles = [],
+  visibleFiles = [],
   children,
 }: PromptInputProviderProps) {
   // ----- textInput state
@@ -323,8 +330,8 @@ export function PromptInputProvider({
   );
 
   const knowledgeFilesContext = useMemo<KnowledgeFilesContext>(
-    () => ({ files: knowledgeFiles }),
-    [knowledgeFiles]
+    () => ({ files: knowledgeFiles, recentFiles, visibleFiles }),
+    [knowledgeFiles, recentFiles, visibleFiles]
   );
 
   return (
@@ -913,15 +920,47 @@ export const PromptInputTextarea = ({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
 
   const currentValue = controller?.textInput.value ?? "";
   const knowledgeFiles = knowledgeFilesCtx?.files ?? [];
+  const recentFiles = knowledgeFilesCtx?.recentFiles ?? [];
+  const visibleFiles = knowledgeFilesCtx?.visibleFiles ?? [];
+
+  // Build mention labels for highlighting (handles multi-word names like "AI Agents")
+  const mentionLabels = useMemo(() => {
+    if (knowledgeFiles.length === 0) return [];
+    const labels = knowledgeFiles
+      .map((path) => wikiLabel(path))
+      .map((label) => label.trim())
+      .filter(Boolean);
+    return Array.from(new Set(labels));
+  }, [knowledgeFiles]);
 
   const { activeMention, cursorCoords } = useMentionDetection(
     textareaRef,
     currentValue,
     knowledgeFiles.length > 0
   );
+
+  // Use proper regex-based highlight segmentation that handles multi-word names
+  const mentionHighlights = useMemo(
+    () => getMentionHighlightSegments(currentValue, activeMention, mentionLabels),
+    [currentValue, activeMention, mentionLabels]
+  );
+
+  // Sync highlight overlay scroll with textarea
+  const syncHighlightScroll = useCallback(() => {
+    const textarea = textareaRef.current;
+    const highlight = highlightRef.current;
+    if (!textarea || !highlight) return;
+    highlight.scrollTop = textarea.scrollTop;
+    highlight.scrollLeft = textarea.scrollLeft;
+  }, []);
+
+  useEffect(() => {
+    syncHighlightScroll();
+  }, [currentValue, mentionHighlights.hasHighlights, syncHighlightScroll]);
 
   const handleMentionSelect = useCallback(
     (path: string, displayName: string) => {
@@ -1044,14 +1083,38 @@ export const PromptInputTextarea = ({
       };
 
   return (
-    <div ref={containerRef} className="relative contents">
+    <div ref={containerRef} className="relative flex-1 min-w-0">
+      {mentionHighlights.hasHighlights && (
+        <div
+          ref={highlightRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-3 text-sm text-transparent"
+        >
+          {mentionHighlights.segments.map((segment, index) =>
+            segment.highlighted ? (
+              <span
+                key={`mention-${index}`}
+                className="rounded bg-primary/20 text-transparent ring-1 ring-primary/15 px-1 py-0.5 [box-decoration-break:clone]"
+              >
+                {segment.text}
+              </span>
+            ) : (
+              <span key={`text-${index}`}>{segment.text}</span>
+            )
+          )}
+        </div>
+      )}
       <InputGroupTextarea
         ref={textareaRef}
-        className={cn("field-sizing-content max-h-48 min-h-16", className)}
+        className={cn(
+          "field-sizing-content max-h-48 min-h-16 relative z-10",
+          className
+        )}
         name="message"
         onCompositionEnd={() => setIsComposing(false)}
         onCompositionStart={() => setIsComposing(true)}
         onKeyDown={handleKeyDown}
+        onScroll={syncHighlightScroll}
         onPaste={handlePaste}
         placeholder={placeholder}
         {...props}
@@ -1060,6 +1123,8 @@ export const PromptInputTextarea = ({
       {knowledgeFiles.length > 0 && (
         <MentionPopover
           files={knowledgeFiles}
+          recentFiles={recentFiles}
+          visibleFiles={visibleFiles}
           query={activeMention?.query ?? ""}
           position={cursorCoords}
           containerRef={containerRef}

@@ -7,6 +7,8 @@ import type { CaretCoordinates } from '@/lib/textarea-caret'
 
 interface MentionPopoverProps {
   files: string[]
+  recentFiles?: string[]
+  visibleFiles?: string[]
   query: string
   position: CaretCoordinates | null
   containerRef: React.RefObject<HTMLElement | null>
@@ -19,33 +21,64 @@ const MAX_VISIBLE_FILES = 8
 
 export function MentionPopover({
   files,
+  recentFiles = [],
+  visibleFiles = [],
   query,
   position,
-  containerRef,
+  containerRef: _containerRef,
   onSelect,
   onClose,
   open,
 }: MentionPopoverProps) {
+  void _containerRef // Reserved for future positioning logic
   const [selectedIndex, setSelectedIndex] = useState(0)
 
-  // Filter files based on query
-  const filteredFiles = useMemo(() => {
-    if (!query) return files.slice(0, MAX_VISIBLE_FILES)
-
+  // Order files: visible > recent > rest, then filter by query
+  const orderedAndFilteredFiles = useMemo(() => {
     const lowerQuery = query.toLowerCase()
-    return files
+
+    // Create sets for quick lookup
+    const visibleSet = new Set(visibleFiles)
+    const recentSet = new Set(recentFiles)
+    const allFiles = new Set(files)
+
+    // Categorize files
+    const visible: string[] = []
+    const recent: string[] = []
+    const rest: string[] = []
+
+    for (const file of files) {
+      if (visibleSet.has(file)) {
+        visible.push(file)
+      } else if (recentSet.has(file)) {
+        recent.push(file)
+      } else {
+        rest.push(file)
+      }
+    }
+
+    // Maintain recent order for recent files
+    const orderedRecent = recentFiles.filter(f => allFiles.has(f) && !visibleSet.has(f))
+
+    // Combine in order: visible > recent > rest
+    const ordered = [...visible, ...orderedRecent, ...rest]
+
+    // Filter by query if present
+    if (!query) return ordered.slice(0, MAX_VISIBLE_FILES)
+
+    return ordered
       .filter((path) => {
         const label = wikiLabel(path).toLowerCase()
         const normalized = stripKnowledgePrefix(path).toLowerCase()
         return label.includes(lowerQuery) || normalized.includes(lowerQuery)
       })
       .slice(0, MAX_VISIBLE_FILES)
-  }, [files, query])
+  }, [files, recentFiles, visibleFiles, query])
 
   // Reset selection when filtered list changes
   useEffect(() => {
     setSelectedIndex(0)
-  }, [filteredFiles.length, query])
+  }, [orderedAndFilteredFiles.length, query])
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback(
@@ -56,18 +89,18 @@ export function MentionPopover({
         case 'ArrowDown':
           e.preventDefault()
           e.stopPropagation()
-          setSelectedIndex((prev) => (prev + 1) % filteredFiles.length)
+          setSelectedIndex((prev) => (prev + 1) % orderedAndFilteredFiles.length)
           break
         case 'ArrowUp':
           e.preventDefault()
           e.stopPropagation()
-          setSelectedIndex((prev) => (prev - 1 + filteredFiles.length) % filteredFiles.length)
+          setSelectedIndex((prev) => (prev - 1 + orderedAndFilteredFiles.length) % orderedAndFilteredFiles.length)
           break
         case 'Enter':
           e.preventDefault()
           e.stopPropagation()
-          if (filteredFiles[selectedIndex]) {
-            const path = filteredFiles[selectedIndex]
+          if (orderedAndFilteredFiles[selectedIndex]) {
+            const path = orderedAndFilteredFiles[selectedIndex]
             onSelect(path, wikiLabel(path))
           }
           break
@@ -79,14 +112,14 @@ export function MentionPopover({
         case 'Tab':
           e.preventDefault()
           e.stopPropagation()
-          if (filteredFiles[selectedIndex]) {
-            const path = filteredFiles[selectedIndex]
+          if (orderedAndFilteredFiles[selectedIndex]) {
+            const path = orderedAndFilteredFiles[selectedIndex]
             onSelect(path, wikiLabel(path))
           }
           break
       }
     },
-    [open, filteredFiles, selectedIndex, onSelect, onClose]
+    [open, orderedAndFilteredFiles, selectedIndex, onSelect, onClose]
   )
 
   // Attach keyboard listener
@@ -100,7 +133,7 @@ export function MentionPopover({
     }
   }, [open, handleKeyDown])
 
-  if (!open || !position || filteredFiles.length === 0) {
+  if (!open || !position || orderedAndFilteredFiles.length === 0) {
     return null
   }
 
@@ -128,10 +161,10 @@ export function MentionPopover({
       >
         <Command shouldFilter={false}>
           <CommandList>
-            {filteredFiles.length === 0 ? (
+            {orderedAndFilteredFiles.length === 0 ? (
               <CommandEmpty>No files found</CommandEmpty>
             ) : (
-              filteredFiles.map((path, index) => (
+              orderedAndFilteredFiles.map((path, index) => (
                 <CommandItem
                   key={path}
                   value={path}

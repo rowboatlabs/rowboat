@@ -56,9 +56,6 @@ export function getCaretCoordinates(
   const style = div.style
   const computed = window.getComputedStyle(textarea)
 
-  // Default return value
-  const defaultCoords: CaretCoordinates = { top: 0, left: 0, height: 0 }
-
   // Position offscreen
   style.whiteSpace = 'pre-wrap'
   style.wordWrap = 'break-word'
@@ -68,7 +65,8 @@ export function getCaretCoordinates(
 
   // Copy styles from textarea to mirror div
   for (const prop of PROPERTIES_TO_COPY) {
-    style[prop as keyof CSSStyleDeclaration] = computed[prop as keyof CSSStyleDeclaration] as string
+    const value = computed.getPropertyValue(prop.replace(/([A-Z])/g, '-$1').toLowerCase())
+    style.setProperty(prop.replace(/([A-Z])/g, '-$1').toLowerCase(), value)
   }
 
   // Firefox-specific handling

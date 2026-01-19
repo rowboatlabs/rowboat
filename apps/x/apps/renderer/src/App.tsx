@@ -320,6 +320,8 @@ function ChatInputInner({
 // Wrapper component with PromptInputProvider
 interface ChatInputWithMentionsProps {
   knowledgeFiles: string[]
+  recentFiles: string[]
+  visibleFiles: string[]
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
   isProcessing: boolean
   contextUsage: LanguageModelUsage
@@ -329,6 +331,8 @@ interface ChatInputWithMentionsProps {
 
 function ChatInputWithMentions({
   knowledgeFiles,
+  recentFiles,
+  visibleFiles,
   onSubmit,
   isProcessing,
   contextUsage,
@@ -336,7 +340,7 @@ function ChatInputWithMentions({
   usedTokens,
 }: ChatInputWithMentionsProps) {
   return (
-    <PromptInputProvider knowledgeFiles={knowledgeFiles}>
+    <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
       <ChatInputInner
         onSubmit={onSubmit}
         isProcessing={isProcessing}
@@ -783,6 +787,30 @@ function App() {
       return acc
     }, [])
   ), [knowledgeFiles])
+
+  // Compute visible files (files whose parent directories are expanded)
+  const visibleKnowledgeFiles = React.useMemo(() => {
+    const visible: string[] = []
+    const isPathVisible = (path: string) => {
+      const parts = path.split('/')
+      // Root level files in knowledge are always visible
+      if (parts.length <= 2) return true
+      // Check if all parent directories are expanded
+      for (let i = 1; i < parts.length - 1; i++) {
+        const parentPath = parts.slice(0, i + 1).join('/')
+        if (!expandedPaths.has(parentPath)) return false
+      }
+      return true
+    }
+
+    for (const file of knowledgeFiles) {
+      const fullPath = toKnowledgePath(file)
+      if (fullPath && isPathVisible(fullPath)) {
+        visible.push(file)
+      }
+    }
+    return visible
+  }, [knowledgeFiles, expandedPaths])
 
   // Get workspace root for full paths
   const [workspaceRoot, setWorkspaceRoot] = useState<string>('')
@@ -1236,6 +1264,8 @@ function App() {
                   <div className="mx-auto w-full max-w-4xl px-4">
                     <ChatInputWithMentions
                       knowledgeFiles={knowledgeFiles}
+                      recentFiles={recentWikiFiles}
+                      visibleFiles={visibleKnowledgeFiles}
                       onSubmit={handlePromptSubmit}
                       isProcessing={isProcessing}
                       contextUsage={contextUsage}
@@ -1265,6 +1295,8 @@ function App() {
                 maxTokens={maxTokens}
                 usedTokens={usedTokens}
                 knowledgeFiles={knowledgeFiles}
+                recentFiles={recentWikiFiles}
+                visibleFiles={visibleKnowledgeFiles}
                 selectedPath={selectedPath}
               />
             )}
