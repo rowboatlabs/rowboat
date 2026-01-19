@@ -1123,7 +1123,7 @@ export const PromptInputTextarea = ({
       };
 
   return (
-    <div ref={containerRef} className="relative flex-1 min-w-0">
+    <div ref={containerRef} className="relative contents">
       {mentionHighlights.hasHighlights && (
         <div
           ref={highlightRef}
@@ -1146,10 +1146,7 @@ export const PromptInputTextarea = ({
       )}
       <InputGroupTextarea
         ref={textareaRef}
-        className={cn(
-          "field-sizing-content max-h-48 min-h-16 relative z-10",
-          className
-        )}
+        className={cn("field-sizing-content max-h-48 min-h-10", className)}
         name="message"
         onCompositionEnd={() => setIsComposing(false)}
         onCompositionStart={() => setIsComposing(true)}

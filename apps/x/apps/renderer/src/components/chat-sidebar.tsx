@@ -478,7 +478,7 @@ export function ChatSidebar({
 
         {/* Input area - responsive to sidebar width, matches floating bar position exactly */}
         <div className="absolute bottom-6 left-14 right-6 z-10" ref={containerRef}>
-          <div className="flex items-center gap-2 bg-background border border-border rounded-2xl shadow-xl px-4 py-2.5">
+          <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
             <div className="relative flex-1 min-w-0">
               {mentionHighlights.hasHighlights && (
                 <div
@@ -518,7 +518,7 @@ export function ChatSidebar({
               onClick={handleSubmit}
               disabled={!canSubmit}
               className={cn(
-                "h-7 w-7 rounded-full shrink-0 transition-all self-end",
+                "h-7 w-7 rounded-full shrink-0 transition-all",
                 canSubmit
                   ? "bg-primary text-primary-foreground hover:bg-primary/90"
                   : "bg-muted text-muted-foreground"

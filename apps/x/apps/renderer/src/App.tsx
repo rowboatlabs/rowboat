@@ -2,11 +2,12 @@ import * as React from 'react'
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
-import type { ChatStatus, LanguageModelUsage, ToolUIPart } from 'ai';
+import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -27,31 +28,15 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message';
 import {
-  PromptInput,
-  PromptInputBody,
-  PromptInputFooter,
   type PromptInputMessage,
   PromptInputProvider,
-  PromptInputSubmit,
   PromptInputTextarea,
-  PromptInputTools,
   usePromptInputController,
   type FileMention,
 } from '@/components/ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
-import {
-  Context,
-  ContextCacheUsage,
-  ContextContent,
-  ContextContentBody,
-  ContextContentHeader,
-  ContextInputUsage,
-  ContextOutputUsage,
-  ContextReasoningUsage,
-  ContextTrigger,
-} from '@/components/ai-elements/context';
 import {
   SidebarInset,
   SidebarProvider,
@@ -259,61 +244,52 @@ const collectFilePaths = (nodes: TreeNode[]): string[] =>
 interface ChatInputInnerProps {
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
   isProcessing: boolean
-  contextUsage: LanguageModelUsage
-  maxTokens: number
-  usedTokens: number
 }
 
 function ChatInputInner({
   onSubmit,
   isProcessing,
-  contextUsage,
-  maxTokens,
-  usedTokens,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
   const canSubmit = Boolean(message.trim()) && !isProcessing
-  const submitStatus: ChatStatus = isProcessing ? 'streaming' : 'ready'
 
-  const handleSubmit = useCallback((msg: PromptInputMessage) => {
-    onSubmit(msg, controller.mentions.mentions)
+  const handleSubmit = useCallback(() => {
+    if (!canSubmit) return
+    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions)
+    controller.textInput.clear()
     controller.mentions.clearMentions()
-  }, [onSubmit, controller.mentions])
+  }, [canSubmit, message, onSubmit, controller])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit()
+    }
+  }, [handleSubmit])
 
   return (
-    <PromptInput onSubmit={handleSubmit}>
-      <PromptInputBody>
-        <PromptInputTextarea
-          placeholder="Type your message..."
-          disabled={isProcessing}
-        />
-      </PromptInputBody>
-      <PromptInputFooter>
-        <PromptInputTools>
-          <Context
-            maxTokens={maxTokens}
-            usedTokens={usedTokens}
-            usage={contextUsage}
-          >
-            <ContextTrigger size="sm" />
-            <ContextContent>
-              <ContextContentHeader />
-              <ContextContentBody>
-                <ContextInputUsage />
-                <ContextOutputUsage />
-                <ContextReasoningUsage />
-                <ContextCacheUsage />
-              </ContextContentBody>
-            </ContextContent>
-          </Context>
-        </PromptInputTools>
-        <PromptInputSubmit
-          disabled={!canSubmit}
-          status={submitStatus}
-        />
-      </PromptInputFooter>
-    </PromptInput>
+    <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
+      <PromptInputTextarea
+        placeholder="Type your message..."
+        disabled={isProcessing}
+        onKeyDown={handleKeyDown}
+        className="min-h-[1.5rem] py-0 border-0 shadow-none focus-visible:ring-0 rounded-none"
+      />
+      <Button
+        size="icon"
+        onClick={handleSubmit}
+        disabled={!canSubmit}
+        className={cn(
+          "h-7 w-7 rounded-full shrink-0 transition-all",
+          canSubmit
+            ? "bg-primary text-primary-foreground hover:bg-primary/90"
+            : "bg-muted text-muted-foreground"
+        )}
+      >
+        <ArrowUp className="h-4 w-4" />
+      </Button>
+    </div>
   )
 }
 
@@ -324,9 +300,6 @@ interface ChatInputWithMentionsProps {
   visibleFiles: string[]
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
   isProcessing: boolean
-  contextUsage: LanguageModelUsage
-  maxTokens: number
-  usedTokens: number
 }
 
 function ChatInputWithMentions({
@@ -335,18 +308,12 @@ function ChatInputWithMentions({
   visibleFiles,
   onSubmit,
   isProcessing,
-  contextUsage,
-  maxTokens,
-  usedTokens,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
       <ChatInputInner
         onSubmit={onSubmit}
         isProcessing={isProcessing}
-        contextUsage={contextUsage}
-        maxTokens={maxTokens}
-        usedTokens={usedTokens}
       />
     </PromptInputProvider>
   )
@@ -1259,7 +1226,7 @@ function App() {
                   <ConversationScrollButton className="bottom-24" />
                 </Conversation>
 
-                <div className="sticky bottom-0 z-10 bg-background pb-4 pt-6 shadow-lg">
+                <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
                   <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                   <div className="mx-auto w-full max-w-4xl px-4">
                     <ChatInputWithMentions
@@ -1268,9 +1235,6 @@ function App() {
                       visibleFiles={visibleKnowledgeFiles}
                       onSubmit={handlePromptSubmit}
                       isProcessing={isProcessing}
-                      contextUsage={contextUsage}
-                      maxTokens={maxTokens}
-                      usedTokens={usedTokens}
                     />
                   </div>
                 </div>
