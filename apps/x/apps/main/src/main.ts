@@ -4,6 +4,7 @@ import { setupIpcHandlers, startRunsWatcher, startWorkspaceWatcher, stopWorkspac
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { existsSync } from "node:fs";
+import { updateElectronApp, UpdateSourceType } from "update-electron-app";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
@@ -113,6 +114,17 @@ app.whenReady().then(() => {
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:77',message:'protocol registered',data:{isPackaged:app.isPackaged},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
   // #endregion
+  
+  // Initialize auto-updater (only in production)
+  if (app.isPackaged) {
+    updateElectronApp({
+      updateSource: {
+        type: UpdateSourceType.StaticStorage,
+        baseUrl: `https://rowboat-desktop-app-releases.s3.amazonaws.com/releases/${process.platform}/${process.arch}`
+      },
+      notifyUser: true  // Shows native dialog when update is available
+    });
+  }
   
   setupIpcHandlers();
 

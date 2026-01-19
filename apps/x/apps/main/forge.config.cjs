@@ -48,6 +48,21 @@ module.exports = {
             name: '@electron-forge/maker-zip',
             platforms: ['darwin'],
             // ZIP is used by Squirrel.Mac for auto-updates
+            config: (arch) => ({
+                // Path must match S3 publisher's folder structure: releases/darwin/{arch}
+                macUpdateManifestBaseUrl: `https://rowboat-desktop-app-releases.s3.amazonaws.com/releases/darwin/${arch}`
+            })
+        }
+    ],
+    publishers: [
+        {
+            name: '@electron-forge/publisher-s3',
+            config: {
+                bucket: 'rowboat-desktop-app-releases',
+                region: 'us-east-1',
+                public: true,
+                folder: 'releases'  // Creates structure: releases/darwin/arm64/files
+            }
         }
     ],
     hooks: {

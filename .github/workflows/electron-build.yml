@@ -87,12 +87,14 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: apps/x
 
-      - name: Build distributables
+      - name: Build and publish to S3
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run make
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: npm run publish
         working-directory: apps/x/apps/main
 
       - name: Diagnose built app
