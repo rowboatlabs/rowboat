@@ -39,16 +39,20 @@ Prepares all build artifacts in a hidden `.package/` staging directory:
 - Copies preload/renderer dist to `.package/`
 
 ### 2. `packageAfterCopy` Hook (Post-copy)
-After Forge copies source to output, this hook fixes it:
-- Removes unbundled `dist/` (has unresolvable `@x/core` imports)
-- Copies bundled `dist-bundle/`, `preload/`, `renderer/` from staging
+After Forge copies source to output, this hook replaces source files with bundled/staged files:
+- **Hook signature**: `async (config, buildPath, electronVersion, platform, arch)`
+  - `buildPath` already points to `Contents/Resources/app` (not the `.app` bundle root)
+- Removes unbundled `dist/` directory (has unresolvable `@x/core` imports)
+- Copies bundled `dist-bundle/` from `.package/` staging directory
+- Copies `preload/` and `renderer/` directories from staging
 - Updates `package.json`: sets `main` to `dist-bundle/main.js`, removes 
-  `"type": "module"` (since we bundle as CJS), removes dependencies
-- Cleans up source files (tsconfig.json, src/, etc.)
+  `"type": "module"` (since we bundle as CJS), removes all dependencies/devDependencies
+- Cleans up source files (src/, tsconfig.json, forge.config.cjs, agents.md, .gitignore, bundle.mjs)
 
 **Why this approach?** Electron Forge ignores `packagerConfig.dir` and always 
 packages from the config file's directory. The `packageAfterCopy` hook is the 
-reliable way to customize the packaged output.
+reliable way to customize the packaged output by modifying files after Forge 
+copies the source directory but before the app bundle is finalized.
 
 ## Staged Build Directory (`.package/`)
 
