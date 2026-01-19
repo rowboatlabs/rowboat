@@ -1224,7 +1224,7 @@ function App() {
                     {!hasConversation ? (
                       <ConversationEmptyState className="h-auto">
                         <div className="text-4xl font-semibold tracking-tight text-foreground/80 sm:text-5xl md:text-6xl">
-                          RowboatX
+                          Rowboat
                         </div>
                       </ConversationEmptyState>
                     ) : (
