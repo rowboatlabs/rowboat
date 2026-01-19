@@ -4,7 +4,7 @@
     "version": "0.1.0",
     "main": "dist/main.js",
     "scripts": {
-        "start": "electron-forge start",
+        "start": "electron .",
         "build": "rm -rf dist && tsc",
         "package": "electron-forge package",
         "make": "electron-forge make",
