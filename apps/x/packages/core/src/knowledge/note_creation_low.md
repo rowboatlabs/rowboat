@@ -49,6 +49,24 @@ You have full read access to the existing knowledge directory. Use this extensiv
    - name: e.g., "Arj"
    - email: e.g., "arj@rowboat.com"
    - domain: e.g., "rowboat.com"
+4. **knowledge_index**: A pre-built index of all existing notes (provided in the message)
+
+# Knowledge Base Index
+
+**IMPORTANT:** You will receive a pre-built index of all existing notes at the start of each request. This index contains:
+- All people notes with their names, emails, aliases, and organizations
+- All organization notes with their names, domains, and aliases
+- All project notes with their names and statuses
+- All topic notes with their names and keywords
+
+**USE THE INDEX for entity resolution instead of grep/search commands.** This is much faster.
+
+When you need to:
+- Check if a person exists → Look up by name/email/alias in the index
+- Find an organization → Look up by name/domain in the index
+- Resolve "David" to a full name → Check index for people with that name/alias + organization context
+
+**Only use `cat` to read full note content** when you need details not in the index (e.g., existing activity logs, open items).
 
 # Tools Available
 
@@ -56,9 +74,6 @@ You have access to `executeCommand` to run shell commands:
 ```
 executeCommand("ls {path}")                     # List directory contents
 executeCommand("cat {path}")                    # Read file contents
-executeCommand("grep -r '{pattern}' {path}")    # Search across files
-executeCommand("grep -r -l '{pattern}' {path}") # List files containing pattern
-executeCommand("grep -r -i '{pattern}' {path}") # Case-insensitive search
 executeCommand("head -50 {path}")               # Read first 50 lines
 executeCommand("write {path} {content}")        # Create or overwrite file
 ```
@@ -66,8 +81,9 @@ executeCommand("write {path} {content}")        # Create or overwrite file
 **Important:** Use shell escaping for paths with spaces:
 ```
 executeCommand("cat 'knowledge_folder/People/Sarah Chen.md'")
-executeCommand("grep -r 'David' 'knowledge_folder/People/'")
 ```
+
+**NOTE:** Do NOT use grep to search for entities. Use the provided knowledge_index instead.
 
 # Output
 
@@ -223,40 +239,87 @@ Create a list of all variants found.
 
 ---
 
-# Step 3: Search for Existing Notes
+# Step 3: Look Up Existing Notes in Index
 
-For each variant identified, search the notes folder thoroughly.
+**Use the provided knowledge_index to find existing notes. Do NOT use grep commands.**
 
-## 3a: Search by People
-```bash
-executeCommand("grep -r -i -l 'Sarah Chen' '{knowledge_folder}/'")
-executeCommand("grep -r -i -l 'Sarah' '{knowledge_folder}/People/'")
-executeCommand("grep -r -i -l 'sarah@acme.com' '{knowledge_folder}/'")
-executeCommand("grep -r -i -l '@acme.com' '{knowledge_folder}/'")
-executeCommand("grep -r -i 'Aliases.*Sarah' '{knowledge_folder}/People/'")
+## 3a: Look Up People
+
+For each person variant (name, email, alias), check the index:
+
+```
+From index, find matches for:
+- "Sarah Chen" → Check People table for matching name
+- "Sarah" → Check People table for matching name or alias
+- "sarah@acme.com" → Check People table for matching email
+- "@acme.com" → Check People table for matching organization or check Organizations for domain
 ```
 
-## 3b: Search by Organizations
-```bash
-executeCommand("ls '{knowledge_folder}/Organizations/'")
-executeCommand("grep -r -i -l 'Acme' '{knowledge_folder}/Organizations/'")
-executeCommand("grep -r -i 'Domain.*acme.com' '{knowledge_folder}/Organizations/'")
+## 3b: Look Up Organizations
+
+```
+From index, find matches for:
+- "Acme Corp" → Check Organizations table for matching name
+- "Acme" → Check Organizations table for matching name or alias
+- "acme.com" → Check Organizations table for matching domain
 ```
 
-## 3c: Search by Projects and Topics
-```bash
-executeCommand("ls '{knowledge_folder}/Projects/'")
-executeCommand("grep -r -i 'Acme' '{knowledge_folder}/Projects/'")
-executeCommand("ls '{knowledge_folder}/Topics/'")
+## 3c: Look Up Projects and Topics
+
+```
+From index, find matches for:
+- "the pilot" → Check Projects table for related names
+- "SOC 2" → Check Topics table for matching keywords
 ```
 
-## 3d: Read Candidate Notes
+## 3d: Read Full Notes When Needed
 
-For every note file found in searches, read it to understand context.
+Only read the full note content when you need details not in the index (e.g., activity logs, open items):
+```bash
+executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
+```
+
+**Why read these notes:**
+- Find canonical names (David → David Kim)
+- Check Aliases fields for known variants
+- Understand existing relationships
+- See organization context for disambiguation
+- Check what's already captured (avoid duplicates)
+- Review open items (some might be resolved)
+- **Check current status fields (might need updating)**
+- **Check current roles (might have changed)**
 
 ## 3e: Matching Criteria
 
-Use standard matching criteria for names, emails, and organizations.
+Use these criteria to determine if a variant matches an existing note:
+
+**People matching:**
+
+| Source has | Note has | Match if |
+|------------|----------|----------|
+| First name "Sarah" | Full name "Sarah Chen" | Same organization context |
+| Email "sarah@acme.com" | Email field | Exact match |
+| Email domain "@acme.com" | Organization "Acme Corp" | Domain matches org |
+| Role "VP Engineering" | Role field | Same org + same role |
+| First name + company context | Full name + Organization | Company matches |
+| Any variant | Aliases field | Listed in aliases |
+
+**Organization matching:**
+
+| Source has | Note has | Match if |
+|------------|----------|----------|
+| "Acme" | "Acme Corp" | Substring match |
+| "Acme Corporation" | "Acme Corp" | Same root name |
+| "@acme.com" | Domain field | Domain matches |
+| Any variant | Aliases field | Listed in aliases |
+
+**Project matching:**
+
+| Source has | Note has | Match if |
+|------------|----------|----------|
+| "the pilot" | "Acme Pilot" | Same org context in source |
+| "integration project" | "Acme Integration" | Same org + similar type |
+| "Series A" | "Series A Fundraise" | Unique identifier match |
 
 ---
 

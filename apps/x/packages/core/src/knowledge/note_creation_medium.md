@@ -49,6 +49,24 @@ You have full read access to the existing knowledge directory. Use this extensiv
    - name: e.g., "Arj"
    - email: e.g., "arj@rowboat.com"
    - domain: e.g., "rowboat.com"
+4. **knowledge_index**: A pre-built index of all existing notes (provided in the message)
+
+# Knowledge Base Index
+
+**IMPORTANT:** You will receive a pre-built index of all existing notes at the start of each request. This index contains:
+- All people notes with their names, emails, aliases, and organizations
+- All organization notes with their names, domains, and aliases
+- All project notes with their names and statuses
+- All topic notes with their names and keywords
+
+**USE THE INDEX for entity resolution instead of grep/search commands.** This is much faster.
+
+When you need to:
+- Check if a person exists → Look up by name/email/alias in the index
+- Find an organization → Look up by name/domain in the index
+- Resolve "David" to a full name → Check index for people with that name/alias + organization context
+
+**Only use `cat` to read full note content** when you need details not in the index (e.g., existing activity logs, open items).
 
 # Tools Available
 
@@ -56,9 +74,6 @@ You have access to `executeCommand` to run shell commands:
 ```
 executeCommand("ls {path}")                     # List directory contents
 executeCommand("cat {path}")                    # Read file contents
-executeCommand("grep -r '{pattern}' {path}")    # Search across files
-executeCommand("grep -r -l '{pattern}' {path}") # List files containing pattern
-executeCommand("grep -r -i '{pattern}' {path}") # Case-insensitive search
 executeCommand("head -50 {path}")               # Read first 50 lines
 executeCommand("write {path} {content}")        # Create or overwrite file
 ```
@@ -66,8 +81,9 @@ executeCommand("write {path} {content}")        # Create or overwrite file
 **Important:** Use shell escaping for paths with spaces:
 ```
 executeCommand("cat 'knowledge_folder/People/Sarah Chen.md'")
-executeCommand("grep -r 'David' 'knowledge_folder/People/'")
 ```
+
+**NOTE:** Do NOT use grep to search for entities. Use the provided knowledge_index instead.
 
 # Output
 
@@ -260,68 +276,44 @@ Variants found:
 
 ---
 
-# Step 3: Search for Existing Notes
+# Step 3: Look Up Existing Notes in Index
 
-For each variant identified, search the notes folder thoroughly.
+**Use the provided knowledge_index to find existing notes. Do NOT use grep commands.**
 
-## 3a: Search by People
-```bash
-# Search by full name
-executeCommand("grep -r -i -l 'Sarah Chen' '{knowledge_folder}/'")
+## 3a: Look Up People
 
-# Search by first name in People folder
-executeCommand("grep -r -i -l 'Sarah' '{knowledge_folder}/People/'")
+For each person variant (name, email, alias), check the index:
 
-# Search by email
-executeCommand("grep -r -i -l 'sarah@acme.com' '{knowledge_folder}/'")
-
-# Search by email domain (finds all people from same company)
-executeCommand("grep -r -i -l '@acme.com' '{knowledge_folder}/'")
-
-# Search Aliases fields
-executeCommand("grep -r -i 'Aliases.*Sarah' '{knowledge_folder}/People/'")
+```
+From index, find matches for:
+- "Sarah Chen" → Check People table for matching name
+- "Sarah" → Check People table for matching name or alias
+- "sarah@acme.com" → Check People table for matching email
+- "@acme.com" → Check People table for matching organization or check Organizations for domain
 ```
 
-## 3b: Search by Organizations
-```bash
-# List all organization notes
-executeCommand("ls '{knowledge_folder}/Organizations/'")
+## 3b: Look Up Organizations
 
-# Search for organization name
-executeCommand("grep -r -i -l 'Acme' '{knowledge_folder}/Organizations/'")
-
-# Search by domain
-executeCommand("grep -r -i 'Domain.*acme.com' '{knowledge_folder}/Organizations/'")
-
-# Search Aliases
-executeCommand("grep -r -i 'Aliases.*Acme' '{knowledge_folder}/Organizations/'")
+```
+From index, find matches for:
+- "Acme Corp" → Check Organizations table for matching name
+- "Acme" → Check Organizations table for matching name or alias
+- "acme.com" → Check Organizations table for matching domain
 ```
 
-## 3c: Search by Projects and Topics
-```bash
-# List all projects
-executeCommand("ls '{knowledge_folder}/Projects/'")
+## 3c: Look Up Projects and Topics
 
-# Search for project references
-executeCommand("grep -r -i 'pilot' '{knowledge_folder}/Projects/'")
-executeCommand("grep -r -i 'integration' '{knowledge_folder}/Projects/'")
-
-# Search for projects involving the organization
-executeCommand("grep -r -i 'Acme' '{knowledge_folder}/Projects/'")
-
-# List and search topics
-executeCommand("ls '{knowledge_folder}/Topics/'")
-executeCommand("grep -r -i 'SOC 2' '{knowledge_folder}/Topics/'")
+```
+From index, find matches for:
+- "the pilot" → Check Projects table for related names
+- "SOC 2" → Check Topics table for matching keywords
 ```
 
-## 3d: Read Candidate Notes
+## 3d: Read Full Notes When Needed
 
-For every note file found in searches, read it to understand context:
+Only read the full note content when you need details not in the index (e.g., activity logs, open items):
 ```bash
 executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
-executeCommand("cat '{knowledge_folder}/People/David Kim.md'")
-executeCommand("cat '{knowledge_folder}/Organizations/Acme Corp.md'")
-executeCommand("cat '{knowledge_folder}/Projects/Acme Integration.md'")
 ```
 
 **Why read these notes:**

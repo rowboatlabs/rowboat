@@ -12,6 +12,7 @@ import {
     resetState,
     type GraphState,
 } from './graph_state.js';
+import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -29,7 +30,6 @@ const SOURCE_FOLDERS = [
     'granola_notes'  // Corrected from 'granola_meetings'
 ];
 const MAX_CONCURRENT_BATCHES = 1; // Process only 1 batch at a time to avoid overwhelming the agent
-const BATCH_DELAY_MS = 5000; // 5 second delay between batches to avoid overwhelming the system
 
 /**
  * Read content for specific files
@@ -66,7 +66,7 @@ async function waitForRunCompletion(runId: string): Promise<void> {
 /**
  * Run note creation agent on a batch of files to extract entities and create/update notes
  */
-async function createNotesFromBatch(files: { path: string; content: string }[], batchNumber: number): Promise<string> {
+async function createNotesFromBatch(files: { path: string; content: string }[], batchNumber: number, knowledgeIndex: string): Promise<string> {
     // Ensure notes output directory exists
     if (!fs.existsSync(NOTES_OUTPUT_DIR)) {
         fs.mkdirSync(NOTES_OUTPUT_DIR, { recursive: true });
@@ -77,17 +77,23 @@ async function createNotesFromBatch(files: { path: string; content: string }[], 
         agentId: NOTE_CREATION_AGENT,
     });
 
-    // Build message with all files in the batch
+    // Build message with index and all files in the batch
     let message = `Process the following ${files.length} source files and create/update obsidian notes.\n\n`;
     message += `**Instructions:**\n`;
+    message += `- Use the KNOWLEDGE BASE INDEX below to resolve entities - DO NOT grep/search for existing notes\n`;
     message += `- Extract entities (people, organizations, projects, topics) from ALL files below\n`;
     message += `- Create or update notes in "knowledge" directory (workspace-relative paths like "knowledge/People/Name.md")\n`;
     message += `- If the same entity appears in multiple files, merge the information into a single note\n`;
-    message += `- Use workspace tools to read existing notes and write updates\n`;
+    message += `- Use workspace tools to read existing notes (when you need full content) and write updates\n`;
     message += `- Follow the note templates and guidelines in your instructions\n\n`;
+
+    // Add the knowledge base index
     message += `---\n\n`;
+    message += knowledgeIndex;
+    message += `\n---\n\n`;
 
     // Add each file's content
+    message += `# Source Files to Process\n\n`;
     files.forEach((file, idx) => {
         message += `## Source File ${idx + 1}: ${path.basename(file.path)}\n\n`;
         message += file.content;
@@ -144,15 +150,15 @@ export async function buildGraph(sourceDir: string): Promise<void> {
         const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
 
         try {
-            console.log(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
-            await createNotesFromBatch(batch, batchNumber);
-            console.log(`Batch ${batchNumber}/${totalBatches} complete`);
+            // Build fresh index before each batch to include notes from previous batches
+            console.log(`Building knowledge index for batch ${batchNumber}...`);
+            const index = buildKnowledgeIndex();
+            const indexForPrompt = formatIndexForPrompt(index);
+            console.log(`Index built: ${index.people.length} people, ${index.organizations.length} orgs, ${index.projects.length} projects, ${index.topics.length} topics, ${index.other.length} other`);
 
-            // Add delay between batches to avoid overwhelming the system
-            if (i + BATCH_SIZE < contentFiles.length) {
-                console.log(`Waiting ${BATCH_DELAY_MS/1000} seconds before next batch...`);
-                await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
-            }
+            console.log(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
+            await createNotesFromBatch(batch, batchNumber, indexForPrompt);
+            console.log(`Batch ${batchNumber}/${totalBatches} complete`);
 
             // Mark files in this batch as processed
             for (const file of batch) {
