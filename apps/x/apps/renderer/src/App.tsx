@@ -307,11 +307,30 @@ function App() {
 
   // Listen to workspace change events
   useEffect(() => {
-    const cleanup = window.ipc.on('workspace:didChange', () => {
+    const cleanup = window.ipc.on('workspace:didChange', async (event) => {
       loadDirectory().then(setTree)
+
+      // Reload current file if it was changed externally
+      if (!selectedPath) return
+
+      const changedPath = event.type === 'changed' ? event.path : null
+      const changedPaths = (event.type === 'bulkChanged' ? event.paths : []) ?? []
+
+      const isCurrentFileChanged =
+        changedPath === selectedPath || changedPaths.includes(selectedPath)
+
+      if (isCurrentFileChanged) {
+        // Only reload if no unsaved edits
+        if (editorContent === initialContentRef.current) {
+          const result = await window.ipc.invoke('workspace:readFile', { path: selectedPath })
+          setFileContent(result.data)
+          setEditorContent(result.data)
+          initialContentRef.current = result.data
+        }
+      }
     })
     return cleanup
-  }, [loadDirectory])
+  }, [loadDirectory, selectedPath, editorContent])
 
   // Load file content when selected
   useEffect(() => {
