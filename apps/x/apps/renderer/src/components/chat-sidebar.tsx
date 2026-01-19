@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, PanelRightClose, Plus } from 'lucide-react'
-import type { LanguageModelUsage, ToolUIPart } from 'ai'
+import { ArrowUp, Plus } from 'lucide-react'
+import type { ToolUIPart } from 'ai'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -103,7 +103,7 @@ const DEFAULT_WIDTH = 400
 
 interface ChatSidebarProps {
   defaultWidth?: number
-  onClose: () => void
+  isOpen?: boolean
   onNewChat: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
@@ -112,9 +112,6 @@ interface ChatSidebarProps {
   message: string
   onMessageChange: (message: string) => void
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
-  contextUsage: LanguageModelUsage
-  maxTokens: number
-  usedTokens: number
   knowledgeFiles?: string[]
   recentFiles?: string[]
   visibleFiles?: string[]
@@ -123,7 +120,7 @@ interface ChatSidebarProps {
 
 export function ChatSidebar({
   defaultWidth = DEFAULT_WIDTH,
-  onClose,
+  isOpen = true,
   onNewChat,
   conversation,
   currentAssistantMessage,
@@ -396,10 +393,15 @@ export function ChatSidebar({
     return null
   }
 
+  const displayWidth = isOpen ? width : 0
+
   return (
     <div
-      className="relative flex flex-col border-l border-border bg-background shrink-0"
-      style={{ width }}
+      className={cn(
+        "relative flex flex-col border-l border-border bg-background shrink-0 overflow-hidden",
+        !isResizing && "transition-[width] duration-200 ease-linear"
+      )}
+      style={{ width: displayWidth }}
     >
       {/* Resize handle */}
       <div
@@ -412,16 +414,8 @@ export function ChatSidebar({
         )}
       />
 
-      {/* Header - minimal, no border */}
-      <header className="flex h-12 shrink-0 items-center justify-between px-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-muted-foreground hover:text-foreground">
-              <PanelRightClose className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Close</TooltipContent>
-        </Tooltip>
+      {/* Header - minimal, just new chat button */}
+      <header className="flex h-12 shrink-0 items-center justify-end px-2">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon" onClick={onNewChat} className="h-8 w-8 text-muted-foreground hover:text-foreground">

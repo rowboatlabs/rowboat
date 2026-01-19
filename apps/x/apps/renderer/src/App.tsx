@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, ArrowUp } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelRightIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
@@ -334,7 +334,7 @@ function App() {
   })
   const [graphStatus, setGraphStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [graphError, setGraphError] = useState<string | null>(null)
-  const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(false)
+  const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(true)
 
   // Auto-save state
   const [isSaving, setIsSaving] = useState(false)
@@ -1120,15 +1120,15 @@ function App() {
               knowledgeActions={knowledgeActions}
             />
             <SidebarInset className="overflow-hidden! min-h-0">
-              {/* Header with sidebar trigger */}
+              {/* Header with sidebar triggers */}
               <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 bg-background">
                 <SidebarTrigger className="-ml-1" />
                 <Separator orientation="vertical" className="h-4" />
-                <span className="text-sm font-medium text-muted-foreground">
+                <span className="text-sm font-medium text-muted-foreground flex-1">
                   {headerTitle}
                 </span>
                 {selectedPath && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground ml-auto">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     {isSaving ? (
                       <>
                         <LoaderIcon className="h-3 w-3 animate-spin" />
@@ -1147,10 +1147,24 @@ function App() {
                     variant="ghost"
                     size="sm"
                     onClick={() => setIsGraphOpen(false)}
-                    className="ml-auto text-foreground"
+                    className="text-foreground"
                   >
                     Close Graph
                   </Button>
+                )}
+                {(selectedPath || isGraphOpen) && (
+                  <>
+                    <Separator orientation="vertical" className="h-4" />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsChatSidebarOpen(!isChatSidebarOpen)}
+                      className="size-7 -mr-1"
+                    >
+                      <PanelRightIcon />
+                      <span className="sr-only">Toggle Chat Sidebar</span>
+                    </Button>
+                  </>
                 )}
               </header>
 
@@ -1243,10 +1257,10 @@ function App() {
             </SidebarInset>
 
             {/* Chat sidebar - shown when viewing files/graph */}
-            {isChatSidebarOpen && (selectedPath || isGraphOpen) && (
+            {(selectedPath || isGraphOpen) && (
               <ChatSidebar
                 defaultWidth={400}
-                onClose={() => setIsChatSidebarOpen(false)}
+                isOpen={isChatSidebarOpen}
                 onNewChat={handleNewChat}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
@@ -1255,9 +1269,6 @@ function App() {
                 message={message}
                 onMessageChange={setMessage}
                 onSubmit={handlePromptSubmit}
-                contextUsage={contextUsage}
-                maxTokens={maxTokens}
-                usedTokens={usedTokens}
                 knowledgeFiles={knowledgeFiles}
                 recentFiles={recentWikiFiles}
                 visibleFiles={visibleKnowledgeFiles}
