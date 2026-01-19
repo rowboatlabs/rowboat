@@ -13,4 +13,16 @@ function ensureDirs() {
     ensure(path.join(WorkDir, "knowledge"));
 }
 
+function ensureDefaultConfigs() {
+    // Create note_creation.json with default strictness if it doesn't exist
+    const noteCreationConfig = path.join(WorkDir, "config", "note_creation.json");
+    if (!fs.existsSync(noteCreationConfig)) {
+        fs.writeFileSync(noteCreationConfig, JSON.stringify({
+            strictness: "high",
+            configured: false
+        }, null, 2));
+    }
+}
+
 ensureDirs();
+ensureDefaultConfigs();

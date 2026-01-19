@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
+import { autoConfigureStrictnessIfNeeded } from '../config/strictness_analyzer.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
 import {
@@ -180,6 +181,9 @@ export async function buildGraph(sourceDir: string): Promise<void> {
  */
 async function processAllSources(): Promise<void> {
     console.log('[GraphBuilder] Checking for new content in all sources...');
+
+    // Auto-configure strictness on first run if not already done
+    autoConfigureStrictnessIfNeeded();
 
     let anyFilesProcessed = false;
 

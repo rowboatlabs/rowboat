@@ -2,6 +2,7 @@ import { jsonSchema, ModelMessage } from "ai";
 import fs from "fs";
 import path from "path";
 import { WorkDir } from "../config/config.js";
+import { getNoteCreationStrictness } from "../config/note_creation_config.js";
 import { Agent, ToolAttachment } from "@x/shared/dist/agent.js";
 import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage } from "@x/shared/dist/message.js";
 import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
@@ -245,16 +246,24 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
         return CopilotAgent;
     }
 
-    // Special case: load built-in agents from checked-in files
+    // Built-in agents loaded from checked-in files
     const builtinAgents: Record<string, string> = {
-        'note_creation': '../knowledge/note_creation.md',
         'meeting-prep': '../pre_built/meeting-prep.md',
         'email-draft': '../pre_built/email-draft.md',
     };
 
-    if (id in builtinAgents) {
-        const currentDir = path.dirname(new URL(import.meta.url).pathname);
-        const agentFilePath = path.join(currentDir, builtinAgents[id]);
+    // Resolve agent file path (note_creation is dynamic based on strictness config)
+    let agentFilePath: string | null = null;
+    const currentDir = path.dirname(new URL(import.meta.url).pathname);
+
+    if (id === 'note_creation') {
+        const strictness = getNoteCreationStrictness();
+        agentFilePath = path.join(currentDir, `../knowledge/note_creation_${strictness}.md`);
+    } else if (id in builtinAgents) {
+        agentFilePath = path.join(currentDir, builtinAgents[id]);
+    }
+
+    if (agentFilePath) {
         const raw = fs.readFileSync(agentFilePath, "utf8");
 
         let agent: z.infer<typeof Agent> = {
