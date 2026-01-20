@@ -20,7 +20,6 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
-  ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import {
   Message,
@@ -1371,7 +1370,6 @@ function App() {
                       </>
                     )}
                   </ConversationContent>
-                  <ConversationScrollButton className="bottom-24" />
                 </Conversation>
 
                 <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">

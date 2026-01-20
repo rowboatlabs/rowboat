@@ -12,7 +12,6 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
-  ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import {
   Message,
@@ -493,7 +492,6 @@ export function ChatSidebar({
               </>
             )}
           </ConversationContent>
-          <ConversationScrollButton className="bottom-24" />
         </Conversation>
 
         {/* Input area - responsive to sidebar width, matches floating bar position exactly */}
@@ -504,7 +502,7 @@ export function ChatSidebar({
                 <div
                   ref={highlightRef}
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-sm text-transparent"
+                  className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap wrap-break-word text-sm text-transparent"
                 >
                   {mentionHighlights.segments.map((segment, index) =>
                     segment.highlighted ? (
@@ -529,7 +527,7 @@ export function ChatSidebar({
                 placeholder="Ask anything..."
                 disabled={isProcessing}
                 rows={1}
-                className="relative z-10 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-32 min-h-[1.5rem]"
+                className="relative z-10 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-32 min-h-6"
                 style={{ fieldSizing: 'content' } as React.CSSProperties}
               />
             </div>
