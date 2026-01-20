@@ -4,6 +4,7 @@ import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
 import draftEmailsSkill from "./draft-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
+import meetingPrepSkill from "./meeting-prep/skill.js";
 import workflowAuthoringSkill from "./workflow-authoring/skill.js";
 import workflowRunOpsSkill from "./workflow-run-ops/skill.js";
 
@@ -32,6 +33,13 @@ const definitions: SkillDefinition[] = [
     folder: "draft-emails",
     summary: "Process incoming emails and create draft responses using calendar and knowledge base for context.",
     content: draftEmailsSkill,
+  },
+  {
+    id: "meeting-prep",
+    title: "Meeting Prep",
+    folder: "meeting-prep",
+    summary: "Prepare for meetings by gathering context about attendees from the knowledge base.",
+    content: meetingPrepSkill,
   },
   {
     id: "workflow-authoring",
