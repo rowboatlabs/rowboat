@@ -158,7 +158,7 @@ module.exports = {
             // Read version from source package.json (updated by CI from git tag)
             const sourcePackageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
             const packageJson = {
-                name: '@x/main',
+                name: 'Rowboat',
                 version: sourcePackageJson.version,
                 main: 'dist-bundle/main.js',
             };
@@ -227,7 +227,7 @@ module.exports = {
                 // Read version from source package.json (updated by CI from git tag)
                 const sourcePackageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
                 const packageJson = {
-                    name: '@x/main',
+                    name: 'Rowboat',
                     version: sourcePackageJson.version,
                     main: 'dist-bundle/main.js',
                     // Note: No "type": "module" since we bundle as CommonJS

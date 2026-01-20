@@ -1,5 +1,5 @@
 {
-    "name": "@x/main",
+    "name": "Rowboat",
     "type": "module",
     "version": "0.1.0",
     "main": "dist/main.js",
