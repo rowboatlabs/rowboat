@@ -6,6 +6,9 @@ import { getProviderConfig, getAvailableProviders } from '@x/core/dist/auth/prov
 import container from '@x/core/dist/di/container.js';
 import { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
+import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
+import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
+import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
 
@@ -138,6 +141,14 @@ export async function connectProvider(provider: string): Promise<{ success: bool
         // Save tokens
         console.log(`[OAuth] Token exchange successful for ${provider}`);
         await oauthRepo.saveTokens(provider, tokens);
+
+        // Trigger immediate sync for relevant providers
+        if (provider === 'google') {
+          triggerGmailSync();
+          triggerCalendarSync();
+        } else if (provider === 'fireflies-ai') {
+          triggerFirefliesSync();
+        }
       } catch (error) {
         console.error('OAuth token exchange failed:', error);
         throw error;

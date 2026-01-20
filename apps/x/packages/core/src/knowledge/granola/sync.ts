@@ -23,6 +23,30 @@ const RATE_LIMIT_RETRY_DELAY_MS = 60 * 1000; // Wait 1 minute on rate limit
 const MAX_RETRIES = 3; // Maximum retries for rate-limited requests
 const MAX_BATCH_SIZE = 10; // Process max 10 documents per folder per sync
 
+// --- Wake Signal for Immediate Sync Trigger ---
+let wakeResolve: (() => void) | null = null;
+
+export function triggerSync(): void {
+    if (wakeResolve) {
+        console.log('[Granola] Triggered - waking up immediately');
+        wakeResolve();
+        wakeResolve = null;
+    }
+}
+
+function interruptibleSleep(ms: number): Promise<void> {
+    return new Promise(resolve => {
+        const timeout = setTimeout(() => {
+            wakeResolve = null;
+            resolve();
+        }, ms);
+        wakeResolve = () => {
+            clearTimeout(timeout);
+            resolve();
+        };
+    });
+}
+
 // --- Token Extraction ---
 
 interface WorkosTokens {
@@ -404,7 +428,7 @@ async function syncNotes(): Promise<void> {
 
 export async function init(): Promise<void> {
     console.log('[Granola] Starting Granola Sync...');
-    console.log(`[Granola] Will check every ${SYNC_INTERVAL_MS / 60000} minutes.`);
+    console.log(`[Granola] Will sync every ${SYNC_INTERVAL_MS / 60000} minutes.`);
     console.log(`[Granola] Notes will be saved to: ${SYNC_DIR}`);
 
     while (true) {
@@ -414,9 +438,9 @@ export async function init(): Promise<void> {
             console.error('[Granola] Error in sync loop:', error);
         }
 
-        // Sleep before next check
+        // Sleep before next check (can be interrupted by triggerSync)
         console.log(`[Granola] Sleeping for ${SYNC_INTERVAL_MS / 60000} minutes...`);
-        await new Promise(resolve => setTimeout(resolve, SYNC_INTERVAL_MS));
+        await interruptibleSleep(SYNC_INTERVAL_MS);
     }
 }
 

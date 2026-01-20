@@ -18,6 +18,7 @@ import z from 'zod';
 import { RunEvent } from 'packages/shared/dist/runs.js';
 import container from '@x/core/dist/di/container.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
+import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -316,6 +317,12 @@ export function setupIpcHandlers() {
     'granola:setConfig': async (_event, args) => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
       await repo.setConfig({ enabled: args.enabled });
+      
+      // Trigger sync immediately when enabled
+      if (args.enabled) {
+        triggerGranolaSync();
+      }
+      
       return { success: true };
     },
   });
