@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol, net } from "electron";
+import { app, BrowserWindow, protocol, net, shell } from "electron";
 import path from "node:path";
 import { setupIpcHandlers, startRunsWatcher, startWorkspaceWatcher, stopWorkspaceWatcher } from "./ipc.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -78,6 +78,24 @@ function createWindow() {
       sandbox: true,
       preload: preloadPath,
     },
+  });
+
+  // Open external links in system browser (not sandboxed Electron window)
+  // This handles window.open() and target="_blank" links
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    // Open all URLs in system browser
+    shell.openExternal(url);
+    return { action: 'deny' }; // Prevent Electron from opening a new window
+  });
+
+  // Handle navigation to external URLs (e.g., clicking a link without target="_blank")
+  win.webContents.on('will-navigate', (event, url) => {
+    // Allow internal navigation (app protocol or dev server)
+    const isInternal = url.startsWith('app://') || url.startsWith('http://localhost:5173');
+    if (!isInternal) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
   });
 
   // #region agent log

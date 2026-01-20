@@ -13,6 +13,30 @@ const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 
 const nhm = new NodeHtmlMarkdown();
 
+// --- Wake Signal for Immediate Sync Trigger ---
+let wakeResolve: (() => void) | null = null;
+
+export function triggerSync(): void {
+    if (wakeResolve) {
+        console.log('[Gmail] Triggered - waking up immediately');
+        wakeResolve();
+        wakeResolve = null;
+    }
+}
+
+function interruptibleSleep(ms: number): Promise<void> {
+    return new Promise(resolve => {
+        const timeout = setTimeout(() => {
+            wakeResolve = null;
+            resolve();
+        }, ms);
+        wakeResolve = () => {
+            clearTimeout(timeout);
+            resolve();
+        };
+    });
+}
+
 // --- Helper Functions ---
 
 function cleanFilename(name: string): string {
@@ -287,7 +311,7 @@ async function performSync() {
 
 export async function init() {
     console.log("Starting Gmail Sync (TS)...");
-    console.log(`Will check for credentials every ${SYNC_INTERVAL_MS / 1000} seconds.`);
+    console.log(`Will sync every ${SYNC_INTERVAL_MS / 1000} seconds.`);
 
     while (true) {
         try {
@@ -304,8 +328,8 @@ export async function init() {
             console.error("Error in main loop:", error);
         }
 
-        // Sleep for N minutes before next check
+        // Sleep for N minutes before next check (can be interrupted by triggerSync)
         console.log(`Sleeping for ${SYNC_INTERVAL_MS / 1000} seconds...`);
-        await new Promise(resolve => setTimeout(resolve, SYNC_INTERVAL_MS));
+        await interruptibleSleep(SYNC_INTERVAL_MS);
     }
 }
