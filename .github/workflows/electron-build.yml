@@ -97,41 +97,6 @@ jobs:
         run: npm run publish
         working-directory: apps/x/apps/main
 
-      - name: Diagnose built app
-        run: |
-          echo "=== Architecture Check ==="
-          APP_PATH=$(find apps/x/apps/main/out -name "Rowboat.app" -type d | head -1)
-          if [ -n "$APP_PATH" ]; then
-            EXECUTABLE="$APP_PATH/Contents/MacOS/rowboat"
-            if [ -f "$EXECUTABLE" ]; then
-              echo "App executable found at: $EXECUTABLE"
-              echo "Architecture:"
-              lipo -info "$EXECUTABLE" || file "$EXECUTABLE"
-              echo ""
-              echo "=== Code Signing Check ==="
-              codesign --verify --deep --strict --verbose=2 "$APP_PATH" || echo "App is not signed (this is OK if code signing secrets are not configured)"
-              echo ""
-              echo "=== _CodeSignature Check ==="
-              if [ -d "$APP_PATH/Contents/_CodeSignature" ]; then
-                echo "WARNING: _CodeSignature directory still exists!"
-                ls -la "$APP_PATH/Contents/_CodeSignature" || true
-              else
-                echo "✓ No _CodeSignature directory (expected for unsigned app)"
-              fi
-              echo ""
-              echo "=== Extended Attributes Check ==="
-              xattr -l "$APP_PATH" | head -5 || echo "No extended attributes (or not on macOS)"
-              echo ""
-              echo "=== Gatekeeper Check ==="
-              spctl --assess --type execute --verbose "$APP_PATH" || echo "Gatekeeper assessment failed (expected for unsigned apps)"
-            else
-              echo "Executable not found at: $EXECUTABLE"
-            fi
-          else
-            echo "App bundle not found"
-          fi
-        continue-on-error: true
-
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:

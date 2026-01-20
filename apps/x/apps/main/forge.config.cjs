@@ -11,7 +11,9 @@ module.exports = {
         icon: './icons/icon',  // .icns extension added automatically
         appBundleId: 'com.rowboat.app',
         appCategoryType: 'public.app-category.productivity',
-        osxSign: {},
+        osxSign: {
+            batchCodesignCalls: true,
+        },
         osxNotarize: {
             appleId: process.env.APPLE_ID,
             appleIdPassword: process.env.APPLE_PASSWORD,
@@ -39,10 +41,10 @@ module.exports = {
     makers: [
         {
             name: '@electron-forge/maker-dmg',
-            config: {
+            config: (arch) => ({
                 format: 'ULFO',
-                name: 'Rowboat',
-            }
+                name: `Rowboat-${arch}`,  // Architecture-specific name to avoid conflicts
+            })
         },
         {
             name: '@electron-forge/maker-zip',
@@ -61,7 +63,7 @@ module.exports = {
                 bucket: 'rowboat-desktop-app-releases',
                 region: 'us-east-1',
                 public: true,
-                folder: 'releases'  // Creates structure: releases/darwin/arm64/files
+                folder: 'releases'  // Creates structure: releases/darwin/{arch}/files (separate builds for arm64 and x64)
             }
         }
     ],
