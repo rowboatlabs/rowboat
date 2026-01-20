@@ -8,7 +8,7 @@ import { GoogleClientFactory } from './google-client-factory.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
-const SYNC_INTERVAL_MS = 60 * 1000; // Check every minute
+const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 
 const nhm = new NodeHtmlMarkdown();
