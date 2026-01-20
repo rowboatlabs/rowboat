@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
-import { RunEvent } from '@x/shared/src/runs.js';
+import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
@@ -48,6 +48,7 @@ import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-lin
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
+type ListRunsResponseType = z.infer<typeof ListRunsResponse>
 
 interface TreeNode extends DirEntry {
   children?: TreeNode[]
@@ -115,6 +116,41 @@ const graphPalette = [
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
+
+// Parse attached files from message content and return clean message + file paths
+const parseAttachedFiles = (content: string): { message: string; files: string[] } => {
+  const attachedFilesRegex = /<attached-files>\s*([\s\S]*?)\s*<\/attached-files>/
+  const match = content.match(attachedFilesRegex)
+
+  if (!match) {
+    return { message: content, files: [] }
+  }
+
+  // Extract file paths from the XML
+  const filesXml = match[1]
+  const filePathRegex = /<file path="([^"]+)">/g
+  const files: string[] = []
+  let fileMatch
+  while ((fileMatch = filePathRegex.exec(filesXml)) !== null) {
+    files.push(fileMatch[1])
+  }
+
+  // Remove the attached-files block
+  let cleanMessage = content.replace(attachedFilesRegex, '').trim()
+
+  // Also remove @mentions for the attached files (they're shown as pills)
+  for (const filePath of files) {
+    // Get the display name (last part of path without extension)
+    const fileName = filePath.split('/').pop()?.replace(/\.md$/i, '') || ''
+    if (fileName) {
+      // Remove @filename pattern (with optional trailing space)
+      const mentionRegex = new RegExp(`@${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'gi')
+      cleanMessage = cleanMessage.replace(mentionRegex, '')
+    }
+  }
+
+  return { message: cleanMessage.trim(), files }
+}
 
 const untitledBaseName = 'untitled'
 
@@ -348,6 +384,10 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [agentId] = useState<string>('copilot')
 
+  // Runs history state
+  type RunListItem = { id: string; createdAt: string; agentId: string }
+  const [runs, setRuns] = useState<RunListItem[]>([])
+
   // Load directory tree
   const loadDirectory = useCallback(async () => {
     try {
@@ -480,6 +520,106 @@ function App() {
     }
     saveFile()
   }, [debouncedContent, selectedPath])
+
+  // Load runs list (all pages)
+  const loadRuns = useCallback(async () => {
+    try {
+      const allRuns: RunListItem[] = []
+      let cursor: string | undefined = undefined
+
+      // Fetch all pages
+      do {
+        const result: ListRunsResponseType = await window.ipc.invoke('runs:list', { cursor })
+        allRuns.push(...result.runs)
+        cursor = result.nextCursor
+      } while (cursor)
+
+      // Filter for copilot runs only
+      const copilotRuns = allRuns.filter((run: RunListItem) => run.agentId === 'copilot')
+      setRuns(copilotRuns)
+    } catch (err) {
+      console.error('Failed to load runs:', err)
+    }
+  }, [])
+
+  // Load runs on mount
+  useEffect(() => {
+    loadRuns()
+  }, [loadRuns])
+
+  // Load a specific run and populate conversation
+  const loadRun = useCallback(async (id: string) => {
+    try {
+      const run = await window.ipc.invoke('runs:fetch', { runId: id })
+
+      // Parse the log events into conversation items
+      const items: ConversationItem[] = []
+      const toolCallMap = new Map<string, ToolCall>()
+
+      for (const event of run.log) {
+        switch (event.type) {
+          case 'message': {
+            const msg = event.message
+            if (msg.role === 'user' || msg.role === 'assistant') {
+              // Extract text content from message
+              let textContent = ''
+              if (typeof msg.content === 'string') {
+                textContent = msg.content
+              } else if (Array.isArray(msg.content)) {
+                textContent = msg.content
+                  .filter((part: { type: string }) => part.type === 'text')
+                  .map((part: { type: string; text?: string }) => part.text || '')
+                  .join('')
+              }
+              if (textContent) {
+                items.push({
+                  id: event.messageId,
+                  role: msg.role,
+                  content: textContent,
+                  timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
+                })
+              }
+            }
+            break
+          }
+          case 'tool-invocation': {
+            const toolCall: ToolCall = {
+              id: event.toolCallId || `tool-${Date.now()}-${Math.random()}`,
+              name: event.toolName,
+              input: normalizeToolInput(event.input),
+              status: 'running',
+              timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
+            }
+            toolCallMap.set(toolCall.id, toolCall)
+            items.push(toolCall)
+            break
+          }
+          case 'tool-result': {
+            const existingTool = event.toolCallId ? toolCallMap.get(event.toolCallId) : null
+            if (existingTool) {
+              existingTool.result = event.result
+              existingTool.status = 'completed'
+            }
+            break
+          }
+          case 'llm-stream-event': {
+            // We don't need to reconstruct streaming events for history
+            // Reasoning is captured in the final message
+            break
+          }
+        }
+      }
+
+      // Set the conversation and runId
+      setConversation(items)
+      setRunId(id)
+      setCurrentAssistantMessage('')
+      setCurrentReasoning('')
+      setMessage('')
+    } catch (err) {
+      console.error('Failed to load run:', err)
+    }
+  }, [])
 
   // Listen to run events
   useEffect(() => {
@@ -664,6 +804,8 @@ function App() {
         })
         currentRunId = run.id
         setRunId(currentRunId)
+        // Refresh runs list to include new run
+        loadRuns()
       }
 
       // Read mentioned file contents and format message with XML context
@@ -1011,14 +1153,32 @@ function App() {
 
   const renderConversationItem = (item: ConversationItem) => {
     if (isChatMessage(item)) {
+      if (item.role === 'user') {
+        const { message, files } = parseAttachedFiles(item.content)
+        return (
+          <Message key={item.id} from={item.role}>
+            <MessageContent>
+              {files.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {files.map((filePath, index) => (
+                    <span
+                      key={index}
+                      className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full"
+                    >
+                      @{wikiLabel(filePath)}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {message}
+            </MessageContent>
+          </Message>
+        )
+      }
       return (
         <Message key={item.id} from={item.role}>
           <MessageContent>
-            {item.role === 'assistant' ? (
-              <MessageResponse>{item.content}</MessageResponse>
-            ) : (
-              item.content
-            )}
+            <MessageResponse>{item.content}</MessageResponse>
           </MessageContent>
         </Message>
       )
@@ -1086,6 +1246,12 @@ function App() {
               expandedPaths={expandedPaths}
               onSelectFile={toggleExpand}
               knowledgeActions={knowledgeActions}
+              runs={runs}
+              currentRunId={runId}
+              tasksActions={{
+                onNewChat: handleNewChat,
+                onSelectRun: loadRun,
+              }}
             />
             <SidebarInset className="overflow-hidden! min-h-0">
               {/* Header with sidebar triggers */}
