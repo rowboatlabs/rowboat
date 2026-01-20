@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
+import draftEmailsSkill from "./draft-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import workflowAuthoringSkill from "./workflow-authoring/skill.js";
 import workflowRunOpsSkill from "./workflow-run-ops/skill.js";
@@ -25,6 +26,13 @@ type ResolvedSkill = {
 };
 
 const definitions: SkillDefinition[] = [
+  {
+    id: "draft-emails",
+    title: "Draft Emails",
+    folder: "draft-emails",
+    summary: "Process incoming emails and create draft responses using calendar and knowledge base for context.",
+    content: draftEmailsSkill,
+  },
   {
     id: "workflow-authoring",
     title: "Workflow Authoring",
