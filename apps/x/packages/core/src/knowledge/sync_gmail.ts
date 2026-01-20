@@ -8,7 +8,7 @@ import { GoogleClientFactory } from './google-client-factory.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
-const SYNC_INTERVAL_MS = 60 * 1000; // Check every minute
+const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 
 const nhm = new NodeHtmlMarkdown();
@@ -253,7 +253,7 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
 }
 
 async function performSync() {
-    const LOOKBACK_DAYS = 7; // Default to 7 days
+    const LOOKBACK_DAYS = 30; // Default to 1 month
     const ATTACHMENTS_DIR = path.join(SYNC_DIR, 'attachments');
     const STATE_FILE = path.join(SYNC_DIR, 'sync_state.json');
 

@@ -11,7 +11,9 @@ module.exports = {
         icon: './icons/icon',  // .icns extension added automatically
         appBundleId: 'com.rowboat.app',
         appCategoryType: 'public.app-category.productivity',
-        osxSign: {},
+        osxSign: {
+            batchCodesignCalls: true,
+        },
         osxNotarize: {
             appleId: process.env.APPLE_ID,
             appleIdPassword: process.env.APPLE_PASSWORD,
@@ -39,10 +41,10 @@ module.exports = {
     makers: [
         {
             name: '@electron-forge/maker-dmg',
-            config: {
+            config: (arch) => ({
                 format: 'ULFO',
-                name: 'Rowboat',
-            }
+                name: `Rowboat-${arch}`,  // Architecture-specific name to avoid conflicts
+            })
         },
         {
             name: '@electron-forge/maker-zip',
@@ -61,7 +63,7 @@ module.exports = {
                 bucket: 'rowboat-desktop-app-releases',
                 region: 'us-east-1',
                 public: true,
-                folder: 'releases'  // Creates structure: releases/darwin/arm64/files
+                folder: 'releases'  // Creates structure: releases/darwin/{arch}/files (separate builds for arm64 and x64)
             }
         }
     ],
@@ -153,9 +155,11 @@ module.exports = {
             // This tells Electron where to find the entry point
             // Note: No "type": "module" since we bundle as CommonJS for compatibility
             // with dependencies that use dynamic require()
+            // Read version from source package.json (updated by CI from git tag)
+            const sourcePackageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
             const packageJson = {
                 name: '@x/main',
-                version: '0.1.0',
+                version: sourcePackageJson.version,
                 main: 'dist-bundle/main.js',
             };
             fs.writeFileSync(
@@ -220,9 +224,11 @@ module.exports = {
             const packageJsonPath = path.join(appResourcesPath, 'package.json');
             if (fs.existsSync(packageJsonPath)) {
                 console.log('Updating package.json...');
+                // Read version from source package.json (updated by CI from git tag)
+                const sourcePackageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
                 const packageJson = {
                     name: '@x/main',
-                    version: '0.1.0',
+                    version: sourcePackageJson.version,
                     main: 'dist-bundle/main.js',
                     // Note: No "type": "module" since we bundle as CommonJS
                     // No dependencies/devDependencies since everything is bundled

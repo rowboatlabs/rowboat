@@ -8,7 +8,7 @@ import { GoogleClientFactory } from './google-client-factory.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'calendar_sync');
-const SYNC_INTERVAL_MS = 60 * 1000; // Check every minute
+const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const LOOKBACK_DAYS = 14;
 const REQUIRED_SCOPES = [
     'https://www.googleapis.com/auth/calendar.readonly',
