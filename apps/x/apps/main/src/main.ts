@@ -69,8 +69,8 @@ function registerAppProtocol() {
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1280,
+    height: 800,
     webPreferences: {
       // IMPORTANT: keep Node out of renderer
       nodeIntegration: false,
