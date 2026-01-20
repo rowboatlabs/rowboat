@@ -14,6 +14,19 @@ export interface IRunsRepo {
     appendEvents(runId: string, events: z.infer<typeof RunEvent>[]): Promise<void>;
 }
 
+/**
+ * Strip attached-files XML from message content for title display (keeps @mentions)
+ */
+function cleanContentForTitle(content: string): string {
+    // Remove the entire attached-files block
+    let cleaned = content.replace(/<attached-files>\s*[\s\S]*?\s*<\/attached-files>/g, '');
+
+    // Clean up extra whitespace
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+    return cleaned;
+}
+
 export class FSRunsRepo implements IRunsRepo {
     private idGenerator: IMonotonicallyIncreasingIdGenerator;
     constructor({
@@ -33,9 +46,10 @@ export class FSRunsRepo implements IRunsRepo {
                 if (messageEvent.message.role === 'user') {
                     const content = messageEvent.message.content;
                     if (typeof content === 'string' && content.trim()) {
-                        // Truncate to 100 chars for display
-                        const truncated = content.trim();
-                        return truncated.length > 100 ? truncated.substring(0, 100) : truncated;
+                        // Clean attached-files XML and @mentions, then truncate to 100 chars
+                        const cleaned = cleanContentForTitle(content);
+                        if (!cleaned) continue; // Skip if only attached files/mentions
+                        return cleaned.length > 100 ? cleaned.substring(0, 100) : cleaned;
                     }
                 }
             }
@@ -76,8 +90,11 @@ export class FSRunsRepo implements IRunsRepo {
                                 // Found first user message - use as title
                                 const content = msg.content;
                                 if (typeof content === 'string' && content.trim()) {
-                                    const truncated = content.trim();
-                                    title = truncated.length > 100 ? truncated.substring(0, 100) : truncated;
+                                    // Clean attached-files XML and @mentions, then truncate
+                                    const cleaned = cleanContentForTitle(content);
+                                    if (cleaned) {
+                                        title = cleaned.length > 100 ? cleaned.substring(0, 100) : cleaned;
+                                    }
                                 }
                                 // Stop reading
                                 rl.close();

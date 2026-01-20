@@ -9,14 +9,14 @@ import { useState, useRef, useEffect } from "react";
 
 export type AskHumanRequestProps = ComponentProps<"div"> & {
   query: string;
-  onSubmit: (response: string) => void;
+  onResponse: (response: string) => void;
   isProcessing?: boolean;
 };
 
 export const AskHumanRequest = ({
   className,
   query,
-  onSubmit,
+  onResponse,
   isProcessing = false,
   ...props
 }: AskHumanRequestProps) => {
@@ -31,7 +31,7 @@ export const AskHumanRequest = ({
   const handleSubmit = () => {
     const trimmed = response.trim();
     if (trimmed && !isProcessing) {
-      onSubmit(trimmed);
+      onResponse(trimmed);
       setResponse("");
     }
   };

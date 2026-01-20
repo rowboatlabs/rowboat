@@ -511,7 +511,7 @@ export function ChatSidebar({
                   <AskHumanRequest
                     key={request.toolCallId}
                     query={request.query}
-                    onSubmit={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
+                    onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
                     isProcessing={isProcessing}
                   />
                 ))}

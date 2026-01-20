@@ -918,14 +918,14 @@ function App() {
 
     try {
       let currentRunId = runId
+      let isNewRun = false
       if (!currentRunId) {
         const run = await window.ipc.invoke('runs:create', {
           agentId,
         })
         currentRunId = run.id
         setRunId(currentRunId)
-        // Refresh runs list to include new run
-        loadRuns()
+        isNewRun = true
       }
 
       // Read mentioned file contents and format message with XML context
@@ -955,6 +955,11 @@ function App() {
         runId: currentRunId,
         message: formattedMessage,
       })
+
+      // Refresh runs list after message is sent (so title is available)
+      if (isNewRun) {
+        loadRuns()
+      }
     } catch (error) {
       console.error('Failed to send message:', error)
     }
@@ -1540,7 +1545,7 @@ function App() {
                           <AskHumanRequest
                             key={request.toolCallId}
                             query={request.query}
-                            onSubmit={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
+                            onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
                             isProcessing={isProcessing}
                           />
                         ))}
