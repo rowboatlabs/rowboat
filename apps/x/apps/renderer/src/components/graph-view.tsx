@@ -68,7 +68,7 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
   const hasCenteredRef = useRef(false)
   const [viewport, setViewport] = useState({ width: 1, height: 1 })
   const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [zoom, setZoom] = useState(1)
+  const [zoom, setZoom] = useState(0.6)
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
@@ -501,7 +501,7 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
                     style={{ backgroundColor: item.color, boxShadow: `0 0 0 1px ${item.stroke}` }}
                   />
                   <span className="truncate">{item.label}</span>
-                  {isSelected && <X className="ml-auto size-3 text-muted-foreground" />}
+                  <X className={`ml-auto size-3 ${isSelected ? 'text-muted-foreground' : 'invisible'}`} />
                 </button>
               )
             })}
