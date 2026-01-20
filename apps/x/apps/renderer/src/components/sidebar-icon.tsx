@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import {
-  Bot,
   Brain,
   HelpCircle,
+  ListTodo,
   Plug,
   Settings,
 } from "lucide-react"
@@ -27,7 +27,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { id: "knowledge", title: "Knowledge", icon: Brain },
-  { id: "agents", title: "Agents", icon: Bot },
+  { id: "tasks", title: "Tasks", icon: ListTodo },
 ]
 
 export function SidebarIcon() {

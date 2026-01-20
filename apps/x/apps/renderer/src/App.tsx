@@ -734,9 +734,9 @@ function App() {
     setExpandedPaths(newExpanded)
   }
 
-  // Handle sidebar section changes - switch to chat view for agents
+  // Handle sidebar section changes - switch to chat view for tasks
   const handleSectionChange = useCallback((section: ActiveSection) => {
-    if (section === 'agents') {
+    if (section === 'tasks') {
       setSelectedPath(null)
       setIsGraphOpen(false)
     }
