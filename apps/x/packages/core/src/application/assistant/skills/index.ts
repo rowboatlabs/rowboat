@@ -5,6 +5,7 @@ import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
 import draftEmailsSkill from "./draft-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
+import organizeFilesSkill from "./organize-files/skill.js";
 import workflowAuthoringSkill from "./workflow-authoring/skill.js";
 import workflowRunOpsSkill from "./workflow-run-ops/skill.js";
 
@@ -40,6 +41,13 @@ const definitions: SkillDefinition[] = [
     folder: "meeting-prep",
     summary: "Prepare for meetings by gathering context about attendees from the knowledge base.",
     content: meetingPrepSkill,
+  },
+  {
+    id: "organize-files",
+    title: "Organize Files",
+    folder: "organize-files",
+    summary: "Find, organize, and tidy up files on the user's machine. Move files to folders, clean up Desktop/Downloads, locate specific files.",
+    content: organizeFilesSkill,
   },
   {
     id: "workflow-authoring",

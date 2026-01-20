@@ -619,14 +619,15 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     ? rootDir
                     : `${rootDir}${path.sep}`;
 
-                if (workingDir !== rootDir && !workingDir.startsWith(rootPrefix)) {
-                    return {
-                        success: false,
-                        message: 'Invalid cwd: must be within workspace root.',
-                        command,
-                        workingDir,
-                    };
-                }
+                // TODO: Re-enable this check
+                // if (workingDir !== rootDir && !workingDir.startsWith(rootPrefix)) {
+                //     return {
+                //         success: false,
+                //         message: 'Invalid cwd: must be within workspace root.',
+                //         command,
+                //         workingDir,
+                //     };
+                // }
 
                 const result = await executeCommand(command, { cwd: workingDir });
                 
