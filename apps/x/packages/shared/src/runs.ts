@@ -110,6 +110,7 @@ export const AskHumanResponsePayload = AskHumanResponseEvent.pick({
 
 export const Run = z.object({
     id: z.string(),
+    title: z.string().optional(),
     createdAt: z.iso.datetime(),
     agentId: z.string(),
     log: z.array(RunEvent),
@@ -118,6 +119,7 @@ export const Run = z.object({
 export const ListRunsResponse = z.object({
     runs: z.array(Run.pick({
         id: true,
+        title: true,
         createdAt: true,
         agentId: true,
     })),

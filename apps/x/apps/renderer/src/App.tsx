@@ -387,7 +387,7 @@ function App() {
   const [agentId] = useState<string>('copilot')
 
   // Runs history state
-  type RunListItem = { id: string; createdAt: string; agentId: string }
+  type RunListItem = { id: string; title?: string; createdAt: string; agentId: string }
   const [runs, setRuns] = useState<RunListItem[]>([])
 
   // Pending requests state

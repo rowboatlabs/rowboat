@@ -72,6 +72,7 @@ type KnowledgeActions = {
 
 type RunListItem = {
   id: string
+  title?: string
   createdAt: string
   agentId: string
 }
@@ -462,7 +463,7 @@ function TasksSection({
                     className="gap-2"
                   >
                     <MessageSquare className="size-4 shrink-0" />
-                    <span className="truncate text-sm">{run.id}</span>
+                    <span className="truncate text-sm">{run.title || '(Untitled chat)'}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
