@@ -36,6 +36,9 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { PermissionRequest } from '@/components/ai-elements/permission-request';
+import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
+import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
   SidebarProvider,
@@ -387,6 +390,14 @@ function App() {
   type RunListItem = { id: string; createdAt: string; agentId: string }
   const [runs, setRuns] = useState<RunListItem[]>([])
 
+  // Pending requests state
+  const [pendingPermissionRequests, setPendingPermissionRequests] = useState<Map<string, z.infer<typeof ToolPermissionRequestEvent>>>(new Map())
+  const [pendingAskHumanRequests, setPendingAskHumanRequests] = useState<Map<string, z.infer<typeof AskHumanRequestEvent>>>(new Map())
+  // Track ALL permission requests (for rendering with response status)
+  const [allPermissionRequests, setAllPermissionRequests] = useState<Map<string, z.infer<typeof ToolPermissionRequestEvent>>>(new Map())
+  // Track permission responses (toolCallId -> response)
+  const [permissionResponses, setPermissionResponses] = useState<Map<string, 'approve' | 'deny'>>(new Map())
+
   // Load directory tree
   const loadDirectory = useCallback(async () => {
     try {
@@ -565,10 +576,28 @@ function App() {
               if (typeof msg.content === 'string') {
                 textContent = msg.content
               } else if (Array.isArray(msg.content)) {
+                // Extract text parts
                 textContent = msg.content
                   .filter((part: { type: string }) => part.type === 'text')
                   .map((part: { type: string; text?: string }) => part.text || '')
                   .join('')
+                
+                // Also extract tool-call parts from assistant messages
+                if (msg.role === 'assistant') {
+                  for (const part of msg.content) {
+                    if (part.type === 'tool-call') {
+                      const toolCall: ToolCall = {
+                        id: part.toolCallId,
+                        name: part.toolName,
+                        input: normalizeToolInput(part.arguments),
+                        status: 'pending',
+                        timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
+                      }
+                      toolCallMap.set(toolCall.id, toolCall)
+                      items.push(toolCall)
+                    }
+                  }
+                }
               }
               if (textContent) {
                 items.push({
@@ -582,15 +611,22 @@ function App() {
             break
           }
           case 'tool-invocation': {
-            const toolCall: ToolCall = {
-              id: event.toolCallId || `tool-${Date.now()}-${Math.random()}`,
-              name: event.toolName,
-              input: normalizeToolInput(event.input),
-              status: 'running',
-              timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
+            // Update existing tool call status or create new one
+            const existingTool = event.toolCallId ? toolCallMap.get(event.toolCallId) : null
+            if (existingTool) {
+              existingTool.input = normalizeToolInput(event.input)
+              existingTool.status = 'running'
+            } else {
+              const toolCall: ToolCall = {
+                id: event.toolCallId || `tool-${Date.now()}-${Math.random()}`,
+                name: event.toolName,
+                input: normalizeToolInput(event.input),
+                status: 'running',
+                timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
+              }
+              toolCallMap.set(toolCall.id, toolCall)
+              items.push(toolCall)
             }
-            toolCallMap.set(toolCall.id, toolCall)
-            items.push(toolCall)
             break
           }
           case 'tool-result': {
@@ -609,12 +645,49 @@ function App() {
         }
       }
 
+      // Track permission requests and responses from history
+      const allPermissionRequests = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
+      const permResponseMap = new Map<string, 'approve' | 'deny'>()
+      const askHumanRequests = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
+      const respondedAskHumanIds = new Set<string>()
+
+      for (const event of run.log) {
+        if (event.type === 'tool-permission-request') {
+          allPermissionRequests.set(event.toolCall.toolCallId, event)
+        } else if (event.type === 'tool-permission-response') {
+          permResponseMap.set(event.toolCallId, event.response)
+        } else if (event.type === 'ask-human-request') {
+          askHumanRequests.set(event.toolCallId, event)
+        } else if (event.type === 'ask-human-response') {
+          respondedAskHumanIds.add(event.toolCallId)
+        }
+      }
+
+      // Separate pending vs responded permission requests
+      const pendingPerms = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
+      for (const [id, req] of allPermissionRequests.entries()) {
+        if (!permResponseMap.has(id)) {
+          pendingPerms.set(id, req)
+        }
+      }
+
+      const pendingAsks = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
+      for (const [id, req] of askHumanRequests.entries()) {
+        if (!respondedAskHumanIds.has(id)) {
+          pendingAsks.set(id, req)
+        }
+      }
+
       // Set the conversation and runId
       setConversation(items)
       setRunId(id)
       setCurrentAssistantMessage('')
       setCurrentReasoning('')
       setMessage('')
+      setPendingPermissionRequests(pendingPerms)
+      setPendingAskHumanRequests(pendingAsks)
+      setAllPermissionRequests(allPermissionRequests)
+      setPermissionResponses(permResponseMap)
     } catch (err) {
       console.error('Failed to load run:', err)
     }
@@ -771,6 +844,54 @@ function App() {
           break
         }
 
+      case 'tool-permission-request': {
+        const key = event.toolCall.toolCallId
+        setPendingPermissionRequests(prev => {
+          const next = new Map(prev)
+          next.set(key, event)
+          return next
+        })
+        setAllPermissionRequests(prev => {
+          const next = new Map(prev)
+          next.set(key, event)
+          return next
+        })
+        break
+      }
+
+      case 'tool-permission-response': {
+        setPendingPermissionRequests(prev => {
+          const next = new Map(prev)
+          next.delete(event.toolCallId)
+          return next
+        })
+        setPermissionResponses(prev => {
+          const next = new Map(prev)
+          next.set(event.toolCallId, event.response)
+          return next
+        })
+        break
+      }
+
+      case 'ask-human-request': {
+        const key = event.toolCallId
+        setPendingAskHumanRequests(prev => {
+          const next = new Map(prev)
+          next.set(key, event)
+          return next
+        })
+        break
+      }
+
+      case 'ask-human-response': {
+        setPendingAskHumanRequests(prev => {
+          const next = new Map(prev)
+          next.delete(event.toolCallId)
+          return next
+        })
+        break
+      }
+
       case 'error':
         setIsProcessing(false)
         console.error('Run error:', event.error)
@@ -839,6 +960,49 @@ function App() {
     }
   }
 
+  const handlePermissionResponse = useCallback(async (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => {
+    if (!runId) return
+    
+    // Optimistically update the UI immediately
+    setPermissionResponses(prev => {
+      const next = new Map(prev)
+      next.set(toolCallId, response)
+      return next
+    })
+    setPendingPermissionRequests(prev => {
+      const next = new Map(prev)
+      next.delete(toolCallId)
+      return next
+    })
+    
+    try {
+      await window.ipc.invoke('runs:authorizePermission', {
+        runId,
+        authorization: { subflow, toolCallId, response }
+      })
+    } catch (error) {
+      console.error('Failed to authorize permission:', error)
+      // Revert the optimistic update on error
+      setPermissionResponses(prev => {
+        const next = new Map(prev)
+        next.delete(toolCallId)
+        return next
+      })
+    }
+  }, [runId])
+
+  const handleAskHumanResponse = useCallback(async (toolCallId: string, subflow: string[], response: string) => {
+    if (!runId) return
+    try {
+      await window.ipc.invoke('runs:provideHumanInput', {
+        runId,
+        reply: { subflow, toolCallId, response }
+      })
+    } catch (error) {
+      console.error('Failed to provide human input:', error)
+    }
+  }, [runId])
+
   const handleNewChat = useCallback(() => {
     setConversation([])
     setCurrentAssistantMessage('')
@@ -846,6 +1010,10 @@ function App() {
     setRunId(null)
     setMessage('')
     setModelUsage(null)
+    setPendingPermissionRequests(new Map())
+    setPendingAskHumanRequests(new Map())
+    setAllPermissionRequests(new Map())
+    setPermissionResponses(new Map())
   }, [])
 
   const handleChatInputSubmit = (text: string) => {
@@ -1343,7 +1511,39 @@ function App() {
                       </ConversationEmptyState>
                     ) : (
                       <>
-                        {conversation.map(item => renderConversationItem(item))}
+                        {conversation.map(item => {
+                          const rendered = renderConversationItem(item)
+                          // If this is a tool call, check for permission request (pending or responded)
+                          if (isToolCall(item)) {
+                            const permRequest = allPermissionRequests.get(item.id)
+                            if (permRequest) {
+                              const response = permissionResponses.get(item.id) || null
+                              return (
+                                <React.Fragment key={item.id}>
+                                  {rendered}
+                                  <PermissionRequest
+                                    toolCall={permRequest.toolCall}
+                                    onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                    onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                    isProcessing={isProcessing}
+                                    response={response}
+                                  />
+                                </React.Fragment>
+                              )
+                            }
+                          }
+                          return rendered
+                        })}
+
+                        {/* Render pending ask-human requests */}
+                        {Array.from(pendingAskHumanRequests.values()).map((request) => (
+                          <AskHumanRequest
+                            key={request.toolCallId}
+                            query={request.query}
+                            onSubmit={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
+                            isProcessing={isProcessing}
+                          />
+                        ))}
 
                         {currentReasoning && (
                           <Reasoning isStreaming>
@@ -1406,6 +1606,12 @@ function App() {
                 recentFiles={recentWikiFiles}
                 visibleFiles={visibleKnowledgeFiles}
                 selectedPath={selectedPath}
+                pendingPermissionRequests={pendingPermissionRequests}
+                pendingAskHumanRequests={pendingAskHumanRequests}
+                allPermissionRequests={allPermissionRequests}
+                permissionResponses={permissionResponses}
+                onPermissionResponse={handlePermissionResponse}
+                onAskHumanResponse={handleAskHumanResponse}
               />
             )}
           </SidebarProvider>

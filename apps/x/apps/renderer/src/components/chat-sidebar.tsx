@@ -21,11 +21,16 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
+import { PermissionRequest } from '@/components/ai-elements/permission-request'
+import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
 import { useMentionDetection } from '@/hooks/use-mention-detection'
 import { MentionPopover } from '@/components/mention-popover'
 import { toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { getMentionHighlightSegments } from '@/lib/mention-highlights'
+import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js'
+import z from 'zod'
+import React from 'react'
 
 interface ChatMessage {
   id: string
@@ -116,6 +121,12 @@ interface ChatSidebarProps {
   recentFiles?: string[]
   visibleFiles?: string[]
   selectedPath?: string | null
+  pendingPermissionRequests?: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
+  pendingAskHumanRequests?: Map<string, z.infer<typeof AskHumanRequestEvent>>
+  allPermissionRequests?: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
+  permissionResponses?: Map<string, 'approve' | 'deny'>
+  onPermissionResponse?: (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => void
+  onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
 }
 
 export function ChatSidebar({
@@ -134,6 +145,12 @@ export function ChatSidebar({
   recentFiles = [],
   visibleFiles = [],
   selectedPath,
+  pendingPermissionRequests = new Map(),
+  pendingAskHumanRequests = new Map(),
+  allPermissionRequests = new Map(),
+  permissionResponses = new Map(),
+  onPermissionResponse,
+  onAskHumanResponse,
 }: ChatSidebarProps) {
   const [width, setWidth] = useState(defaultWidth)
   const [isResizing, setIsResizing] = useState(false)
@@ -465,7 +482,39 @@ export function ChatSidebar({
               </ConversationEmptyState>
             ) : (
               <>
-                {conversation.map(item => renderConversationItem(item))}
+                {conversation.map(item => {
+                  const rendered = renderConversationItem(item)
+                  // If this is a tool call, check for permission request (pending or responded)
+                  if (isToolCall(item) && onPermissionResponse) {
+                    const permRequest = allPermissionRequests.get(item.id)
+                    if (permRequest) {
+                      const response = permissionResponses.get(item.id) || null
+                      return (
+                        <React.Fragment key={item.id}>
+                          {rendered}
+                          <PermissionRequest
+                            toolCall={permRequest.toolCall}
+                            onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                            onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                            isProcessing={isProcessing}
+                            response={response}
+                          />
+                        </React.Fragment>
+                      )
+                    }
+                  }
+                  return rendered
+                })}
+
+                {/* Render pending ask-human requests */}
+                {onAskHumanResponse && Array.from(pendingAskHumanRequests.values()).map((request) => (
+                  <AskHumanRequest
+                    key={request.toolCallId}
+                    query={request.query}
+                    onSubmit={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
+                    isProcessing={isProcessing}
+                  />
+                ))}
 
                 {currentReasoning && (
                   <Reasoning isStreaming>
