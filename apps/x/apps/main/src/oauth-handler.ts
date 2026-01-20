@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { shell } from 'electron';
 import { createAuthServer } from './auth-server.js';
 import * as oauthClient from '@x/core/dist/auth/oauth-client.js';
 import type { Configuration } from '@x/core/dist/auth/oauth-client.js';
@@ -113,6 +113,17 @@ export async function connectProvider(provider: string): Promise<{ success: bool
     // Store flow state
     activeFlows.set(state, { codeVerifier, provider, config });
 
+    // Build authorization URL
+    const authUrl = oauthClient.buildAuthorizationUrl(config, {
+      redirectUri: REDIRECT_URI,
+      scope: scopes.join(' '),
+      codeChallenge,
+      state,
+    });
+
+    // Declare timeout variable (will be set after server is created)
+    let cleanupTimeout: NodeJS.Timeout;
+
     // Create callback server
     const { server } = await createAuthServer(8080, async (code, receivedState) => {
       // Validate state
@@ -156,35 +167,22 @@ export async function connectProvider(provider: string): Promise<{ success: bool
         // Clean up
         activeFlows.delete(state);
         server.close();
+        clearTimeout(cleanupTimeout);
       }
     });
 
-    // Build authorization URL
-    const authUrl = oauthClient.buildAuthorizationUrl(config, {
-      redirectUri: REDIRECT_URI,
-      scope: scopes.join(' '),
-      codeChallenge,
-      state,
-    });
+    // Set timeout to clean up abandoned flows (5 minutes)
+    // This prevents memory leaks if user never completes the OAuth flow
+    cleanupTimeout = setTimeout(() => {
+      if (activeFlows.has(state)) {
+        console.log(`[OAuth] Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
+        activeFlows.delete(state);
+        server.close();
+      }
+    }, 5 * 60 * 1000); // 5 minutes
 
-    // Open browser window
-    const authWindow = new BrowserWindow({
-      width: 600,
-      height: 700,
-      show: true,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-      },
-    });
-
-    authWindow.loadURL(authUrl.toString());
-
-    // Clean up on window close
-    authWindow.on('closed', () => {
-      activeFlows.delete(state);
-      server.close();
-    });
+    // Open in system browser (shares cookies/sessions with user's regular browser)
+    shell.openExternal(authUrl.toString());
 
     // Wait for callback (server will handle it)
     return { success: true };
