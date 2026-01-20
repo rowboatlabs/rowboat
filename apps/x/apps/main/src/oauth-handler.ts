@@ -9,6 +9,7 @@ import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
 import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
+import { emitOAuthEvent } from './ipc.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
 
@@ -160,8 +161,13 @@ export async function connectProvider(provider: string): Promise<{ success: bool
         } else if (provider === 'fireflies-ai') {
           triggerFirefliesSync();
         }
+
+        // Emit success event to renderer
+        emitOAuthEvent({ provider, success: true });
       } catch (error) {
         console.error('OAuth token exchange failed:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        emitOAuthEvent({ provider, success: false, error: errorMessage });
         throw error;
       } finally {
         // Clean up
@@ -178,6 +184,7 @@ export async function connectProvider(provider: string): Promise<{ success: bool
         console.log(`[OAuth] Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
         activeFlows.delete(state);
         server.close();
+        emitOAuthEvent({ provider, success: false, error: 'OAuth flow timed out' });
       }
     }, 5 * 60 * 1000); // 5 minutes
 
