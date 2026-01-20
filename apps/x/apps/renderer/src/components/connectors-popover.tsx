@@ -127,6 +127,32 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
     }
   }, [open, providers, refreshAllStatuses])
 
+  // Listen for OAuth completion events
+  useEffect(() => {
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      const { provider, success, error } = event
+      
+      setProviderStates(prev => ({
+        ...prev,
+        [provider]: {
+          isConnected: success,
+          isLoading: false,
+          isConnecting: false,
+        }
+      }))
+
+      if (success) {
+        toast(`Successfully connected to ${provider}`, 'success')
+        // Refresh status to ensure consistency
+        refreshAllStatuses()
+      } else {
+        toast(error || `Failed to connect to ${provider}`, 'error')
+      }
+    })
+    
+    return cleanup
+  }, [refreshAllStatuses])
+
   // Connect to a provider
   const handleConnect = useCallback(async (provider: string) => {
     setProviderStates(prev => ({
@@ -138,18 +164,10 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       const result = await window.ipc.invoke('oauth:connect', { provider })
 
       if (result.success) {
-        toast(`Successfully connected to ${provider}`, 'success')
-        // Refresh the status after successful connection
-        const checkResult = await window.ipc.invoke('oauth:is-connected', { provider })
-        setProviderStates(prev => ({
-          ...prev,
-          [provider]: {
-            isConnected: checkResult.isConnected,
-            isLoading: false,
-            isConnecting: false,
-          }
-        }))
+        // OAuth flow started - keep isConnecting state, wait for event
+        // Event listener will handle the actual completion
       } else {
+        // Immediate failure (e.g., couldn't start flow)
         toast(result.error || `Failed to connect to ${provider}`, 'error')
         setProviderStates(prev => ({
           ...prev,

@@ -9,11 +9,6 @@ export function useOAuth(provider: string) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
 
-  // Check connection status on mount and when provider changes
-  useEffect(() => {
-    checkConnection();
-  }, [provider]);
-
   const checkConnection = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -27,23 +22,52 @@ export function useOAuth(provider: string) {
     }
   }, [provider]);
 
+    // Check connection status on mount and when provider changes
+    useEffect(() => {
+      checkConnection();
+    }, [provider, checkConnection]);
+  
+    // Listen for OAuth completion events
+    useEffect(() => {
+      const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+        if (event.provider !== provider) {
+          return; // Ignore events for other providers
+        }
+  
+        setIsConnected(event.success);
+        setIsConnecting(false);
+        setIsLoading(false);
+  
+        if (event.success) {
+          toast(`Successfully connected to ${provider}`, 'success');
+          // Refresh connection status to ensure consistency
+          checkConnection();
+        } else {
+          toast(event.error || `Failed to connect to ${provider}`, 'error');
+        }
+      });
+  
+      return cleanup;
+    }, [provider, checkConnection]);
+
   const connect = useCallback(async () => {
     try {
       setIsConnecting(true);
       const result = await window.ipc.invoke('oauth:connect', { provider });
       if (result.success) {
-        toast(`Successfully connected to ${provider}`, 'success');
-        await checkConnection();
+        // OAuth flow started - keep isConnecting state, wait for event
+        // Event listener will handle the actual completion
       } else {
+        // Immediate failure (e.g., couldn't start flow)
         toast(result.error || `Failed to connect to ${provider}`, 'error');
+        setIsConnecting(false);
       }
     } catch (error) {
       console.error('Failed to connect:', error);
       toast(`Failed to connect to ${provider}`, 'error');
-    } finally {
       setIsConnecting(false);
     }
-  }, [provider, checkConnection]);
+  }, [provider]);
 
   const disconnect = useCallback(async () => {
     try {

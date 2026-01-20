@@ -210,6 +210,15 @@ function emitRunEvent(event: z.infer<typeof RunEvent>): void {
   }
 }
 
+export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string }): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('oauth:didConnect', event);
+    }
+  }
+}
+
 let runsWatcher: (() => void) | null = null;
 export async function startRunsWatcher(): Promise<void> {
   if (runsWatcher) {
