@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
+import docCollabSkill from "./doc-collab/skill.js";
 import draftEmailsSkill from "./draft-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
@@ -28,6 +29,13 @@ type ResolvedSkill = {
 };
 
 const definitions: SkillDefinition[] = [
+  {
+    id: "doc-collab",
+    title: "Document Collaboration",
+    folder: "doc-collab",
+    summary: "Collaborate on documents - create, edit, and refine notes and documents in the knowledge base.",
+    content: docCollabSkill,
+  },
   {
     id: "draft-emails",
     title: "Draft Emails",
