@@ -231,6 +231,18 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  'onboarding:getStatus': {
+    req: z.null(),
+    res: z.object({
+      showOnboarding: z.boolean(),
+    }),
+  },
+  'onboarding:markComplete': {
+    req: z.null(),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
 } as const;
 
 // ============================================================================

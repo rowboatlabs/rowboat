@@ -7,6 +7,7 @@ export type NoteCreationStrictness = 'low' | 'medium' | 'high';
 interface NoteCreationConfig {
     strictness: NoteCreationStrictness;
     configured: boolean;
+    onboardingComplete?: boolean;
 }
 
 const CONFIG_FILE = path.join(WorkDir, 'config', 'note_creation.json');
@@ -91,4 +92,45 @@ export function setStrictnessAndMarkConfigured(strictness: NoteCreationStrictnes
 export function getNoteCreationAgentSuffix(): string {
     const strictness = getNoteCreationStrictness();
     return `note_creation_${strictness}`;
+}
+
+/**
+ * Check if onboarding has been completed.
+ */
+export function isOnboardingComplete(): boolean {
+    try {
+        if (!fs.existsSync(CONFIG_FILE)) {
+            return false;
+        }
+        const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+        const config = JSON.parse(raw);
+        return config.onboardingComplete === true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Mark onboarding as complete.
+ */
+export function markOnboardingComplete(): void {
+    const configDir = path.dirname(CONFIG_FILE);
+    if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+    }
+
+    let config: NoteCreationConfig;
+    try {
+        if (fs.existsSync(CONFIG_FILE)) {
+            const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+            config = JSON.parse(raw);
+        } else {
+            config = { strictness: DEFAULT_STRICTNESS, configured: false };
+        }
+    } catch {
+        config = { strictness: DEFAULT_STRICTNESS, configured: false };
+    }
+
+    config.onboardingComplete = true;
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }

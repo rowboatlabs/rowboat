@@ -49,6 +49,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
+import { OnboardingModal } from '@/components/onboarding-modal'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -421,6 +422,9 @@ function App() {
 
   // Workspace root for full paths
   const [workspaceRoot, setWorkspaceRoot] = useState<string>('')
+
+  // Onboarding state
+  const [showOnboarding, setShowOnboarding] = useState(false)
 
   // Load directory tree
   const loadDirectory = useCallback(async () => {
@@ -1175,6 +1179,30 @@ function App() {
     })
   }, [])
 
+  // Check onboarding status on mount
+  useEffect(() => {
+    async function checkOnboarding() {
+      try {
+        const result = await window.ipc.invoke('onboarding:getStatus', null)
+        setShowOnboarding(result.showOnboarding)
+      } catch (err) {
+        console.error('Failed to check onboarding status:', err)
+      }
+    }
+    checkOnboarding()
+  }, [])
+
+  // Handler for onboarding completion
+  const handleOnboardingComplete = useCallback(async () => {
+    try {
+      await window.ipc.invoke('onboarding:markComplete', null)
+      setShowOnboarding(false)
+    } catch (err) {
+      console.error('Failed to mark onboarding complete:', err)
+      setShowOnboarding(false)
+    }
+  }, [])
+
   const knowledgeActions = React.useMemo(() => ({
     createNote: async (parentPath: string = 'knowledge') => {
       try {
@@ -1732,6 +1760,10 @@ function App() {
         </div>
       </SidebarSectionProvider>
       <Toaster />
+      <OnboardingModal
+        open={showOnboarding}
+        onComplete={handleOnboardingComplete}
+      />
     </TooltipProvider>
   )
 }
