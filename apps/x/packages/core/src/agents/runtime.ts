@@ -696,10 +696,21 @@ export async function* streamAgent({
         loopLogger.log('running llm turn');
         // stream agent response and build message
         const messageBuilder = new StreamStepMessageBuilder();
+        const now = new Date();
+        const currentDateTime = now.toLocaleString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZoneName: 'short'
+        });
+        const instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
         for await (const event of streamLlm(
             model,
             state.messages,
-            agent.instructions,
+            instructionsWithDateTime,
             tools,
         )) {
             // Only log significant events (not text-delta to reduce noise)
