@@ -910,6 +910,7 @@ export const PromptInputTextarea = ({
   onChange,
   className,
   placeholder = "What would you like to know?",
+  onKeyDown: externalOnKeyDown,
   ...props
 }: PromptInputTextareaProps) => {
   const controller = useOptionalPromptInputController();
@@ -1027,10 +1028,11 @@ export const PromptInputTextarea = ({
     }
 
     // Handle backspace to delete entire mention at once
-    if (e.key === "Backspace" && controller) {
+    if (e.key === "Backspace") {
       const textarea = e.currentTarget;
       const cursorPos = textarea.selectionStart;
       const selectionEnd = textarea.selectionEnd;
+      const textValue = controller?.textInput.value ?? textarea.value;
 
       // Only handle if no text is selected (cursor is at a single position)
       if (cursorPos === selectionEnd) {
@@ -1039,13 +1041,19 @@ export const PromptInputTextarea = ({
           const mentionText = `@${label}`;
           const startPos = cursorPos - mentionText.length;
           if (startPos >= 0) {
-            const textBefore = currentValue.substring(startPos, cursorPos);
+            const textBefore = textValue.substring(startPos, cursorPos);
             if (textBefore === mentionText) {
               // Check if it's at word boundary (start of string or preceded by whitespace)
-              if (startPos === 0 || /\s/.test(currentValue[startPos - 1])) {
+              if (startPos === 0 || /\s/.test(textValue[startPos - 1])) {
                 e.preventDefault();
-                const newText = currentValue.substring(0, startPos) + currentValue.substring(cursorPos);
-                controller.textInput.setInput(newText);
+                const newText = textValue.substring(0, startPos) + textValue.substring(cursorPos);
+                if (controller) {
+                  controller.textInput.setInput(newText);
+                } else {
+                  // Fallback: directly set textarea value and trigger change
+                  textarea.value = newText;
+                  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                }
                 // Remove the mention from state
                 if (mentionsCtx) {
                   const mentionToRemove = mentionsCtx.mentions.find(m => m.displayName === label);
@@ -1084,6 +1092,9 @@ export const PromptInputTextarea = ({
       // Let the popover handle this
       return;
     }
+
+    // Call external handler if provided
+    externalOnKeyDown?.(e);
   };
 
   const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = (event) => {
@@ -1123,12 +1134,12 @@ export const PromptInputTextarea = ({
       };
 
   return (
-    <div ref={containerRef} className="relative contents">
+    <div ref={containerRef} className="relative flex flex-1 min-w-0">
       {mentionHighlights.hasHighlights && (
         <div
           ref={highlightRef}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-3 text-sm text-transparent"
+          className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-sm text-transparent"
         >
           {mentionHighlights.segments.map((segment, index) =>
             segment.highlighted ? (
@@ -1146,7 +1157,7 @@ export const PromptInputTextarea = ({
       )}
       <InputGroupTextarea
         ref={textareaRef}
-        className={cn("field-sizing-content max-h-48 min-h-10", className)}
+        className={cn("relative z-10 !p-0 field-sizing-content max-h-48 min-h-10", className)}
         name="message"
         onCompositionEnd={() => setIsComposing(false)}
         onCompositionStart={() => setIsComposing(true)}
