@@ -24,6 +24,9 @@ import { IRunsRepo } from "../runs/repo.js";
 import { IRunsLock } from "../runs/lock.js";
 import { PrefixLogger } from "@x/shared";
 import { parse } from "yaml";
+import { raw as noteCreationMediumRaw } from "../knowledge/note_creation_medium.js";
+import { raw as noteCreationLowRaw } from "../knowledge/note_creation_low.js";
+import { raw as noteCreationHighRaw } from "../knowledge/note_creation_high.js";
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -246,26 +249,20 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
         return CopilotAgent;
     }
 
-    // Built-in agents loaded from checked-in files
-    const builtinAgents: Record<string, string> = {
-        'meeting-prep': '../pre_built/meeting-prep.md',
-        'email-draft': '../pre_built/email-draft.md',
-    };
-
-    // Resolve agent file path (note_creation is dynamic based on strictness config)
-    let agentFilePath: string | null = null;
-    const currentDir = path.dirname(new URL(import.meta.url).pathname);
-
     if (id === 'note_creation') {
         const strictness = getNoteCreationStrictness();
-        agentFilePath = path.join(currentDir, `../knowledge/note_creation_${strictness}.md`);
-    } else if (id in builtinAgents) {
-        agentFilePath = path.join(currentDir, builtinAgents[id]);
-    }
-
-    if (agentFilePath) {
-        const raw = fs.readFileSync(agentFilePath, "utf8");
-
+        let raw = '';
+        switch (strictness) {
+            case 'medium':
+                raw = noteCreationMediumRaw;
+                break;
+            case 'low':
+                raw = noteCreationLowRaw;
+                break;
+            case 'high':
+                raw = noteCreationHighRaw;
+                break;
+        }
         let agent: z.infer<typeof Agent> = {
             name: id,
             instructions: raw,

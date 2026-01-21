@@ -5,7 +5,11 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
+<<<<<<< HEAD
     "build": "rm -rf dist && tsc && mkdir -p dist/knowledge dist/pre_built && cp src/knowledge/note_creation_*.md src/knowledge/welcome.md dist/knowledge/ && cp src/pre_built/*.md dist/pre_built/",
+=======
+    "build": "rm -rf dist && tsc",
+>>>>>>> 13c5c03f (fix note creation agent)
     "dev": "tsc -w"
   },
   "dependencies": {
