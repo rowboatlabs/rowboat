@@ -1,4 +1,4 @@
-![ui](https://github.com/user-attachments/assets/fdf0679f-b107-48ce-b326-04db752838d9)
+![ui](https://github.com/user-attachments/assets/0a742932-9c84-4fda-a3f7-c4157d9f99c0)
 
 <h5 align="center">
 
