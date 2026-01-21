@@ -6,7 +6,6 @@ export const SECURITY_CONFIG_PATH = path.join(WorkDir, "config", "security.json"
 
 const DEFAULT_ALLOW_LIST = [
     "cat",
-    "curl",
     "date",
     "echo",
     "grep",
