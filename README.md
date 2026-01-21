@@ -1,19 +1,19 @@
-![ui](https://github.com/user-attachments/assets/fdf0679f-b107-48ce-b326-04db752838d9)
+<img width="1409" height="605" alt="Work knowledge graph" src="https://github.com/user-attachments/assets/707d0452-459d-4710-be85-b5322b433151" />
 
 <h5 align="center">
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
   <a href="https://trendshift.io/repositories/13609" target="blank">
-    <img src="https://trendshift.io/api/badge/repositories/13609" alt="rowboatlabs%2Frowboat | Trendshift" width="250" height="55"/>
+    <img src="https://trendshift.io/api/badge/repositories/13609" alt="rowboatlabs/rowboat | Trendshift" width="250" height="55"/>
   </a>
 </p>
 
 <p align="center">
-  <a href="https://discord.gg/rxB8pzHxaS" target="_blank" rel="noopener">
-    <img alt="Discord" src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white&labelColor=5865F2">
-  </a>
-  <a href="https://www.rowboatx.com/" target="_blank" rel="noopener">
+    <a href="https://www.rowboatlabs.com/" target="_blank" rel="noopener">
     <img alt="Website" src="https://img.shields.io/badge/Website-10b981?labelColor=10b981&logo=window&logoColor=white">
+  </a>
+  <a href="https://discord.com/invite/htdKpBZF" target="_blank" rel="noopener">
+    <img alt="Discord" src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white&labelColor=5865F2">
   </a>
   <a href="https://x.com/intent/user?screen_name=rowboatlabshq" target="_blank" rel="noopener">
     <img alt="Twitter" src="https://img.shields.io/twitter/follow/rowboatlabshq?style=social">
@@ -23,134 +23,80 @@
   </a>
 </p>
 
-# RowboatX - Claude Code for Everyday Automations
+# Rowboat  
+**An open-source, local-first AI coworker with memory for everyday work**
+
 </h5>
 
-RowboatX is a local-first CLI for creating background AI agents with full shell access.
+Rowboat connects your email and meeting notes, builds long-lived knowledge from them, and uses that knowledge to help get work done on your machine.
 
-**Example agents you can create:**
-- Research every person before your meetings (Exa search MCP + Google Calendar MCP)
-- Daily podcast summarizing your saved articles (ElevenLabs MCP + ffmpeg)
-- Auto-triage Slack DMs and draft responses while you sleep (Slack MCP)
-
-## Quick start
-```bash
-npx @rowboatlabs/rowboatx@latest
-```
+---
 
 ## Demo
-[![Screenshot](https://github.com/user-attachments/assets/ab46ff8b-44bd-400e-beb0-801c6431033f)](https://www.youtube.com/watch?v=cyPBinQzicY&t)
 
-## Examples
-### Add and Manage MCP servers 
-`$ rowboatx`
-- Add MCP: 'Add this MCP server config: \<config\> '
-- Explore tools: 'What tools are there in \<server-name\> '
+[![Demo video](https://github.com/user-attachments/assets/f378285b-4ef3-4a4b-aa20-7dbb664e496c)](https://www.youtube.com/watch?v=T2Bmiy05FrI)
 
-### Create background agents
-`$ rowboatx`
-- 'Create agent to do X.'
-- '... Attach the correct tools from \<mcp-server-name\> to the agent'
-- '... Allow the agent to run shell commands including ffmpeg'
+---
 
-### Schedule and monitor agents
-`$ rowboatx`
-- 'Make agent \<background-agent-name\> run every day at 10 AM' 
-- 'What agents do I have scheduled to run and at what times'
-- 'When was \<background-agent-name\> last run'
-- 'Are any agents waiting for my input or confirmation'
+## Quick start
 
-### Run background agents manually
-``` bash
-rowboatx --agent=<agent-name> --input="xyz" --no-interactive=true
-```
-```bash    
-rowboatx --agent=<agent-name> --run_id=<run_id> # resume from a previous run
-```
-## Models support
-You can configure your models using:
-```bash
-rowboatx model-config
-```
+**Download for Mac:**  
 
-Alternatively, you can directly edit `~/.rowboat/config/models.json`
-```json
-{
-  "providers": {
-    "openai": {
-      "flavor": "openai"
-    },
-    "lm-studio": {
-      "flavor": "openai-compatible",
-      "baseURL": "http://localhost:2000/...",
-      "apiKey": "...",
-      "headers": {
-        "foo": "bar"
-      }
-    },
-    "anthropic": {
-      "flavor": "anthropic"
-    },
-    "google": {
-      "flavor": "google"
-    },
-    "ollama": {
-      "flavor": "ollama"
-    }
-  },
-  "defaults": {
-    "provider": "lm-studio",
-    "model": "gpt-5"
-  }
-}
-```
-## Contributing
+https://github.com/rowboatlabs/rowboat/releases/latest
 
-We want help with:
+## What it does
 
-- **Agent templates** - Pre-built agents others can use (podcast generator, meeting prep, etc.)
-- **MCP server integrations** - Add support for new tools
-- **Platform support** - Windows improvements, Linux edge cases
+Rowboat ingests your:
+- **Email** (Gmail)
+- **Meeting notes** (Granola, Fireflies)
 
-```bash
-git clone git@github.com:rowboatlabs/rowboat.git
-cd rowboat
-npm install
-npm run build
-npm link
-rowboatx
-```
+and organizes them into a local, Obsidian-compatible vault of plain Markdown files with backlinks.
 
-Ping us on [Discord](https://discord.com/invite/rxB8pzHxaS) if you want to discuss before building.
+This vault is not just for browsing or search. It becomes a working memory that Rowboat’s AI uses to take actions on your behalf.
 
---- 
-## Prefer a Web UI: Rowboat Studio
+As new emails and meetings come in, the relevant notes update automatically, building persistent context across people, projects, organizations, and topics.
 
-*Cursor for Multi-agent Workflows*
+---
 
-⚡ Build AI agents instantly with natural language | 🔌 Connect tools with one-click integrations | 📂 Power with knowledge by adding documents for RAG | 🔄 Automate workflows by setting up triggers and actions | 🚀 Deploy anywhere via API or SDK<br><br>
+## How it’s different
 
-### Quick start
-1. Set your OpenAI key
-   ```bash
-   export OPENAI_API_KEY=your-openai-api-key  
-   ```
-      
-2. Clone the repository and start Rowboat (requires Docker)
-   ```bash
-   ./start.sh
-   ```
+Most AI tools reconstruct context on demand by searching transcripts or documents.
 
-3. Access the app at [http://localhost:3000](http://localhost:3000).
+Rowboat maintains **long-lived knowledge** instead:
+- context accumulates over time
+- relationships are explicit and inspectable
+- notes are editable by you, not hidden inside a model
+- everything lives on your machine as plain Markdown
 
-#### Create a multi-agent assistant with MCP tools by chatting with Rowboat
-[![meeting-prep](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/KZTP4xZM2DY)
-See [Docs](https://docs.rowboatlabs.com/) for more details.
- 
+The result is memory that compounds, rather than retrieval that starts cold every time.
+
+---
+
+## What you can do with it
+
+Rowboat uses this knowledge to help with everyday work, including:
+
+- Drafting emails using accumulated context
+- Preparing for meetings from prior decisions and discussions
+- Organizing files and project artifacts as work evolves
+- Running shell commands or scripts as agent actions
+- Extending capabilities via external tools and MCP servers
+
+Actions are explicit and grounded in the current state of your knowledge.
+
+---
+
+## Local-first by design
+
+- All data is stored locally as plain Markdown
+- No proprietary formats or hosted lock-in
+- Works with local models via Ollama or LM Studio, or hosted models if you prefer
+- You can inspect, edit, back up, or delete everything at any time
+
 ---
 <div align="center">
   
 Made with ❤️ by the Rowboat team
 
-[Discord](https://discord.gg/rxB8pzHxaS) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
+[Discord](https://discord.com/invite/htdKpBZF) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
 </div>
