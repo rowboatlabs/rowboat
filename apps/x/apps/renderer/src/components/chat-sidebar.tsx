@@ -23,6 +23,7 @@ import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
+import { Suggestions } from '@/components/ai-elements/suggestions'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
 import { useMentionDetection } from '@/hooks/use-mention-detection'
 import { MentionPopover } from '@/components/mention-popover'
@@ -544,6 +545,16 @@ export function ChatSidebar({
 
         {/* Input area - responsive to sidebar width, matches floating bar position exactly */}
         <div className="absolute bottom-6 left-14 right-6 z-10" ref={containerRef}>
+          {!hasConversation && (
+            <Suggestions
+              onSelect={(prompt) => {
+                onMessageChange(prompt)
+                setTimeout(() => textareaRef.current?.focus(), 0)
+              }}
+              vertical
+              className="mb-3"
+            />
+          )}
           <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
             <div className="relative flex-1 min-w-0">
               {mentionHighlights.hasHighlights && (
