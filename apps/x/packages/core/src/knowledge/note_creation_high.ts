@@ -1,4 +1,4 @@
-export const raw = `
+export const raw = `---
 model: gpt-5.2
 tools:
   workspace-writeFile:
