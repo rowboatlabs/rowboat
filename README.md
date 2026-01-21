@@ -1,4 +1,4 @@
-![ui](https://github.com/user-attachments/assets/0a742932-9c84-4fda-a3f7-c4157d9f99c0)
+<img width="1409" height="605" alt="Work knowledge graph" src="https://github.com/user-attachments/assets/707d0452-459d-4710-be85-b5322b433151" />
 
 <h5 align="center">
 
@@ -12,7 +12,7 @@
     <a href="https://www.rowboatlabs.com/" target="_blank" rel="noopener">
     <img alt="Website" src="https://img.shields.io/badge/Website-10b981?labelColor=10b981&logo=window&logoColor=white">
   </a>
-  <a href="https://discord.gg/rxB8pzHxaS" target="_blank" rel="noopener">
+  <a href="https://discord.com/invite/htdKpBZF" target="_blank" rel="noopener">
     <img alt="Discord" src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white&labelColor=5865F2">
   </a>
   <a href="https://x.com/intent/user?screen_name=rowboatlabshq" target="_blank" rel="noopener">
@@ -43,13 +43,6 @@ Rowboat connects your email and meeting notes, builds long-lived knowledge from 
 **Download for Mac:**  
 
 https://github.com/rowboatlabs/rowboat/releases/latest
-
-
-Or build from source:
-
-```bash
-[build instructions]
-```
 
 ## What it does
 
@@ -105,5 +98,5 @@ Actions are explicit and grounded in the current state of your knowledge.
   
 Made with ❤️ by the Rowboat team
 
-[Discord](https://discord.gg/rxB8pzHxaS) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
+[Discord](https://discord.com/invite/htdKpBZF) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
 </div>
