@@ -23,7 +23,7 @@ const NOTES_OUTPUT_DIR = path.join(WorkDir, 'knowledge');
 const NOTE_CREATION_AGENT = 'note_creation';
 
 // Configuration for the graph builder service
-const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes (reduced frequency)
+const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
 const SOURCE_FOLDERS = [
     'gmail_sync',
     'fireflies_transcripts',
