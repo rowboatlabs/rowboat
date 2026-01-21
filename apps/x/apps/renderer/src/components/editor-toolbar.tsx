@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import type { Editor } from '@tiptap/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -26,16 +26,19 @@ import {
   Redo2Icon,
   ExternalLinkIcon,
   Trash2Icon,
+  ImageIcon,
 } from 'lucide-react'
 
 interface EditorToolbarProps {
   editor: Editor | null
   onSelectionHighlight?: (range: { from: number; to: number } | null) => void
+  onImageUpload?: (file: File) => Promise<void> | void
 }
 
-export function EditorToolbar({ editor, onSelectionHighlight }: EditorToolbarProps) {
+export function EditorToolbar({ editor, onSelectionHighlight, onImageUpload }: EditorToolbarProps) {
   const [linkUrl, setLinkUrl] = useState('')
   const [isLinkPopoverOpen, setIsLinkPopoverOpen] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const openLinkPopover = useCallback(() => {
     if (!editor) return
@@ -78,6 +81,23 @@ export function EditorToolbar({ editor, onSelectionHighlight }: EditorToolbarPro
     editor.chain().focus().extendMarkRange('link').unsetLink().run()
     closeLinkPopover()
   }, [editor, closeLinkPopover])
+
+  const handleImageUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file || !onImageUpload) return
+
+    // Reset file input immediately
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+
+    // Call the upload handler (which handles placeholder insertion)
+    try {
+      await onImageUpload(file)
+    } catch (error) {
+      console.error('Failed to upload image:', error)
+    }
+  }, [onImageUpload])
 
   if (!editor) return null
 
@@ -320,6 +340,27 @@ export function EditorToolbar({ editor, onSelectionHighlight }: EditorToolbarPro
           </div>
         </PopoverContent>
       </Popover>
+
+      {/* Image upload */}
+      {onImageUpload && (
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageUpload}
+            className="hidden"
+          />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => fileInputRef.current?.click()}
+            title="Insert Image"
+          >
+            <ImageIcon className="size-4" />
+          </Button>
+        </>
+      )}
     </div>
   )
 }

@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, ArrowUp, PanelRightIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelRightIcon, SquarePen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
@@ -398,6 +398,9 @@ function App() {
   const [allPermissionRequests, setAllPermissionRequests] = useState<Map<string, z.infer<typeof ToolPermissionRequestEvent>>>(new Map())
   // Track permission responses (toolCallId -> response)
   const [permissionResponses, setPermissionResponses] = useState<Map<string, 'approve' | 'deny'>>(new Map())
+
+  // Workspace root for full paths
+  const [workspaceRoot, setWorkspaceRoot] = useState<string>('')
 
   // Load directory tree
   const loadDirectory = useCallback(async () => {
@@ -1033,6 +1036,45 @@ function App() {
     setIsGraphOpen(false)
   }, [])
 
+  // Handle image upload for the markdown editor
+  const handleImageUpload = useCallback(async (file: File): Promise<string | null> => {
+    try {
+      // Read file as data URL (includes mime type)
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+
+      // Also save to .assets folder for persistence
+      const timestamp = Date.now()
+      const extension = file.name.split('.').pop() || 'png'
+      const filename = `image-${timestamp}.${extension}`
+      const assetsPath = 'knowledge/.assets'
+      const imagePath = `${assetsPath}/${filename}`
+
+      try {
+        // Extract base64 data (remove data URL prefix)
+        const base64Data = dataUrl.split(',')[1]
+        await window.ipc.invoke('workspace:writeFile', {
+          path: imagePath,
+          data: base64Data,
+          opts: { encoding: 'base64', mkdirp: true }
+        })
+      } catch (err) {
+        console.error('Failed to save image to disk:', err)
+        // Continue anyway - image will still display via data URL
+      }
+
+      // Return data URL for immediate display in editor
+      return dataUrl
+    } catch (error) {
+      console.error('Failed to upload image:', error)
+      return null
+    }
+  }, [])
+
   // Keyboard shortcut: Ctrl+L to open main chat view
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1106,8 +1148,7 @@ function App() {
     return visible
   }, [knowledgeFiles, expandedPaths])
 
-  // Get workspace root for full paths
-  const [workspaceRoot, setWorkspaceRoot] = useState<string>('')
+  // Load workspace root on mount
   useEffect(() => {
     window.ipc.invoke('workspace:getRoot', null).then(result => {
       setWorkspaceRoot(result.root)
@@ -1461,6 +1502,22 @@ function App() {
                     ) : null}
                   </div>
                 )}
+                {!isGraphOpen && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      handleNewChat()
+                      if (selectedPath) {
+                        setIsChatSidebarOpen(true)
+                      }
+                    }}
+                    className="text-foreground gap-1.5"
+                  >
+                    <SquarePen className="size-4" />
+                    New Chat
+                  </Button>
+                )}
                 {!selectedPath && isGraphOpen && (
                   <Button
                     variant="ghost"
@@ -1508,6 +1565,7 @@ function App() {
                       onChange={setEditorContent}
                       placeholder="Start writing..."
                       wikiLinks={wikiLinkConfig}
+                      onImageUpload={handleImageUpload}
                     />
                   </div>
                 ) : (
