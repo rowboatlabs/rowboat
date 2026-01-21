@@ -27,7 +27,7 @@ const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes (reduced freque
 const SOURCE_FOLDERS = [
     'gmail_sync',
     'fireflies_transcripts',
-    'granola_notes'  // Corrected from 'granola_meetings'
+    'granola_notes',
 ];
 const MAX_CONCURRENT_BATCHES = 1; // Process only 1 batch at a time to avoid overwhelming the agent
 
@@ -152,13 +152,17 @@ export async function buildGraph(sourceDir: string): Promise<void> {
         try {
             // Build fresh index before each batch to include notes from previous batches
             console.log(`Building knowledge index for batch ${batchNumber}...`);
+            const indexStartTime = Date.now();
             const index = buildKnowledgeIndex();
             const indexForPrompt = formatIndexForPrompt(index);
-            console.log(`Index built: ${index.people.length} people, ${index.organizations.length} orgs, ${index.projects.length} projects, ${index.topics.length} topics, ${index.other.length} other`);
+            const indexDuration = ((Date.now() - indexStartTime) / 1000).toFixed(2);
+            console.log(`Index built in ${indexDuration}s: ${index.people.length} people, ${index.organizations.length} orgs, ${index.projects.length} projects, ${index.topics.length} topics, ${index.other.length} other`);
 
             console.log(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
+            const agentStartTime = Date.now();
             await createNotesFromBatch(batch, batchNumber, indexForPrompt);
-            console.log(`Batch ${batchNumber}/${totalBatches} complete`);
+            const agentDuration = ((Date.now() - agentStartTime) / 1000).toFixed(2);
+            console.log(`Batch ${batchNumber}/${totalBatches} complete in ${agentDuration}s`);
 
             // Mark files in this batch as processed
             for (const file of batch) {

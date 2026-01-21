@@ -126,7 +126,6 @@ executeCommand("cat '{source_file}'")
 - Has `Attendees:` field
 - Has `Meeting:` title
 - Transcript format with speaker labels
-- Calendar event metadata
 
 **Email indicators:**
 - Has `From:` and `To:` fields
@@ -136,6 +135,42 @@ executeCommand("cat '{source_file}'")
 **Set processing mode:**
 - `source_type = "meeting"` → Can create new notes
 - `source_type = "email"` → Can create notes if personalized and relevant
+
+---
+
+## Calendar Invite Emails
+
+Emails containing calendar invites (`.ics` attachments or inline calendar data) are **high signal** - a scheduled meeting means this person matters.
+
+**How to identify:**
+- Subject contains "Invitation:", "Accepted:", "Declined:", or "Updated:"
+- Has `.ics` attachment reference
+- Contains calendar metadata (VCALENDAR, VEVENT)
+
+**Rules for calendar invite emails:**
+1. **CREATE a note for the primary contact** - the person you're actually meeting with
+2. **Extract from the invite:** their name, email, organization (from email domain), meeting topic
+3. **Skip automated notifications from Google/Outlook** - emails from calendar-no-reply@google.com with no human sender
+4. **Skip "Accepted/Declined" responses** - these are just RSVP confirmations, not new contacts
+
+**Who is the primary contact?**
+- For 1:1 meetings: the other person
+- For group meetings: the organizer (unless it's an EA - check if organizer differs from attendees)
+- Look at the meeting title for hints (e.g., "Coffee with Sarah" → Sarah is the contact)
+
+**What to extract:**
+- Name and email from the invite
+- Organization from email domain
+- Meeting topic as context
+- Note that you have an upcoming meeting scheduled
+
+**Examples:**
+- "Invitation: Coffee with Sarah Chen" from sarah@acme.com → CREATE note for Sarah Chen at Acme
+- "Invitation: Acme <> YourCompany sync" organized by sarah@acme.com → CREATE note for Sarah
+- "Accepted: Meeting" from calendar-no-reply@google.com → SKIP (just a notification)
+- "Declined: Sync" from john@example.com → SKIP (RSVP, not a new relationship)
+
+**Why this matters:** Once a note exists, subsequent emails from this person will enrich it. When the meeting happens, the transcript adds more detail.
 
 ---
 
@@ -155,6 +190,78 @@ executeCommand("cat '{source_file}'")
 - Sent via marketing platforms (via sendgrid, via mailchimp, etc.)
 
 **Action:** SKIP with reason "Newsletter/mass email"
+
+### Product Updates & Changelogs
+
+**Indicators:**
+- Subject contains: "changelog", "what's new", "product update", "release notes", "v1.x", "new features"
+- Content describes feature releases, bug fixes, or product changes
+- Sent to all users/customers (not personalized to you specifically)
+- From tools/SaaS you use: Cal.com, Notion, Slack, Linear, Figma, etc.
+- No action required from you — purely informational
+- Written in announcement style, not conversational
+
+**Examples to SKIP:**
+- "Cal.com Changelog v6.1" — product update
+- "What's new in Notion - January 2026" — feature announcement
+- "Introducing new Slack features" — product marketing
+- "Linear Release Notes" — changelog
+
+**Action:** SKIP with reason "Product update/changelog"
+
+### Cold Outreach / Sales Emails
+
+**THE RULE: If someone emails you offering services and you never responded, SKIP.**
+
+It doesn't matter how personalized, detailed, or relevant the pitch seems. If:
+1. They initiated contact (you didn't reach out first)
+2. They're offering services/products
+3. You never replied or engaged
+
+Then it's cold outreach and should be SKIPPED. Do NOT create notes for cold outreach senders or their organizations.
+
+**EXCEPTION:** If they reference a prior real-world interaction, CREATE a note:
+- "Great meeting you at [conference/event]"
+- "Following up on our conversation at..."
+- "It was nice chatting at [place]"
+- "[Mutual contact] suggested I reach out after we met"
+
+This indicates a real relationship that started offline, not cold outreach.
+
+**Indicators:**
+- Unsolicited contact from someone you've never interacted with
+- Offering services you didn't request (HR, payroll, compliance, bookkeeping, recruiting, dev shops, marketing, etc.)
+- Sales-y language: "wanted to reach out", "thought this might help", "quick question about your..."
+- Mentions your company growth/funding/hiring/tech stack as a hook
+- Attaches "free guides", "case studies", "resources", or "frameworks"
+- Asks for a call/meeting without any prior relationship
+- From domains you've never contacted or met with before
+- No existing note for this person or organization
+- **No reply from the user in the email thread**
+
+**Examples to SKIP:**
+- "Saw you raised funding, wanted to reach out about our services"
+- "Quick question about your bookkeeping/compliance/hiring"
+- "Shared this guide that might help with [your problem]"
+- "Noticed you're scaling, we help startups with..."
+- "Would love 15 minutes to show you how we can help"
+- Detailed pitch about HR/payroll/India expansion services (still cold outreach!)
+- Follow-up emails to previous cold outreach that got no response
+
+**Key distinction:**
+- **You reaching out to a vendor** → worth tracking (you initiated)
+- **You replied to their outreach** → worth tracking (you engaged)
+- **Vendor cold emailing you with no response** → SKIP (no relationship exists)
+
+**IMPORTANT: CC'd people on cold outreach**
+When an email is identified as cold outreach, skip notes for ALL parties involved:
+- The sender (the person doing the outreach)
+- Anyone CC'd on the email (colleagues of the sender, other contacts they're trying to connect)
+- The organization they represent
+
+If someone only appears in your memory as "CC'd on outreach emails from [Sender]", they don't warrant a note — they're just incidentally included in cold outreach, not a real relationship.
+
+**Action:** SKIP with reason "Cold outreach/sales email - no engagement from user"
 
 ### Automated/Transactional
 
@@ -185,6 +292,27 @@ executeCommand("cat '{source_file}'")
 - Delivery notifications
 
 **Action:** SKIP with reason "Consumer service"
+
+### Infrastructure & SaaS Providers
+
+**Skip emails from these types of services:**
+- Domain registrars: GoDaddy, Namecheap, Google Domains, Cloudflare
+- Hosting providers: AWS, Google Cloud, Azure, DigitalOcean, Heroku, Vercel, Netlify
+- Email providers: Google Workspace, Microsoft 365, Zoho
+- Payment processors: Stripe, PayPal, Square, Razorpay
+- Developer tools: GitHub, GitLab, Bitbucket, npm, Docker Hub
+- Analytics: Google Analytics, Mixpanel, Amplitude, Segment
+- Auth providers: Auth0, Okta, Firebase Auth
+- Support platforms: Zendesk, Intercom, Freshdesk
+- HR/Payroll: Gusto, Rippling, Deel, Remote
+
+**Indicators:**
+- Automated system notifications (renewal reminders, usage alerts, security notices)
+- No personalized content from a human
+- From domains like @godaddy.com, @aws.amazon.com, @stripe.com, etc.
+- Templates about account status, billing, or technical alerts
+
+**Action:** SKIP with reason "Infrastructure/SaaS provider notification"
 
 ## Email-Specific Processing (Medium Strictness)
 

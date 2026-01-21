@@ -127,7 +127,6 @@ executeCommand("cat '{source_file}'")
 - Has `Attendees:` field
 - Has `Meeting:` title
 - Transcript format with speaker labels
-- Calendar event metadata
 
 **Email indicators:**
 - Has `From:` and `To:` fields
@@ -137,6 +136,23 @@ executeCommand("cat '{source_file}'")
 **Set processing mode:**
 - `source_type = "meeting"` → Create notes for all external attendees
 - `source_type = "email"` → Create notes for sender if identifiable human
+
+---
+
+## Calendar Invite Emails
+
+Emails containing calendar invites (`.ics` attachments) are **high signal** - a scheduled meeting means this person matters.
+
+**How to identify:**
+- Subject contains "Invitation:", "Accepted:", "Declined:", or "Updated:"
+- Has `.ics` attachment reference
+
+**Rules:**
+1. **CREATE a note for the primary contact** - the person you're meeting with
+2. **Skip automated notifications** - from calendar-no-reply@google.com with no human sender
+3. **Skip "Accepted/Declined" responses** - just RSVP confirmations
+
+Once a note exists, subsequent emails will enrich it. When the meeting happens, the transcript adds more detail.
 
 ---
 
