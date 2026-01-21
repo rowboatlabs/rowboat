@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
+import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
@@ -1647,6 +1648,7 @@ function App() {
           )}
         </div>
       </SidebarSectionProvider>
+      <Toaster />
     </TooltipProvider>
   )
 }

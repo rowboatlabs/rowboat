@@ -145,7 +145,6 @@ export function ChatSidebar({
   recentFiles = [],
   visibleFiles = [],
   selectedPath,
-  pendingPermissionRequests = new Map(),
   pendingAskHumanRequests = new Map(),
   allPermissionRequests = new Map(),
   permissionResponses = new Map(),
