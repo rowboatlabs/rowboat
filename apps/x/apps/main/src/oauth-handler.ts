@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { shell } from 'electron';
 import { createAuthServer } from './auth-server.js';
 import * as oauthClient from '@x/core/dist/auth/oauth-client.js';
 import type { Configuration } from '@x/core/dist/auth/oauth-client.js';
@@ -6,6 +6,10 @@ import { getProviderConfig, getAvailableProviders } from '@x/core/dist/auth/prov
 import container from '@x/core/dist/di/container.js';
 import { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
+import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
+import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
+import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
+import { emitOAuthEvent } from './ipc.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
 
@@ -110,6 +114,17 @@ export async function connectProvider(provider: string): Promise<{ success: bool
     // Store flow state
     activeFlows.set(state, { codeVerifier, provider, config });
 
+    // Build authorization URL
+    const authUrl = oauthClient.buildAuthorizationUrl(config, {
+      redirectUri: REDIRECT_URI,
+      scope: scopes.join(' '),
+      codeChallenge,
+      state,
+    });
+
+    // Declare timeout variable (will be set after server is created)
+    let cleanupTimeout: NodeJS.Timeout;
+
     // Create callback server
     const { server } = await createAuthServer(8080, async (code, receivedState) => {
       // Validate state
@@ -138,42 +153,43 @@ export async function connectProvider(provider: string): Promise<{ success: bool
         // Save tokens
         console.log(`[OAuth] Token exchange successful for ${provider}`);
         await oauthRepo.saveTokens(provider, tokens);
+
+        // Trigger immediate sync for relevant providers
+        if (provider === 'google') {
+          triggerGmailSync();
+          triggerCalendarSync();
+        } else if (provider === 'fireflies-ai') {
+          triggerFirefliesSync();
+        }
+
+        // Emit success event to renderer
+        emitOAuthEvent({ provider, success: true });
       } catch (error) {
         console.error('OAuth token exchange failed:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        emitOAuthEvent({ provider, success: false, error: errorMessage });
         throw error;
       } finally {
         // Clean up
         activeFlows.delete(state);
         server.close();
+        clearTimeout(cleanupTimeout);
       }
     });
 
-    // Build authorization URL
-    const authUrl = oauthClient.buildAuthorizationUrl(config, {
-      redirectUri: REDIRECT_URI,
-      scope: scopes.join(' '),
-      codeChallenge,
-      state,
-    });
+    // Set timeout to clean up abandoned flows (5 minutes)
+    // This prevents memory leaks if user never completes the OAuth flow
+    cleanupTimeout = setTimeout(() => {
+      if (activeFlows.has(state)) {
+        console.log(`[OAuth] Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
+        activeFlows.delete(state);
+        server.close();
+        emitOAuthEvent({ provider, success: false, error: 'OAuth flow timed out' });
+      }
+    }, 5 * 60 * 1000); // 5 minutes
 
-    // Open browser window
-    const authWindow = new BrowserWindow({
-      width: 600,
-      height: 700,
-      show: true,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-      },
-    });
-
-    authWindow.loadURL(authUrl.toString());
-
-    // Clean up on window close
-    authWindow.on('closed', () => {
-      activeFlows.delete(state);
-      server.close();
-    });
+    // Open in system browser (shares cookies/sessions with user's regular browser)
+    shell.openExternal(authUrl.toString());
 
     // Wait for callback (server will handle it)
     return { success: true };

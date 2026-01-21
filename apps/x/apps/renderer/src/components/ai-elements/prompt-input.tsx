@@ -47,6 +47,10 @@ import {
   XIcon,
 } from "lucide-react";
 import { nanoid } from "nanoid";
+import { useMentionDetection } from "@/hooks/use-mention-detection";
+import { MentionPopover } from "@/components/mention-popover";
+import { toKnowledgePath, wikiLabel } from "@/lib/wiki-links";
+import { getMentionHighlightSegments } from "@/lib/mention-highlights";
 import {
   type ChangeEvent,
   type ChangeEventHandler,
@@ -83,6 +87,19 @@ export type AttachmentsContext = {
   fileInputRef: RefObject<HTMLInputElement | null>;
 };
 
+export type FileMention = {
+  id: string;
+  path: string;         // "knowledge/notes.md"
+  displayName: string;  // "notes"
+};
+
+export type MentionsContext = {
+  mentions: FileMention[];
+  addMention: (path: string, displayName: string) => void;
+  removeMention: (id: string) => void;
+  clearMentions: () => void;
+};
+
 export type TextInputContext = {
   value: string;
   setInput: (v: string) => void;
@@ -92,6 +109,7 @@ export type TextInputContext = {
 export type PromptInputControllerProps = {
   textInput: TextInputContext;
   attachments: AttachmentsContext;
+  mentions: MentionsContext;
   /** INTERNAL: Allows PromptInput to register its file textInput + "open" callback */
   __registerFileInput: (
     ref: RefObject<HTMLInputElement | null>,
@@ -105,6 +123,7 @@ const PromptInputController = createContext<PromptInputControllerProps | null>(
 const ProviderAttachmentsContext = createContext<AttachmentsContext | null>(
   null
 );
+const ProviderMentionsContext = createContext<MentionsContext | null>(null);
 
 export const usePromptInputController = () => {
   const ctx = useContext(PromptInputController);
@@ -133,8 +152,35 @@ export const useProviderAttachments = () => {
 const useOptionalProviderAttachments = () =>
   useContext(ProviderAttachmentsContext);
 
+export const useProviderMentions = () => {
+  const ctx = useContext(ProviderMentionsContext);
+  if (!ctx) {
+    throw new Error(
+      "Wrap your component inside <PromptInputProvider> to use useProviderMentions()."
+    );
+  }
+  return ctx;
+};
+
+const useOptionalProviderMentions = () => useContext(ProviderMentionsContext);
+
+export type KnowledgeFilesContext = {
+  files: string[];
+  recentFiles: string[];
+  visibleFiles: string[];
+};
+
+const ProviderKnowledgeFilesContext = createContext<KnowledgeFilesContext | null>(null);
+
+export const useProviderKnowledgeFiles = () => {
+  return useContext(ProviderKnowledgeFilesContext);
+};
+
 export type PromptInputProviderProps = PropsWithChildren<{
   initialInput?: string;
+  knowledgeFiles?: string[];
+  recentFiles?: string[];
+  visibleFiles?: string[];
 }>;
 
 /**
@@ -143,6 +189,9 @@ export type PromptInputProviderProps = PropsWithChildren<{
  */
 export function PromptInputProvider({
   initialInput: initialTextInput = "",
+  knowledgeFiles = [],
+  recentFiles = [],
+  visibleFiles = [],
   children,
 }: PromptInputProviderProps) {
   // ----- textInput state
@@ -227,6 +276,37 @@ export function PromptInputProvider({
     [attachmentFiles, add, remove, clear, openFileDialog]
   );
 
+  // ----- mentions state (for @ file mentions)
+  const [mentionsList, setMentionsList] = useState<FileMention[]>([]);
+
+  const addMention = useCallback((path: string, displayName: string) => {
+    setMentionsList((prev) => {
+      // Avoid duplicates
+      if (prev.some((m) => m.path === path)) {
+        return prev;
+      }
+      return [...prev, { id: nanoid(), path, displayName }];
+    });
+  }, []);
+
+  const removeMention = useCallback((id: string) => {
+    setMentionsList((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
+  const clearMentions = useCallback(() => {
+    setMentionsList([]);
+  }, []);
+
+  const mentions = useMemo<MentionsContext>(
+    () => ({
+      mentions: mentionsList,
+      addMention,
+      removeMention,
+      clearMentions,
+    }),
+    [mentionsList, addMention, removeMention, clearMentions]
+  );
+
   const __registerFileInput = useCallback(
     (ref: RefObject<HTMLInputElement | null>, open: () => void) => {
       fileInputRef.current = ref.current;
@@ -243,15 +323,25 @@ export function PromptInputProvider({
         clear: clearInput,
       },
       attachments,
+      mentions,
       __registerFileInput,
     }),
-    [textInput, clearInput, attachments, __registerFileInput]
+    [textInput, clearInput, attachments, mentions, __registerFileInput]
+  );
+
+  const knowledgeFilesContext = useMemo<KnowledgeFilesContext>(
+    () => ({ files: knowledgeFiles, recentFiles, visibleFiles }),
+    [knowledgeFiles, recentFiles, visibleFiles]
   );
 
   return (
     <PromptInputController.Provider value={controller}>
       <ProviderAttachmentsContext.Provider value={attachments}>
-        {children}
+        <ProviderMentionsContext.Provider value={mentions}>
+          <ProviderKnowledgeFilesContext.Provider value={knowledgeFilesContext}>
+            {children}
+          </ProviderKnowledgeFilesContext.Provider>
+        </ProviderMentionsContext.Provider>
       </ProviderAttachmentsContext.Provider>
     </PromptInputController.Provider>
   );
@@ -820,14 +910,103 @@ export const PromptInputTextarea = ({
   onChange,
   className,
   placeholder = "What would you like to know?",
+  onKeyDown: externalOnKeyDown,
   ...props
 }: PromptInputTextareaProps) => {
   const controller = useOptionalPromptInputController();
   const attachments = usePromptInputAttachments();
+  const mentionsCtx = useOptionalProviderMentions();
+  const knowledgeFilesCtx = useProviderKnowledgeFiles();
   const [isComposing, setIsComposing] = useState(false);
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
+
+  const currentValue = controller?.textInput.value ?? "";
+  const knowledgeFiles = knowledgeFilesCtx?.files ?? [];
+  const recentFiles = knowledgeFilesCtx?.recentFiles ?? [];
+  const visibleFiles = knowledgeFilesCtx?.visibleFiles ?? [];
+
+  // Build mention labels for highlighting (handles multi-word names like "AI Agents")
+  const mentionLabels = useMemo(() => {
+    if (knowledgeFiles.length === 0) return [];
+    const labels = knowledgeFiles
+      .map((path) => wikiLabel(path))
+      .map((label) => label.trim())
+      .filter(Boolean);
+    return Array.from(new Set(labels));
+  }, [knowledgeFiles]);
+
+  const { activeMention, cursorCoords } = useMentionDetection(
+    textareaRef,
+    currentValue,
+    knowledgeFiles.length > 0
+  );
+
+  // Use proper regex-based highlight segmentation that handles multi-word names
+  const mentionHighlights = useMemo(
+    () => getMentionHighlightSegments(currentValue, activeMention, mentionLabels),
+    [currentValue, activeMention, mentionLabels]
+  );
+
+  // Sync highlight overlay scroll with textarea
+  const syncHighlightScroll = useCallback(() => {
+    const textarea = textareaRef.current;
+    const highlight = highlightRef.current;
+    if (!textarea || !highlight) return;
+    highlight.scrollTop = textarea.scrollTop;
+    highlight.scrollLeft = textarea.scrollLeft;
+  }, []);
+
+  useEffect(() => {
+    syncHighlightScroll();
+  }, [currentValue, mentionHighlights.hasHighlights, syncHighlightScroll]);
+
+  const handleMentionSelect = useCallback(
+    (path: string, displayName: string) => {
+      if (!controller || !activeMention) return;
+
+      // Calculate the text before and after the @query
+      const currentText = controller.textInput.value;
+      const beforeAt = currentText.substring(0, activeMention.triggerIndex);
+      const afterQuery = currentText.substring(
+        activeMention.triggerIndex + 1 + activeMention.query.length
+      );
+
+      // Replace @query with @displayName followed by a space
+      const newText = `${beforeAt}@${displayName} ${afterQuery}`;
+      controller.textInput.setInput(newText);
+
+      // Convert to knowledge path and add mention
+      const fullPath = toKnowledgePath(path);
+      if (fullPath && mentionsCtx) {
+        mentionsCtx.addMention(fullPath, displayName);
+      }
+
+      // Focus back on textarea
+      textareaRef.current?.focus();
+    },
+    [controller, activeMention, mentionsCtx]
+  );
+
+  const handleMentionClose = useCallback(() => {
+    // The popover handles its own closing
+  }, []);
+
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+    // If mention popover is open, let it handle navigation keys
+    if (activeMention && ["ArrowDown", "ArrowUp", "Tab"].includes(e.key)) {
+      // Don't prevent default here - the popover handles this via document listener
+      return;
+    }
+
     if (e.key === "Enter") {
+      // If mention popover is open, Enter should select the item
+      if (activeMention) {
+        return;
+      }
+
       if (isComposing || e.nativeEvent.isComposing) {
         return;
       }
@@ -848,6 +1027,53 @@ export const PromptInputTextarea = ({
       form?.requestSubmit();
     }
 
+    // Handle backspace to delete entire mention at once
+    if (e.key === "Backspace") {
+      const textarea = e.currentTarget;
+      const cursorPos = textarea.selectionStart;
+      const selectionEnd = textarea.selectionEnd;
+      const textValue = controller?.textInput.value ?? textarea.value;
+
+      // Only handle if no text is selected (cursor is at a single position)
+      if (cursorPos === selectionEnd) {
+        // Check if cursor is right after a mention
+        for (const label of mentionLabels) {
+          const mentionText = `@${label}`;
+          const startPos = cursorPos - mentionText.length;
+          if (startPos >= 0) {
+            const textBefore = textValue.substring(startPos, cursorPos);
+            if (textBefore === mentionText) {
+              // Check if it's at word boundary (start of string or preceded by whitespace)
+              if (startPos === 0 || /\s/.test(textValue[startPos - 1])) {
+                e.preventDefault();
+                const newText = textValue.substring(0, startPos) + textValue.substring(cursorPos);
+                if (controller) {
+                  controller.textInput.setInput(newText);
+                } else {
+                  // Fallback: directly set textarea value and trigger change
+                  textarea.value = newText;
+                  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                // Remove the mention from state
+                if (mentionsCtx) {
+                  const mentionToRemove = mentionsCtx.mentions.find(m => m.displayName === label);
+                  if (mentionToRemove) {
+                    mentionsCtx.removeMention(mentionToRemove.id);
+                  }
+                }
+                // Set cursor position after React updates
+                setTimeout(() => {
+                  textarea.selectionStart = startPos;
+                  textarea.selectionEnd = startPos;
+                }, 0);
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Remove last attachment when Backspace is pressed and textarea is empty
     if (
       e.key === "Backspace" &&
@@ -860,6 +1086,15 @@ export const PromptInputTextarea = ({
         attachments.remove(lastAttachment.id);
       }
     }
+
+    // Close mention popover on Escape
+    if (e.key === "Escape" && activeMention) {
+      // Let the popover handle this
+      return;
+    }
+
+    // Call external handler if provided
+    externalOnKeyDown?.(e);
   };
 
   const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = (event) => {
@@ -899,17 +1134,54 @@ export const PromptInputTextarea = ({
       };
 
   return (
-    <InputGroupTextarea
-      className={cn("field-sizing-content max-h-48 min-h-16", className)}
-      name="message"
-      onCompositionEnd={() => setIsComposing(false)}
-      onCompositionStart={() => setIsComposing(true)}
-      onKeyDown={handleKeyDown}
-      onPaste={handlePaste}
-      placeholder={placeholder}
-      {...props}
-      {...controlledProps}
-    />
+    <div ref={containerRef} className="relative flex flex-1 min-w-0">
+      {mentionHighlights.hasHighlights && (
+        <div
+          ref={highlightRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-sm text-transparent"
+        >
+          {mentionHighlights.segments.map((segment, index) =>
+            segment.highlighted ? (
+              <span
+                key={`mention-${index}`}
+                className="rounded bg-primary/20 text-transparent [box-decoration-break:clone] shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.15),-3px_0_0_hsl(var(--primary)/0.2),3px_0_0_hsl(var(--primary)/0.2),0_-2px_0_hsl(var(--primary)/0.2),0_2px_0_hsl(var(--primary)/0.2)]"
+              >
+                {segment.text}
+              </span>
+            ) : (
+              <span key={`text-${index}`}>{segment.text}</span>
+            )
+          )}
+        </div>
+      )}
+      <InputGroupTextarea
+        ref={textareaRef}
+        className={cn("relative z-10 !p-0 field-sizing-content max-h-48 min-h-10", className)}
+        name="message"
+        onCompositionEnd={() => setIsComposing(false)}
+        onCompositionStart={() => setIsComposing(true)}
+        onKeyDown={handleKeyDown}
+        onScroll={syncHighlightScroll}
+        onPaste={handlePaste}
+        placeholder={placeholder}
+        {...props}
+        {...controlledProps}
+      />
+      {knowledgeFiles.length > 0 && (
+        <MentionPopover
+          files={knowledgeFiles}
+          recentFiles={recentFiles}
+          visibleFiles={visibleFiles}
+          query={activeMention?.query ?? ""}
+          position={cursorCoords}
+          containerRef={containerRef}
+          onSelect={handleMentionSelect}
+          onClose={handleMentionClose}
+          open={Boolean(activeMention)}
+        />
+      )}
+    </div>
   );
 };
 

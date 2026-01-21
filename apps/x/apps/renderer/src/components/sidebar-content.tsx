@@ -3,7 +3,6 @@
 import * as React from "react"
 import { useState } from "react"
 import {
-  CalendarDays,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -12,11 +11,10 @@ import {
   FilePlus,
   Folder,
   FolderPlus,
-  Mail,
-  Microscope,
+  MessageSquare,
   Network,
   Pencil,
-  Plus,
+  SquarePen,
   Trash2,
 } from "lucide-react"
 
@@ -30,7 +28,6 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -73,37 +70,33 @@ type KnowledgeActions = {
   copyPath: (path: string) => void
 }
 
+type RunListItem = {
+  id: string
+  title?: string
+  createdAt: string
+  agentId: string
+}
+
+type TasksActions = {
+  onNewChat: () => void
+  onSelectRun: (runId: string) => void
+}
+
 type SidebarContentPanelProps = {
   tree: TreeNode[]
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
   knowledgeActions: KnowledgeActions
+  runs?: RunListItem[]
+  currentRunId?: string | null
+  tasksActions?: TasksActions
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTitles = {
   knowledge: "Knowledge",
-  agents: "Agents",
+  tasks: "Tasks",
 }
-
-
-const agentPresets = [
-  {
-    name: "Email Assistant",
-    description: "Draft replies, summarize threads.",
-    icon: Mail,
-  },
-  {
-    name: "Meeting Prep",
-    description: "Build briefs and talking points.",
-    icon: CalendarDays,
-  },
-  {
-    name: "Research",
-    description: "Gather sources, outline findings.",
-    icon: Microscope,
-  },
-]
 
 export function SidebarContentPanel({
   tree,
@@ -111,6 +104,9 @@ export function SidebarContentPanel({
   expandedPaths,
   onSelectFile,
   knowledgeActions,
+  runs = [],
+  currentRunId,
+  tasksActions,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection } = useSidebarSection()
@@ -132,8 +128,12 @@ export function SidebarContentPanel({
             actions={knowledgeActions}
           />
         )}
-        {activeSection === "agents" && (
-          <AgentsSection />
+        {activeSection === "tasks" && (
+          <TasksSection
+            runs={runs}
+            currentRunId={currentRunId}
+            actions={tasksActions}
+          />
         )}
       </SidebarContent>
       <SidebarRail />
@@ -425,40 +425,53 @@ function Tree({
   )
 }
 
-// Agents Section
-function AgentsSection() {
+// Tasks Section
+function TasksSection({
+  runs,
+  currentRunId,
+  actions,
+}: {
+  runs: RunListItem[]
+  currentRunId?: string | null
+  actions?: TasksActions
+}) {
   return (
-    <>
-      {/* Agent Presets */}
-      <SidebarGroup>
-        <SidebarGroupLabel className="flex items-center justify-between">
-          <span>Agent Presets</span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1 transition-colors">
-                <Plus className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">New Agent</TooltipContent>
-          </Tooltip>
-        </SidebarGroupLabel>
-        <SidebarGroupContent>
-          <SidebarMenu>
-            {agentPresets.map((agent) => (
-              <SidebarMenuItem key={agent.name}>
-                <SidebarMenuButton className="h-auto items-start gap-2 py-2">
-                  <agent.icon className="mt-0.5 size-4" />
-                  <div className="flex flex-col gap-1">
-                    <span className="text-sm font-medium">{agent.name}</span>
-                    <span className="text-xs text-muted-foreground">{agent.description}</span>
-                  </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
-    </>
+    <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
+      {/* Sticky New Chat button - matches Knowledge section height */}
+      <div className="sticky top-0 z-10 bg-sidebar border-b border-sidebar-border py-0.5">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={actions?.onNewChat} className="gap-2">
+              <SquarePen className="size-4 shrink-0" />
+              <span className="text-sm">New chat</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </div>
+      <SidebarGroupContent className="flex-1 overflow-y-auto">
+        {runs.length > 0 && (
+          <>
+            <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+              Chat history
+            </div>
+            <SidebarMenu>
+              {runs.map((run) => (
+                <SidebarMenuItem key={run.id}>
+                  <SidebarMenuButton
+                    isActive={currentRunId === run.id}
+                    onClick={() => actions?.onSelectRun(run.id)}
+                    className="gap-2"
+                  >
+                    <MessageSquare className="size-4 shrink-0" />
+                    <span className="truncate text-sm">{run.title || '(Untitled chat)'}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </>
+        )}
+      </SidebarGroupContent>
+    </SidebarGroup>
   )
 }
 

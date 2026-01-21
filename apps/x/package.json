@@ -2,6 +2,7 @@
   "name": "x",
   "private": true,
   "type": "module",
+  "version": "0.1.0",
   "scripts": {
     "dev": "npm run deps && concurrently -k \"npm:renderer\" \"npm:main\"",
     "renderer": "cd apps/renderer && npm run dev",

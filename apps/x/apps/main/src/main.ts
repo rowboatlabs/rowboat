@@ -1,8 +1,9 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, protocol, net, shell } from "electron";
 import path from "node:path";
 import { setupIpcHandlers, startRunsWatcher, startWorkspaceWatcher, stopWorkspaceWatcher } from "./ipc.js";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
+import { updateElectronApp, UpdateSourceType } from "update-electron-app";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
@@ -13,13 +14,55 @@ import { init as initPreBuiltRunner } from "@x/core/dist/pre_built/runner.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const preloadPath = path.join(__dirname, "../../preload/dist/preload.js");
+// Path resolution differs between development and production:
+const preloadPath = app.isPackaged
+  ? path.join(__dirname, "../preload/dist/preload.js")
+  : path.join(__dirname, "../../../preload/dist/preload.js");
 console.log("preloadPath", preloadPath);
+
+const rendererPath = app.isPackaged
+  ? path.join(__dirname, "../renderer/dist") // Production
+  : path.join(__dirname, "../../../renderer/dist"); // Development
+console.log("rendererPath", rendererPath);
+
+// Register custom protocol for serving built renderer files in production.
+// This keeps SPA routes working when users deep link into the packaged app.
+function registerAppProtocol() {
+  protocol.handle("app", (request) => {
+    const url = new URL(request.url);
+
+    // url.pathname starts with "/"
+    let urlPath = url.pathname;
+
+    // If it's "/" or a SPA route (no extension), serve index.html
+    if (urlPath === "/" || !path.extname(urlPath)) {
+      urlPath = "/index.html";
+    }
+
+    const filePath = path.join(rendererPath, urlPath);
+    return net.fetch(pathToFileURL(filePath).toString());
+  });
+}
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "app",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      allowServiceWorkers: true,
+      // optional but often helpful:
+      // stream: true,
+    },
+  },
+]);
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1280,
+    height: 800,
     webPreferences: {
       // IMPORTANT: keep Node out of renderer
       nodeIntegration: false,
@@ -29,10 +72,47 @@ function createWindow() {
     },
   });
 
-  win.loadURL("http://localhost:5173"); // load the dev server
+  // Open external links in system browser (not sandboxed Electron window)
+  // This handles window.open() and target="_blank" links
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+
+  // Handle navigation to external URLs (e.g., clicking a link without target="_blank")
+  win.webContents.on("will-navigate", (event, url) => {
+    const isInternal =
+      url.startsWith("app://") || url.startsWith("http://localhost:5173");
+    if (!isInternal) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  if (app.isPackaged) {
+    win.loadURL("app://-/index.html");
+  } else {
+    win.loadURL("http://localhost:5173");
+  }
 }
 
 app.whenReady().then(() => {
+  // Register custom protocol before creating window (for production builds)
+  if (app.isPackaged) {
+    registerAppProtocol();
+  }
+
+  // Initialize auto-updater (only in production)
+  if (app.isPackaged) {
+    updateElectronApp({
+      updateSource: {
+        type: UpdateSourceType.StaticStorage,
+        baseUrl: `https://rowboat-desktop-app-releases.s3.amazonaws.com/releases/${process.platform}/${process.arch}`,
+      },
+      notifyUser: true, // Shows native dialog when update is available
+    });
+  }
+
   setupIpcHandlers();
 
   createWindow();
@@ -43,7 +123,6 @@ app.whenReady().then(() => {
   // - External changes (terminal, git, other editors)
   // Only starts once (guarded in startWorkspaceWatcher)
   startWorkspaceWatcher();
-
 
   // start runs watcher
   startRunsWatcher();
@@ -66,7 +145,7 @@ app.whenReady().then(() => {
   // start pre-built agent runner
   initPreBuiltRunner();
 
-  app.on('activate', () => {
+  app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }

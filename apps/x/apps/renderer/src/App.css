@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Required for Streamdown markdown rendering (bullet points, lists, etc.) */
+@source "../node_modules/streamdown/dist/*.js";
+
 @custom-variant dark (&:is(.dark *));
 
 #root {
@@ -162,6 +165,66 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Markdown content base styles for Streamdown/MessageResponse */
+@layer components {
+  /* Target elements inside MessageResponse wrapper */
+  [data-slot="message-content"] ul,
+  [data-slot="message-content"] ol {
+    @apply my-2 pl-5;
+  }
+  [data-slot="message-content"] ul {
+    @apply list-disc;
+  }
+  [data-slot="message-content"] ol {
+    @apply list-decimal;
+  }
+  [data-slot="message-content"] li {
+    @apply my-1;
+  }
+  [data-slot="message-content"] p {
+    @apply my-2 first:mt-0 last:mb-0;
+  }
+  [data-slot="message-content"] h1 {
+    @apply my-4 text-2xl font-bold first:mt-0;
+  }
+  [data-slot="message-content"] h2 {
+    @apply my-3 text-xl font-semibold first:mt-0;
+  }
+  [data-slot="message-content"] h3 {
+    @apply my-3 text-lg font-semibold first:mt-0;
+  }
+  [data-slot="message-content"] h4,
+  [data-slot="message-content"] h5,
+  [data-slot="message-content"] h6 {
+    @apply my-2 font-semibold first:mt-0;
+  }
+  [data-slot="message-content"] code:not(pre code) {
+    @apply rounded bg-muted px-1.5 py-0.5 font-mono text-sm;
+  }
+  [data-slot="message-content"] pre {
+    @apply my-3 overflow-x-auto rounded-lg;
+  }
+  [data-slot="message-content"] blockquote {
+    @apply my-3 border-l-4 border-border pl-4 italic text-muted-foreground;
+  }
+  [data-slot="message-content"] hr {
+    @apply my-4 border-border;
+  }
+  [data-slot="message-content"] a {
+    @apply text-primary underline underline-offset-2 hover:text-primary/80;
+  }
+  [data-slot="message-content"] table {
+    @apply my-3 w-full border-collapse;
+  }
+  [data-slot="message-content"] th,
+  [data-slot="message-content"] td {
+    @apply border border-border px-3 py-2 text-left;
+  }
+  [data-slot="message-content"] th {
+    @apply bg-muted font-semibold;
   }
 }
 

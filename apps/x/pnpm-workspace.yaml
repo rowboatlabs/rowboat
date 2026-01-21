@@ -3,5 +3,10 @@ packages:
   - packages/*
 
 onlyBuiltDependencies:
+  - core-js
   - electron
+  - electron-winstaller
   - esbuild
+  - fs-xattr
+  - macos-alias
+  - protobufjs

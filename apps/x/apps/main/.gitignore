@@ -1,2 +1,5 @@
 node_modules/
 dist/
+# Staging directory for Electron Forge packaging (contains bundled main process, copied preload/renderer)
+.package/
+out/

@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import {
-  Bot,
   Brain,
   HelpCircle,
+  ListTodo,
   Plug,
   Settings,
 } from "lucide-react"
@@ -18,6 +18,7 @@ import {
 import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
 import { ConnectorsPopover } from "@/components/connectors-popover"
 import { HelpPopover } from "@/components/help-popover"
+import { SettingsDialog } from "@/components/settings-dialog"
 
 type NavItem = {
   id: ActiveSection
@@ -27,7 +28,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { id: "knowledge", title: "Knowledge", icon: Brain },
-  { id: "agents", title: "Agents", icon: Bot },
+  { id: "tasks", title: "Tasks", icon: ListTodo },
 ]
 
 export function SidebarIcon() {
@@ -71,18 +72,13 @@ export function SidebarIcon() {
         </ConnectorsPopover>
 
         {/* Settings */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-            >
-              <Settings className="size-5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right" sideOffset={8}>
-            Settings
-          </TooltipContent>
-        </Tooltip>
+        <SettingsDialog>
+          <button
+            className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          >
+            <Settings className="size-5" />
+          </button>
+        </SettingsDialog>
 
         {/* Help */}
         <HelpPopover tooltip="Help">

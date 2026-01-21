@@ -209,6 +209,14 @@ const ipcSchemas = {
       providers: z.array(z.string()),
     }),
   },
+  'oauth:didConnect': {
+    req: z.object({
+      provider: z.string(),
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+    res: z.null(),
+  },
   'granola:getConfig': {
     req: z.null(),
     res: z.object({
@@ -219,6 +227,18 @@ const ipcSchemas = {
     req: z.object({
       enabled: z.boolean(),
     }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  'onboarding:getStatus': {
+    req: z.null(),
+    res: z.object({
+      showOnboarding: z.boolean(),
+    }),
+  },
+  'onboarding:markComplete': {
+    req: z.null(),
     res: z.object({
       success: z.literal(true),
     }),

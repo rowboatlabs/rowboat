@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: './',  // Use relative paths for assets (required for Electron custom protocol)
   plugins: [
     react(),
     tailwindcss(),
@@ -13,5 +14,8 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+  },
+  build: {
+    outDir: 'dist',
   },
 })

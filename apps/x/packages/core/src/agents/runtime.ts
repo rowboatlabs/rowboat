@@ -2,6 +2,7 @@ import { jsonSchema, ModelMessage } from "ai";
 import fs from "fs";
 import path from "path";
 import { WorkDir } from "../config/config.js";
+import { getNoteCreationStrictness } from "../config/note_creation_config.js";
 import { Agent, ToolAttachment } from "@x/shared/dist/agent.js";
 import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage } from "@x/shared/dist/message.js";
 import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
@@ -23,6 +24,9 @@ import { IRunsRepo } from "../runs/repo.js";
 import { IRunsLock } from "../runs/lock.js";
 import { PrefixLogger } from "@x/shared";
 import { parse } from "yaml";
+import { raw as noteCreationMediumRaw } from "../knowledge/note_creation_medium.js";
+import { raw as noteCreationLowRaw } from "../knowledge/note_creation_low.js";
+import { raw as noteCreationHighRaw } from "../knowledge/note_creation_high.js";
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -245,18 +249,20 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
         return CopilotAgent;
     }
 
-    // Special case: load built-in agents from checked-in files
-    const builtinAgents: Record<string, string> = {
-        'note_creation': '../knowledge/note_creation.md',
-        'meeting-prep': '../pre_built/meeting-prep.md',
-        'email-draft': '../pre_built/email-draft.md',
-    };
-
-    if (id in builtinAgents) {
-        const currentDir = path.dirname(new URL(import.meta.url).pathname);
-        const agentFilePath = path.join(currentDir, builtinAgents[id]);
-        const raw = fs.readFileSync(agentFilePath, "utf8");
-
+    if (id === 'note_creation') {
+        const strictness = getNoteCreationStrictness();
+        let raw = '';
+        switch (strictness) {
+            case 'medium':
+                raw = noteCreationMediumRaw;
+                break;
+            case 'low':
+                raw = noteCreationLowRaw;
+                break;
+            case 'high':
+                raw = noteCreationHighRaw;
+                break;
+        }
         let agent: z.infer<typeof Agent> = {
             name: id,
             instructions: raw,
@@ -687,10 +693,21 @@ export async function* streamAgent({
         loopLogger.log('running llm turn');
         // stream agent response and build message
         const messageBuilder = new StreamStepMessageBuilder();
+        const now = new Date();
+        const currentDateTime = now.toLocaleString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZoneName: 'short'
+        });
+        const instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
         for await (const event of streamLlm(
             model,
             state.messages,
-            agent.instructions,
+            instructionsWithDateTime,
             tools,
         )) {
             // Only log significant events (not text-delta to reduce noise)

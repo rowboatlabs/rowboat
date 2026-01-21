@@ -2,7 +2,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
+import docCollabSkill from "./doc-collab/skill.js";
+import draftEmailsSkill from "./draft-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
+import meetingPrepSkill from "./meeting-prep/skill.js";
+import organizeFilesSkill from "./organize-files/skill.js";
 import workflowAuthoringSkill from "./workflow-authoring/skill.js";
 import workflowRunOpsSkill from "./workflow-run-ops/skill.js";
 
@@ -25,6 +29,34 @@ type ResolvedSkill = {
 };
 
 const definitions: SkillDefinition[] = [
+  {
+    id: "doc-collab",
+    title: "Document Collaboration",
+    folder: "doc-collab",
+    summary: "Collaborate on documents - create, edit, and refine notes and documents in the knowledge base.",
+    content: docCollabSkill,
+  },
+  {
+    id: "draft-emails",
+    title: "Draft Emails",
+    folder: "draft-emails",
+    summary: "Process incoming emails and create draft responses using calendar and knowledge base for context.",
+    content: draftEmailsSkill,
+  },
+  {
+    id: "meeting-prep",
+    title: "Meeting Prep",
+    folder: "meeting-prep",
+    summary: "Prepare for meetings by gathering context about attendees from the knowledge base.",
+    content: meetingPrepSkill,
+  },
+  {
+    id: "organize-files",
+    title: "Organize Files",
+    folder: "organize-files",
+    summary: "Find, organize, and tidy up files on the user's machine. Move files to folders, clean up Desktop/Downloads, locate specific files.",
+    content: organizeFilesSkill,
+  },
   {
     id: "workflow-authoring",
     title: "Workflow Authoring",

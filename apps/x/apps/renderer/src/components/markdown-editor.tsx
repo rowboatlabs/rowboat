@@ -3,9 +3,11 @@ import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
+import Image from '@tiptap/extension-image'
 import Placeholder from '@tiptap/extension-placeholder'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
 import { Markdown } from 'tiptap-markdown'
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
 import { EditorToolbar } from './editor-toolbar'
@@ -27,6 +29,7 @@ interface MarkdownEditorProps {
   onChange: (markdown: string) => void
   placeholder?: string
   wikiLinks?: WikiLinkConfig
+  onImageUpload?: (file: File) => Promise<string | null>
 }
 
 type WikiLinkMatch = {
@@ -74,6 +77,7 @@ export function MarkdownEditor({
   onChange,
   placeholder = 'Start writing...',
   wikiLinks,
+  onImageUpload,
 }: MarkdownEditorProps) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -105,6 +109,14 @@ export function MarkdownEditor({
           target: '_blank',
         },
       }),
+      Image.configure({
+        inline: false,
+        allowBase64: true,
+        HTMLAttributes: {
+          class: 'editor-image',
+        },
+      }),
+      ImageUploadPlaceholderExtension,
       WikiLink.configure({
         onCreate: wikiLinks?.onCreate
           ? (path) => {
@@ -298,9 +310,15 @@ export function MarkdownEditor({
 
   const showWikiPopover = Boolean(wikiLinks && activeWikiLink && anchorPosition)
 
+  // Create image upload handler that shows placeholder
+  const handleImageUploadWithPlaceholder = useMemo(() => {
+    if (!editor || !onImageUpload) return undefined
+    return createImageUploadHandler(editor, onImageUpload)
+  }, [editor, onImageUpload])
+
   return (
     <div className="tiptap-editor" onKeyDown={handleKeyDown}>
-      <EditorToolbar editor={editor} onSelectionHighlight={setSelectionHighlight} />
+      <EditorToolbar editor={editor} onSelectionHighlight={setSelectionHighlight} onImageUpload={handleImageUploadWithPlaceholder} />
       <div className="editor-content-wrapper" ref={wrapperRef} onScroll={handleScroll}>
         <EditorContent editor={editor} />
         {wikiLinks ? (

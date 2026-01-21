@@ -13,12 +13,12 @@ export interface IModelConfigRepo {
 
 const defaultConfig: z.infer<typeof ModelConfig> = {
     providers: {
-        "openai": {
-            flavor: "openai",
+        "rowboat": {
+            flavor: "rowboat [free]",
         }
     },
     defaults: {
-        provider: "openai",
+        provider: "rowboat",
         model: "gpt-5.1",
     }
 };

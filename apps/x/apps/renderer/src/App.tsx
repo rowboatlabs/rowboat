@@ -1,12 +1,13 @@
 import * as React from 'react'
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
-import { RunEvent } from '@x/shared/src/runs.js';
-import type { ChatStatus, LanguageModelUsage, ToolUIPart } from 'ai';
+import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
+import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelRightIcon, SquarePen } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -19,7 +20,6 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
-  ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import {
   Message,
@@ -27,28 +27,19 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message';
 import {
-  PromptInput,
-  PromptInputBody,
-  PromptInputFooter,
   type PromptInputMessage,
-  PromptInputSubmit,
+  PromptInputProvider,
   PromptInputTextarea,
-  PromptInputTools,
+  usePromptInputController,
+  type FileMention,
 } from '@/components/ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
-import {
-  Context,
-  ContextCacheUsage,
-  ContextContent,
-  ContextContentBody,
-  ContextContentHeader,
-  ContextInputUsage,
-  ContextOutputUsage,
-  ContextReasoningUsage,
-  ContextTrigger,
-} from '@/components/ai-elements/context';
+import { PermissionRequest } from '@/components/ai-elements/permission-request';
+import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
+import { Suggestions } from '@/components/ai-elements/suggestions';
+import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
   SidebarProvider,
@@ -56,10 +47,13 @@ import {
 } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
+import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
+import { OnboardingModal } from '@/components/onboarding-modal'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
+type ListRunsResponseType = z.infer<typeof ListRunsResponse>
 
 interface TreeNode extends DirEntry {
   children?: TreeNode[]
@@ -91,11 +85,6 @@ interface ReasoningBlock {
 type ConversationItem = ChatMessage | ToolCall | ReasoningBlock;
 
 type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
-
-const estimateTokens = (text: string) => {
-  if (!text) return 0
-  return Math.ceil(text.trim().length / 4)
-}
 
 const isChatMessage = (item: ConversationItem): item is ChatMessage => 'role' in item
 const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
@@ -133,6 +122,41 @@ const graphPalette = [
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
 
+// Parse attached files from message content and return clean message + file paths
+const parseAttachedFiles = (content: string): { message: string; files: string[] } => {
+  const attachedFilesRegex = /<attached-files>\s*([\s\S]*?)\s*<\/attached-files>/
+  const match = content.match(attachedFilesRegex)
+
+  if (!match) {
+    return { message: content, files: [] }
+  }
+
+  // Extract file paths from the XML
+  const filesXml = match[1]
+  const filePathRegex = /<file path="([^"]+)">/g
+  const files: string[] = []
+  let fileMatch
+  while ((fileMatch = filePathRegex.exec(filesXml)) !== null) {
+    files.push(fileMatch[1])
+  }
+
+  // Remove the attached-files block
+  let cleanMessage = content.replace(attachedFilesRegex, '').trim()
+
+  // Also remove @mentions for the attached files (they're shown as pills)
+  for (const filePath of files) {
+    // Get the display name (last part of path without extension)
+    const fileName = filePath.split('/').pop()?.replace(/\.md$/i, '') || ''
+    if (fileName) {
+      // Remove @filename pattern (with optional trailing space)
+      const mentionRegex = new RegExp(`@${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'gi')
+      cleanMessage = cleanMessage.replace(mentionRegex, '')
+    }
+  }
+
+  return { message: cleanMessage.trim(), files }
+}
+
 const untitledBaseName = 'untitled'
 
 const getHeadingTitle = (markdown: string) => {
@@ -140,7 +164,8 @@ const getHeadingTitle = (markdown: string) => {
   for (const line of lines) {
     const match = line.match(/^#\s+(.+)$/)
     if (match) return match[1].trim()
-    if (line.trim() !== '') return null
+    const trimmed = line.trim()
+    if (trimmed !== '') return trimmed
   }
   return null
 }
@@ -251,6 +276,103 @@ const collectDirPaths = (nodes: TreeNode[]): string[] =>
 const collectFilePaths = (nodes: TreeNode[]): string[] =>
   nodes.flatMap(n => n.kind === 'file' ? [n.path] : (n.children ? collectFilePaths(n.children) : []))
 
+// Inner component that uses the controller to access mentions
+interface ChatInputInnerProps {
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
+  isProcessing: boolean
+  presetMessage?: string
+  onPresetMessageConsumed?: () => void
+}
+
+function ChatInputInner({
+  onSubmit,
+  isProcessing,
+  presetMessage,
+  onPresetMessageConsumed,
+}: ChatInputInnerProps) {
+  const controller = usePromptInputController()
+  const message = controller.textInput.value
+  const canSubmit = Boolean(message.trim()) && !isProcessing
+
+  // Handle preset message from suggestions
+  useEffect(() => {
+    if (presetMessage) {
+      controller.textInput.setInput(presetMessage)
+      onPresetMessageConsumed?.()
+    }
+  }, [presetMessage, controller.textInput, onPresetMessageConsumed])
+
+  const handleSubmit = useCallback(() => {
+    if (!canSubmit) return
+    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions)
+    controller.textInput.clear()
+    controller.mentions.clearMentions()
+  }, [canSubmit, message, onSubmit, controller])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit()
+    }
+  }, [handleSubmit])
+
+  return (
+    <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
+      <PromptInputTextarea
+        placeholder="Type your message..."
+        disabled={isProcessing}
+        onKeyDown={handleKeyDown}
+        className="min-h-6 py-0 border-0 shadow-none focus-visible:ring-0 rounded-none"
+      />
+      <Button
+        size="icon"
+        onClick={handleSubmit}
+        disabled={!canSubmit}
+        className={cn(
+          "h-7 w-7 rounded-full shrink-0 transition-all",
+          canSubmit
+            ? "bg-primary text-primary-foreground hover:bg-primary/90"
+            : "bg-muted text-muted-foreground"
+        )}
+      >
+        <ArrowUp className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+}
+
+// Wrapper component with PromptInputProvider
+interface ChatInputWithMentionsProps {
+  knowledgeFiles: string[]
+  recentFiles: string[]
+  visibleFiles: string[]
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
+  isProcessing: boolean
+  presetMessage?: string
+  onPresetMessageConsumed?: () => void
+}
+
+function ChatInputWithMentions({
+  knowledgeFiles,
+  recentFiles,
+  visibleFiles,
+  onSubmit,
+  isProcessing,
+  presetMessage,
+  onPresetMessageConsumed,
+}: ChatInputWithMentionsProps) {
+  return (
+    <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
+      <ChatInputInner
+        onSubmit={onSubmit}
+        isProcessing={isProcessing}
+        presetMessage={presetMessage}
+        onPresetMessageConsumed={onPresetMessageConsumed}
+      />
+    </PromptInputProvider>
+  )
+}
+
 function App() {
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -266,7 +388,7 @@ function App() {
   })
   const [graphStatus, setGraphStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [graphError, setGraphError] = useState<string | null>(null)
-  const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(false)
+  const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(true)
 
   // Auto-save state
   const [isSaving, setIsSaving] = useState(false)
@@ -280,10 +402,29 @@ function App() {
   const [conversation, setConversation] = useState<ConversationItem[]>([])
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>('')
   const [currentReasoning, setCurrentReasoning] = useState<string>('')
-  const [modelUsage, setModelUsage] = useState<LanguageModelUsage | null>(null)
+  const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [agentId] = useState<string>('copilot')
+  const [presetMessage, setPresetMessage] = useState<string | undefined>(undefined)
+
+  // Runs history state
+  type RunListItem = { id: string; title?: string; createdAt: string; agentId: string }
+  const [runs, setRuns] = useState<RunListItem[]>([])
+
+  // Pending requests state
+  const [pendingPermissionRequests, setPendingPermissionRequests] = useState<Map<string, z.infer<typeof ToolPermissionRequestEvent>>>(new Map())
+  const [pendingAskHumanRequests, setPendingAskHumanRequests] = useState<Map<string, z.infer<typeof AskHumanRequestEvent>>>(new Map())
+  // Track ALL permission requests (for rendering with response status)
+  const [allPermissionRequests, setAllPermissionRequests] = useState<Map<string, z.infer<typeof ToolPermissionRequestEvent>>>(new Map())
+  // Track permission responses (toolCallId -> response)
+  const [permissionResponses, setPermissionResponses] = useState<Map<string, 'approve' | 'deny'>>(new Map())
+
+  // Workspace root for full paths
+  const [workspaceRoot, setWorkspaceRoot] = useState<string>('')
+
+  // Onboarding state
+  const [showOnboarding, setShowOnboarding] = useState(false)
 
   // Load directory tree
   const loadDirectory = useCallback(async () => {
@@ -306,11 +447,30 @@ function App() {
 
   // Listen to workspace change events
   useEffect(() => {
-    const cleanup = window.ipc.on('workspace:didChange', () => {
+    const cleanup = window.ipc.on('workspace:didChange', async (event) => {
       loadDirectory().then(setTree)
+
+      // Reload current file if it was changed externally
+      if (!selectedPath) return
+
+      const changedPath = event.type === 'changed' ? event.path : null
+      const changedPaths = (event.type === 'bulkChanged' ? event.paths : []) ?? []
+
+      const isCurrentFileChanged =
+        changedPath === selectedPath || changedPaths.includes(selectedPath)
+
+      if (isCurrentFileChanged) {
+        // Only reload if no unsaved edits
+        if (editorContent === initialContentRef.current) {
+          const result = await window.ipc.invoke('workspace:readFile', { path: selectedPath })
+          setFileContent(result.data)
+          setEditorContent(result.data)
+          initialContentRef.current = result.data
+        }
+      }
     })
     return cleanup
-  }, [loadDirectory])
+  }, [loadDirectory, selectedPath, editorContent])
 
   // Load file content when selected
   useEffect(() => {
@@ -398,6 +558,168 @@ function App() {
     }
     saveFile()
   }, [debouncedContent, selectedPath])
+
+  // Load runs list (all pages)
+  const loadRuns = useCallback(async () => {
+    try {
+      const allRuns: RunListItem[] = []
+      let cursor: string | undefined = undefined
+
+      // Fetch all pages
+      do {
+        const result: ListRunsResponseType = await window.ipc.invoke('runs:list', { cursor })
+        allRuns.push(...result.runs)
+        cursor = result.nextCursor
+      } while (cursor)
+
+      // Filter for copilot runs only
+      const copilotRuns = allRuns.filter((run: RunListItem) => run.agentId === 'copilot')
+      setRuns(copilotRuns)
+    } catch (err) {
+      console.error('Failed to load runs:', err)
+    }
+  }, [])
+
+  // Load runs on mount
+  useEffect(() => {
+    loadRuns()
+  }, [loadRuns])
+
+  // Load a specific run and populate conversation
+  const loadRun = useCallback(async (id: string) => {
+    try {
+      const run = await window.ipc.invoke('runs:fetch', { runId: id })
+
+      // Parse the log events into conversation items
+      const items: ConversationItem[] = []
+      const toolCallMap = new Map<string, ToolCall>()
+
+      for (const event of run.log) {
+        switch (event.type) {
+          case 'message': {
+            const msg = event.message
+            if (msg.role === 'user' || msg.role === 'assistant') {
+              // Extract text content from message
+              let textContent = ''
+              if (typeof msg.content === 'string') {
+                textContent = msg.content
+              } else if (Array.isArray(msg.content)) {
+                // Extract text parts
+                textContent = msg.content
+                  .filter((part: { type: string }) => part.type === 'text')
+                  .map((part: { type: string; text?: string }) => part.text || '')
+                  .join('')
+                
+                // Also extract tool-call parts from assistant messages
+                if (msg.role === 'assistant') {
+                  for (const part of msg.content) {
+                    if (part.type === 'tool-call') {
+                      const toolCall: ToolCall = {
+                        id: part.toolCallId,
+                        name: part.toolName,
+                        input: normalizeToolInput(part.arguments),
+                        status: 'pending',
+                        timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
+                      }
+                      toolCallMap.set(toolCall.id, toolCall)
+                      items.push(toolCall)
+                    }
+                  }
+                }
+              }
+              if (textContent) {
+                items.push({
+                  id: event.messageId,
+                  role: msg.role,
+                  content: textContent,
+                  timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
+                })
+              }
+            }
+            break
+          }
+          case 'tool-invocation': {
+            // Update existing tool call status or create new one
+            const existingTool = event.toolCallId ? toolCallMap.get(event.toolCallId) : null
+            if (existingTool) {
+              existingTool.input = normalizeToolInput(event.input)
+              existingTool.status = 'running'
+            } else {
+              const toolCall: ToolCall = {
+                id: event.toolCallId || `tool-${Date.now()}-${Math.random()}`,
+                name: event.toolName,
+                input: normalizeToolInput(event.input),
+                status: 'running',
+                timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
+              }
+              toolCallMap.set(toolCall.id, toolCall)
+              items.push(toolCall)
+            }
+            break
+          }
+          case 'tool-result': {
+            const existingTool = event.toolCallId ? toolCallMap.get(event.toolCallId) : null
+            if (existingTool) {
+              existingTool.result = event.result
+              existingTool.status = 'completed'
+            }
+            break
+          }
+          case 'llm-stream-event': {
+            // We don't need to reconstruct streaming events for history
+            // Reasoning is captured in the final message
+            break
+          }
+        }
+      }
+
+      // Track permission requests and responses from history
+      const allPermissionRequests = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
+      const permResponseMap = new Map<string, 'approve' | 'deny'>()
+      const askHumanRequests = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
+      const respondedAskHumanIds = new Set<string>()
+
+      for (const event of run.log) {
+        if (event.type === 'tool-permission-request') {
+          allPermissionRequests.set(event.toolCall.toolCallId, event)
+        } else if (event.type === 'tool-permission-response') {
+          permResponseMap.set(event.toolCallId, event.response)
+        } else if (event.type === 'ask-human-request') {
+          askHumanRequests.set(event.toolCallId, event)
+        } else if (event.type === 'ask-human-response') {
+          respondedAskHumanIds.add(event.toolCallId)
+        }
+      }
+
+      // Separate pending vs responded permission requests
+      const pendingPerms = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
+      for (const [id, req] of allPermissionRequests.entries()) {
+        if (!permResponseMap.has(id)) {
+          pendingPerms.set(id, req)
+        }
+      }
+
+      const pendingAsks = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
+      for (const [id, req] of askHumanRequests.entries()) {
+        if (!respondedAskHumanIds.has(id)) {
+          pendingAsks.set(id, req)
+        }
+      }
+
+      // Set the conversation and runId
+      setConversation(items)
+      setRunId(id)
+      setCurrentAssistantMessage('')
+      setCurrentReasoning('')
+      setMessage('')
+      setPendingPermissionRequests(pendingPerms)
+      setPendingAskHumanRequests(pendingAsks)
+      setAllPermissionRequests(allPermissionRequests)
+      setPermissionResponses(permResponseMap)
+    } catch (err) {
+      console.error('Failed to load run:', err)
+    }
+  }, [])
 
   // Listen to run events
   useEffect(() => {
@@ -550,6 +872,54 @@ function App() {
           break
         }
 
+      case 'tool-permission-request': {
+        const key = event.toolCall.toolCallId
+        setPendingPermissionRequests(prev => {
+          const next = new Map(prev)
+          next.set(key, event)
+          return next
+        })
+        setAllPermissionRequests(prev => {
+          const next = new Map(prev)
+          next.set(key, event)
+          return next
+        })
+        break
+      }
+
+      case 'tool-permission-response': {
+        setPendingPermissionRequests(prev => {
+          const next = new Map(prev)
+          next.delete(event.toolCallId)
+          return next
+        })
+        setPermissionResponses(prev => {
+          const next = new Map(prev)
+          next.set(event.toolCallId, event.response)
+          return next
+        })
+        break
+      }
+
+      case 'ask-human-request': {
+        const key = event.toolCallId
+        setPendingAskHumanRequests(prev => {
+          const next = new Map(prev)
+          next.set(key, event)
+          return next
+        })
+        break
+      }
+
+      case 'ask-human-response': {
+        setPendingAskHumanRequests(prev => {
+          const next = new Map(prev)
+          next.delete(event.toolCallId)
+          return next
+        })
+        break
+      }
+
       case 'error':
         setIsProcessing(false)
         console.error('Run error:', event.error)
@@ -557,9 +927,10 @@ function App() {
     }
   }
 
-  const handlePromptSubmit = async ({ text }: PromptInputMessage) => {
+  const handlePromptSubmit = async (message: PromptInputMessage, mentions?: FileMention[]) => {
     if (isProcessing) return
 
+    const { text } = message;
     const userMessage = text.trim()
     if (!userMessage) return
 
@@ -575,22 +946,95 @@ function App() {
 
     try {
       let currentRunId = runId
+      let isNewRun = false
       if (!currentRunId) {
         const run = await window.ipc.invoke('runs:create', {
           agentId,
         })
         currentRunId = run.id
         setRunId(currentRunId)
+        isNewRun = true
+      }
+
+      // Read mentioned file contents and format message with XML context
+      let formattedMessage = userMessage
+      if (mentions && mentions.length > 0) {
+        const attachedFiles = await Promise.all(
+          mentions.map(async (m) => {
+            try {
+              const result = await window.ipc.invoke('workspace:readFile', { path: m.path })
+              return { path: m.path, content: result.data as string }
+            } catch (err) {
+              console.error('Failed to read mentioned file:', m.path, err)
+              return { path: m.path, content: `[Error reading file: ${m.path}]` }
+            }
+          })
+        )
+
+        if (attachedFiles.length > 0) {
+          const filesXml = attachedFiles
+            .map(f => `<file path="${f.path}">\n${f.content}\n</file>`)
+            .join('\n')
+          formattedMessage = `<attached-files>\n${filesXml}\n</attached-files>\n\n${userMessage}`
+        }
       }
 
       await window.ipc.invoke('runs:createMessage', {
         runId: currentRunId,
-        message: userMessage,
+        message: formattedMessage,
       })
+
+      // Refresh runs list after message is sent (so title is available)
+      if (isNewRun) {
+        loadRuns()
+      }
     } catch (error) {
       console.error('Failed to send message:', error)
     }
   }
+
+  const handlePermissionResponse = useCallback(async (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => {
+    if (!runId) return
+    
+    // Optimistically update the UI immediately
+    setPermissionResponses(prev => {
+      const next = new Map(prev)
+      next.set(toolCallId, response)
+      return next
+    })
+    setPendingPermissionRequests(prev => {
+      const next = new Map(prev)
+      next.delete(toolCallId)
+      return next
+    })
+    
+    try {
+      await window.ipc.invoke('runs:authorizePermission', {
+        runId,
+        authorization: { subflow, toolCallId, response }
+      })
+    } catch (error) {
+      console.error('Failed to authorize permission:', error)
+      // Revert the optimistic update on error
+      setPermissionResponses(prev => {
+        const next = new Map(prev)
+        next.delete(toolCallId)
+        return next
+      })
+    }
+  }, [runId])
+
+  const handleAskHumanResponse = useCallback(async (toolCallId: string, subflow: string[], response: string) => {
+    if (!runId) return
+    try {
+      await window.ipc.invoke('runs:provideHumanInput', {
+        runId,
+        reply: { subflow, toolCallId, response }
+      })
+    } catch (error) {
+      console.error('Failed to provide human input:', error)
+    }
+  }, [runId])
 
   const handleNewChat = useCallback(() => {
     setConversation([])
@@ -599,13 +1043,73 @@ function App() {
     setRunId(null)
     setMessage('')
     setModelUsage(null)
+    setPendingPermissionRequests(new Map())
+    setPendingAskHumanRequests(new Map())
+    setAllPermissionRequests(new Map())
+    setPermissionResponses(new Map())
   }, [])
 
   const handleChatInputSubmit = (text: string) => {
     setIsChatSidebarOpen(true)
     // Submit immediately - the sidebar will open and show the message
-    handlePromptSubmit({ text })
+    handlePromptSubmit({ text, files: [] })
   }
+
+  const handleOpenFullScreenChat = useCallback(() => {
+    setSelectedPath(null)
+    setIsGraphOpen(false)
+  }, [])
+
+  // Handle image upload for the markdown editor
+  const handleImageUpload = useCallback(async (file: File): Promise<string | null> => {
+    try {
+      // Read file as data URL (includes mime type)
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+
+      // Also save to .assets folder for persistence
+      const timestamp = Date.now()
+      const extension = file.name.split('.').pop() || 'png'
+      const filename = `image-${timestamp}.${extension}`
+      const assetsPath = 'knowledge/.assets'
+      const imagePath = `${assetsPath}/${filename}`
+
+      try {
+        // Extract base64 data (remove data URL prefix)
+        const base64Data = dataUrl.split(',')[1]
+        await window.ipc.invoke('workspace:writeFile', {
+          path: imagePath,
+          data: base64Data,
+          opts: { encoding: 'base64', mkdirp: true }
+        })
+      } catch (err) {
+        console.error('Failed to save image to disk:', err)
+        // Continue anyway - image will still display via data URL
+      }
+
+      // Return data URL for immediate display in editor
+      return dataUrl
+    } catch (error) {
+      console.error('Failed to upload image:', error)
+      return null
+    }
+  }, [])
+
+  // Keyboard shortcut: Ctrl+L to open main chat view
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
+        e.preventDefault()
+        handleOpenFullScreenChat()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [handleOpenFullScreenChat])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
@@ -623,9 +1127,9 @@ function App() {
     setExpandedPaths(newExpanded)
   }
 
-  // Handle sidebar section changes - switch to chat view for agents
+  // Handle sidebar section changes - switch to chat view for tasks
   const handleSectionChange = useCallback((section: ActiveSection) => {
-    if (section === 'agents') {
+    if (section === 'tasks') {
       setSelectedPath(null)
       setIsGraphOpen(false)
     }
@@ -644,12 +1148,59 @@ function App() {
     }, [])
   ), [knowledgeFiles])
 
-  // Get workspace root for full paths
-  const [workspaceRoot, setWorkspaceRoot] = useState<string>('')
+  // Compute visible files (files whose parent directories are expanded)
+  const visibleKnowledgeFiles = React.useMemo(() => {
+    const visible: string[] = []
+    const isPathVisible = (path: string) => {
+      const parts = path.split('/')
+      // Root level files in knowledge are always visible
+      if (parts.length <= 2) return true
+      // Check if all parent directories are expanded
+      for (let i = 1; i < parts.length - 1; i++) {
+        const parentPath = parts.slice(0, i + 1).join('/')
+        if (!expandedPaths.has(parentPath)) return false
+      }
+      return true
+    }
+
+    for (const file of knowledgeFiles) {
+      const fullPath = toKnowledgePath(file)
+      if (fullPath && isPathVisible(fullPath)) {
+        visible.push(file)
+      }
+    }
+    return visible
+  }, [knowledgeFiles, expandedPaths])
+
+  // Load workspace root on mount
   useEffect(() => {
     window.ipc.invoke('workspace:getRoot', null).then(result => {
       setWorkspaceRoot(result.root)
     })
+  }, [])
+
+  // Check onboarding status on mount
+  useEffect(() => {
+    async function checkOnboarding() {
+      try {
+        const result = await window.ipc.invoke('onboarding:getStatus', null)
+        setShowOnboarding(result.showOnboarding)
+      } catch (err) {
+        console.error('Failed to check onboarding status:', err)
+      }
+    }
+    checkOnboarding()
+  }, [])
+
+  // Handler for onboarding completion
+  const handleOnboardingComplete = useCallback(async () => {
+    try {
+      await window.ipc.invoke('onboarding:markComplete', null)
+      setShowOnboarding(false)
+    } catch (err) {
+      console.error('Failed to mark onboarding complete:', err)
+      setShowOnboarding(false)
+    }
   }, [])
 
   const knowledgeActions = React.useMemo(() => ({
@@ -876,14 +1427,32 @@ function App() {
 
   const renderConversationItem = (item: ConversationItem) => {
     if (isChatMessage(item)) {
+      if (item.role === 'user') {
+        const { message, files } = parseAttachedFiles(item.content)
+        return (
+          <Message key={item.id} from={item.role}>
+            <MessageContent>
+              {files.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {files.map((filePath, index) => (
+                    <span
+                      key={index}
+                      className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full"
+                    >
+                      @{wikiLabel(filePath)}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {message}
+            </MessageContent>
+          </Message>
+        )
+      }
       return (
         <Message key={item.id} from={item.role}>
           <MessageContent>
-            {item.role === 'assistant' ? (
-              <MessageResponse>{item.content}</MessageResponse>
-            ) : (
-              item.content
-            )}
+            <MessageResponse>{item.content}</MessageResponse>
           </MessageContent>
         </Message>
       )
@@ -922,44 +1491,10 @@ function App() {
     return null
   }
 
-  const chatMessages = conversation.filter(isChatMessage)
-  const reasoningBlocks = conversation.filter(isReasoningBlock)
-  const estimatedInputTokens = chatMessages
-    .filter((item) => item.role === 'user')
-    .reduce((total, item) => total + estimateTokens(item.content), 0)
-  const estimatedOutputTokens = chatMessages
-    .filter((item) => item.role === 'assistant')
-    .reduce((total, item) => total + estimateTokens(item.content), 0)
-    + estimateTokens(currentAssistantMessage)
-  const estimatedReasoningTokens = reasoningBlocks
-    .reduce((total, item) => total + estimateTokens(item.content), 0)
-    + estimateTokens(currentReasoning)
-  const estimatedTotalTokens = estimatedInputTokens + estimatedOutputTokens + estimatedReasoningTokens
-  const maxTokens = 128_000
-  const estimatedUsage = {
-    inputTokens: estimatedInputTokens,
-    outputTokens: estimatedOutputTokens,
-    totalTokens: estimatedTotalTokens,
-    cachedInputTokens: 0,
-    reasoningTokens: estimatedReasoningTokens,
-  } as LanguageModelUsage
-  const effectiveUsage = modelUsage ?? estimatedUsage
-  const effectiveTotalTokens = effectiveUsage.totalTokens
-    ?? (effectiveUsage.inputTokens ?? 0)
-      + (effectiveUsage.outputTokens ?? 0)
-      + (effectiveUsage.reasoningTokens ?? 0)
-  const usedTokens = Math.min(effectiveTotalTokens, maxTokens)
-  const contextUsage = {
-    ...effectiveUsage,
-    totalTokens: effectiveTotalTokens,
-  } as LanguageModelUsage
-
   const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
   const conversationContentClassName = hasConversation
     ? "mx-auto w-full max-w-4xl pb-28"
     : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
-  const submitStatus: ChatStatus = isProcessing ? 'streaming' : 'ready'
-  const canSubmit = Boolean(message.trim()) && !isProcessing
   const headerTitle = selectedPath ? selectedPath : (isGraphOpen ? 'Graph View' : 'Chat')
 
   return (
@@ -985,17 +1520,23 @@ function App() {
               expandedPaths={expandedPaths}
               onSelectFile={toggleExpand}
               knowledgeActions={knowledgeActions}
+              runs={runs}
+              currentRunId={runId}
+              tasksActions={{
+                onNewChat: handleNewChat,
+                onSelectRun: loadRun,
+              }}
             />
-            <SidebarInset className="!overflow-hidden min-h-0">
-              {/* Header with sidebar trigger */}
+            <SidebarInset className="overflow-hidden! min-h-0">
+              {/* Header with sidebar triggers */}
               <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 bg-background">
                 <SidebarTrigger className="-ml-1" />
                 <Separator orientation="vertical" className="h-4" />
-                <span className="text-sm font-medium text-muted-foreground">
+                <span className="text-sm font-medium text-muted-foreground flex-1">
                   {headerTitle}
                 </span>
                 {selectedPath && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground ml-auto">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     {isSaving ? (
                       <>
                         <LoaderIcon className="h-3 w-3 animate-spin" />
@@ -1009,15 +1550,45 @@ function App() {
                     ) : null}
                   </div>
                 )}
+                {!isGraphOpen && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      handleNewChat()
+                      if (selectedPath) {
+                        setIsChatSidebarOpen(true)
+                      }
+                    }}
+                    className="text-foreground gap-1.5"
+                  >
+                    <SquarePen className="size-4" />
+                    New Chat
+                  </Button>
+                )}
                 {!selectedPath && isGraphOpen && (
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setIsGraphOpen(false)}
-                    className="ml-auto text-foreground"
+                    className="text-foreground"
                   >
                     Close Graph
                   </Button>
+                )}
+                {(selectedPath || isGraphOpen) && (
+                  <>
+                    <Separator orientation="vertical" className="h-4" />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsChatSidebarOpen(!isChatSidebarOpen)}
+                      className="size-7 -mr-1"
+                    >
+                      <PanelRightIcon />
+                      <span className="sr-only">Toggle Chat Sidebar</span>
+                    </Button>
+                  </>
                 )}
               </header>
 
@@ -1042,6 +1613,7 @@ function App() {
                       onChange={setEditorContent}
                       placeholder="Start writing..."
                       wikiLinks={wikiLinkConfig}
+                      onImageUpload={handleImageUpload}
                     />
                   </div>
                 ) : (
@@ -1058,12 +1630,49 @@ function App() {
                     {!hasConversation ? (
                       <ConversationEmptyState className="h-auto">
                         <div className="text-4xl font-semibold tracking-tight text-foreground/80 sm:text-5xl md:text-6xl">
-                          RowboatX
+                          Rowboat
+                        </div>
+                        <div className="mt-3 text-sm text-muted-foreground flex items-center gap-1">
+                          <kbd className="px-1.5 py-0.5 text-xs font-medium bg-muted rounded border border-border">⌘</kbd>
+                          <kbd className="px-1.5 py-0.5 text-xs font-medium bg-muted rounded border border-border">L</kbd>
+                          <span className="ml-1">to open chat from anywhere</span>
                         </div>
                       </ConversationEmptyState>
                     ) : (
                       <>
-                        {conversation.map(item => renderConversationItem(item))}
+                        {conversation.map(item => {
+                          const rendered = renderConversationItem(item)
+                          // If this is a tool call, check for permission request (pending or responded)
+                          if (isToolCall(item)) {
+                            const permRequest = allPermissionRequests.get(item.id)
+                            if (permRequest) {
+                              const response = permissionResponses.get(item.id) || null
+                              return (
+                                <React.Fragment key={item.id}>
+                                  {rendered}
+                                  <PermissionRequest
+                                    toolCall={permRequest.toolCall}
+                                    onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                    onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                    isProcessing={isProcessing}
+                                    response={response}
+                                  />
+                                </React.Fragment>
+                              )
+                            }
+                          }
+                          return rendered
+                        })}
+
+                        {/* Render pending ask-human requests */}
+                        {Array.from(pendingAskHumanRequests.values()).map((request) => (
+                          <AskHumanRequest
+                            key={request.toolCallId}
+                            query={request.query}
+                            onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
+                            isProcessing={isProcessing}
+                          />
+                        ))}
 
                         {currentReasoning && (
                           <Reasoning isStreaming>
@@ -1090,46 +1699,23 @@ function App() {
                       </>
                     )}
                   </ConversationContent>
-                  <ConversationScrollButton className="bottom-24" />
                 </Conversation>
 
-                <div className="relative sticky bottom-0 z-10 bg-background pb-4 pt-6 shadow-lg">
-                  <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-background to-transparent" />
+                <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
+                  <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                   <div className="mx-auto w-full max-w-4xl px-4">
-                    <PromptInput onSubmit={handlePromptSubmit}>
-                      <PromptInputBody>
-                        <PromptInputTextarea
-                          value={message}
-                          onChange={(e) => setMessage(e.target.value)}
-                          placeholder="Type your message..."
-                          disabled={isProcessing}
-                        />
-                      </PromptInputBody>
-                      <PromptInputFooter>
-                        <PromptInputTools>
-                          <Context
-                            maxTokens={maxTokens}
-                            usedTokens={usedTokens}
-                            usage={contextUsage}
-                          >
-                            <ContextTrigger size="sm" />
-                            <ContextContent>
-                              <ContextContentHeader />
-                              <ContextContentBody>
-                                <ContextInputUsage />
-                                <ContextOutputUsage />
-                                <ContextReasoningUsage />
-                                <ContextCacheUsage />
-                              </ContextContentBody>
-                            </ContextContent>
-                          </Context>
-                        </PromptInputTools>
-                        <PromptInputSubmit
-                          disabled={!canSubmit}
-                          status={submitStatus}
-                        />
-                      </PromptInputFooter>
-                    </PromptInput>
+                    {!hasConversation && (
+                      <Suggestions onSelect={setPresetMessage} className="mb-3 justify-center" />
+                    )}
+                    <ChatInputWithMentions
+                      knowledgeFiles={knowledgeFiles}
+                      recentFiles={recentWikiFiles}
+                      visibleFiles={visibleKnowledgeFiles}
+                      onSubmit={handlePromptSubmit}
+                      isProcessing={isProcessing}
+                      presetMessage={presetMessage}
+                      onPresetMessageConsumed={() => setPresetMessage(undefined)}
+                    />
                   </div>
                 </div>
               </div>
@@ -1137,11 +1723,12 @@ function App() {
             </SidebarInset>
 
             {/* Chat sidebar - shown when viewing files/graph */}
-            {isChatSidebarOpen && (selectedPath || isGraphOpen) && (
+            {(selectedPath || isGraphOpen) && (
               <ChatSidebar
                 defaultWidth={400}
-                onClose={() => setIsChatSidebarOpen(false)}
+                isOpen={isChatSidebarOpen}
                 onNewChat={handleNewChat}
+                onOpenFullScreen={handleOpenFullScreenChat}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
                 currentReasoning={currentReasoning}
@@ -1149,9 +1736,16 @@ function App() {
                 message={message}
                 onMessageChange={setMessage}
                 onSubmit={handlePromptSubmit}
-                contextUsage={contextUsage}
-                maxTokens={maxTokens}
-                usedTokens={usedTokens}
+                knowledgeFiles={knowledgeFiles}
+                recentFiles={recentWikiFiles}
+                visibleFiles={visibleKnowledgeFiles}
+                selectedPath={selectedPath}
+                pendingPermissionRequests={pendingPermissionRequests}
+                pendingAskHumanRequests={pendingAskHumanRequests}
+                allPermissionRequests={allPermissionRequests}
+                permissionResponses={permissionResponses}
+                onPermissionResponse={handlePermissionResponse}
+                onAskHumanResponse={handleAskHumanResponse}
               />
             )}
           </SidebarProvider>
@@ -1165,6 +1759,11 @@ function App() {
           )}
         </div>
       </SidebarSectionProvider>
+      <Toaster />
+      <OnboardingModal
+        open={showOnboarding}
+        onComplete={handleOnboardingComplete}
+      />
     </TooltipProvider>
   )
 }

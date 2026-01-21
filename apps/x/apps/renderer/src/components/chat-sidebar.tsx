@@ -1,6 +1,6 @@
-import { useCallback, useRef, useState } from 'react'
-import { ArrowUp, PanelRightClose, Plus } from 'lucide-react'
-import type { LanguageModelUsage, ToolUIPart } from 'ai'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowUp, Expand, Plus } from 'lucide-react'
+import type { ToolUIPart } from 'ai'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -12,7 +12,6 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
-  ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import {
   Message,
@@ -22,6 +21,17 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
+import { PermissionRequest } from '@/components/ai-elements/permission-request'
+import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
+import { Suggestions } from '@/components/ai-elements/suggestions'
+import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
+import { useMentionDetection } from '@/hooks/use-mention-detection'
+import { MentionPopover } from '@/components/mention-popover'
+import { toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
+import { getMentionHighlightSegments } from '@/lib/mention-highlights'
+import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js'
+import z from 'zod'
+import React from 'react'
 
 interface ChatMessage {
   id: string
@@ -98,24 +108,33 @@ const DEFAULT_WIDTH = 400
 
 interface ChatSidebarProps {
   defaultWidth?: number
-  onClose: () => void
+  isOpen?: boolean
   onNewChat: () => void
+  onOpenFullScreen?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
   currentReasoning: string
   isProcessing: boolean
   message: string
   onMessageChange: (message: string) => void
-  onSubmit: (message: { text: string }) => void
-  contextUsage: LanguageModelUsage
-  maxTokens: number
-  usedTokens: number
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
+  knowledgeFiles?: string[]
+  recentFiles?: string[]
+  visibleFiles?: string[]
+  selectedPath?: string | null
+  pendingPermissionRequests?: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
+  pendingAskHumanRequests?: Map<string, z.infer<typeof AskHumanRequestEvent>>
+  allPermissionRequests?: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
+  permissionResponses?: Map<string, 'approve' | 'deny'>
+  onPermissionResponse?: (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => void
+  onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
 }
 
 export function ChatSidebar({
   defaultWidth = DEFAULT_WIDTH,
-  onClose,
+  isOpen = true,
   onNewChat,
+  onOpenFullScreen,
   conversation,
   currentAssistantMessage,
   currentReasoning,
@@ -123,12 +142,101 @@ export function ChatSidebar({
   message,
   onMessageChange,
   onSubmit,
+  knowledgeFiles = [],
+  recentFiles = [],
+  visibleFiles = [],
+  selectedPath,
+  pendingAskHumanRequests = new Map(),
+  allPermissionRequests = new Map(),
+  permissionResponses = new Map(),
+  onPermissionResponse,
+  onAskHumanResponse,
 }: ChatSidebarProps) {
   const [width, setWidth] = useState(defaultWidth)
   const [isResizing, setIsResizing] = useState(false)
+  const [showContent, setShowContent] = useState(isOpen)
+
+  // Delay showing content when opening, hide immediately when closing
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => setShowContent(true), 150)
+      return () => clearTimeout(timer)
+    } else {
+      setShowContent(false)
+    }
+  }, [isOpen])
   const startXRef = useRef(0)
   const startWidthRef = useRef(0)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
+  const [mentions, setMentions] = useState<FileMention[]>([])
+  const autoMentionRef = useRef<{ path: string; displayName: string } | null>(null)
+  const lastSelectedPathRef = useRef<string | null>(null)
+
+  // Build mention labels for highlighting (handles multi-word names like "AI Agents")
+  const mentionLabels = useMemo(() => {
+    if (knowledgeFiles.length === 0) return []
+    const labels = knowledgeFiles
+      .map((path) => wikiLabel(path))
+      .map((label) => label.trim())
+      .filter(Boolean)
+    return Array.from(new Set(labels))
+  }, [knowledgeFiles])
+
+  const { activeMention, cursorCoords } = useMentionDetection(
+    textareaRef,
+    message,
+    knowledgeFiles.length > 0
+  )
+
+  // Use proper regex-based highlight segmentation that handles multi-word names
+  const mentionHighlights = useMemo(
+    () => getMentionHighlightSegments(message, activeMention, mentionLabels),
+    [message, activeMention, mentionLabels]
+  )
+
+  // Sync highlight overlay scroll with textarea
+  const syncHighlightScroll = useCallback(() => {
+    const textarea = textareaRef.current
+    const highlight = highlightRef.current
+    if (!textarea || !highlight) return
+    highlight.scrollTop = textarea.scrollTop
+    highlight.scrollLeft = textarea.scrollLeft
+  }, [])
+
+  useEffect(() => {
+    syncHighlightScroll()
+  }, [message, mentionHighlights.hasHighlights, syncHighlightScroll])
+
+  const handleMentionSelect = useCallback(
+    (path: string, displayName: string) => {
+      if (!activeMention) return
+
+      const beforeAt = message.substring(0, activeMention.triggerIndex)
+      const afterQuery = message.substring(
+        activeMention.triggerIndex + 1 + activeMention.query.length
+      )
+
+      const newText = `${beforeAt}@${displayName} ${afterQuery}`
+      onMessageChange(newText)
+
+      const fullPath = toKnowledgePath(path)
+      if (fullPath) {
+        setMentions(prev => {
+          if (prev.some(m => m.path === fullPath)) return prev
+          return [...prev, { id: `mention-${Date.now()}`, path: fullPath, displayName }]
+        })
+      }
+
+      textareaRef.current?.focus()
+    },
+    [activeMention, message, onMessageChange]
+  )
+
+  const handleMentionClose = useCallback(() => {
+    // The popover handles its own closing
+  }, [])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -152,20 +260,117 @@ export function ChatSidebar({
     document.addEventListener('mouseup', handleMouseUp)
   }, [width])
 
+  // Auto-focus textarea when sidebar opens
+  useEffect(() => {
+    textareaRef.current?.focus()
+  }, [])
+
+  // Auto-populate with @currentfile when switching knowledge files
+  useEffect(() => {
+    if (selectedPath === lastSelectedPathRef.current) return
+    lastSelectedPathRef.current = selectedPath ?? null
+
+    if (!selectedPath || !selectedPath.startsWith('knowledge/') || !selectedPath.endsWith('.md')) {
+      return
+    }
+
+    const displayName = wikiLabel(selectedPath)
+    const previousAuto = autoMentionRef.current
+    const trimmed = message.trim()
+    const previousToken = previousAuto ? `@${previousAuto.displayName}` : null
+    const shouldReplace = !trimmed || (previousToken && trimmed === previousToken)
+
+    if (!shouldReplace) {
+      return
+    }
+
+    const nextText = `@${displayName} `
+    if (message !== nextText) {
+      onMessageChange(nextText)
+    }
+
+    setMentions((prev) => {
+      const withoutPrevious = previousAuto
+        ? prev.filter((mention) => mention.path !== previousAuto.path)
+        : prev
+      if (withoutPrevious.some((mention) => mention.path === selectedPath)) {
+        return withoutPrevious
+      }
+      return [
+        ...withoutPrevious,
+        {
+          id: `mention-auto-${Date.now()}`,
+          path: selectedPath,
+          displayName,
+        },
+      ]
+    })
+
+    autoMentionRef.current = { path: selectedPath, displayName }
+  }, [selectedPath, message, onMessageChange])
+
   const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
   const canSubmit = Boolean(message.trim()) && !isProcessing
 
   const handleSubmit = () => {
     const trimmed = message.trim()
     if (trimmed && !isProcessing) {
-      onSubmit({ text: trimmed })
+      onSubmit({ text: trimmed, files: [] }, mentions)
+      setMentions([])
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // If mention popover is open, let it handle navigation keys
+    if (activeMention && ['ArrowDown', 'ArrowUp', 'Tab', 'Escape'].includes(e.key)) {
+      return
+    }
+
+    if (e.key === 'Enter') {
+      // If mention popover is open, Enter should select the item
+      if (activeMention) {
+        return
+      }
+
+      if (!e.shiftKey) {
+        e.preventDefault()
+        handleSubmit()
+      }
+    }
+
+    // Handle backspace to delete entire mention at once
+    if (e.key === 'Backspace') {
+      const textarea = e.currentTarget
+      const cursorPos = textarea.selectionStart
+      const selectionEnd = textarea.selectionEnd
+
+      // Only handle if no text is selected (cursor is at a single position)
+      if (cursorPos !== selectionEnd) return
+
+      // Check if cursor is right after a mention
+      for (const label of mentionLabels) {
+        const mentionText = `@${label}`
+        const startPos = cursorPos - mentionText.length
+        if (startPos >= 0) {
+          const textBefore = message.substring(startPos, cursorPos)
+          if (textBefore === mentionText) {
+            // Check if it's at word boundary (start of string or preceded by whitespace)
+            if (startPos === 0 || /\s/.test(message[startPos - 1])) {
+              e.preventDefault()
+              const newText = message.substring(0, startPos) + message.substring(cursorPos)
+              onMessageChange(newText)
+              // Remove the mention from state
+              setMentions(prev => prev.filter(m => m.displayName !== label))
+              // Set cursor position after React updates
+              setTimeout(() => {
+                textarea.selectionStart = startPos
+                textarea.selectionEnd = startPos
+              }, 0)
+              return
+            }
+          }
+        }
+      }
     }
   }
 
@@ -217,10 +422,15 @@ export function ChatSidebar({
     return null
   }
 
+  const displayWidth = isOpen ? width : 0
+
   return (
     <div
-      className="relative flex flex-col border-l border-border bg-background shrink-0"
-      style={{ width }}
+      className={cn(
+        "relative flex flex-col border-l border-border bg-background shrink-0 overflow-hidden",
+        !isResizing && "transition-[width] duration-200 ease-linear"
+      )}
+      style={{ width: displayWidth }}
     >
       {/* Resize handle */}
       <div
@@ -233,25 +443,30 @@ export function ChatSidebar({
         )}
       />
 
-      {/* Header - minimal, no border */}
-      <header className="flex h-12 shrink-0 items-center justify-between px-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-muted-foreground hover:text-foreground">
-              <PanelRightClose className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Close</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={onNewChat} className="h-8 w-8 text-muted-foreground hover:text-foreground">
-              <Plus className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">New chat</TooltipContent>
-        </Tooltip>
-      </header>
+      {/* Content - delayed on open, hidden immediately on close to avoid layout issues during animation */}
+      {showContent && (
+        <>
+          {/* Header - minimal, expand and new chat buttons */}
+          <header className="flex h-12 shrink-0 items-center justify-end gap-1 px-2">
+            {onOpenFullScreen && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={onOpenFullScreen} className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                    <Expand className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Full screen chat</TooltipContent>
+              </Tooltip>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={onNewChat} className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">New chat</TooltipContent>
+            </Tooltip>
+          </header>
 
       {/* Conversation area */}
       <div className="flex min-h-0 flex-1 flex-col relative">
@@ -267,7 +482,39 @@ export function ChatSidebar({
               </ConversationEmptyState>
             ) : (
               <>
-                {conversation.map(item => renderConversationItem(item))}
+                {conversation.map(item => {
+                  const rendered = renderConversationItem(item)
+                  // If this is a tool call, check for permission request (pending or responded)
+                  if (isToolCall(item) && onPermissionResponse) {
+                    const permRequest = allPermissionRequests.get(item.id)
+                    if (permRequest) {
+                      const response = permissionResponses.get(item.id) || null
+                      return (
+                        <React.Fragment key={item.id}>
+                          {rendered}
+                          <PermissionRequest
+                            toolCall={permRequest.toolCall}
+                            onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                            onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                            isProcessing={isProcessing}
+                            response={response}
+                          />
+                        </React.Fragment>
+                      )
+                    }
+                  }
+                  return rendered
+                })}
+
+                {/* Render pending ask-human requests */}
+                {onAskHumanResponse && Array.from(pendingAskHumanRequests.values()).map((request) => (
+                  <AskHumanRequest
+                    key={request.toolCallId}
+                    query={request.query}
+                    onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
+                    isProcessing={isProcessing}
+                  />
+                ))}
 
                 {currentReasoning && (
                   <Reasoning isStreaming>
@@ -294,22 +541,55 @@ export function ChatSidebar({
               </>
             )}
           </ConversationContent>
-          <ConversationScrollButton className="bottom-24" />
         </Conversation>
 
         {/* Input area - responsive to sidebar width, matches floating bar position exactly */}
-        <div className="absolute bottom-6 left-14 right-6 z-10">
-          <div className="flex items-center gap-2 bg-background border border-border rounded-full shadow-xl px-4 py-2.5">
-            <input
-              ref={inputRef}
-              type="text"
-              value={message}
-              onChange={(e) => onMessageChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask anything..."
-              disabled={isProcessing}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
+        <div className="absolute bottom-6 left-14 right-6 z-10" ref={containerRef}>
+          {!hasConversation && (
+            <Suggestions
+              onSelect={(prompt) => {
+                onMessageChange(prompt)
+                setTimeout(() => textareaRef.current?.focus(), 0)
+              }}
+              vertical
+              className="mb-3"
             />
+          )}
+          <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
+            <div className="relative flex-1 min-w-0">
+              {mentionHighlights.hasHighlights && (
+                <div
+                  ref={highlightRef}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap wrap-break-word text-sm text-transparent"
+                >
+                  {mentionHighlights.segments.map((segment, index) =>
+                    segment.highlighted ? (
+                      <span
+                        key={`mention-${index}`}
+                        className="rounded bg-primary/20 text-transparent [box-decoration-break:clone] shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.15),-3px_0_0_hsl(var(--primary)/0.2),3px_0_0_hsl(var(--primary)/0.2),0_-2px_0_hsl(var(--primary)/0.2),0_2px_0_hsl(var(--primary)/0.2)]"
+                      >
+                        {segment.text}
+                      </span>
+                    ) : (
+                      <span key={`text-${index}`}>{segment.text}</span>
+                    )
+                  )}
+                </div>
+              )}
+              <textarea
+                ref={textareaRef}
+                value={message}
+                onChange={(e) => onMessageChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onScroll={syncHighlightScroll}
+                placeholder="Ask anything..."
+                disabled={isProcessing}
+                rows={1}
+                className="relative z-10 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-32 min-h-6"
+                style={{ fieldSizing: 'content' } as React.CSSProperties}
+              />
+            </div>
             <Button
               size="icon"
               onClick={handleSubmit}
@@ -324,8 +604,23 @@ export function ChatSidebar({
               <ArrowUp className="h-4 w-4" />
             </Button>
           </div>
+          {knowledgeFiles.length > 0 && (
+            <MentionPopover
+              files={knowledgeFiles}
+              recentFiles={recentFiles}
+              visibleFiles={visibleFiles}
+              query={activeMention?.query ?? ''}
+              position={cursorCoords}
+              containerRef={containerRef}
+              onSelect={handleMentionSelect}
+              onClose={handleMentionClose}
+              open={Boolean(activeMention)}
+            />
+          )}
         </div>
       </div>
+        </>
+      )}
     </div>
   )
 }

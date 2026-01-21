@@ -1,19 +1,31 @@
 {
-    "name": "@x/main",
+    "name": "Rowboat",
     "type": "module",
-    "main": "dist/main.js",
+    "version": "0.1.0",
+    "main": ".package/dist/main.cjs",
     "scripts": {
         "start": "electron .",
-        "build": "rm -rf dist && tsc"
+        "build": "rm -rf dist && tsc && node bundle.mjs",
+        "package": "electron-forge package --arch=arm64,x64 --platform=darwin",
+        "make": "electron-forge make --arch=arm64,x64 --platform=darwin",
+        "publish": "electron-forge publish --arch=arm64,x64 --platform=darwin"
     },
     "dependencies": {
         "@x/core": "workspace:*",
         "@x/shared": "workspace:*",
         "chokidar": "^4.0.3",
+        "update-electron-app": "^3.1.2",
         "zod": "^4.2.1"
     },
     "devDependencies": {
         "@types/node": "^25.0.3",
-        "electron": "^39.2.7"
+        "electron": "^39.2.7",
+        "esbuild": "^0.24.2",
+        "@electron-forge/cli": "^7.10.2",
+        "@electron-forge/maker-deb": "^7.10.2",
+        "@electron-forge/maker-dmg": "^7.10.2",
+        "@electron-forge/maker-squirrel": "^7.10.2",
+        "@electron-forge/maker-zip": "^7.10.2",
+        "@electron-forge/publisher-s3": "^7.10.2"
     }
 }

@@ -137,7 +137,82 @@ resetGraphState(); // Clears the state file
 
 Or manually delete: `~/.rowboat/knowledge_graph_state.json`
 
-## Configuration
+## Note Creation Strictness
+
+The system supports three strictness levels that control how aggressively notes are created from emails. Meetings always create notes at all levels.
+
+### Configuration
+
+Strictness is configured in `~/.rowboat/config/note_creation.json`:
+
+```json
+{
+  "strictness": "medium",
+  "configured": true
+}
+```
+
+On first run, the system auto-analyzes your emails and recommends a setting based on volume and patterns.
+
+### Strictness Levels
+
+| Level | Philosophy |
+|-------|------------|
+| **High** | "Meetings create notes. Emails enrich them." |
+| **Medium** | "Both create notes, but emails require personalized content." |
+| **Low** | "Capture broadly. Never miss a potentially important contact." |
+
+### What Each Level Filters
+
+| Email Type | High | Medium | Low |
+|------------|------|--------|-----|
+| Mass newsletters | Skip | Skip | Skip |
+| Automated/system emails | Skip | Skip | Skip |
+| Consumer services (Amazon, Netflix, banks) | Skip | Skip | ✅ Create |
+| Generic cold sales | Skip | Skip | ✅ Create |
+| Recruiters | Skip | Skip | ✅ Create |
+| Support reps | Skip | Skip | ✅ Create |
+| Personalized business emails | Skip | ✅ Create | ✅ Create |
+| Warm intros | ✅ Create | ✅ Create | ✅ Create |
+
+### High Strictness
+
+- Emails **never create** new notes (only meetings do)
+- Emails can only **update existing** notes for people you've already met
+- Exception: Warm intros from known contacts can create notes
+- Best for: Users who get lots of emails and want minimal noise
+
+### Medium Strictness
+
+- Emails **can create** notes if personalized and business-relevant
+- Filters out consumer services, mass mail, generic pitches
+- Warm intros from anyone (not just existing contacts) create notes
+- Best for: Balanced capture of relevant business contacts
+
+### Low Strictness
+
+- Creates notes for **any identifiable human sender**
+- Only skips obvious automated emails and newsletters
+- Philosophy: "Better to have a note you don't need than to miss someone important"
+- Best for: Users with low email volume who want comprehensive capture
+
+### Auto-Configuration
+
+On first run, `strictness_analyzer.ts` analyzes your emails and recommends a level:
+
+- **>100 human senders** → Recommends High (avoid overload)
+- **50-100 senders** → Recommends Medium (balanced)
+- **>50% consumer services** → Recommends Medium (filter noise)
+- **<30 senders** → Recommends Low (comprehensive capture is manageable)
+
+### Prompt Files
+
+Each strictness level has its own agent prompt:
+- `note_creation_high.md` - Original strict rules
+- `note_creation_medium.md` - Relaxed for personalized emails
+- `note_creation_low.md` - Minimal filtering
+
+## Other Configuration
 
 ### Batch Size
 Change `BATCH_SIZE` in `build_graph.ts` (currently 25 files per batch)

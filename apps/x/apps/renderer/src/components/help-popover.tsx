@@ -25,7 +25,7 @@ export function HelpPopover({ children, tooltip }: HelpPopoverProps) {
   const [open, setOpen] = useState(false)
 
   const handleDiscordClick = () => {
-    window.open("https://discord.com/invite/rxB8pzHxaS", "_blank")
+    window.open("https://discord.gg/htdKpBZF", "_blank")
   }
 
   return (
@@ -74,6 +74,25 @@ export function HelpPopover({ children, tooltip }: HelpPopoverProps) {
               </span>
             </div>
           </Button>
+        </div>
+        <div className="px-4 py-3 border-t flex justify-center gap-3 text-xs text-muted-foreground">
+          <a
+            href="https://www.rowboatlabs.com/terms-of-service"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-foreground transition-colors"
+          >
+            Terms of Service
+          </a>
+          <span>·</span>
+          <a
+            href="https://www.rowboatlabs.com/privacy-policy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-foreground transition-colors"
+          >
+            Privacy Policy
+          </a>
         </div>
       </PopoverContent>
     </Popover>

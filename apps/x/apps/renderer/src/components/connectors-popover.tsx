@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { Database, Loader2, Plug } from "lucide-react"
+import { Loader2, Mic, Mail } from "lucide-react"
 
 import {
   Popover,
@@ -15,10 +15,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { toast } from "@/lib/toast"
+import { toast } from "sonner"
 
 interface ProviderState {
   isConnected: boolean
@@ -78,10 +77,10 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       setGranolaLoading(true)
       await window.ipc.invoke('granola:setConfig', { enabled })
       setGranolaEnabled(enabled)
-      toast(enabled ? 'Granola sync enabled' : 'Granola sync disabled', 'success')
+      toast.success(enabled ? 'Granola sync enabled' : 'Granola sync disabled')
     } catch (error) {
       console.error('Failed to update Granola config:', error)
-      toast('Failed to update Granola sync settings', 'error')
+      toast.error('Failed to update Granola sync settings')
     } finally {
       setGranolaLoading(false)
     }
@@ -127,6 +126,41 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
     }
   }, [open, providers, refreshAllStatuses])
 
+  // Listen for OAuth completion events
+  useEffect(() => {
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      const { provider, success, error } = event
+      
+      setProviderStates(prev => ({
+        ...prev,
+        [provider]: {
+          isConnected: success,
+          isLoading: false,
+          isConnecting: false,
+        }
+      }))
+
+      if (success) {
+        const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
+        // Show detailed message for Google and Fireflies (includes sync info)
+        if (provider === 'google' || provider === 'fireflies-ai') {
+          toast.success(`Connected to ${displayName}`, {
+            description: 'Syncing your data in the background. This may take a few minutes before changes appear.',
+            duration: 8000,
+          })
+        } else {
+          toast.success(`Connected to ${displayName}`)
+        }
+        // Refresh status to ensure consistency
+        refreshAllStatuses()
+      } else {
+        toast.error(error || `Failed to connect to ${provider}`)
+      }
+    })
+
+    return cleanup
+  }, [refreshAllStatuses])
+
   // Connect to a provider
   const handleConnect = useCallback(async (provider: string) => {
     setProviderStates(prev => ({
@@ -138,19 +172,11 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       const result = await window.ipc.invoke('oauth:connect', { provider })
 
       if (result.success) {
-        toast(`Successfully connected to ${provider}`, 'success')
-        // Refresh the status after successful connection
-        const checkResult = await window.ipc.invoke('oauth:is-connected', { provider })
-        setProviderStates(prev => ({
-          ...prev,
-          [provider]: {
-            isConnected: checkResult.isConnected,
-            isLoading: false,
-            isConnecting: false,
-          }
-        }))
+        // OAuth flow started - keep isConnecting state, wait for event
+        // Event listener will handle the actual completion
       } else {
-        toast(result.error || `Failed to connect to ${provider}`, 'error')
+        // Immediate failure (e.g., couldn't start flow)
+        toast.error(result.error || `Failed to connect to ${provider}`)
         setProviderStates(prev => ({
           ...prev,
           [provider]: { ...prev[provider], isConnecting: false }
@@ -158,7 +184,7 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       }
     } catch (error) {
       console.error('Failed to connect:', error)
-      toast(`Failed to connect to ${provider}`, 'error')
+      toast.error(`Failed to connect to ${provider}`)
       setProviderStates(prev => ({
         ...prev,
         [provider]: { ...prev[provider], isConnecting: false }
@@ -177,7 +203,8 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       const result = await window.ipc.invoke('oauth:disconnect', { provider })
 
       if (result.success) {
-        toast(`Disconnected from ${provider}`, 'success')
+        const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
+        toast.success(`Disconnected from ${displayName}`)
         setProviderStates(prev => ({
           ...prev,
           [provider]: {
@@ -187,7 +214,7 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
           }
         }))
       } else {
-        toast(`Failed to disconnect from ${provider}`, 'error')
+        toast.error(`Failed to disconnect from ${provider}`)
         setProviderStates(prev => ({
           ...prev,
           [provider]: { ...prev[provider], isLoading: false }
@@ -195,13 +222,71 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       }
     } catch (error) {
       console.error('Failed to disconnect:', error)
-      toast(`Failed to disconnect from ${provider}`, 'error')
+      toast.error(`Failed to disconnect from ${provider}`)
       setProviderStates(prev => ({
         ...prev,
         [provider]: { ...prev[provider], isLoading: false }
       }))
     }
   }, [])
+
+  // Helper to render an OAuth provider row
+  const renderOAuthProvider = (provider: string, displayName: string, icon: React.ReactNode, description: string) => {
+    const state = providerStates[provider] || {
+      isConnected: false,
+      isLoading: true,
+      isConnecting: false,
+    }
+
+    return (
+      <div
+        key={provider}
+        className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+            {icon}
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-medium truncate">{displayName}</span>
+            {state.isLoading ? (
+              <span className="text-xs text-muted-foreground">Checking...</span>
+            ) : (
+              <span className="text-xs text-muted-foreground truncate">{description}</span>
+            )}
+          </div>
+        </div>
+        <div className="shrink-0">
+          {state.isLoading ? (
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          ) : state.isConnected ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleDisconnect(provider)}
+              className="h-7 px-2 text-xs"
+            >
+              Disconnect
+            </Button>
+          ) : (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => handleConnect(provider)}
+              disabled={state.isConnecting}
+              className="h-7 px-2 text-xs"
+            >
+              {state.isConnecting ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                "Connect"
+              )}
+            </Button>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -234,123 +319,56 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
           </p>
         </div>
         <div className="p-2">
-          {/* Data Sources Section */}
-          <div className="px-2 py-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Data Sources</span>
-          </div>
-
-          {/* Granola */}
-          <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                <Database className="size-4" />
-              </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-sm font-medium truncate">Granola</span>
-                <span className="text-xs text-muted-foreground truncate">
-                  Sync meeting notes
-                </span>
-              </div>
-            </div>
-            <div className="shrink-0 flex items-center gap-2">
-              {granolaLoading && (
-                <Loader2 className="size-3 animate-spin" />
-              )}
-              <Switch
-                checked={granolaEnabled}
-                onCheckedChange={handleGranolaToggle}
-                disabled={granolaLoading}
-              />
-            </div>
-          </div>
-
-          <Separator className="my-2" />
-
-          {/* OAuth Connectors Section */}
-          <div className="px-2 py-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Accounts</span>
-          </div>
-
           {providersLoading ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
             </div>
-          ) : providers.length === 0 ? (
-            <div className="text-center py-4 text-xs text-muted-foreground">
-              No account connectors available
-            </div>
           ) : (
-            <div className="flex flex-col gap-1">
-              {providers.map((provider) => {
-                const state = providerStates[provider] || {
-                  isConnected: false,
-                  isLoading: true,
-                  isConnecting: false,
-                }
-                const displayName = provider.charAt(0).toUpperCase() + provider.slice(1)
-
-                return (
-                  <div
-                    key={provider}
-                    className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                        <Plug className="size-4" />
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-sm font-medium truncate">
-                          {displayName}
-                        </span>
-                        {state.isLoading ? (
-                          <span className="text-xs text-muted-foreground">
-                            Checking...
-                          </span>
-                        ) : (
-                          <Badge
-                            variant={state.isConnected ? "default" : "outline"}
-                            className="w-fit text-xs mt-0.5"
-                          >
-                            {state.isConnected ? "Connected" : "Not Connected"}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <div className="shrink-0">
-                      {state.isConnected ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDisconnect(provider)}
-                          disabled={state.isLoading}
-                          className="h-7 px-2 text-xs"
-                        >
-                          {state.isLoading ? (
-                            <Loader2 className="size-3 animate-spin" />
-                          ) : (
-                            "Disconnect"
-                          )}
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => handleConnect(provider)}
-                          disabled={state.isConnecting || state.isLoading}
-                          className="h-7 px-2 text-xs"
-                        >
-                          {state.isConnecting ? (
-                            <Loader2 className="size-3 animate-spin" />
-                          ) : (
-                            "Connect"
-                          )}
-                        </Button>
-                      )}
-                    </div>
+            <>
+              {/* Email & Calendar Section - Google */}
+              {providers.includes('google') && (
+                <>
+                  <div className="px-2 py-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">Email & Calendar</span>
                   </div>
-                )
-              })}
-            </div>
+                  {renderOAuthProvider('google', 'Google', <Mail className="size-4" />, 'Sync emails and calendar')}
+                  <Separator className="my-2" />
+                </>
+              )}
+
+              {/* Meeting Notes Section - Granola & Fireflies */}
+              <div className="px-2 py-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Meeting Notes</span>
+              </div>
+
+              {/* Granola */}
+              <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                    <Mic className="size-4" />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-sm font-medium truncate">Granola</span>
+                    <span className="text-xs text-muted-foreground truncate">
+                      Local meeting notes
+                    </span>
+                  </div>
+                </div>
+                <div className="shrink-0 flex items-center gap-2">
+                  {granolaLoading && (
+                    <Loader2 className="size-3 animate-spin" />
+                  )}
+                  <Switch
+                    checked={granolaEnabled}
+                    onCheckedChange={handleGranolaToggle}
+                    disabled={granolaLoading}
+                  />
+                </div>
+              </div>
+
+              {/* Fireflies */}
+              {providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-4" />, 'AI meeting transcripts')}
+            </>
           )}
         </div>
       </PopoverContent>

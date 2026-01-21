@@ -18,6 +18,8 @@ import z from 'zod';
 import { RunEvent } from 'packages/shared/dist/runs.js';
 import container from '@x/core/dist/di/container.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
+import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
+import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -209,6 +211,15 @@ function emitRunEvent(event: z.infer<typeof RunEvent>): void {
   }
 }
 
+export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string }): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('oauth:didConnect', event);
+    }
+  }
+}
+
 let runsWatcher: (() => void) | null = null;
 export async function startRunsWatcher(): Promise<void> {
   if (runsWatcher) {
@@ -316,6 +327,21 @@ export function setupIpcHandlers() {
     'granola:setConfig': async (_event, args) => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
       await repo.setConfig({ enabled: args.enabled });
+
+      // Trigger sync immediately when enabled
+      if (args.enabled) {
+        triggerGranolaSync();
+      }
+
+      return { success: true };
+    },
+    'onboarding:getStatus': async () => {
+      // Show onboarding if it hasn't been completed yet
+      const complete = isOnboardingComplete();
+      return { showOnboarding: !complete };
+    },
+    'onboarding:markComplete': async () => {
+      markOnboardingComplete();
       return { success: true };
     },
   });
