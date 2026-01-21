@@ -38,6 +38,7 @@ import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
+import { Suggestions } from '@/components/ai-elements/suggestions';
 import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
@@ -278,15 +279,27 @@ const collectFilePaths = (nodes: TreeNode[]): string[] =>
 interface ChatInputInnerProps {
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
   isProcessing: boolean
+  presetMessage?: string
+  onPresetMessageConsumed?: () => void
 }
 
 function ChatInputInner({
   onSubmit,
   isProcessing,
+  presetMessage,
+  onPresetMessageConsumed,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
   const canSubmit = Boolean(message.trim()) && !isProcessing
+
+  // Handle preset message from suggestions
+  useEffect(() => {
+    if (presetMessage) {
+      controller.textInput.setInput(presetMessage)
+      onPresetMessageConsumed?.()
+    }
+  }, [presetMessage, controller.textInput, onPresetMessageConsumed])
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return
@@ -334,6 +347,8 @@ interface ChatInputWithMentionsProps {
   visibleFiles: string[]
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
   isProcessing: boolean
+  presetMessage?: string
+  onPresetMessageConsumed?: () => void
 }
 
 function ChatInputWithMentions({
@@ -342,12 +357,16 @@ function ChatInputWithMentions({
   visibleFiles,
   onSubmit,
   isProcessing,
+  presetMessage,
+  onPresetMessageConsumed,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
       <ChatInputInner
         onSubmit={onSubmit}
         isProcessing={isProcessing}
+        presetMessage={presetMessage}
+        onPresetMessageConsumed={onPresetMessageConsumed}
       />
     </PromptInputProvider>
   )
@@ -386,6 +405,7 @@ function App() {
   const [runId, setRunId] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [agentId] = useState<string>('copilot')
+  const [presetMessage, setPresetMessage] = useState<string | undefined>(undefined)
 
   // Runs history state
   type RunListItem = { id: string; title?: string; createdAt: string; agentId: string }
@@ -1656,12 +1676,17 @@ function App() {
                 <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
                   <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                   <div className="mx-auto w-full max-w-4xl px-4">
+                    {!hasConversation && (
+                      <Suggestions onSelect={setPresetMessage} className="mb-3 justify-center" />
+                    )}
                     <ChatInputWithMentions
                       knowledgeFiles={knowledgeFiles}
                       recentFiles={recentWikiFiles}
                       visibleFiles={visibleKnowledgeFiles}
                       onSubmit={handlePromptSubmit}
                       isProcessing={isProcessing}
+                      presetMessage={presetMessage}
+                      onPresetMessageConsumed={() => setPresetMessage(undefined)}
                     />
                   </div>
                 </div>
