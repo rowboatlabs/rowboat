@@ -3,7 +3,6 @@ import path from "node:path";
 import { setupIpcHandlers, startRunsWatcher, startWorkspaceWatcher, stopWorkspaceWatcher } from "./ipc.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
-import { existsSync } from "node:fs";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
@@ -15,57 +14,50 @@ import { init as initPreBuiltRunner } from "@x/core/dist/pre_built/runner.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// #region agent log
-fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:14',message:'__dirname resolved',data:{__dirname,__filename,isPackaged:app.isPackaged},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-// #endregion
-
 // Path resolution differs between development and production:
-// - Development: main.js runs from dist/, preload is at ../../preload/dist/ (sibling dir)
-// - Production: main.js runs from .package/dist-bundle/, preload is at ../preload/dist/ (copied into .package/)
 const preloadPath = app.isPackaged
-  ? path.join(__dirname, "../preload/dist/preload.js")      // Production
-  : path.join(__dirname, "../../preload/dist/preload.js");  // Development
+  ? path.join(__dirname, "../preload/dist/preload.js")
+  : path.join(__dirname, "../../../preload/dist/preload.js");
 console.log("preloadPath", preloadPath);
 
-// #region agent log
-fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:22',message:'preloadPath computed',data:{preloadPath,exists:existsSync(preloadPath)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-// #endregion
+const rendererPath = app.isPackaged
+  ? path.join(__dirname, "../renderer/dist") // Production
+  : path.join(__dirname, "../../../renderer/dist"); // Development
+console.log("rendererPath", rendererPath);
 
-// Register custom protocol for serving built renderer files in production
+// Register custom protocol for serving built renderer files in production.
+// This keeps SPA routes working when users deep link into the packaged app.
 function registerAppProtocol() {
-  protocol.handle('app', (request) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:26',message:'protocol handler called',data:{url:request.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
-    
-    // Remove 'app://' prefix and get the path
-    let urlPath = request.url.slice('app://'.length);
-    
-    // Remove leading './' if present
-    if (urlPath.startsWith('./')) {
-      urlPath = urlPath.slice(2);
+  protocol.handle("app", (request) => {
+    const url = new URL(request.url);
+
+    // url.pathname starts with "/"
+    let urlPath = url.pathname;
+
+    // If it's "/" or a SPA route (no extension), serve index.html
+    if (urlPath === "/" || !path.extname(urlPath)) {
+      urlPath = "/index.html";
     }
-    
-    // Default to index.html for root or SPA routes (no file extension)
-    if (!urlPath || urlPath === '/' || !path.extname(urlPath)) {
-      urlPath = 'index.html';
-    }
-    
-    // Resolve to the renderer dist directory
-    // - Development: main.js at dist/, renderer at ../../renderer/dist/ (sibling dir)
-    // - Production: main.js at .package/dist-bundle/, renderer at ../renderer/dist/ (copied into .package/)
-    const rendererDistPath = app.isPackaged
-      ? path.join(__dirname, '../renderer/dist')
-      : path.join(__dirname, '../../renderer/dist');
-    const filePath = path.join(rendererDistPath, urlPath);
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:46',message:'renderer path resolution',data:{rendererDistPath,filePath,urlPath,exists:existsSync(filePath),rendererDistExists:existsSync(rendererDistPath)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
-    
+
+    const filePath = path.join(rendererPath, urlPath);
     return net.fetch(pathToFileURL(filePath).toString());
   });
 }
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "app",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      allowServiceWorkers: true,
+      // optional but often helpful:
+      // stream: true,
+    },
+  },
+]);
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -83,67 +75,44 @@ function createWindow() {
   // Open external links in system browser (not sandboxed Electron window)
   // This handles window.open() and target="_blank" links
   win.webContents.setWindowOpenHandler(({ url }) => {
-    // Open all URLs in system browser
     shell.openExternal(url);
-    return { action: 'deny' }; // Prevent Electron from opening a new window
+    return { action: "deny" };
   });
 
   // Handle navigation to external URLs (e.g., clicking a link without target="_blank")
-  win.webContents.on('will-navigate', (event, url) => {
-    // Allow internal navigation (app protocol or dev server)
-    const isInternal = url.startsWith('app://') || url.startsWith('http://localhost:5173');
+  win.webContents.on("will-navigate", (event, url) => {
+    const isInternal =
+      url.startsWith("app://") || url.startsWith("http://localhost:5173");
     if (!isInternal) {
       event.preventDefault();
       shell.openExternal(url);
     }
   });
 
-  // #region agent log
-  const loadURL = app.isPackaged ? 'app://./' : 'http://localhost:5173';
-  fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:65',message:'createWindow called',data:{isPackaged:app.isPackaged,loadURL,preloadPath},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-  // #endregion
-
   if (app.isPackaged) {
-    // Production: load from custom protocol (serves built renderer files)
-    win.loadURL('app://./');
-    
-    // #region agent log
-    win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
-      fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:69',message:'window load failed',data:{errorCode,errorDescription,validatedURL},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    });
-    win.webContents.on('did-finish-load', () => {
-      fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:72',message:'window load finished',data:{url:win.webContents.getURL()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    });
-    // #endregion
+    win.loadURL("app://-/index.html");
   } else {
-    // Development: load from Vite dev server
-    win.loadURL('http://localhost:5173');
+    win.loadURL("http://localhost:5173");
   }
 }
 
 app.whenReady().then(() => {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:74',message:'app.whenReady triggered',data:{isPackaged:app.isPackaged},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
-  
   // Register custom protocol before creating window (for production builds)
-  registerAppProtocol();
-  
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/dd33b297-24f6-4846-82f9-02599308a13a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.ts:77',message:'protocol registered',data:{isPackaged:app.isPackaged},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
-  
+  if (app.isPackaged) {
+    registerAppProtocol();
+  }
+
   // Initialize auto-updater (only in production)
   if (app.isPackaged) {
     updateElectronApp({
       updateSource: {
         type: UpdateSourceType.StaticStorage,
-        baseUrl: `https://rowboat-desktop-app-releases.s3.amazonaws.com/releases/${process.platform}/${process.arch}`
+        baseUrl: `https://rowboat-desktop-app-releases.s3.amazonaws.com/releases/${process.platform}/${process.arch}`,
       },
-      notifyUser: true  // Shows native dialog when update is available
+      notifyUser: true, // Shows native dialog when update is available
     });
   }
-  
+
   setupIpcHandlers();
 
   createWindow();
@@ -154,7 +123,6 @@ app.whenReady().then(() => {
   // - External changes (terminal, git, other editors)
   // Only starts once (guarded in startWorkspaceWatcher)
   startWorkspaceWatcher();
-
 
   // start runs watcher
   startRunsWatcher();
@@ -177,7 +145,7 @@ app.whenReady().then(() => {
   // start pre-built agent runner
   initPreBuiltRunner();
 
-  app.on('activate', () => {
+  app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
