@@ -27,15 +27,11 @@ module.exports = {
         // to analyze/copy node_modules, which fails with pnpm's symlinked workspaces.
         prune: false,
         ignore: [
-            // Skip any node_modules that might exist
-            /node_modules/,
-            // Skip source files
-            /\.ts$/,
-            /\.tsx$/,
-            // Skip the staging directory
-            /\.package/,
-            // Skip the bundle script
-            /bundle\.mjs$/,
+            /src\//,
+            /node_modules\//,
+            /.gitignore/,
+            /bundle\.mjs/,
+            /tsconfig.json/,
         ],
     },
     makers: [
@@ -142,111 +138,7 @@ module.exports = {
             fs.mkdirSync(rendererDest, { recursive: true });
             fs.cpSync(rendererSrc, rendererDest, { recursive: true });
 
-            // Copy icons into staging directory
-            console.log('Copying icons...');
-            const iconsSrc = path.join(__dirname, 'icons');
-            const iconsDest = path.join(packageDir, 'icons');
-            if (fs.existsSync(iconsSrc)) {
-                fs.mkdirSync(iconsDest, { recursive: true });
-                fs.cpSync(iconsSrc, iconsDest, { recursive: true });
-            }
-
-            // Generate package.json in staging directory
-            // This tells Electron where to find the entry point
-            // Note: No "type": "module" since we bundle as CommonJS for compatibility
-            // with dependencies that use dynamic require()
-            // Read version from source package.json (updated by CI from git tag)
-            const sourcePackageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
-            const packageJson = {
-                name: 'Rowboat',
-                version: sourcePackageJson.version,
-                main: 'dist-bundle/main.js',
-            };
-            fs.writeFileSync(
-                path.join(packageDir, 'package.json'),
-                JSON.stringify(packageJson, null, 2)
-            );
-
             console.log('✅ All assets staged in .package/');
         },
-        // Hook signature: async (config, buildPath, electronVersion, platform, arch)
-        // Called after Forge copies source directory to build output
-        // This is where we replace source files with bundled/staged files
-        packageAfterCopy: async (config, buildPath, electronVersion, platform, arch) => {
-            const fs = require('fs');
-            const packageDir = path.join(__dirname, '.package');
-            // buildPath already points to the app directory (Contents/Resources/app)
-            const appResourcesPath = buildPath;
-
-            console.log('📦 Copying staged files from .package/ to packaged app...');
-
-            // Remove unbundled dist/ directory (source TypeScript output)
-            const unbundledDist = path.join(appResourcesPath, 'dist');
-            if (fs.existsSync(unbundledDist)) {
-                console.log('Removing unbundled dist/...');
-                fs.rmSync(unbundledDist, { recursive: true });
-            }
-
-            // Copy bundled dist-bundle/ from staging
-            const distBundleSrc = path.join(packageDir, 'dist-bundle');
-            const distBundleDest = path.join(appResourcesPath, 'dist-bundle');
-            if (fs.existsSync(distBundleSrc)) {
-                console.log('Copying dist-bundle/...');
-                fs.mkdirSync(distBundleDest, { recursive: true });
-                fs.cpSync(distBundleSrc, distBundleDest, { recursive: true });
-            }
-
-            // Copy preload/ from staging
-            const preloadSrc = path.join(packageDir, 'preload');
-            const preloadDest = path.join(appResourcesPath, 'preload');
-            if (fs.existsSync(preloadSrc)) {
-                console.log('Copying preload/...');
-                // Remove old preload if it exists
-                if (fs.existsSync(preloadDest)) {
-                    fs.rmSync(preloadDest, { recursive: true });
-                }
-                fs.cpSync(preloadSrc, preloadDest, { recursive: true });
-            }
-
-            // Copy renderer/ from staging
-            const rendererSrc = path.join(packageDir, 'renderer');
-            const rendererDest = path.join(appResourcesPath, 'renderer');
-            if (fs.existsSync(rendererSrc)) {
-                console.log('Copying renderer/...');
-                // Remove old renderer if it exists
-                if (fs.existsSync(rendererDest)) {
-                    fs.rmSync(rendererDest, { recursive: true });
-                }
-                fs.cpSync(rendererSrc, rendererDest, { recursive: true });
-            }
-
-            // Update package.json to point to bundled entry point
-            const packageJsonPath = path.join(appResourcesPath, 'package.json');
-            if (fs.existsSync(packageJsonPath)) {
-                console.log('Updating package.json...');
-                // Read version from source package.json (updated by CI from git tag)
-                const sourcePackageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
-                const packageJson = {
-                    name: 'Rowboat',
-                    version: sourcePackageJson.version,
-                    main: 'dist-bundle/main.js',
-                    // Note: No "type": "module" since we bundle as CommonJS
-                    // No dependencies/devDependencies since everything is bundled
-                };
-                fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
-            }
-
-            // Clean up source files that shouldn't be in packaged app
-            const filesToRemove = ['src', 'tsconfig.json', 'forge.config.cjs', 'agents.md', '.gitignore', 'bundle.mjs'];
-            for (const file of filesToRemove) {
-                const filePath = path.join(appResourcesPath, file);
-                if (fs.existsSync(filePath)) {
-                    console.log(`Removing ${file}...`);
-                    fs.rmSync(filePath, { recursive: true, force: true });
-                }
-            }
-
-            console.log('✅ Staged files copied to packaged app');
-        }
     }
 };

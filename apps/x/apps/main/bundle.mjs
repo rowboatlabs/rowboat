@@ -21,12 +21,11 @@ await esbuild.build({
   bundle: true,
   platform: 'node',
   target: 'node20',
-  outfile: './.package/dist-bundle/main.js',
+  outfile: './.package/dist/main.cjs',
   external: ['electron'],  // Provided by Electron runtime
   // Use CommonJS format - many dependencies use require() which doesn't work
   // well with esbuild's ESM shim. CJS handles dynamic requires natively.
   format: 'cjs',
-  sourcemap: true,
   // Inject the polyfill variable at the top
   banner: { js: cjsBanner },
   // Replace import.meta.url directly with our polyfill variable

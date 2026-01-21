@@ -2,10 +2,10 @@
     "name": "Rowboat",
     "type": "module",
     "version": "0.1.0",
-    "main": "dist/main.js",
+    "main": ".package/dist/main.cjs",
     "scripts": {
         "start": "electron .",
-        "build": "rm -rf dist && tsc",
+        "build": "rm -rf dist && tsc && node bundle.mjs",
         "package": "electron-forge package --arch=arm64,x64 --platform=darwin",
         "make": "electron-forge make --arch=arm64,x64 --platform=darwin",
         "publish": "electron-forge publish --arch=arm64,x64 --platform=darwin"
