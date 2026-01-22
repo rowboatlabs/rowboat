@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useState } from "react"
 import {
+  Brain,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -11,9 +12,13 @@ import {
   FilePlus,
   Folder,
   FolderPlus,
+  HelpCircle,
+  ListTodo,
   MessageSquare,
   Network,
   Pencil,
+  Plug,
+  Settings,
   SquarePen,
   Trash2,
 } from "lucide-react"
@@ -26,6 +31,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -48,7 +54,11 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { Input } from "@/components/ui/input"
-import { useSidebarSection } from "@/contexts/sidebar-context"
+import { cn } from "@/lib/utils"
+import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
+import { ConnectorsPopover } from "@/components/connectors-popover"
+import { HelpPopover } from "@/components/help-popover"
+import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
 
 interface TreeNode {
@@ -93,10 +103,16 @@ type SidebarContentPanelProps = {
   tasksActions?: TasksActions
 } & React.ComponentProps<typeof Sidebar>
 
-const sectionTitles = {
-  knowledge: "Knowledge",
-  tasks: "Tasks",
+type NavItem = {
+  id: ActiveSection
+  title: string
+  icon: React.ElementType
 }
+
+const navItems: NavItem[] = [
+  { id: "knowledge", title: "Knowledge", icon: Brain },
+  { id: "tasks", title: "Tasks", icon: ListTodo },
+]
 
 export function SidebarContentPanel({
   tree,
@@ -109,13 +125,27 @@ export function SidebarContentPanel({
   tasksActions,
   ...props
 }: SidebarContentPanelProps) {
-  const { activeSection } = useSidebarSection()
+  const { activeSection, setActiveSection } = useSidebarSection()
 
   return (
     <Sidebar className="border-r-0" {...props}>
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <span className="font-semibold text-lg">{sectionTitles[activeSection]}</span>
+        <div className="flex items-center gap-1 px-1 py-1">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveSection(item.id)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex-1 justify-center",
+                activeSection === item.id
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <item.icon className="size-4" />
+              <span>{item.title}</span>
+            </button>
+          ))}
         </div>
       </SidebarHeader>
       <SidebarContent>
@@ -136,6 +166,18 @@ export function SidebarContentPanel({
           />
         )}
       </SidebarContent>
+      <SidebarFooter className="border-t border-sidebar-border">
+        <div className="flex items-center justify-center gap-1 py-1">
+          {/* Help */}
+          <HelpPopover tooltip="Help">
+            <button
+              className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <HelpCircle className="size-4" />
+            </button>
+          </HelpPopover>
+        </div>
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   )
@@ -158,9 +200,9 @@ function KnowledgeSection({
   const isExpanded = expandedPaths.size > 0
   
   const quickActions = [
+    { icon: Network, label: "Graph View", action: () => actions.openGraph() },
     { icon: FilePlus, label: "New Note", action: () => actions.createNote() },
     { icon: FolderPlus, label: "New Folder", action: () => actions.createFolder() },
-    { icon: Network, label: "Graph View", action: () => actions.openGraph() },
   ]
 
   return (
@@ -168,6 +210,13 @@ function KnowledgeSection({
       <ContextMenuTrigger asChild>
         <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
           <div className="flex items-center justify-center gap-1 py-1 sticky top-0 z-10 bg-sidebar border-b border-sidebar-border">
+            <ConnectorsPopover tooltip="Connectors">
+              <button
+                className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+              >
+                <Plug className="size-4" />
+              </button>
+            </ConnectorsPopover>
             {quickActions.map((action) => (
               <Tooltip key={action.label}>
                 <TooltipTrigger asChild>
@@ -437,16 +486,26 @@ function TasksSection({
 }) {
   return (
     <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
-      {/* Sticky New Chat button - matches Knowledge section height */}
-      <div className="sticky top-0 z-10 bg-sidebar border-b border-sidebar-border py-0.5">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton onClick={actions?.onNewChat} className="gap-2">
-              <SquarePen className="size-4 shrink-0" />
-              <span className="text-sm">New chat</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+      {/* Sticky action bar - matches Knowledge section style */}
+      <div className="flex items-center justify-center gap-1 py-1 sticky top-0 z-10 bg-sidebar border-b border-sidebar-border">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={actions?.onNewChat}
+              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+            >
+              <SquarePen className="size-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">New Chat</TooltipContent>
+        </Tooltip>
+        <SettingsDialog>
+          <button
+            className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+          >
+            <Settings className="size-4" />
+          </button>
+        </SettingsDialog>
       </div>
       <SidebarGroupContent className="flex-1 overflow-y-auto">
         {runs.length > 0 && (

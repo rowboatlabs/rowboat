@@ -13,7 +13,6 @@ import { ChatInputBar } from './components/chat-button';
 import { ChatSidebar } from './components/chat-sidebar';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { useDebounce } from './hooks/use-debounce';
-import { SidebarIcon } from '@/components/sidebar-icon';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SidebarSectionProvider, type ActiveSection } from '@/contexts/sidebar-context';
 import {
@@ -1501,16 +1500,9 @@ function App() {
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="knowledge" onSectionChange={handleSectionChange}>
         <div className="flex h-svh w-full">
-          {/* Icon sidebar - always visible, fixed position */}
-          <SidebarIcon />
-
-          {/* Spacer for the fixed icon sidebar */}
-          <div className="w-14 shrink-0" />
-
           {/* Content sidebar with SidebarProvider for collapse functionality */}
           <SidebarProvider
             style={{
-              "--sidebar-offset": "3.5rem",
               "--sidebar-width": `${DEFAULT_SIDEBAR_WIDTH}px`,
             } as React.CSSProperties}
           >
