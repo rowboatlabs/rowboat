@@ -499,7 +499,7 @@ function TasksSection({
           </TooltipTrigger>
           <TooltipContent side="bottom">New Chat</TooltipContent>
         </Tooltip>
-        <SettingsDialog>
+        <SettingsDialog tooltip="Settings">
           <button
             className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
           >

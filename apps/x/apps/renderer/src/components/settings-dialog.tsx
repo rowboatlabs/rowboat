@@ -9,6 +9,11 @@ import {
   DialogContent,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -48,9 +53,10 @@ const tabs: TabConfig[] = [
 
 interface SettingsDialogProps {
   children: React.ReactNode
+  tooltip?: string
 }
 
-export function SettingsDialog({ children }: SettingsDialogProps) {
+export function SettingsDialog({ children, tooltip }: SettingsDialogProps) {
   const [open, setOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<ConfigTab>("models")
   const [content, setContent] = useState("")
@@ -134,7 +140,18 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      {tooltip ? (
+        <Tooltip open={open ? false : undefined}>
+          <TooltipTrigger asChild>
+            <DialogTrigger asChild>{children}</DialogTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={8}>
+            {tooltip}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        <DialogTrigger asChild>{children}</DialogTrigger>
+      )}
       <DialogContent
         className="!max-w-[900px] w-[900px] h-[600px] p-0 gap-0 overflow-hidden"
         showCloseButton={false}
