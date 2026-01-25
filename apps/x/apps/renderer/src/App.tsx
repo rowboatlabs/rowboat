@@ -322,6 +322,7 @@ function ChatInputInner({
         placeholder="Type your message..."
         disabled={isProcessing}
         onKeyDown={handleKeyDown}
+        autoFocus
         className="min-h-6 py-0 border-0 shadow-none focus-visible:ring-0 rounded-none"
       />
       <Button
