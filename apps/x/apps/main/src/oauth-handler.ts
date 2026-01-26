@@ -3,6 +3,12 @@ import { createAuthServer } from './auth-server.js';
 import * as oauthClient from '@x/core/dist/auth/oauth-client.js';
 import type { Configuration } from '@x/core/dist/auth/oauth-client.js';
 import { getProviderConfig, getAvailableProviders } from '@x/core/dist/auth/providers.js';
+import {
+  clearProviderClientIdOverride,
+  getProviderClientIdOverride,
+  hasProviderClientIdOverride,
+  setProviderClientIdOverride,
+} from '@x/core/dist/auth/provider-client-id.js';
 import container from '@x/core/dist/di/container.js';
 import { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
@@ -39,14 +45,25 @@ function getClientRegistrationRepo(): IClientRegistrationRepo {
  */
 async function getProviderConfiguration(provider: string): Promise<Configuration> {
   const config = getProviderConfig(provider);
+  const resolveClientId = (): string => {
+    const override = getProviderClientIdOverride(provider);
+    if (override) {
+      return override;
+    }
+    if (config.client.mode === 'static' && config.client.clientId) {
+      return config.client.clientId;
+    }
+    throw new Error(`${provider} client ID not configured. Please provide a client ID.`);
+  };
 
   if (config.discovery.mode === 'issuer') {
     if (config.client.mode === 'static') {
       // Discover endpoints, use static client ID
       console.log(`[OAuth] ${provider}: Discovery from issuer with static client ID`);
+      const clientId = resolveClientId();
       return await oauthClient.discoverConfiguration(
         config.discovery.issuer,
-        config.client.clientId
+        clientId
       );
     } else {
       // DCR mode - check for existing registration or register new
@@ -83,10 +100,11 @@ async function getProviderConfiguration(provider: string): Promise<Configuration
     }
     
     console.log(`[OAuth] ${provider}: Using static endpoints (no discovery)`);
+    const clientId = resolveClientId();
     return oauthClient.createStaticConfiguration(
       config.discovery.authorizationEndpoint,
       config.discovery.tokenEndpoint,
-      config.client.clientId,
+      clientId,
       config.discovery.revocationEndpoint
     );
   }
@@ -95,11 +113,19 @@ async function getProviderConfiguration(provider: string): Promise<Configuration
 /**
  * Initiate OAuth flow for a provider
  */
-export async function connectProvider(provider: string): Promise<{ success: boolean; error?: string }> {
+export async function connectProvider(provider: string, clientId?: string): Promise<{ success: boolean; error?: string }> {
   try {
     console.log(`[OAuth] Starting connection flow for ${provider}...`);
     const oauthRepo = getOAuthRepo();
     const providerConfig = getProviderConfig(provider);
+
+    if (provider === 'google') {
+      const trimmedClientId = clientId?.trim();
+      if (!trimmedClientId) {
+        return { success: false, error: 'Google client ID is required to connect.' };
+      }
+      setProviderClientIdOverride(provider, trimmedClientId);
+    }
 
     // Get or create OAuth configuration
     const config = await getProviderConfiguration(provider);
@@ -209,6 +235,9 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
   try {
     const oauthRepo = getOAuthRepo();
     await oauthRepo.clearTokens(provider);
+    if (provider === 'google') {
+      clearProviderClientIdOverride(provider);
+    }
     return { success: true };
   } catch (error) {
     console.error('OAuth disconnect failed:', error);
@@ -222,6 +251,9 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
 export async function isConnected(provider: string): Promise<{ isConnected: boolean }> {
   try {
     const oauthRepo = getOAuthRepo();
+    if (provider === 'google' && !hasProviderClientIdOverride(provider)) {
+      return { isConnected: false };
+    }
     const connected = await oauthRepo.isConnected(provider);
     return { isConnected: connected };
   } catch (error) {
@@ -278,7 +310,10 @@ export async function getConnectedProviders(): Promise<{ providers: string[] }> 
   try {
     const oauthRepo = getOAuthRepo();
     const providers = await oauthRepo.getConnectedProviders();
-    return { providers };
+    const filteredProviders = providers.filter((provider) =>
+      provider === 'google' ? hasProviderClientIdOverride(provider) : true
+    );
+    return { providers: filteredProviders };
   } catch (error) {
     console.error('Get connected providers failed:', error);
     return { providers: [] };
