@@ -382,6 +382,8 @@ function ChatInputWithMentions({
 function App() {
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [fileHistoryBack, setFileHistoryBack] = useState<string[]>([])
+  const [fileHistoryForward, setFileHistoryForward] = useState<string[]>([])
   const [fileContent, setFileContent] = useState<string>('')
   const [editorContent, setEditorContent] = useState<string>('')
   const [tree, setTree] = useState<TreeNode[]>([])
@@ -1075,6 +1077,52 @@ function App() {
     setIsGraphOpen(false)
   }, [])
 
+  // File navigation with history tracking
+  const navigateToFile = useCallback((path: string | null) => {
+    if (path === selectedPath) return
+
+    // Push current path to back history (if we have one)
+    if (selectedPath) {
+      setFileHistoryBack(prev => [...prev, selectedPath])
+    }
+    // Clear forward history when navigating to a new file
+    setFileHistoryForward([])
+    setSelectedPath(path)
+  }, [selectedPath])
+
+  const navigateBack = useCallback(() => {
+    if (fileHistoryBack.length === 0) return
+
+    const newBack = [...fileHistoryBack]
+    const previousPath = newBack.pop()!
+
+    // Push current path to forward history
+    if (selectedPath) {
+      setFileHistoryForward(prev => [...prev, selectedPath])
+    }
+
+    setFileHistoryBack(newBack)
+    setSelectedPath(previousPath)
+  }, [fileHistoryBack, selectedPath])
+
+  const navigateForward = useCallback(() => {
+    if (fileHistoryForward.length === 0) return
+
+    const newForward = [...fileHistoryForward]
+    const nextPath = newForward.pop()!
+
+    // Push current path to back history
+    if (selectedPath) {
+      setFileHistoryBack(prev => [...prev, selectedPath])
+    }
+
+    setFileHistoryForward(newForward)
+    setSelectedPath(nextPath)
+  }, [fileHistoryForward, selectedPath])
+
+  const canNavigateBack = fileHistoryBack.length > 0
+  const canNavigateForward = fileHistoryForward.length > 0
+
   // Handle image upload for the markdown editor
   const handleImageUpload = useCallback(async (file: File): Promise<string | null> => {
     try {
@@ -1128,7 +1176,7 @@ function App() {
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
-      setSelectedPath(path)
+      navigateToFile(path)
       setIsGraphOpen(false)
       return
     }
@@ -1312,9 +1360,9 @@ function App() {
   const openWikiLink = useCallback(async (wikiPath: string) => {
     const resolvedPath = await ensureWikiFile(wikiPath)
     if (resolvedPath) {
-      setSelectedPath(resolvedPath)
+      navigateToFile(resolvedPath)
     }
-  }, [ensureWikiFile, setSelectedPath])
+  }, [ensureWikiFile, navigateToFile])
 
   const wikiLinkConfig = React.useMemo(() => ({
     files: knowledgeFiles,
@@ -1616,7 +1664,7 @@ function App() {
                     error={graphStatus === 'error' ? (graphError ?? 'Failed to build graph') : null}
                     onSelectNode={(path) => {
                       setIsGraphOpen(false)
-                      setSelectedPath(path)
+                      navigateToFile(path)
                     }}
                   />
                 </div>
@@ -1629,6 +1677,10 @@ function App() {
                       placeholder="Start writing..."
                       wikiLinks={wikiLinkConfig}
                       onImageUpload={handleImageUpload}
+                      onNavigateBack={navigateBack}
+                      onNavigateForward={navigateForward}
+                      canNavigateBack={canNavigateBack}
+                      canNavigateForward={canNavigateForward}
                     />
                   </div>
                 ) : (

@@ -22,8 +22,8 @@ import {
   MinusIcon,
   LinkIcon,
   CodeSquareIcon,
-  Undo2Icon,
-  Redo2Icon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   ExternalLinkIcon,
   Trash2Icon,
   ImageIcon,
@@ -33,9 +33,21 @@ interface EditorToolbarProps {
   editor: Editor | null
   onSelectionHighlight?: (range: { from: number; to: number } | null) => void
   onImageUpload?: (file: File) => Promise<void> | void
+  onNavigateBack?: () => void
+  onNavigateForward?: () => void
+  canNavigateBack?: boolean
+  canNavigateForward?: boolean
 }
 
-export function EditorToolbar({ editor, onSelectionHighlight, onImageUpload }: EditorToolbarProps) {
+export function EditorToolbar({
+  editor,
+  onSelectionHighlight,
+  onImageUpload,
+  onNavigateBack,
+  onNavigateForward,
+  canNavigateBack,
+  canNavigateForward,
+}: EditorToolbarProps) {
   const [linkUrl, setLinkUrl] = useState('')
   const [isLinkPopoverOpen, setIsLinkPopoverOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -105,24 +117,24 @@ export function EditorToolbar({ editor, onSelectionHighlight, onImageUpload }: E
 
   return (
     <div className="editor-toolbar">
-      {/* Undo / Redo */}
+      {/* Back / Forward Navigation */}
       <Button
         variant="ghost"
         size="icon-sm"
-        onClick={() => editor.chain().focus().undo().run()}
-        disabled={!editor.can().undo()}
-        title="Undo (Ctrl+Z)"
+        onClick={onNavigateBack}
+        disabled={!canNavigateBack}
+        title="Go back"
       >
-        <Undo2Icon className="size-4" />
+        <ChevronLeftIcon className="size-4" />
       </Button>
       <Button
         variant="ghost"
         size="icon-sm"
-        onClick={() => editor.chain().focus().redo().run()}
-        disabled={!editor.can().redo()}
-        title="Redo (Ctrl+Shift+Z)"
+        onClick={onNavigateForward}
+        disabled={!canNavigateForward}
+        title="Go forward"
       >
-        <Redo2Icon className="size-4" />
+        <ChevronRightIcon className="size-4" />
       </Button>
 
       <div className="separator" />
