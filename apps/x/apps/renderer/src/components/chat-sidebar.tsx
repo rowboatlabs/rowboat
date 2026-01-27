@@ -260,10 +260,16 @@ export function ChatSidebar({
     document.addEventListener('mouseup', handleMouseUp)
   }, [width])
 
-  // Auto-focus textarea when sidebar opens
+  // Auto-focus textarea when sidebar opens or when conversation is cleared (new chat)
   useEffect(() => {
-    textareaRef.current?.focus()
-  }, [])
+    // Focus when conversation is empty (new chat started)
+    if (conversation.length === 0) {
+      const timer = setTimeout(() => {
+        textareaRef.current?.focus()
+      }, 50)
+      return () => clearTimeout(timer)
+    }
+  }, [conversation.length])
 
   // Auto-populate with @currentfile when switching knowledge files
   useEffect(() => {
@@ -584,9 +590,8 @@ export function ChatSidebar({
                 onKeyDown={handleKeyDown}
                 onScroll={syncHighlightScroll}
                 placeholder="Ask anything..."
-                disabled={isProcessing}
                 rows={1}
-                className="relative z-10 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-32 min-h-6"
+                className="relative z-10 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground resize-none max-h-32 min-h-6"
                 style={{ fieldSizing: 'content' } as React.CSSProperties}
               />
             </div>

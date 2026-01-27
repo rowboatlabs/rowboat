@@ -906,6 +906,7 @@ export type PromptInputTextareaProps = ComponentProps<
   typeof InputGroupTextarea
 > & {
   autoFocus?: boolean;
+  focusTrigger?: unknown; // When this value changes, focus the textarea
 };
 
 export const PromptInputTextarea = ({
@@ -914,6 +915,7 @@ export const PromptInputTextarea = ({
   placeholder = "What would you like to know?",
   onKeyDown: externalOnKeyDown,
   autoFocus = false,
+  focusTrigger,
   ...props
 }: PromptInputTextareaProps) => {
   const controller = useOptionalPromptInputController();
@@ -924,16 +926,16 @@ export const PromptInputTextarea = ({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-focus the textarea when requested
+  // Auto-focus the textarea when requested or when focusTrigger changes
   useEffect(() => {
-    if (autoFocus) {
+    if (autoFocus || focusTrigger !== undefined) {
       // Small delay to ensure the element is fully mounted and visible
       const timer = setTimeout(() => {
         textareaRef.current?.focus();
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [autoFocus]);
+  }, [autoFocus, focusTrigger]);
   const containerRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
 
