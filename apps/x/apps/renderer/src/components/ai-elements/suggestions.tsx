@@ -51,7 +51,7 @@ export function Suggestions({
   return (
     <div className={cn(
       'flex gap-2',
-      vertical ? 'flex-col items-start' : 'flex-wrap justify-center',
+      vertical ? 'flex-col items-end' : 'flex-wrap justify-center',
       className
     )}>
       {suggestions.map((suggestion) => (
