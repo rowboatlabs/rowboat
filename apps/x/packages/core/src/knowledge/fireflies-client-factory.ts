@@ -144,13 +144,9 @@ export class FirefliesClientFactory {
             if (providerConfig.client.mode === 'static') {
                 // Discover endpoints, use static client ID
                 console.log(`[Fireflies] Discovery mode: issuer with static client ID`);
-                const clientId = providerConfig.client.clientId;
-                if (!clientId) {
-                    throw new Error('Fireflies client ID not configured.');
-                }
                 this.cache.config = await oauthClient.discoverConfiguration(
                     providerConfig.discovery.issuer,
-                    clientId
+                    providerConfig.client.clientId
                 );
             } else {
                 // DCR mode - need existing registration
@@ -174,14 +170,10 @@ export class FirefliesClientFactory {
             }
             
             console.log(`[Fireflies] Using static endpoints (no discovery)`);
-            const clientId = providerConfig.client.clientId;
-            if (!clientId) {
-                throw new Error('Fireflies client ID not configured.');
-            }
             this.cache.config = oauthClient.createStaticConfiguration(
                 providerConfig.discovery.authorizationEndpoint,
                 providerConfig.discovery.tokenEndpoint,
-                clientId,
+                providerConfig.client.clientId,
                 providerConfig.discovery.revocationEndpoint
             );
         }

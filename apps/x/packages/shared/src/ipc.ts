@@ -175,7 +175,6 @@ const ipcSchemas = {
   'oauth:connect': {
     req: z.object({
       provider: z.string(),
-      clientId: z.string().optional(),
     }),
     res: z.object({
       success: z.boolean(),

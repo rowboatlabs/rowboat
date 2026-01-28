@@ -17,8 +17,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { GoogleClientIdModal } from "@/components/google-client-id-modal"
-import { getGoogleClientId, setGoogleClientId, clearGoogleClientId } from "@/lib/google-client-id-store"
 import { toast } from "sonner"
 
 interface ProviderState {
@@ -37,7 +35,6 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
   const [providers, setProviders] = useState<string[]>([])
   const [providersLoading, setProvidersLoading] = useState(true)
   const [providerStates, setProviderStates] = useState<Record<string, ProviderState>>({})
-  const [googleClientIdOpen, setGoogleClientIdOpen] = useState(false)
 
   // Granola state
   const [granolaEnabled, setGranolaEnabled] = useState(false)
@@ -164,14 +161,15 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
     return cleanup
   }, [refreshAllStatuses])
 
-  const startConnect = useCallback(async (provider: string, clientId?: string) => {
+  // Connect to a provider
+  const handleConnect = useCallback(async (provider: string) => {
     setProviderStates(prev => ({
       ...prev,
       [provider]: { ...prev[provider], isConnecting: true }
     }))
 
     try {
-      const result = await window.ipc.invoke('oauth:connect', { provider, clientId })
+      const result = await window.ipc.invoke('oauth:connect', { provider })
 
       if (result.success) {
         // OAuth flow started - keep isConnecting state, wait for event
@@ -194,27 +192,6 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
     }
   }, [])
 
-  // Connect to a provider
-  const handleConnect = useCallback(async (provider: string) => {
-    if (provider === 'google') {
-      const existingClientId = getGoogleClientId()
-      if (!existingClientId) {
-        setGoogleClientIdOpen(true)
-        return
-      }
-      await startConnect(provider, existingClientId)
-      return
-    }
-
-    await startConnect(provider)
-  }, [startConnect])
-
-  const handleGoogleClientIdSubmit = useCallback((clientId: string) => {
-    setGoogleClientId(clientId)
-    setGoogleClientIdOpen(false)
-    startConnect('google', clientId)
-  }, [startConnect])
-
   // Disconnect from a provider
   const handleDisconnect = useCallback(async (provider: string) => {
     setProviderStates(prev => ({
@@ -226,9 +203,6 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       const result = await window.ipc.invoke('oauth:disconnect', { provider })
 
       if (result.success) {
-        if (provider === 'google') {
-          clearGoogleClientId()
-        }
         const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
         toast.success(`Disconnected from ${displayName}`)
         setProviderStates(prev => ({
@@ -315,13 +289,6 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
   }
 
   return (
-    <>
-    <GoogleClientIdModal
-      open={googleClientIdOpen}
-      onOpenChange={setGoogleClientIdOpen}
-      onSubmit={handleGoogleClientIdSubmit}
-      isSubmitting={providerStates.google?.isConnecting ?? false}
-    />
     <Popover open={open} onOpenChange={setOpen}>
       {tooltip ? (
         <Tooltip open={open ? false : undefined}>
@@ -406,6 +373,5 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
         </div>
       </PopoverContent>
     </Popover>
-    </>
   )
 }

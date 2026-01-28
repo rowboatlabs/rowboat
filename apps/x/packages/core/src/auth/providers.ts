@@ -22,7 +22,7 @@ const DiscoverySchema = z.discriminatedUnion('mode', [
 const ClientSchema = z.discriminatedUnion('mode', [
   z.object({
     mode: z.literal('static'),
-    clientId: z.string().min(1).optional(),
+    clientId: z.string().min(1),
   }),
   z.object({
     mode: z.literal('dcr'),
@@ -58,6 +58,7 @@ const providerConfigs: ProviderConfig = {
     },
     client: {
       mode: 'static',
+      clientId: '797410052581-ibmmvqec0l68stv5fmgh0juqfvbg08fc.apps.googleusercontent.com',
     },
     scopes: [
       'https://www.googleapis.com/auth/gmail.readonly',

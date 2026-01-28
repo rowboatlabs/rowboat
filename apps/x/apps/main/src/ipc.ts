@@ -305,7 +305,7 @@ export function setupIpcHandlers() {
       return runsCore.listRuns(args.cursor);
     },
     'oauth:connect': async (_event, args) => {
-      return await connectProvider(args.provider, args.clientId);
+      return await connectProvider(args.provider);
     },
     'oauth:disconnect': async (_event, args) => {
       return await disconnectProvider(args.provider);
