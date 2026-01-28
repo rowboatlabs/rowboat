@@ -137,7 +137,6 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent
         className="!max-w-[900px] w-[900px] h-[600px] p-0 gap-0 overflow-hidden"
-        showCloseButton={false}
       >
         <div className="flex h-full">
           {/* Sidebar */}

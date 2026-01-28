@@ -906,6 +906,12 @@ If new info contradicts existing:
 
 ## 9a: Create and Update Notes
 
+**IMPORTANT: Write sequentially, one file at a time.**
+- Generate content for exactly one note.
+- Issue exactly one \`write\` command.
+- Wait for the tool to return before generating the next note.
+- Do NOT batch multiple \`write\` commands in a single response.
+
 **For new entities (meetings and qualifying emails):**
 \`\`\`bash
 executeCommand("write '{knowledge_folder}/People/Jennifer.md' '{content}'")
@@ -941,6 +947,7 @@ If you discovered new name variants during resolution, add them to Aliases field
 - Be concise: one line per activity entry
 - Note state changes with \`[Field → value]\` in activity
 - Escape quotes properly in shell commands
+- Write only one file per response (no multi-file write batches)
 
 ---
 

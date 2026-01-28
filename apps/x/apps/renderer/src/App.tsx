@@ -282,6 +282,7 @@ interface ChatInputInnerProps {
   isProcessing: boolean
   presetMessage?: string
   onPresetMessageConsumed?: () => void
+  runId?: string | null
 }
 
 function ChatInputInner({
@@ -289,6 +290,7 @@ function ChatInputInner({
   isProcessing,
   presetMessage,
   onPresetMessageConsumed,
+  runId,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -320,8 +322,9 @@ function ChatInputInner({
     <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
       <PromptInputTextarea
         placeholder="Type your message..."
-        disabled={isProcessing}
         onKeyDown={handleKeyDown}
+        autoFocus
+        focusTrigger={runId}
         className="min-h-6 py-0 border-0 shadow-none focus-visible:ring-0 rounded-none"
       />
       <Button
@@ -350,6 +353,7 @@ interface ChatInputWithMentionsProps {
   isProcessing: boolean
   presetMessage?: string
   onPresetMessageConsumed?: () => void
+  runId?: string | null
 }
 
 function ChatInputWithMentions({
@@ -360,6 +364,7 @@ function ChatInputWithMentions({
   isProcessing,
   presetMessage,
   onPresetMessageConsumed,
+  runId,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -368,6 +373,7 @@ function ChatInputWithMentions({
         isProcessing={isProcessing}
         presetMessage={presetMessage}
         onPresetMessageConsumed={onPresetMessageConsumed}
+        runId={runId}
       />
     </PromptInputProvider>
   )
@@ -376,6 +382,8 @@ function ChatInputWithMentions({
 function App() {
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [fileHistoryBack, setFileHistoryBack] = useState<string[]>([])
+  const [fileHistoryForward, setFileHistoryForward] = useState<string[]>([])
   const [fileContent, setFileContent] = useState<string>('')
   const [editorContent, setEditorContent] = useState<string>('')
   const [tree, setTree] = useState<TreeNode[]>([])
@@ -404,6 +412,7 @@ function App() {
   const [currentReasoning, setCurrentReasoning] = useState<string>('')
   const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
+  const runIdRef = useRef<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [agentId] = useState<string>('copilot')
   const [presetMessage, setPresetMessage] = useState<string | undefined>(undefined)
@@ -425,6 +434,11 @@ function App() {
 
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false)
+
+  // Keep runIdRef in sync with runId state (for use in event handlers to avoid stale closures)
+  useEffect(() => {
+    runIdRef.current = runId
+  }, [runId])
 
   // Load directory tree
   const loadDirectory = useCallback(async () => {
@@ -722,15 +736,17 @@ function App() {
   }, [])
 
   // Listen to run events
+  // Listen to run events - use ref to avoid stale closure issues
   useEffect(() => {
     const cleanup = window.ipc.on('runs:events', ((event: unknown) => {
       handleRunEvent(event as RunEventType)
     }) as (event: null) => void)
     return cleanup
-  }, [runId])
+  }, [])
 
   const handleRunEvent = (event: RunEventType) => {
-    if (event.runId !== runId) return
+    // Use ref to get current runId to avoid stale closure issues
+    if (event.runId !== runIdRef.current) return
 
     console.log('Run event:', event.type, event)
 
@@ -1043,6 +1059,7 @@ function App() {
     setRunId(null)
     setMessage('')
     setModelUsage(null)
+    setIsProcessing(false)
     setPendingPermissionRequests(new Map())
     setPendingAskHumanRequests(new Map())
     setAllPermissionRequests(new Map())
@@ -1059,6 +1076,52 @@ function App() {
     setSelectedPath(null)
     setIsGraphOpen(false)
   }, [])
+
+  // File navigation with history tracking
+  const navigateToFile = useCallback((path: string | null) => {
+    if (path === selectedPath) return
+
+    // Push current path to back history (if we have one)
+    if (selectedPath) {
+      setFileHistoryBack(prev => [...prev, selectedPath])
+    }
+    // Clear forward history when navigating to a new file
+    setFileHistoryForward([])
+    setSelectedPath(path)
+  }, [selectedPath])
+
+  const navigateBack = useCallback(() => {
+    if (fileHistoryBack.length === 0) return
+
+    const newBack = [...fileHistoryBack]
+    const previousPath = newBack.pop()!
+
+    // Push current path to forward history
+    if (selectedPath) {
+      setFileHistoryForward(prev => [...prev, selectedPath])
+    }
+
+    setFileHistoryBack(newBack)
+    setSelectedPath(previousPath)
+  }, [fileHistoryBack, selectedPath])
+
+  const navigateForward = useCallback(() => {
+    if (fileHistoryForward.length === 0) return
+
+    const newForward = [...fileHistoryForward]
+    const nextPath = newForward.pop()!
+
+    // Push current path to back history
+    if (selectedPath) {
+      setFileHistoryBack(prev => [...prev, selectedPath])
+    }
+
+    setFileHistoryForward(newForward)
+    setSelectedPath(nextPath)
+  }, [fileHistoryForward, selectedPath])
+
+  const canNavigateBack = fileHistoryBack.length > 0
+  const canNavigateForward = fileHistoryForward.length > 0
 
   // Handle image upload for the markdown editor
   const handleImageUpload = useCallback(async (file: File): Promise<string | null> => {
@@ -1113,7 +1176,7 @@ function App() {
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
-      setSelectedPath(path)
+      navigateToFile(path)
       setIsGraphOpen(false)
       return
     }
@@ -1297,9 +1360,9 @@ function App() {
   const openWikiLink = useCallback(async (wikiPath: string) => {
     const resolvedPath = await ensureWikiFile(wikiPath)
     if (resolvedPath) {
-      setSelectedPath(resolvedPath)
+      navigateToFile(resolvedPath)
     }
-  }, [ensureWikiFile, setSelectedPath])
+  }, [ensureWikiFile, navigateToFile])
 
   const wikiLinkConfig = React.useMemo(() => ({
     files: knowledgeFiles,
@@ -1601,7 +1664,7 @@ function App() {
                     error={graphStatus === 'error' ? (graphError ?? 'Failed to build graph') : null}
                     onSelectNode={(path) => {
                       setIsGraphOpen(false)
-                      setSelectedPath(path)
+                      navigateToFile(path)
                     }}
                   />
                 </div>
@@ -1614,6 +1677,10 @@ function App() {
                       placeholder="Start writing..."
                       wikiLinks={wikiLinkConfig}
                       onImageUpload={handleImageUpload}
+                      onNavigateBack={navigateBack}
+                      onNavigateForward={navigateForward}
+                      canNavigateBack={canNavigateBack}
+                      canNavigateForward={canNavigateForward}
                     />
                   </div>
                 ) : (
@@ -1715,6 +1782,7 @@ function App() {
                       isProcessing={isProcessing}
                       presetMessage={presetMessage}
                       onPresetMessageConsumed={() => setPresetMessage(undefined)}
+                      runId={runId}
                     />
                   </div>
                 </div>
