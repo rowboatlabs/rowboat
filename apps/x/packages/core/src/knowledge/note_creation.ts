@@ -178,10 +178,15 @@ workspace-readFile({ path: "{source_file}" })
 - Has frontmatter \`path:\` field like \`Voice Memos/YYYY-MM-DD/...\`
 - Has \`## Transcript\` section
 
+**Browsing indicators (chrome_sync):**
+- Has frontmatter with \`url:\`, \`title:\`, and \`captured_at:\` fields
+- File path contains \`chrome_sync/\`
+
 **Set processing mode:**
 - \`source_type = "meeting"\` → Can create new notes
 - \`source_type = "email"\` → Can create notes if personalized and relevant
 - \`source_type = "voice_memo"\` → Can create new notes (treat like meetings)
+- \`source_type = "browsing"\` → Can ONLY update existing notes, adds to ## From web browsing section
 
 ---
 
@@ -248,6 +253,26 @@ labeled_at: "2026-02-28T12:00:00Z"
 ## Decision Rules
 
 ${renderNoteEffectRules()}
+
+## From web browsing Source Filtering (chrome_sync)
+
+For browsing sources, the rules are simple:
+- **NEVER create new notes** from browsing data
+- Read the captured page content, title, and URL
+- Determine which existing notes (People, Organizations, Projects, Topics) the page is relevant to
+- If no existing notes are relevant → SKIP
+- If relevant notes exist → Continue processing, will add to ## From web browsing section only
+
+**What makes a page relevant to a note?**
+- Page is about a person who has an existing note (e.g., their LinkedIn profile, blog post)
+- Page is about an organization that has an existing note (e.g., company website, news article)
+- Page is about a project or topic that has an existing note
+- Page contains information directly related to an entity in your knowledge base
+
+**Skip browsing pages that are:**
+- Generic content not related to any existing entity
+- Your own company's pages
+- General news, tutorials, or documentation not tied to a specific entity
 
 ## Filter Decision Output
 
@@ -852,15 +877,47 @@ workspace-edit({
 })
 \`\`\`
 
-## 9b: Apply State Changes
+## 9b: Browsing — Update Existing Notes Only (## From web browsing Section)
+
+**Only update notes that already exist. NEVER create new notes from browsing data.**
+
+For each existing note that is relevant to the browsed page:
+1. Read the current note
+2. If no \`## From web browsing\` section exists, add one after \`## Activity\`
+3. Add a new entry at the TOP of the Browsing section (reverse chronological)
+
+**Entry format:**
+\`\`\`markdown
+## From web browsing
+- **{YYYY-MM-DD}**: {Author/source if identifiable} — {Brief 1-sentence description of the page content} — {URL}
+\`\`\`
+
+**Example:**
+\`\`\`markdown
+## From web browsing
+- **2025-01-20**: Acme Corp blog — Announced Series B funding round of $50M — https://acme.com/blog/series-b
+- **2025-01-15**: Sarah Chen (LinkedIn) — Profile showing recent promotion to VP Engineering — https://linkedin.com/in/sarahchen
+- **2025-01-14**: John Park (LinkedIn post) — Shared thoughts on MCP as backbone of enterprise AI architecture — https://linkedin.com/feed/
+\`\`\`
+
+**Guidelines:**
+- Always include who posted/authored the content when identifiable from the page text (look for author names, "Posted by", bylines, LinkedIn profile names, etc.)
+- Keep descriptions brief (one sentence)
+- Always include the URL if available from the frontmatter
+- Use the \`captured_at\` date from frontmatter for the date
+- Do NOT update Activity, Key facts, Open items, or other sections from browsing data
+- Only update the ## From web browsing section
+- Update \`**Last seen:**\` date in Info section
+
+## 9c: Apply State Changes
 
 For each state change identified in Step 7, update the relevant fields.
 
-## 9c: Update Aliases
+## 9d: Update Aliases
 
 If you discovered new name variants during resolution, add them to Aliases field.
 
-## 9d: Writing Rules
+## 9e: Writing Rules
 
 - **Always use absolute paths** with format \`[[Folder/Name]]\` for all links
 - Use YYYY-MM-DD format for dates
@@ -909,6 +966,7 @@ ${renderNoteTypesBlock()}
 | Voice memo | Yes | Yes | Yes |
 | Email (has create label) | Yes | Yes | Yes |
 | Email (only skip labels) | No (SKIP) | No | No |
+| Browsing (chrome_sync) | No | Yes (## From web browsing only) | No |
 
 **Meeting activity format:** Always include a link to the source meeting note:
 \`\`\`
