@@ -24,7 +24,9 @@
     "ai": "^5.0.133",
     "awilix": "^12.0.5",
     "chokidar": "^4.0.3",
+    "cors": "^2.8.6",
     "cron-parser": "^5.5.0",
+    "express": "^5.2.1",
     "glob": "^13.0.0",
     "google-auth-library": "^10.5.0",
     "googleapis": "^169.0.0",
@@ -40,6 +42,8 @@
     "zod": "^4.2.1"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/node": "^25.0.3",
     "@types/papaparse": "^5.5.2",
     "@types/pdf-parse": "^1.1.5"
