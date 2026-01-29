@@ -30,6 +30,7 @@ const SOURCE_FOLDERS = [
     'gmail_sync',
     'fireflies_transcripts',
     'granola_notes',
+    'chrome_sync',
 ];
 
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
@@ -182,7 +183,23 @@ async function createNotesFromBatch(
     message += `- Create or update notes in "knowledge" directory (workspace-relative paths like "knowledge/People/Name.md")\n`;
     message += `- If the same entity appears in multiple files, merge the information into a single note\n`;
     message += `- Use workspace tools to read existing notes (when you need full content) and write updates\n`;
-    message += `- Follow the note templates and guidelines in your instructions\n\n`;
+    message += `- Follow the note templates and guidelines in your instructions\n`;
+
+    // Add browsing-specific instructions if any files are from chrome_sync
+    const hasBrowsingFiles = files.some(f => f.path.includes('chrome_sync'));
+    if (hasBrowsingFiles) {
+        message += `\n**BROWSING SOURCE RULES (chrome_sync files):**\n`;
+        message += `- Files from chrome_sync are captured web pages from the user's browser\n`;
+        message += `- They have frontmatter with url, title, and captured_at fields\n`;
+        message += `- NEVER create new notes from browsing data — only update EXISTING notes\n`;
+        message += `- Read the page content and determine which existing People, Organizations, Projects, or Topics are relevant\n`;
+        message += `- For each relevant existing note, add an entry under a "## From web browsing" section\n`;
+        message += `- Browsing entry format: \`- **{YYYY-MM-DD}**: {Author/source} — {Brief description} — {URL}\`\n`;
+        message += `- Always identify who posted/authored the content when possible (author names, bylines, LinkedIn profile names, etc.)\n`;
+        message += `- Add the ## From web browsing section after ## Activity if it doesn't exist yet\n`;
+        message += `- If the browsed content is not relevant to any existing note, skip it\n`;
+    }
+    message += `\n`;
 
     // Add the knowledge base index
     message += `---\n\n`;
