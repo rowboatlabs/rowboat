@@ -23,6 +23,7 @@ import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js"
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
+import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -184,6 +185,9 @@ app.whenReady().then(async () => {
 
   // start background agent runner (scheduled agents)
   initAgentRunner();
+
+  // start chrome extension sync server
+  initChromeSync();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
