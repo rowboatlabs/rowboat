@@ -2,7 +2,13 @@
   "manifest_version": 3,
   "name": "Rowboat Browser Capture",
   "version": "1.1.0",
-  "description": "Captures web pages and sends them to Rowboat for indexing",
+  "description": "Allows users to save and capture web page content to their Rowboat workspace.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": [
     "tabs",
     "scripting",
@@ -15,7 +21,12 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_icon": "icon.png"
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "background": {
     "service_worker": "background.js"
