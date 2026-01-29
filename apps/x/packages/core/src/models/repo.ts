@@ -5,6 +5,7 @@ import path from "path";
 import z from "zod";
 
 export interface IModelConfigRepo {
+    ensureConfig(): Promise<void>;
     getConfig(): Promise<z.infer<typeof ModelConfig>>;
     upsert(providerName: string, config: z.infer<typeof Provider>): Promise<void>;
     delete(providerName: string): Promise<void>;
@@ -26,11 +27,7 @@ const defaultConfig: z.infer<typeof ModelConfig> = {
 export class FSModelConfigRepo implements IModelConfigRepo {
     private readonly configPath = path.join(WorkDir, "config", "models.json");
 
-    constructor() {
-        this.ensureDefaultConfig();
-    }
-
-    private async ensureDefaultConfig(): Promise<void> {
+    async ensureConfig(): Promise<void> {
         try {
             await fs.access(this.configPath);
         } catch {
