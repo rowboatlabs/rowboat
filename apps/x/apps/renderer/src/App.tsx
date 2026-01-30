@@ -322,6 +322,37 @@ function ChatInputInner({
     }
   }, [handleSubmit])
 
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes("Files")) {
+        e.preventDefault()
+      }
+    }
+    const onDrop = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes("Files")) {
+        e.preventDefault()
+      }
+      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+        const paths = Array.from(e.dataTransfer.files)
+          .map((f) => window.electronUtils?.getPathForFile(f))
+          .filter(Boolean)
+        if (paths.length > 0) {
+          const currentText = controller.textInput.value
+          const pathText = paths.join(' ')
+          controller.textInput.setInput(
+            currentText ? `${currentText} ${pathText}` : pathText
+          )
+        }
+      }
+    }
+    document.addEventListener("dragover", onDragOver)
+    document.addEventListener("drop", onDrop)
+    return () => {
+      document.removeEventListener("dragover", onDragOver)
+      document.removeEventListener("drop", onDrop)
+    }
+  }, [controller])
+
   return (
     <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
       <PromptInputTextarea

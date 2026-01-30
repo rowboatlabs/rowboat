@@ -33,6 +33,9 @@ declare global {
         handler: (event: IPCChannels[K]['req']) => void
       ): () => void;
     };
+    electronUtils: {
+      getPathForFile: (file: File) => string;
+    };
   }
 }
 
