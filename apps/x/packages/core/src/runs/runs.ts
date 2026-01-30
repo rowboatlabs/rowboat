@@ -5,6 +5,8 @@ import { AskHumanResponseEvent, ToolPermissionResponseEvent, CreateRunOptions, R
 import { IRunsRepo } from "./repo.js";
 import { IAgentRuntime } from "../agents/runtime.js";
 import { IBus } from "../application/lib/bus.js";
+import { IAbortRegistry } from "./abort-registry.js";
+import { forceCloseAllMcpClients } from "../mcp/mcp.js";
 
 export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {
     const repo = container.resolve<IRunsRepo>('runsRepo');
@@ -46,9 +48,21 @@ export async function replyToHumanInputRequest(runId: string, ev: z.infer<typeof
     runtime.trigger(runId);
 }
 
-export async function stop(runId: string): Promise<void> {
-    console.log(`Stopping run ${runId}`);
-    throw new Error('Not implemented');
+export async function stop(runId: string, force: boolean = false): Promise<void> {
+    const abortRegistry = container.resolve<IAbortRegistry>('abortRegistry');
+
+    if (force && abortRegistry.isAborted(runId)) {
+        // Second click: aggressive cleanup — SIGKILL + force close MCP clients
+        console.log(`Force stopping run ${runId}`);
+        abortRegistry.forceAbort(runId);
+        await forceCloseAllMcpClients();
+    } else {
+        // First click: graceful — fires AbortSignal + SIGTERM
+        console.log(`Gracefully stopping run ${runId}`);
+        abortRegistry.abort(runId);
+    }
+    // Note: The run-stopped event is emitted by AgentRuntime.trigger() when it detects the abort.
+    // This avoids duplicate events and ensures proper sequencing.
 }
 
 export async function fetchRun(runId: string): Promise<z.infer<typeof Run>> {

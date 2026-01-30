@@ -295,7 +295,7 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'runs:stop': async (_event, args) => {
-      await runsCore.stop(args.runId);
+      await runsCore.stop(args.runId, args.force);
       return { success: true };
     },
     'runs:fetch': async (_event, args) => {

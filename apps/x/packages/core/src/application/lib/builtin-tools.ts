@@ -2,7 +2,7 @@ import { z, ZodType } from "zod";
 import * as path from "path";
 import { execSync } from "child_process";
 import { glob } from "glob";
-import { executeCommand } from "./command-executor.js";
+import { executeCommand, executeCommandAbortable } from "./command-executor.js";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
 import container from "../../di/container.js";
@@ -11,13 +11,14 @@ import { McpServerDefinition } from "@x/shared/dist/mcp.js";
 import * as workspace from "../../workspace/workspace.js";
 import { IAgentsRepo } from "../../agents/repo.js";
 import { WorkDir } from "../../config/config.js";
+import type { ToolContext } from "./exec-tool.js";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const BuiltinToolsSchema = z.record(z.string(), z.object({
     description: z.string(),
 	inputSchema: z.custom<ZodType>(),
     execute: z.function({
-        input: z.any(),
+        input: z.any(), // (input, ctx?) => Promise<any>
         output: z.promise(z.any()),
     }),
 }));
@@ -611,15 +612,15 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             command: z.string().describe('The shell command to execute (e.g., "ls -la", "cat file.txt")'),
             cwd: z.string().optional().describe('Working directory to execute the command in (defaults to workspace root)'),
         }),
-        execute: async ({ command, cwd }: { command: string, cwd?: string }) => {
+        execute: async ({ command, cwd }: { command: string, cwd?: string }, ctx?: ToolContext) => {
             try {
                 const rootDir = path.resolve(WorkDir);
                 const workingDir = cwd ? path.resolve(rootDir, cwd) : rootDir;
-                const rootPrefix = rootDir.endsWith(path.sep)
-                    ? rootDir
-                    : `${rootDir}${path.sep}`;
 
                 // TODO: Re-enable this check
+                // const rootPrefix = rootDir.endsWith(path.sep)
+                //     ? rootDir
+                //     : `${rootDir}${path.sep}`;
                 // if (workingDir !== rootDir && !workingDir.startsWith(rootPrefix)) {
                 //     return {
                 //         success: false,
@@ -629,8 +630,32 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 //     };
                 // }
 
+                // Use abortable version when we have a signal
+                if (ctx?.signal) {
+                    const { promise, process: proc } = executeCommandAbortable(command, {
+                        cwd: workingDir,
+                        signal: ctx.signal,
+                    });
+
+                    // Register process with abort registry for force-kill
+                    ctx.abortRegistry.registerProcess(ctx.runId, proc);
+
+                    const result = await promise;
+
+                    return {
+                        success: result.exitCode === 0 && !result.wasAborted,
+                        stdout: result.stdout,
+                        stderr: result.stderr,
+                        exitCode: result.exitCode,
+                        wasAborted: result.wasAborted,
+                        command,
+                        workingDir,
+                    };
+                }
+
+                // Fallback to original for backward compatibility
                 const result = await executeCommand(command, { cwd: workingDir });
-                
+
                 return {
                     success: result.exitCode === 0,
                     stdout: result.stdout,

@@ -151,6 +151,7 @@ const ipcSchemas = {
   'runs:stop': {
     req: z.object({
       runId: z.string(),
+      force: z.boolean().optional().default(false),
     }),
     res: z.object({
       success: z.literal(true),

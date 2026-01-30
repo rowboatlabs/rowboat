@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Expand, Plus } from 'lucide-react'
+import { ArrowUp, Expand, LoaderIcon, Plus, Square } from 'lucide-react'
 import type { ToolUIPart } from 'ai'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -115,6 +115,8 @@ interface ChatSidebarProps {
   currentAssistantMessage: string
   currentReasoning: string
   isProcessing: boolean
+  isStopping?: boolean
+  onStop?: () => void
   message: string
   onMessageChange: (message: string) => void
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
@@ -139,6 +141,8 @@ export function ChatSidebar({
   currentAssistantMessage,
   currentReasoning,
   isProcessing,
+  isStopping,
+  onStop,
   message,
   onMessageChange,
   onSubmit,
@@ -595,19 +599,39 @@ export function ChatSidebar({
                 style={{ fieldSizing: 'content' } as React.CSSProperties}
               />
             </div>
-            <Button
-              size="icon"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              className={cn(
-                "h-7 w-7 rounded-full shrink-0 transition-all",
-                canSubmit
-                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                  : "bg-muted text-muted-foreground"
-              )}
-            >
-              <ArrowUp className="h-4 w-4" />
-            </Button>
+            {isProcessing ? (
+              <Button
+                size="icon"
+                onClick={onStop}
+                title={isStopping ? "Click again to force stop" : "Stop generation"}
+                className={cn(
+                  "h-7 w-7 rounded-full shrink-0 transition-all",
+                  isStopping
+                    ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    : "bg-primary text-primary-foreground hover:bg-primary/90"
+                )}
+              >
+                {isStopping ? (
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="h-3 w-3 fill-current" />
+                )}
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                className={cn(
+                  "h-7 w-7 rounded-full shrink-0 transition-all",
+                  canSubmit
+                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            )}
           </div>
           {knowledgeFiles.length > 0 && (
             <MentionPopover
