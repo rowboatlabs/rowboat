@@ -8,6 +8,7 @@ import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
 import workflowAuthoringSkill from "./workflow-authoring/skill.js";
+import createPresentationsSkill from "./create-presentations/skill.js";
 import workflowRunOpsSkill from "./workflow-run-ops/skill.js";
 
 const CURRENT_FILE = fileURLToPath(import.meta.url);
@@ -29,6 +30,13 @@ type ResolvedSkill = {
 };
 
 const definitions: SkillDefinition[] = [
+  {
+    id: "create-presentations",
+    title: "Create Presentations",
+    folder: "create-presentations",
+    summary: "Create PDF presentations and slide decks from natural language requests using knowledge base context.",
+    content: createPresentationsSkill,
+  },
   {
     id: "doc-collab",
     title: "Document Collaboration",
