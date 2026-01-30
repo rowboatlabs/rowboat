@@ -12,7 +12,6 @@ import * as workspace from "../../workspace/workspace.js";
 import { IAgentsRepo } from "../../agents/repo.js";
 import { WorkDir } from "../../config/config.js";
 import type { ToolContext } from "./exec-tool.js";
-import { generatePresentation } from "../assistant/skills/create-presentations/presentation-generator.js";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const BuiltinToolsSchema = z.record(z.string(), z.object({
@@ -607,76 +606,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
     
-    generatePresentation: {
-        description: 'Generate a PDF presentation from slide data. Creates a 16:9 PDF with styled slides.',
-        inputSchema: z.object({
-            slides: z.array(z.object({
-                type: z.enum(['title', 'content', 'section', 'stats', 'two-column', 'quote', 'image', 'team', 'cta']),
-                title: z.string().optional(),
-                subtitle: z.string().optional(),
-                content: z.string().optional(),
-                presenter: z.string().optional(),
-                items: z.array(z.string()).optional(),
-                stats: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
-                note: z.string().optional(),
-                columns: z.array(z.object({
-                    title: z.string().optional(),
-                    content: z.string().optional(),
-                    items: z.array(z.string()).optional(),
-                })).optional(),
-                quote: z.string().optional(),
-                attribution: z.string().optional(),
-                imagePath: z.string().optional(),
-                caption: z.string().optional(),
-                members: z.array(z.object({
-                    name: z.string(),
-                    role: z.string(),
-                    bio: z.string().optional(),
-                    photoPath: z.string().optional(),
-                })).optional(),
-                contact: z.string().optional(),
-            })).describe('Array of slide objects'),
-            theme: z.object({
-                primaryColor: z.string().optional(),
-                secondaryColor: z.string().optional(),
-                accentColor: z.string().optional(),
-                textColor: z.string().optional(),
-                textLight: z.string().optional(),
-                background: z.string().optional(),
-                backgroundAlt: z.string().optional(),
-                fontFamily: z.string().optional(),
-            }).optional().describe('Optional theme customization'),
-            outputPath: z.string().describe('Absolute path for the output PDF file'),
-        }),
-        execute: async ({ slides, theme, outputPath }: {
-            slides: Array<Record<string, unknown>>;
-            theme?: Record<string, string>;
-            outputPath: string;
-        }) => {
-            try {
-                const result = await generatePresentation(
-                    { slides: slides as never, theme },
-                    outputPath,
-                );
-                return {
-                    success: true,
-                    outputPath: result,
-                    slideCount: slides.length,
-                };
-            } catch (error) {
-                return {
-                    success: false,
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                };
-            }
-        },
-    },
-
     executeCommand: {
         description: 'Execute a shell command and return the output. Use this to run bash/shell commands.',
         inputSchema: z.object({
             command: z.string().describe('The shell command to execute (e.g., "ls -la", "cat file.txt")'),
-            cwd: z.string().optional().describe('Working directory to execute the command in (defaults to workspace root)'),
+            cwd: z.string().optional().describe('Working directory to execute the command in (defaults to workspace root). You do not need to set this unless absolutely necessary.'),
         }),
         execute: async ({ command, cwd }: { command: string, cwd?: string }, ctx?: ToolContext) => {
             try {
