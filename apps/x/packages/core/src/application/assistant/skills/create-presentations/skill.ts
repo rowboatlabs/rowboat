@@ -3,7 +3,19 @@ export const skill = String.raw`
 
 ## Overview
 
-This skill enables Rowboat to create stunning PDF presentations from natural language requests. Use the built-in **generatePresentation** tool to render slides to PDF.
+This skill enables Rowboat to create visually compelling PDF presentations from natural language requests. You have full freedom to write and execute your own code to generate presentations — install any npm packages you need, generate charts, use custom layouts, and make the output look polished and professional.
+
+A minimal reference implementation using @react-pdf/renderer exists in the codebase at:
+- **Types:** src/application/assistant/skills/create-presentations/types.ts
+- **Generator:** src/application/assistant/skills/create-presentations/presentation-generator.tsx
+
+**This code is just a starting point.** It shows one basic approach to PDF generation. You are NOT limited to it. Feel free to:
+- Write your own code from scratch
+- Use different libraries (e.g., pdfkit, puppeteer with HTML/CSS, jsPDF, or anything else)
+- Install any npm packages you need via executeCommand
+- Generate charts and visualizations (e.g., chartjs-node-canvas, d3-node, vega-lite, mermaid)
+- Render charts as PNG images and embed them in slides
+- Create custom layouts, gradients, decorative elements — whatever makes the presentation look great
 
 ## When to Use This Skill
 
@@ -51,7 +63,7 @@ Before creating any presentation, gather context from the user's knowledge base:
 Before doing anything else, ask the user about their preferences:
 
 1. **Content density**: Should the slides be text-heavy with detailed explanations, or minimal with just key points and big numbers?
-2. **Color / theme**: Do they have brand colors or a color preference? (e.g., "use our brand blue #2563eb" or "dark theme" or "keep it default")
+2. **Color / theme**: Do they have brand colors or a color preference? (e.g., "use our brand blue #2563eb", "dark theme", "warm tones", "professional and clean")
 3. **Presentation type**: pitch deck, product demo, team intro, investor update, etc.
 4. **Audience**: investors, customers, internal team, conference
 5. **Tone**: formal, casual, technical, inspirational
@@ -82,7 +94,7 @@ Before generating slides, present a structured outline to the user:
 
 **Title:** [Presentation Title]
 **Slides:** [N] slides
-**Estimated read time:** [X] minutes
+**Style:** [Color scheme / theme description]
 
 ### Flow:
 
@@ -111,212 +123,71 @@ After the user approves (or after incorporating their feedback), immediately ask
 
 ### Step 4: Generate the Presentation
 
-Once approved, call the **generatePresentation** tool with the slides JSON and output path. Apply the user's theme/color preferences from Step 1.
+Write code to generate the presentation. You have complete freedom here:
 
-## Slide Types Reference
+1. **Install any packages you need** via executeCommand (e.g., npm install @react-pdf/renderer chartjs-node-canvas)
+2. **Write a script** that generates the PDF — you can use the reference code as inspiration or write something entirely different
+3. **Generate charts** for any data that would benefit from visualization (revenue growth, market size, traction metrics, competitive positioning, etc.) — use chartjs-node-canvas, d3, vega, or any charting library
+4. **Execute the script** to produce the final PDF
 
-| Type | Description | Required Fields |
-|------|-------------|-----------------|
-| title | Opening slide with gradient background | title |
-| section | Section divider with large number | title |
-| content | Standard content slide | title, content or items |
-| two-column | Two column layout | title, columns (array of 2) |
-| stats | Big numbers display | title, stats (array of {value, label}) |
-| quote | Testimonial/quote | quote |
-| image | Image with caption | title, imagePath |
-| team | Team member grid | title, members (array) |
-| cta | Call to action / closing | title |
+## Visual Quality Guidelines
 
-## Slide Type Details
+**Do NOT produce plain, boring slides.** Make them look professional and visually engaging:
 
-### title
-~~~json
-{
-  "type": "title",
-  "title": "Company Name",
-  "subtitle": "Tagline or description",
-  "presenter": "Name • Context • Date"
-}
-~~~
+- **Use color intentionally** — gradient backgrounds on title/CTA slides, accent colors for bullets and highlights, colored stat numbers
+- **Apply the user's brand colors** throughout — not just on the title slide, but as accents, backgrounds, and highlights across all slides
+- **Charts and visualizations** — whenever there are numbers (revenue, growth, market size, user counts), generate a chart instead of just listing numbers. Bar charts, line charts, pie charts, and simple diagrams make slides far more impactful
+- **Visual hierarchy** — large bold headings, generous whitespace, clear separation between sections
+- **Consistent theming** — every slide should feel like part of the same deck, with consistent colors, fonts, and spacing
+- **Decorative elements** — subtle accent bars, colored bullets, gradient sections, and background tints add polish
 
-### content
-~~~json
-{
-  "type": "content",
-  "title": "Slide Title",
-  "content": "Optional paragraph text",
-  "items": ["Bullet point 1", "Bullet point 2", "Bullet point 3"]
-}
-~~~
+## Slide Types (Reference)
 
-### section
-~~~json
-{
-  "type": "section",
-  "title": "Section Title",
-  "subtitle": "Optional subtitle"
-}
-~~~
+These are common slide patterns. You can implement these or create your own:
 
-### stats
-~~~json
-{
-  "type": "stats",
-  "title": "Key Metrics",
-  "stats": [
-    { "value": "$5M", "label": "Revenue" },
-    { "value": "150%", "label": "YoY Growth" },
-    { "value": "10K+", "label": "Users" }
-  ],
-  "note": "Optional footnote"
-}
-~~~
+| Type | Description | When to Use |
+|------|-------------|-------------|
+| Title | Bold opening with gradient/colored background | First slide |
+| Section | Section divider between topics | Between major sections |
+| Content | Text with bullet points | Explaining concepts, lists |
+| Two-column | Side-by-side comparison | Us vs. them, before/after |
+| Stats | Big bold numbers | Key metrics, traction, market size |
+| Chart | Data visualization | Revenue growth, market breakdown, trends |
+| Quote | Testimonial or notable quote | Customer feedback, press quotes |
+| Image | Full or partial image with caption | Product screenshots, team photos |
+| Team | Grid of team member cards | Team introduction |
+| CTA | Call to action / closing | Final slide |
 
-### two-column
-~~~json
-{
-  "type": "two-column",
-  "title": "Comparison",
-  "columns": [
-    {
-      "title": "Column A",
-      "content": "Optional text",
-      "items": ["Item 1", "Item 2"]
-    },
-    {
-      "title": "Column B",
-      "content": "Optional text",
-      "items": ["Item 1", "Item 2"]
-    }
-  ]
-}
-~~~
+## Content Limits Per Slide
 
-### quote
-~~~json
-{
-  "type": "quote",
-  "quote": "The quote text goes here.",
-  "attribution": "Person Name, Title"
-}
-~~~
+Each slide is a fixed page. Content that exceeds the available space will overflow. Follow these limits:
 
-### image
-~~~json
-{
-  "type": "image",
-  "title": "Product Screenshot",
-  "imagePath": "/absolute/path/to/image.png",
-  "caption": "Optional caption"
-}
-~~~
+| Slide Type | Max Items / Content |
+|------------|-------------------|
+| Content | 5 bullet points max (~80 chars each). Paragraph text: max ~4 lines. |
+| Two-column | 4 bullet points per column max (~60 chars each). |
+| Stats | 3-4 stats max. Keep labels short. |
+| Team | 4 members max per slide. Split into multiple slides if needed. |
+| Quote | Keep quotes under ~200 characters. |
 
-### team
-~~~json
-{
-  "type": "team",
-  "title": "Our Team",
-  "members": [
-    {
-      "name": "Jane Doe",
-      "role": "CEO",
-      "bio": "Optional short bio",
-      "photoPath": "/absolute/path/to/photo.png"
-    }
-  ]
-}
-~~~
-
-### cta
-~~~json
-{
-  "type": "cta",
-  "title": "Let's Build Together",
-  "subtitle": "email@company.com",
-  "contact": "website.com • github.com/org"
-}
-~~~
-
-## Theme Customization
-
-Pass an optional theme object to customize colors:
-
-~~~json
-{
-  "primaryColor": "#2563eb",
-  "secondaryColor": "#7c3aed",
-  "accentColor": "#f59e0b",
-  "textColor": "#1f2937",
-  "textLight": "#6b7280",
-  "background": "#ffffff",
-  "backgroundAlt": "#f9fafb",
-  "fontFamily": "Helvetica"
-}
-~~~
-
-All theme fields are optional — defaults are used for any omitted fields.
-
-## Example: Calling generatePresentation
-
-~~~json
-{
-  "slides": [
-    {
-      "type": "title",
-      "title": "Acme Corp",
-      "subtitle": "Revolutionizing Widget Manufacturing",
-      "presenter": "Jane Doe • Series A • 2025"
-    },
-    {
-      "type": "content",
-      "title": "The Problem",
-      "items": [
-        "Widget production is slow and expensive",
-        "Legacy systems can't keep up with demand",
-        "Quality control remains manual"
-      ]
-    },
-    {
-      "type": "stats",
-      "title": "Traction",
-      "stats": [
-        { "value": "500+", "label": "Customers" },
-        { "value": "$2M", "label": "ARR" },
-        { "value": "3x", "label": "YoY Growth" }
-      ]
-    },
-    {
-      "type": "cta",
-      "title": "Let's Talk",
-      "subtitle": "jane@acme.com",
-      "contact": "acme.com"
-    }
-  ],
-  "theme": {
-    "primaryColor": "#2563eb"
-  },
-  "outputPath": "/Users/user/Desktop/acme_pitch.pdf"
-}
-~~~
+**If the user's content needs more space**, split it across multiple slides rather than cramming it into one.
 
 ## Pitch Deck Templates
 
 ### Series A Pitch Deck (12 slides)
 
-Standard flow for investor presentations:
-
-1. **Title** (type: title) - Company name, tagline, presenter
-2. **Problem** (type: content) - What pain point you solve
-3. **Solution** (type: content) - Your product/service
-4. **Product** (type: image) - Demo/screenshots
-5. **Market** (type: stats) - TAM/SAM/SOM
-6. **Business Model** (type: content) - How you make money
-7. **Traction** (type: stats) - Metrics and growth
-8. **Competition** (type: two-column) - Your differentiation
-9. **Team** (type: team) - Key team members
-10. **Financials** (type: content or stats) - Projections
-11. **The Ask** (type: content) - Funding amount and use
-12. **Contact** (type: cta) - CTA with contact info
+1. **Title** - Company name, tagline, presenter
+2. **Problem** - What pain point you solve
+3. **Solution** - Your product/service
+4. **Product** - Demo/screenshots
+5. **Market** - TAM/SAM/SOM (use a chart!)
+6. **Business Model** - How you make money
+7. **Traction** - Metrics and growth (use charts!)
+8. **Competition** - Positioning (two-column or matrix chart)
+9. **Team** - Key team members
+10. **Financials** - Projections (use a chart!)
+11. **The Ask** - Funding amount and use (pie chart for allocation)
+12. **Contact** - CTA with contact info
 
 ### Product Demo Deck (8 slides)
 
@@ -324,44 +195,22 @@ Standard flow for investor presentations:
 2. **Problem** - User pain points
 3. **Solution** - High-level approach
 4. **Features** - Key capabilities (two-column)
-5. **Demo** - Screenshots (image)
+5. **Demo** - Screenshots
 6. **Pricing** - Plans and pricing
-7. **Testimonials** - Customer quotes (quote)
+7. **Testimonials** - Customer quotes
 8. **Get Started** - CTA
-
-## Content Limits Per Slide (IMPORTANT)
-
-Each slide is a fixed 1280x720 page. Content that exceeds the available space will be clipped. Follow these limits strictly:
-
-| Slide Type | Max Items / Content |
-|------------|-------------------|
-| content | 5 bullet points max (keep each bullet to 1 line, ~80 chars). If using paragraph text instead, max ~4 lines. |
-| two-column | 4 bullet points per column max. Keep bullets short (~60 chars). |
-| stats | 3-4 stats max. Keep labels short (1-2 words). |
-| team | 4 members max per slide. Split into multiple team slides if needed. |
-| quote | Keep quotes under ~200 characters. |
-| image | Caption should be 1 line. |
-
-**If the user's content needs more space**, split it across multiple slides of the same type rather than cramming it into one. For example, if there are 8 bullet points, use two content slides (4 each) with titles like "Key Benefits (1/2)" and "Key Benefits (2/2)".
 
 ## Best Practices
 
 1. **Keep slides simple** - One idea per slide
-2. **Use stats slides for numbers** - Big, bold metrics
+2. **Use charts for numbers** - Never just list numbers when a chart would be more impactful
 3. **Limit bullet points** - 3-5 max per slide, keep them short
 4. **Use two-column for comparisons** - Us vs. them, before/after
 5. **End with clear CTA** - What do you want them to do?
 6. **Gather knowledge first** - Check ~/.rowboat/knowledge/ before generating
 7. **Use absolute paths** for images (PNG, JPG supported)
 8. **Never overflow** - If content doesn't fit, split across multiple slides
-
-## Output
-
-The generatePresentation tool produces:
-- **PDF file** at the specified outputPath
-- **16:9 aspect ratio** (1280x720px per slide)
-- **Print-ready** quality
-- **Embedded fonts** for portability
+9. **Make it visually rich** - Colors, charts, gradients — not just text on white backgrounds
 `;
 
 export default skill;
