@@ -32,7 +32,6 @@ const definitions: SkillDefinition[] = [
   {
     id: "create-presentations",
     title: "Create Presentations",
-    folder: "create-presentations",
     summary: "Create PDF presentations and slide decks from natural language requests using knowledge base context.",
     content: createPresentationsSkill,
   },
