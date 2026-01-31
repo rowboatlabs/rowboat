@@ -1666,7 +1666,7 @@ function App() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <SidebarSectionProvider defaultSection="knowledge" onSectionChange={handleSectionChange}>
+      <SidebarSectionProvider defaultSection="tasks" onSectionChange={handleSectionChange}>
         <div className="flex h-svh w-full">
           {/* Icon sidebar - always visible, fixed position */}
           <SidebarIcon />

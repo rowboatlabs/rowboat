@@ -95,7 +95,7 @@ type SidebarContentPanelProps = {
 
 const sectionTitles = {
   knowledge: "Knowledge",
-  tasks: "Tasks",
+  tasks: "Chats",
 }
 
 export function SidebarContentPanel({

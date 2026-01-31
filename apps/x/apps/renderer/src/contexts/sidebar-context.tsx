@@ -20,7 +20,7 @@ export function useSidebarSection() {
 }
 
 export function SidebarSectionProvider({
-  defaultSection = "knowledge",
+  defaultSection = "tasks",
   onSectionChange,
   children,
 }: {
