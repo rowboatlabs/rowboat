@@ -296,7 +296,7 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'runs:stop': async (_event, args) => {
-      await runsCore.stop(args.runId);
+      await runsCore.stop(args.runId, args.force);
       return { success: true };
     },
     'runs:fetch': async (_event, args) => {
@@ -306,7 +306,7 @@ export function setupIpcHandlers() {
       return runsCore.listRuns(args.cursor);
     },
     'oauth:connect': async (_event, args) => {
-      return await connectProvider(args.provider, args.clientId);
+      return await connectProvider(args.provider);
     },
     'oauth:disconnect': async (_event, args) => {
       return await disconnectProvider(args.provider);

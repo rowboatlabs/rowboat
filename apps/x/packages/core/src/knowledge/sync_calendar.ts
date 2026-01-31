@@ -11,8 +11,8 @@ const SYNC_DIR = path.join(WorkDir, 'calendar_sync');
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const LOOKBACK_DAYS = 14;
 const REQUIRED_SCOPES = [
-    'https://www.googleapis.com/auth/calendar.readonly',
-    'https://www.googleapis.com/auth/drive.readonly'
+    'https://www.googleapis.com/auth/calendar.events.readonly',
+    // 'https://www.googleapis.com/auth/drive.readonly'
 ];
 
 const nhm = new NodeHtmlMarkdown();
@@ -186,7 +186,7 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
             for (const event of events) {
                 if (event.id) {
                     await saveEvent(event, syncDir);
-                    await processAttachments(drive, event, syncDir);
+                    // await processAttachments(drive, event, syncDir);
                     currentEventIds.add(event.id);
                 }
             }

@@ -11,6 +11,7 @@ import { IAgentRuntime, AgentRuntime } from "../agents/runtime.js";
 import { FSOAuthRepo, IOAuthRepo } from "../auth/repo.js";
 import { FSClientRegistrationRepo, IClientRegistrationRepo } from "../auth/client-repo.js";
 import { FSGranolaConfigRepo, IGranolaConfigRepo } from "../knowledge/granola/repo.js";
+import { IAbortRegistry, InMemoryAbortRegistry } from "../runs/abort-registry.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -22,6 +23,7 @@ container.register({
     messageQueue: asClass<IMessageQueue>(InMemoryMessageQueue).singleton(),
     bus: asClass<IBus>(InMemoryBus).singleton(),
     runsLock: asClass<IRunsLock>(InMemoryRunsLock).singleton(),
+    abortRegistry: asClass<IAbortRegistry>(InMemoryAbortRegistry).singleton(),
     agentRuntime: asClass<IAgentRuntime>(AgentRuntime).singleton(),
 
     mcpConfigRepo: asClass<IMcpConfigRepo>(FSMcpConfigRepo).singleton(),

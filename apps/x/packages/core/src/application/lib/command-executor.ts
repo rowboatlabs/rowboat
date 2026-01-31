@@ -1,4 +1,4 @@
-import { exec, execSync } from 'child_process';
+import { exec, execSync, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { getSecurityAllowList } from '../../config/security.js';
 
@@ -108,6 +108,159 @@ export async function executeCommand(
       exitCode: e.code || 1,
     };
   }
+}
+
+export interface AbortableCommandResult extends CommandResult {
+  wasAborted: boolean;
+}
+
+const SIGKILL_GRACE_MS = 200;
+
+/**
+ * Kill a process tree using negative PID (process group kill on Unix).
+ * Falls back to direct kill if group kill fails.
+ */
+function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
+  if (!proc.pid || proc.killed) return;
+  try {
+    // Negative PID kills the entire process group (Unix)
+    process.kill(-proc.pid, signal);
+  } catch {
+    try {
+      proc.kill(signal);
+    } catch {
+      // Process may already be dead
+    }
+  }
+}
+
+/**
+ * Executes a shell command with abort support.
+ * Uses spawn with detached=true to create a process group for proper tree killing.
+ * Returns both the promise and the child process handle.
+ */
+export function executeCommandAbortable(
+  command: string,
+  options?: {
+    cwd?: string;
+    timeout?: number;
+    maxBuffer?: number;
+    signal?: AbortSignal;
+  }
+): { promise: Promise<AbortableCommandResult>; process: ChildProcess } {
+  // Check if already aborted before spawning
+  if (options?.signal?.aborted) {
+    // Return a dummy process and a resolved result
+    const dummyProc = spawn('true', { shell: true });
+    dummyProc.kill();
+    return {
+      process: dummyProc,
+      promise: Promise.resolve({
+        stdout: '',
+        stderr: '',
+        exitCode: 130,
+        wasAborted: true,
+      }),
+    };
+  }
+
+  const proc = spawn(command, [], {
+    shell: '/bin/sh',
+    cwd: options?.cwd,
+    detached: process.platform !== 'win32', // Create process group on Unix
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const promise = new Promise<AbortableCommandResult>((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let wasAborted = false;
+    let exited = false;
+
+    // Collect output
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      const maxBuffer = options?.maxBuffer || 1024 * 1024;
+      if (stdout.length < maxBuffer) {
+        stdout += chunk.toString();
+      }
+    });
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      const maxBuffer = options?.maxBuffer || 1024 * 1024;
+      if (stderr.length < maxBuffer) {
+        stderr += chunk.toString();
+      }
+    });
+
+    // Abort handler
+    const abortHandler = () => {
+      wasAborted = true;
+      killProcessTree(proc, 'SIGTERM');
+      // Force kill after grace period
+      setTimeout(() => {
+        if (!exited) {
+          killProcessTree(proc, 'SIGKILL');
+        }
+      }, SIGKILL_GRACE_MS);
+    };
+
+    if (options?.signal) {
+      options.signal.addEventListener('abort', abortHandler, { once: true });
+    }
+
+    // Timeout handler
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (options?.timeout) {
+      timeoutId = setTimeout(() => {
+        wasAborted = true;
+        killProcessTree(proc, 'SIGTERM');
+        setTimeout(() => {
+          if (!exited) {
+            killProcessTree(proc, 'SIGKILL');
+          }
+        }, SIGKILL_GRACE_MS);
+      }, options.timeout);
+    }
+
+    proc.once('exit', (code) => {
+      exited = true;
+      // Cleanup listeners
+      if (options?.signal) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
+      if (wasAborted) {
+        stdout += '\n\n(Command was aborted)';
+      }
+
+      resolve({
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        exitCode: code ?? 1,
+        wasAborted,
+      });
+    });
+
+    proc.once('error', (err) => {
+      exited = true;
+      if (options?.signal) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      resolve({
+        stdout: '',
+        stderr: err.message,
+        exitCode: 1,
+        wasAborted,
+      });
+    });
+  });
+
+  return { promise, process: proc };
 }
 
 /**

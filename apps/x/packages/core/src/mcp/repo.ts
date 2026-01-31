@@ -5,6 +5,7 @@ import path from "path";
 import z from "zod";
 
 export interface IMcpConfigRepo {
+    ensureConfig(): Promise<void>;
     getConfig(): Promise<z.infer<typeof McpServerConfig>>;
     upsert(serverName: string, config: z.infer<typeof McpServerDefinition>): Promise<void>;
     delete(serverName: string): Promise<void>;
@@ -13,11 +14,7 @@ export interface IMcpConfigRepo {
 export class FSMcpConfigRepo implements IMcpConfigRepo {
     private readonly configPath = path.join(WorkDir, "config", "mcp.json");
 
-    constructor() {
-        this.ensureDefaultConfig();
-    }
-
-    private async ensureDefaultConfig(): Promise<void> {
+    async ensureConfig(): Promise<void> {
         try {
             await fs.access(this.configPath);
         } catch {

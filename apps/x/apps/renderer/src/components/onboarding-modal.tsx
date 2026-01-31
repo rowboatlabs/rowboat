@@ -14,9 +14,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
-import { GoogleClientIdModal } from "@/components/google-client-id-modal"
 import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
-import { getGoogleClientId, setGoogleClientId } from "@/lib/google-client-id-store"
 import { toast } from "sonner"
 
 interface ProviderState {
@@ -39,7 +37,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [providers, setProviders] = useState<string[]>([])
   const [providersLoading, setProvidersLoading] = useState(true)
   const [providerStates, setProviderStates] = useState<Record<string, ProviderState>>({})
-  const [googleClientIdOpen, setGoogleClientIdOpen] = useState(false)
 
   // Granola state
   const [granolaEnabled, setGranolaEnabled] = useState(false)
@@ -248,14 +245,15 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     return cleanup
   }, [])
 
-  const startConnect = useCallback(async (provider: string, clientId?: string) => {
+  // Connect to a provider
+  const handleConnect = useCallback(async (provider: string) => {
     setProviderStates(prev => ({
       ...prev,
       [provider]: { ...prev[provider], isConnecting: true }
     }))
 
     try {
-      const result = await window.ipc.invoke('oauth:connect', { provider, clientId })
+      const result = await window.ipc.invoke('oauth:connect', { provider })
 
       if (!result.success) {
         toast.error(result.error || `Failed to connect to ${provider}`)
@@ -273,27 +271,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       }))
     }
   }, [])
-
-  // Connect to a provider
-  const handleConnect = useCallback(async (provider: string) => {
-    if (provider === 'google') {
-      const existingClientId = getGoogleClientId()
-      if (!existingClientId) {
-        setGoogleClientIdOpen(true)
-        return
-      }
-      await startConnect(provider, existingClientId)
-      return
-    }
-
-    await startConnect(provider)
-  }, [startConnect])
-
-  const handleGoogleClientIdSubmit = useCallback((clientId: string) => {
-    setGoogleClientId(clientId)
-    setGoogleClientIdOpen(false)
-    startConnect('google', clientId)
-  }, [startConnect])
 
   const handleNext = () => {
     if (currentStep < 2) {
@@ -597,12 +574,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   return (
     <>
-    <GoogleClientIdModal
-      open={googleClientIdOpen}
-      onOpenChange={setGoogleClientIdOpen}
-      onSubmit={handleGoogleClientIdSubmit}
-      isSubmitting={providerStates.google?.isConnecting ?? false}
-    />
     <ComposioApiKeyModal
       open={composioApiKeyOpen}
       onOpenChange={setComposioApiKeyOpen}

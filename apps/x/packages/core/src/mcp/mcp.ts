@@ -84,6 +84,22 @@ export async function cleanup() {
     }
 }
 
+/**
+ * Force-close all MCP client connections.
+ * Used during force abort to immediately reject any pending MCP tool calls.
+ * Clients will be lazily reconnected on next use.
+ */
+export async function forceCloseAllMcpClients(): Promise<void> {
+    for (const [serverName, { client }] of Object.entries(clients)) {
+        try {
+            await client?.close();
+        } catch {
+            // Ignore errors during force close
+        }
+        delete clients[serverName];
+    }
+}
+
 export async function listServers(): Promise<z.infer<typeof McpServerList>> {
     const repo = container.resolve<IMcpConfigRepo>('mcpConfigRepo');
     const { mcpServers } = await repo.getConfig();

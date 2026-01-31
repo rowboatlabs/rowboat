@@ -3,7 +3,6 @@ import container from '../di/container.js';
 import { IOAuthRepo } from '../auth/repo.js';
 import { IClientRegistrationRepo } from '../auth/client-repo.js';
 import { getProviderConfig } from '../auth/providers.js';
-import { getProviderClientIdOverride } from '../auth/provider-client-id.js';
 import * as oauthClient from '../auth/oauth-client.js';
 import type { Configuration } from '../auth/oauth-client.js';
 import { OAuthTokens } from '../auth/types.js';
@@ -18,21 +17,11 @@ export class GoogleClientFactory {
         config: Configuration | null;
         client: OAuth2Client | null;
         tokens: OAuthTokens | null;
-        clientId: string | null;
     } = {
         config: null,
         client: null,
         tokens: null,
-        clientId: null,
     };
-
-    private static resolveClientId(): string {
-        const override = getProviderClientIdOverride(this.PROVIDER_NAME);
-        if (!override) {
-            throw new Error('Google client ID not provided for this session.');
-        }
-        return override;
-    }
 
     /**
      * Get or create OAuth2Client, reusing cached instance when possible
@@ -47,13 +36,7 @@ export class GoogleClientFactory {
         }
 
         // Initialize config cache if needed
-        try {
-            await this.initializeConfigCache();
-        } catch (error) {
-            console.error("[OAuth] Failed to initialize Google OAuth configuration:", error);
-            this.clearCache();
-            return null;
-        }
+        await this.initializeConfigCache();
         if (!this.cache.config) {
             return null;
         }
@@ -112,10 +95,6 @@ export class GoogleClientFactory {
             return false;
         }
 
-        if (!getProviderClientIdOverride(this.PROVIDER_NAME)) {
-            return false;
-        }
-
         const tokens = await oauthRepo.getTokens(this.PROVIDER_NAME);
         if (!tokens) {
             return false;
@@ -137,21 +116,14 @@ export class GoogleClientFactory {
         this.cache.config = null;
         this.cache.client = null;
         this.cache.tokens = null;
-        this.cache.clientId = null;
     }
 
     /**
      * Initialize cached configuration (called once)
      */
     private static async initializeConfigCache(): Promise<void> {
-        const clientId = this.resolveClientId();
-
-        if (this.cache.config && this.cache.clientId === clientId) {
-            return; // Already initialized for this client ID
-        }
-
-        if (this.cache.clientId && this.cache.clientId !== clientId) {
-            this.clearCache();
+        if (this.cache.config) {
+            return; // Already initialized
         }
 
         console.log(`[OAuth] Initializing Google OAuth configuration...`);
@@ -163,7 +135,7 @@ export class GoogleClientFactory {
                 console.log(`[OAuth] Discovery mode: issuer with static client ID`);
                 this.cache.config = await oauthClient.discoverConfiguration(
                     providerConfig.discovery.issuer,
-                    clientId
+                    providerConfig.client.clientId
                 );
             } else {
                 // DCR mode - need existing registration
@@ -190,12 +162,11 @@ export class GoogleClientFactory {
             this.cache.config = oauthClient.createStaticConfiguration(
                 providerConfig.discovery.authorizationEndpoint,
                 providerConfig.discovery.tokenEndpoint,
-                clientId,
+                providerConfig.client.clientId,
                 providerConfig.discovery.revocationEndpoint
             );
         }
 
-        this.cache.clientId = clientId;
         console.log(`[OAuth] Google OAuth configuration initialized`);
     }
 
@@ -203,7 +174,17 @@ export class GoogleClientFactory {
      * Create OAuth2Client from OAuthTokens
      */
     private static createClientFromTokens(tokens: OAuthTokens): OAuth2Client {
-        const clientId = this.resolveClientId();
+        const providerConfig = getProviderConfig(this.PROVIDER_NAME);
+        
+        // Get client ID from config
+        let clientId: string;
+        if (providerConfig.client.mode === 'static') {
+            clientId = providerConfig.client.clientId;
+        } else {
+            // For DCR, we'd need to look up the registered client ID
+            // This is a fallback - normally initializeConfigCache handles this
+            throw new Error('Cannot create client without static client ID');
+        }
 
         // Create OAuth2Client directly (PKCE flow doesn't use client secret)
         const client = new OAuth2Client(

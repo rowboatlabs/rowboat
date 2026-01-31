@@ -151,6 +151,7 @@ const ipcSchemas = {
   'runs:stop': {
     req: z.object({
       runId: z.string(),
+      force: z.boolean().optional().default(false),
     }),
     res: z.object({
       success: z.literal(true),
@@ -175,7 +176,6 @@ const ipcSchemas = {
   'oauth:connect': {
     req: z.object({
       provider: z.string(),
-      clientId: z.string().optional(),
     }),
     res: z.object({
       success: z.boolean(),
