@@ -7,7 +7,6 @@ import { getProviderConfig, getAvailableProviders } from '@x/core/dist/auth/prov
 import container from '@x/core/dist/di/container.js';
 import { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
-import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
 import { emitOAuthEvent, emitAuthEvent } from './ipc.js';
@@ -260,7 +259,6 @@ export async function connectProvider(provider: string): Promise<{ success: bool
 
         // Trigger immediate sync for relevant providers
         if (provider === 'google') {
-          triggerGmailSync();
           triggerCalendarSync();
         } else if (provider === 'fireflies-ai') {
           triggerFirefliesSync();
