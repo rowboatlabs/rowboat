@@ -4,6 +4,16 @@ import { URL } from 'url';
 const OAUTH_CALLBACK_PATH = '/oauth/callback';
 const DEFAULT_PORT = 8080;
 
+/** Escape HTML special characters to prevent XSS */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 export interface AuthServerResult {
   server: Server;
   port: number;
@@ -15,7 +25,7 @@ export interface AuthServerResult {
  */
 export function createAuthServer(
   port: number = DEFAULT_PORT,
-  onCallback: (code: string, state: string) => void
+  onCallback: (code: string, state: string) => void | Promise<void>
 ): Promise<AuthServerResult> {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -46,7 +56,7 @@ export function createAuthServer(
               </head>
               <body>
                 <h1 class="error">Authorization Failed</h1>
-                <p>Error: ${error}</p>
+                <p>Error: ${escapeHtml(error)}</p>
                 <p>You can close this window.</p>
                 <script>setTimeout(() => window.close(), 3000);</script>
               </body>
@@ -55,48 +65,28 @@ export function createAuthServer(
           return;
         }
 
-        if (code && state) {
-          onCallback(code, state);
-          
-          res.writeHead(200, { 'Content-Type': 'text/html' });
-          res.end(`
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <title>Authorization Successful</title>
-                <style>
-                  body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-                  .success { color: #2e7d32; }
-                </style>
-              </head>
-              <body>
-                <h1 class="success">Authorization Successful</h1>
-                <p>You can close this window.</p>
-                <script>setTimeout(() => window.close(), 2000);</script>
-              </body>
-            </html>
-          `);
-        } else {
-          res.writeHead(400, { 'Content-Type': 'text/html' });
-          res.end(`
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <title>OAuth Error</title>
-                <style>
-                  body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-                  .error { color: #d32f2f; }
-                </style>
-              </head>
-              <body>
-                <h1 class="error">Invalid Request</h1>
-                <p>Missing code or state parameter.</p>
-                <p>You can close this window.</p>
-                <script>setTimeout(() => window.close(), 3000);</script>
-              </body>
-            </html>
-          `);
-        }
+        // Handle callback - either traditional OAuth with code/state or Composio-style notification
+        // Composio callbacks may not have code/state, just a notification that the flow completed
+        onCallback(code || '', state || '');
+
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Authorization Successful</title>
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                .success { color: #2e7d32; }
+              </style>
+            </head>
+            <body>
+              <h1 class="success">Authorization Successful</h1>
+              <p>You can close this window.</p>
+              <script>setTimeout(() => window.close(), 2000);</script>
+            </body>
+          </html>
+        `);
       } else {
         res.writeHead(404);
         res.end('Not Found');

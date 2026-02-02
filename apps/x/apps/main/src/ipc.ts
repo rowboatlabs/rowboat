@@ -17,11 +17,12 @@ import { bus } from '@x/core/dist/runs/bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
 import z from 'zod';
-import { RunEvent } from 'packages/shared/dist/runs.js';
+import { RunEvent } from '@x/shared/dist/runs.js';
 import container from '@x/core/dist/di/container.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
+import * as composioHandler from './composio-handler.js';
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -363,6 +364,31 @@ export function setupIpcHandlers() {
     },
     'auth:logout': async () => {
       return await logoutRowboat();
+    },
+    // Composio integration handlers
+    'composio:is-configured': async () => {
+      return composioHandler.isConfigured();
+    },
+    'composio:set-api-key': async (_event, args) => {
+      return composioHandler.setApiKey(args.apiKey);
+    },
+    'composio:initiate-connection': async (_event, args) => {
+      return composioHandler.initiateConnection(args.toolkitSlug);
+    },
+    'composio:get-connection-status': async (_event, args) => {
+      return composioHandler.getConnectionStatus(args.toolkitSlug);
+    },
+    'composio:sync-connection': async (_event, args) => {
+      return composioHandler.syncConnection(args.toolkitSlug, args.connectedAccountId);
+    },
+    'composio:disconnect': async (_event, args) => {
+      return composioHandler.disconnect(args.toolkitSlug);
+    },
+    'composio:list-connected': async () => {
+      return composioHandler.listConnected();
+    },
+    'composio:execute-action': async (_event, args) => {
+      return composioHandler.executeAction(args.actionSlug, args.toolkitSlug, args.input);
     },
   });
 }
