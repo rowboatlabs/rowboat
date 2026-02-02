@@ -291,8 +291,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.1
       '@composio/core':
-        specifier: ^0.1.48
-        version: 0.1.55(zod@4.2.1)
+        specifier: ^0.6.0
+        version: 0.6.2(zod@4.2.1)
       '@google-cloud/local-auth':
         specifier: ^3.0.1
         version: 3.0.1(encoding@0.1.13)
@@ -677,16 +677,16 @@ packages:
   '@chevrotain/utils@11.0.3':
     resolution: {integrity: sha512-YslZMgtJUyuMbZ+aKvfF3x1f5liK4mWNxghFRv7jqRR9C3R3fAOGTTKvxXDa2Y1s9zSbcpuO0cAxDYsc9SrXoQ==}
 
-  '@composio/client@0.1.0-alpha.37':
-    resolution: {integrity: sha512-2YzXiRXlxqOgEz7nEh1aKdJ9vwQRb69+RX6UH+LTDmuTwW+pOjI2qbhIBxTbP2z9e2SyHVG0/AtMxc9tR5jU0w==}
+  '@composio/client@0.1.0-alpha.56':
+    resolution: {integrity: sha512-hNgChB5uhdvT4QXNzzfUuvtG6vrfanQQFY2hPyKwbeR4x6mEmIGFiZ4y2qynErdUWldAZiB/7pY/MBMg6Q9E0g==}
 
-  '@composio/core@0.1.55':
-    resolution: {integrity: sha512-GLSWTS/gZeycQ7W2wSZQ21DKV+LC6WTAilhSj+JG9Apslx3re9luF1Lyblm4UMSf4DzYWKOrtipwQOaeg7bmTg==}
+  '@composio/core@0.6.2':
+    resolution: {integrity: sha512-q4ICwbKdSfFcdWHkgaKf8FBUu7/dohYOCn04MhPU2JcbaVOZ2haGEGv7TdACxMx6zUQpx6HVGKCA0ewH+9MBQA==}
     peerDependencies:
-      zod: '>=3.25.76 <5'
+      zod: ^3.25 || ^4
 
-  '@composio/json-schema-to-zod@0.1.16':
-    resolution: {integrity: sha512-vu6RUQTWDW/0wLDWsQHtWJ97JsnMjA1olTQwVD88BAtKZTdDLuzjnGRxSllxp5JG/GntnovUphraZWcWfe80eQ==}
+  '@composio/json-schema-to-zod@0.1.20':
+    resolution: {integrity: sha512-d4V34itLrUWG/VBh7ciznKcxF/T22MBLHmuEzHoX0zsBOHsUmjYz5qtDh20S2p3FE+HHvLZxpXiv8yfdd4yI+Q==}
     peerDependencies:
       zod: '>=3.25.76 <5'
 
@@ -5391,12 +5391,12 @@ packages:
     resolution: {integrity: sha512-MVHddDVweXZF3awtlAS+6pgKLlm/JgxZ90+/NBurBoQctVOOB/zDdVjcyPzQ+0laDGbsWgrRkflI65sQeOgT9Q==}
     engines: {node: '>=8'}
 
-  openai@5.23.2:
-    resolution: {integrity: sha512-MQBzmTulj+MM5O8SKEk/gL8a7s5mktS9zUtAkU257WjvobGc9nKcBuVwjyEEcb9SI8a8Y2G/mzn3vm9n1Jlleg==}
+  openai@6.17.0:
+    resolution: {integrity: sha512-NHRpPEUPzAvFOAFs9+9pC6+HCw/iWsYsKCMPXH5Kw7BpMxqd8g/A07/1o7Gx2TWtCnzevVRyKMRFqyiHyAlqcA==}
     hasBin: true
     peerDependencies:
       ws: ^8.18.0
-      zod: ^3.23.8
+      zod: ^3.25 || ^4.0
     peerDependenciesMeta:
       ws:
         optional: true
@@ -6503,10 +6503,6 @@ packages:
     resolution: {integrity: sha512-0/A9rDy9P7cJ+8w1c9WD9V//9Wj15Ce2MPz8Ri6032usz+NfePxx5AcN3bN+r6ZL6jEo066/yNYB3tn4pQEx+A==}
     hasBin: true
 
-  uuid@13.0.0:
-    resolution: {integrity: sha512-XQegIaBTVUjSHliKqcnFqYypAd4S+WCYt5NIeRs6w/UAry7z8Y9j5ZwRRL4kzq9U3sD6v+85er9FvkEaBpji2w==}
-    hasBin: true
-
   uuid@9.0.1:
     resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
     hasBin: true
@@ -7412,24 +7408,23 @@ snapshots:
 
   '@chevrotain/utils@11.0.3': {}
 
-  '@composio/client@0.1.0-alpha.37': {}
+  '@composio/client@0.1.0-alpha.56': {}
 
-  '@composio/core@0.1.55(zod@4.2.1)':
+  '@composio/core@0.6.2(zod@4.2.1)':
     dependencies:
-      '@composio/client': 0.1.0-alpha.37
-      '@composio/json-schema-to-zod': 0.1.16(zod@4.2.1)
+      '@composio/client': 0.1.0-alpha.56
+      '@composio/json-schema-to-zod': 0.1.20(zod@4.2.1)
       '@types/json-schema': 7.0.15
       chalk: 4.1.2
-      openai: 5.23.2(zod@4.2.1)
+      openai: 6.17.0(zod@4.2.1)
       pusher-js: 8.4.0
       semver: 7.7.3
-      uuid: 13.0.0
       zod: 4.2.1
       zod-to-json-schema: 3.25.1(zod@4.2.1)
     transitivePeerDependencies:
       - ws
 
-  '@composio/json-schema-to-zod@0.1.16(zod@4.2.1)':
+  '@composio/json-schema-to-zod@0.1.20(zod@4.2.1)':
     dependencies:
       zod: 4.2.1
 
@@ -13085,7 +13080,7 @@ snapshots:
       is-docker: 2.2.1
       is-wsl: 2.2.0
 
-  openai@5.23.2(zod@4.2.1):
+  openai@6.17.0(zod@4.2.1):
     optionalDependencies:
       zod: 4.2.1
 
@@ -14337,8 +14332,6 @@ snapshots:
   util-deprecate@1.0.2: {}
 
   uuid@11.1.0: {}
-
-  uuid@13.0.0: {}
 
   uuid@9.0.1: {}
 
