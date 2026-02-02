@@ -346,6 +346,7 @@ export async function executeAction(
             userId: connectedAccountId,
             arguments: input,
             connectedAccountId,
+            dangerouslySkipVersionCheck: true,
         });
 
         console.log(`[Composio] Action completed successfully`);

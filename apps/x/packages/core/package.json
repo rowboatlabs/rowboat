@@ -12,7 +12,7 @@
     "@ai-sdk/anthropic": "^2.0.44",
     "@ai-sdk/google": "^2.0.25",
     "@ai-sdk/openai": "^2.0.53",
-    "@composio/core": "^0.1.48",
+    "@composio/core": "^0.6.0",
     "@ai-sdk/openai-compatible": "^1.0.27",
     "@ai-sdk/provider": "^2.0.0",
     "@google-cloud/local-auth": "^3.0.1",
