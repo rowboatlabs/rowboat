@@ -143,6 +143,35 @@ export function SidebarContentPanel({
   )
 }
 
+async function transcribeWithDeepgram(audioBlob: Blob): Promise<string | null> {
+  try {
+    const configResult = await window.ipc.invoke('workspace:readFile', {
+      path: 'config/deepgram.json',
+      encoding: 'utf8',
+    })
+    const { api_key } = JSON.parse(configResult.data) as { api_key: string }
+    if (!api_key) throw new Error('No api_key in deepgram.json')
+
+    const response = await fetch(
+      'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${api_key}`,
+          'Content-Type': audioBlob.type,
+        },
+        body: audioBlob,
+      },
+    )
+
+    if (!response.ok) throw new Error(`Deepgram API error: ${response.status}`)
+    const result = await response.json()
+    return result.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? null
+  } catch {
+    return null
+  }
+}
+
 // Voice Note Recording Button
 function VoiceNoteButton() {
   const [isRecording, setIsRecording] = React.useState(false)
@@ -191,6 +220,21 @@ function VoiceNoteButton() {
           toast('Voice memo saved', 'success')
         } catch {
           toast('Failed to save voice memo', 'error')
+          return
+        }
+
+        // Transcribe and save transcript alongside the audio file
+        const transcript = await transcribeWithDeepgram(blob)
+        if (transcript) {
+          const txtFilename = filename.replace(/\.[^.]+$/, '.txt')
+          await window.ipc.invoke('workspace:writeFile', {
+            path: `voice_memos/${txtFilename}`,
+            data: transcript,
+            opts: { encoding: 'utf8' },
+          })
+          toast('Transcription saved', 'success')
+        } else {
+          toast('Transcription failed', 'error')
         }
       }
 
