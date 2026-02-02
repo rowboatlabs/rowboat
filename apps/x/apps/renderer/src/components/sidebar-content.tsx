@@ -12,8 +12,10 @@ import {
   Folder,
   FolderPlus,
   MessageSquare,
+  Mic,
   Network,
   Pencil,
+  Square,
   SquarePen,
   Trash2,
 } from "lucide-react"
@@ -141,6 +143,94 @@ export function SidebarContentPanel({
   )
 }
 
+// Voice Note Recording Button
+function VoiceNoteButton() {
+  const [isRecording, setIsRecording] = React.useState(false)
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null)
+  const chunksRef = React.useRef<Blob[]>([])
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : 'audio/webm'
+      const recorder = new MediaRecorder(stream, { mimeType })
+      chunksRef.current = []
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const blob = new Blob(chunksRef.current, { type: mimeType })
+        const ext = mimeType === 'audio/mp4' ? 'm4a' : 'webm'
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+        const filename = `voice-memo-${timestamp}.${ext}`
+
+        try {
+          await window.ipc.invoke('workspace:mkdir', {
+            path: 'voice_memos',
+            recursive: true,
+          })
+
+          const arrayBuffer = await blob.arrayBuffer()
+          const base64 = btoa(
+            new Uint8Array(arrayBuffer).reduce(
+              (data, byte) => data + String.fromCharCode(byte),
+              '',
+            ),
+          )
+
+          await window.ipc.invoke('workspace:writeFile', {
+            path: `voice_memos/${filename}`,
+            data: base64,
+            opts: { encoding: 'base64' },
+          })
+          toast('Voice memo saved', 'success')
+        } catch {
+          toast('Failed to save voice memo', 'error')
+        }
+      }
+
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      setIsRecording(true)
+    } catch {
+      toast('Could not access microphone', 'error')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    mediaRecorderRef.current = null
+    setIsRecording(false)
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={isRecording ? stopRecording : startRecording}
+          className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+        >
+          {isRecording ? (
+            <Square className="size-4 fill-red-500 text-red-500 animate-pulse" />
+          ) : (
+            <Mic className="size-4 text-red-500" />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        {isRecording ? 'Stop Recording' : 'Voice Note'}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 // Knowledge Section
 function KnowledgeSection({
   tree,
@@ -181,6 +271,7 @@ function KnowledgeSection({
                 <TooltipContent side="bottom">{action.label}</TooltipContent>
               </Tooltip>
             ))}
+            <VoiceNoteButton />
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
