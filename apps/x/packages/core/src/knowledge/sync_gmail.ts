@@ -180,11 +180,17 @@ function extractBodyFromPayload(payload: Record<string, unknown>): string {
  * Returns the newest message date (as ISO string) found in the thread, or null.
  */
 async function processThread(connectedAccountId: string, threadId: string, syncDir: string): Promise<string | null> {
-    const threadResult = await executeAction(
-        'GMAIL_FETCH_MESSAGE_BY_THREAD_ID',
-        connectedAccountId,
-        { thread_id: threadId, user_id: 'me' }
-    );
+    let threadResult;
+    try {
+        threadResult = await executeAction(
+            'GMAIL_FETCH_MESSAGE_BY_THREAD_ID',
+            connectedAccountId,
+            { thread_id: threadId, user_id: 'me' }
+        );
+    } catch (error) {
+        console.warn(`[Gmail] Skipping thread ${threadId} (fetch failed):`, error instanceof Error ? error.message : error);
+        return null;
+    }
 
     if (!threadResult.success || !threadResult.data) {
         console.error(`[Gmail] Failed to fetch thread ${threadId}:`, threadResult.error);
@@ -233,7 +239,9 @@ async function processThread(connectedAccountId: string, threadId: string, syncD
         console.log(`[Gmail] Synced Thread: ${firstParsed.subject} (${threadId})`);
     }
 
-    return newestDate ? newestDate.toISOString() : null;
+    if (!newestDate) return null;
+    // Add 1 second so the `after:` query (epoch-second granularity) excludes this email next sync
+    return new Date(newestDate.getTime() + 1000).toISOString();
 }
 
 async function performSync() {

@@ -41,8 +41,12 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
   const [granolaEnabled, setGranolaEnabled] = useState(false)
   const [granolaLoading, setGranolaLoading] = useState(true)
 
-  // Composio/Slack state
+  // Composio state (Gmail + Slack)
   const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
+  const [composioApiKeyTarget, setComposioApiKeyTarget] = useState<'gmail' | 'slack'>('gmail')
+  const [gmailConnected, setGmailConnected] = useState(false)
+  const [gmailLoading, setGmailLoading] = useState(true)
+  const [gmailConnecting, setGmailConnecting] = useState(false)
   const [slackConnected, setSlackConnected] = useState(false)
   const [slackLoading, setSlackLoading] = useState(true)
   const [slackConnecting, setSlackConnecting] = useState(false)
@@ -93,6 +97,20 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
     }
   }, [])
 
+  // Load Gmail connection status
+  const refreshGmailStatus = useCallback(async () => {
+    try {
+      setGmailLoading(true)
+      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'gmail' })
+      setGmailConnected(result.isConnected)
+    } catch (error) {
+      console.error('Failed to load Gmail status:', error)
+      setGmailConnected(false)
+    } finally {
+      setGmailLoading(false)
+    }
+  }, [])
+
   // Load Slack connection status
   const refreshSlackStatus = useCallback(async () => {
     try {
@@ -104,6 +122,53 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       setSlackConnected(false)
     } finally {
       setSlackLoading(false)
+    }
+  }, [])
+
+  // Connect to Gmail via Composio
+  const startGmailConnect = useCallback(async () => {
+    try {
+      setGmailConnecting(true)
+      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'gmail' })
+      if (!result.success) {
+        toast.error(result.error || 'Failed to connect to Gmail')
+        setGmailConnecting(false)
+      }
+      // Success will be handled by composio:didConnect event
+    } catch (error) {
+      console.error('Failed to connect to Gmail:', error)
+      toast.error('Failed to connect to Gmail')
+      setGmailConnecting(false)
+    }
+  }, [])
+
+  // Handle Gmail connect button click
+  const handleConnectGmail = useCallback(async () => {
+    const configResult = await window.ipc.invoke('composio:is-configured', null)
+    if (!configResult.configured) {
+      setComposioApiKeyTarget('gmail')
+      setComposioApiKeyOpen(true)
+      return
+    }
+    await startGmailConnect()
+  }, [startGmailConnect])
+
+  // Disconnect from Gmail
+  const handleDisconnectGmail = useCallback(async () => {
+    try {
+      setGmailLoading(true)
+      const result = await window.ipc.invoke('composio:disconnect', { toolkitSlug: 'gmail' })
+      if (result.success) {
+        setGmailConnected(false)
+        toast.success('Disconnected from Gmail')
+      } else {
+        toast.error('Failed to disconnect from Gmail')
+      }
+    } catch (error) {
+      console.error('Failed to disconnect from Gmail:', error)
+      toast.error('Failed to disconnect from Gmail')
+    } finally {
+      setGmailLoading(false)
     }
   }, [])
 
@@ -126,9 +191,9 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
 
   // Handle Slack connect button click
   const handleConnectSlack = useCallback(async () => {
-    // Check if Composio is configured
     const configResult = await window.ipc.invoke('composio:is-configured', null)
     if (!configResult.configured) {
+      setComposioApiKeyTarget('slack')
       setComposioApiKeyOpen(true)
       return
     }
@@ -141,13 +206,17 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       await window.ipc.invoke('composio:set-api-key', { apiKey })
       setComposioApiKeyOpen(false)
       toast.success('Composio API key saved')
-      // Now start the Slack connection
-      await startSlackConnect()
+      // Start the connection for whichever toolkit triggered the API key prompt
+      if (composioApiKeyTarget === 'gmail') {
+        await startGmailConnect()
+      } else {
+        await startSlackConnect()
+      }
     } catch (error) {
       console.error('Failed to save Composio API key:', error)
       toast.error('Failed to save API key')
     }
-  }, [startSlackConnect])
+  }, [composioApiKeyTarget, startGmailConnect, startSlackConnect])
 
   // Disconnect from Slack
   const handleDisconnectSlack = useCallback(async () => {
@@ -173,7 +242,8 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
     // Refresh Granola
     refreshGranolaConfig()
 
-    // Refresh Slack status
+    // Refresh Composio connections
+    refreshGmailStatus()
     refreshSlackStatus()
 
     // Refresh OAuth providers
@@ -202,7 +272,7 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
     )
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackStatus])
+  }, [providers, refreshGranolaConfig, refreshGmailStatus, refreshSlackStatus])
 
   // Refresh statuses when popover opens or providers list changes
   useEffect(() => {
@@ -227,7 +297,7 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
 
       if (success) {
         const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
-        // Show detailed message for Google and Fireflies (includes sync info)
+        // Show detailed message for providers that sync in background
         if (provider === 'google' || provider === 'fireflies-ai') {
           toast.success(`Connected to ${displayName}`, {
             description: 'Syncing your data in the background. This may take a few minutes before changes appear.',
@@ -251,7 +321,19 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
     const cleanup = window.ipc.on('composio:didConnect', (event) => {
       const { toolkitSlug, success, error } = event
 
-      if (toolkitSlug === 'slack') {
+      if (toolkitSlug === 'gmail') {
+        setGmailConnected(success)
+        setGmailConnecting(false)
+
+        if (success) {
+          toast.success('Connected to Gmail', {
+            description: 'Syncing your emails in the background. This may take a few minutes.',
+            duration: 8000,
+          })
+        } else {
+          toast.error(error || 'Failed to connect to Gmail')
+        }
+      } else if (toolkitSlug === 'slack') {
         setSlackConnected(success)
         setSlackConnecting(false)
 
@@ -431,16 +513,55 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
             </div>
           ) : (
             <>
-              {/* Email & Calendar Section - Google */}
-              {providers.includes('google') && (
-                <>
-                  <div className="px-2 py-1.5">
-                    <span className="text-xs font-medium text-muted-foreground">Email & Calendar</span>
+              {/* Email Section - Gmail via Composio */}
+              <div className="px-2 py-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Email</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                    <Mail className="size-4" />
                   </div>
-                  {renderOAuthProvider('google', 'Google', <Mail className="size-4" />, 'Sync emails and calendar')}
-                  <Separator className="my-2" />
-                </>
-              )}
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-sm font-medium truncate">Gmail</span>
+                    {gmailLoading ? (
+                      <span className="text-xs text-muted-foreground">Checking...</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground truncate">Sync emails</span>
+                    )}
+                  </div>
+                </div>
+                <div className="shrink-0">
+                  {gmailLoading ? (
+                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                  ) : gmailConnected ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDisconnectGmail}
+                      className="h-7 px-2 text-xs"
+                    >
+                      Disconnect
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={handleConnectGmail}
+                      disabled={gmailConnecting}
+                      className="h-7 px-2 text-xs"
+                    >
+                      {gmailConnecting ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        "Connect"
+                      )}
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <Separator className="my-2" />
 
               {/* Meeting Notes Section - Granola & Fireflies */}
               <div className="px-2 py-1.5">
@@ -537,7 +658,7 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       open={composioApiKeyOpen}
       onOpenChange={setComposioApiKeyOpen}
       onSubmit={handleComposioApiKeySubmit}
-      isSubmitting={slackConnecting}
+      isSubmitting={gmailConnecting || slackConnecting}
     />
     </>
   )
