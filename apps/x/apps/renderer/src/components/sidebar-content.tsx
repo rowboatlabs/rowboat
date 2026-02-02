@@ -149,15 +149,15 @@ async function transcribeWithDeepgram(audioBlob: Blob): Promise<string | null> {
       path: 'config/deepgram.json',
       encoding: 'utf8',
     })
-    const { api_key } = JSON.parse(configResult.data) as { api_key: string }
-    if (!api_key) throw new Error('No api_key in deepgram.json')
+    const { apiKey } = JSON.parse(configResult.data) as { apiKey: string }
+    if (!apiKey) throw new Error('No apiKey in deepgram.json')
 
     const response = await fetch(
       'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true',
       {
         method: 'POST',
         headers: {
-          Authorization: `Token ${api_key}`,
+          Authorization: `Token ${apiKey}`,
           'Content-Type': audioBlob.type,
         },
         body: audioBlob,
@@ -167,7 +167,8 @@ async function transcribeWithDeepgram(audioBlob: Blob): Promise<string | null> {
     if (!response.ok) throw new Error(`Deepgram API error: ${response.status}`)
     const result = await response.json()
     return result.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? null
-  } catch {
+  } catch (err) {
+    console.error('Deepgram transcription failed:', err)
     return null
   }
 }
