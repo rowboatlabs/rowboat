@@ -244,6 +244,85 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  // Composio integration channels
+  'composio:is-configured': {
+    req: z.null(),
+    res: z.object({
+      configured: z.boolean(),
+    }),
+  },
+  'composio:set-api-key': {
+    req: z.object({
+      apiKey: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'composio:initiate-connection': {
+    req: z.object({
+      toolkitSlug: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      redirectUrl: z.string().optional(),
+      connectedAccountId: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'composio:get-connection-status': {
+    req: z.object({
+      toolkitSlug: z.string(),
+    }),
+    res: z.object({
+      isConnected: z.boolean(),
+      status: z.string().optional(),
+    }),
+  },
+  'composio:sync-connection': {
+    req: z.object({
+      toolkitSlug: z.string(),
+      connectedAccountId: z.string(),
+    }),
+    res: z.object({
+      status: z.string(),
+    }),
+  },
+  'composio:disconnect': {
+    req: z.object({
+      toolkitSlug: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
+  'composio:list-connected': {
+    req: z.null(),
+    res: z.object({
+      toolkits: z.array(z.string()),
+    }),
+  },
+  'composio:execute-action': {
+    req: z.object({
+      actionSlug: z.string(),
+      toolkitSlug: z.string(),
+      input: z.record(z.string(), z.unknown()),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      data: z.unknown(),
+      error: z.string().optional(),
+    }),
+  },
+  'composio:didConnect': {
+    req: z.object({
+      toolkitSlug: z.string(),
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+    res: z.null(),
+  },
 } as const;
 
 // ============================================================================
