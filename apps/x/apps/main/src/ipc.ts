@@ -6,6 +6,8 @@ import {
   isConnected,
   getConnectedProviders,
   listProviders,
+  getAuthStatus,
+  logoutRowboat,
 } from './oauth-handler.js';
 import { watcher as watcherCore, workspace } from '@x/core';
 import { workspace as workspaceShared } from '@x/shared';
@@ -220,6 +222,15 @@ export function emitOAuthEvent(event: { provider: string; success: boolean; erro
   }
 }
 
+export function emitAuthEvent(event: { isAuthenticated: boolean; user: { email: string; name?: string } | null }): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('auth:didAuthenticate', event);
+    }
+  }
+}
+
 let runsWatcher: (() => void) | null = null;
 export async function startRunsWatcher(): Promise<void> {
   if (runsWatcher) {
@@ -343,6 +354,15 @@ export function setupIpcHandlers() {
     'onboarding:markComplete': async () => {
       markOnboardingComplete();
       return { success: true };
+    },
+    'auth:getStatus': async () => {
+      return await getAuthStatus();
+    },
+    'auth:login': async () => {
+      return await connectProvider('rowboat');
+    },
+    'auth:logout': async () => {
+      return await logoutRowboat();
     },
   });
 }

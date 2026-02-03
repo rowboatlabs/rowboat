@@ -9,6 +9,7 @@ export const OAuthTokens = z.object({
   expires_at: z.number(), // Unix timestamp
   token_type: z.literal('Bearer').optional(),
   scopes: z.array(z.string()).optional(), // Granted scopes from OAuth response
+  id_token_sub: z.string().optional(), // Subject claim from ID token
 });
 
 export type OAuthTokens = z.infer<typeof OAuthTokens>;

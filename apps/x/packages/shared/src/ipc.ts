@@ -244,6 +244,39 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  'auth:getStatus': {
+    req: z.null(),
+    res: z.object({
+      isAuthenticated: z.boolean(),
+      user: z.object({
+        email: z.string(),
+        name: z.string().optional(),
+      }).nullable(),
+    }),
+  },
+  'auth:login': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'auth:logout': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
+  'auth:didAuthenticate': {
+    req: z.object({
+      isAuthenticated: z.boolean(),
+      user: z.object({
+        email: z.string(),
+        name: z.string().optional(),
+      }).nullable(),
+    }),
+    res: z.null(),
+  },
 } as const;
 
 // ============================================================================

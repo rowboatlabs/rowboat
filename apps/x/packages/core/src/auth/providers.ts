@@ -77,7 +77,22 @@ const providerConfigs: ProviderConfig = {
       'profile',
       'email',
     ]
-  }
+  },
+  rowboat: {
+    discovery: {
+      mode: 'issuer',
+      issuer: 'https://yhafoahozylbdyyyqjep.supabase.co/auth/v1',
+    },
+    client: {
+      mode: 'static',
+      clientId: '0b8a99ec-b5b2-4ddf-8e14-69a3a1675114',
+    },
+    scopes: [
+      'openid',
+      'email',
+      'profile',
+    ],
+  },
 };
 
 /**
