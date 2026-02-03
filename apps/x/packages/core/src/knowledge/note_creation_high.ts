@@ -7,15 +7,21 @@ tools:
   workspace-readFile:
     type: builtin
     name: workspace-readFile
+  workspace-edit:
+    type: builtin
+    name: workspace-edit
   workspace-readdir:
     type: builtin
     name: workspace-readdir
   workspace-mkdir:
     type: builtin
     name: workspace-mkdir
-  executeCommand:
+  workspace-grep:
     type: builtin
-    name: executeCommand
+    name: workspace-grep
+  workspace-glob:
+    type: builtin
+    name: workspace-glob
 ---
 # Task
 
@@ -70,20 +76,51 @@ When you need to:
 
 # Tools Available
 
-You have access to \`executeCommand\` to run shell commands:
+You have access to these tools:
+
+**For reading files:**
 \`\`\`
-executeCommand("ls {path}")                     # List directory contents
-executeCommand("cat {path}")                    # Read file contents
-executeCommand("head -50 {path}")               # Read first 50 lines
-executeCommand("write {path} {content}")        # Create or overwrite file
+workspace-readFile({ path: "knowledge/People/Sarah Chen.md" })
 \`\`\`
 
-**Important:** Use shell escaping for paths with spaces:
+**For creating NEW files:**
 \`\`\`
-executeCommand("cat 'knowledge_folder/People/Sarah Chen.md'")
+workspace-writeFile({ path: "knowledge/People/Sarah Chen.md", data: "# Sarah Chen\\n\\n..." })
 \`\`\`
 
-**NOTE:** Do NOT use grep to search for entities. Use the provided knowledge_index instead.
+**For editing EXISTING files (preferred for updates):**
+\`\`\`
+workspace-edit({
+  path: "knowledge/People/Sarah Chen.md",
+  oldString: "## Activity\\n",
+  newString: "## Activity\\n- **2026-02-03** (meeting): New activity entry\\n"
+})
+\`\`\`
+
+**For listing directories:**
+\`\`\`
+workspace-readdir({ path: "knowledge/People" })
+\`\`\`
+
+**For creating directories:**
+\`\`\`
+workspace-mkdir({ path: "knowledge/Projects", recursive: true })
+\`\`\`
+
+**For searching files:**
+\`\`\`
+workspace-grep({ pattern: "Acme Corp", searchPath: "knowledge", fileGlob: "*.md" })
+\`\`\`
+
+**For finding files by pattern:**
+\`\`\`
+workspace-glob({ pattern: "**/*.md", cwd: "knowledge/People" })
+\`\`\`
+
+**IMPORTANT:**
+- Use \`workspace-edit\` for updating existing notes (adding activity, updating fields)
+- Use \`workspace-writeFile\` only for creating new notes
+- Prefer the knowledge_index for entity resolution (it's faster than grep)
 
 # Output
 
@@ -113,7 +150,7 @@ Either:
 
 Read the source file and determine if it's a meeting or email.
 \`\`\`
-executeCommand("cat '{source_file}'")
+workspace-readFile({ path: "{source_file}" })
 \`\`\`
 
 **Meeting indicators:**
@@ -307,9 +344,9 @@ If someone only appears in your memory as "CC'd on outreach emails from [Sender]
 ## Email-Specific Filtering
 
 For emails, check if sender/recipients have existing notes:
-\`\`\`bash
-executeCommand("grep -r -i -l '{sender email}' '{knowledge_folder}/'")
-executeCommand("grep -r -i -l '{sender name}' '{knowledge_folder}/People/'")
+\`\`\`
+workspace-grep({ pattern: "{sender email}", searchPath: "{knowledge_folder}" })
+workspace-grep({ pattern: "{sender name}", searchPath: "{knowledge_folder}/People" })
 \`\`\`
 
 **If no existing note found:**
@@ -349,7 +386,7 @@ If processing, continue to Step 2.
 
 # Step 2: Read and Parse Source File
 \`\`\`
-executeCommand("cat '{source_file}'")
+workspace-readFile({ path: "{source_file}" })
 \`\`\`
 
 Extract metadata:
@@ -446,7 +483,7 @@ From index, find matches for:
 
 Only read the full note content when you need details not in the index (e.g., activity logs, open items):
 \`\`\`bash
-executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
+workspace-readFile({ path: "{knowledge_folder}/People/Sarah Chen.md" })
 \`\`\`
 
 **Why read these notes:**
@@ -530,27 +567,27 @@ Resolution Map:
 When multiple candidates match a variant, disambiguate:
 
 **By organization (strongest signal):**
-\`\`\`bash
+\`\`\`
 # "David" could be David Kim or David Chen
-executeCommand("grep -i 'Acme' '{knowledge_folder}/People/David Kim.md'")
+workspace-grep({ pattern: "Acme", searchPath: "{knowledge_folder}/People/David Kim.md" })
 # Output: **Organization:** [[Acme Corp]]
 
-executeCommand("grep -i 'Acme' '{knowledge_folder}/People/David Chen.md'")
+workspace-grep({ pattern: "Acme", searchPath: "{knowledge_folder}/People/David Chen.md" })
 # Output: **Organization:** [[Other Corp]]
 
 # Source is from Acme context → "David" = "David Kim"
 \`\`\`
 
 **By email (definitive):**
-\`\`\`bash
-executeCommand("grep -i 'david@acme.com' '{knowledge_folder}/People/David Kim.md'")
+\`\`\`
+workspace-grep({ pattern: "david@acme.com", searchPath: "{knowledge_folder}/People/David Kim.md" })
 # Exact email match is definitive
 \`\`\`
 
 **By role:**
-\`\`\`bash
+\`\`\`
 # Source mentions "their CTO"
-executeCommand("grep -r -i 'Role.*CTO' '{knowledge_folder}/People/'")
+workspace-grep({ pattern: "Role.*CTO", searchPath: "{knowledge_folder}/People" })
 # Filter results by organization context
 \`\`\`
 
@@ -979,8 +1016,8 @@ STATE CHANGES:
 Before writing, compare extracted content against existing notes.
 
 ## Check Activity Log
-\`\`\`bash
-executeCommand("grep '2025-01-15' '{knowledge_folder}/People/Sarah Chen.md'")
+\`\`\`
+workspace-grep({ pattern: "2025-01-15", searchPath: "{knowledge_folder}/People/Sarah Chen.md" })
 \`\`\`
 
 If an entry for this date/source already exists, this may have been processed. Skip or verify different interaction.
@@ -1010,28 +1047,28 @@ If new info contradicts existing:
 
 **IMPORTANT: Write sequentially, one file at a time.**
 - Generate content for exactly one note.
-- Issue exactly one \`write\` command.
+- Issue exactly one write/edit command.
 - Wait for the tool to return before generating the next note.
-- Do NOT batch multiple \`write\` commands in a single response.
+- Do NOT batch multiple write commands in a single response.
 
-**For new entities (meetings only):**
-\`\`\`bash
-executeCommand("write '{knowledge_folder}/People/Jennifer.md' '{content}'")
+**For NEW entities (use workspace-writeFile):**
+\`\`\`
+workspace-writeFile({
+  path: "{knowledge_folder}/People/Jennifer.md",
+  data: "# Jennifer\\n\\n## Summary\\n..."
+})
 \`\`\`
 
-**For existing entities:**
-- Read current content first
-- Add activity entry at TOP of Activity section (reverse chronological)
-- Update "Last seen" date
-- Add new key facts (skip duplicates)
-- Add new open items
-- Add new decisions
-- Add new relationships
-- Update summary ONLY if significant new understanding
-\`\`\`bash
-executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
-# ... modify content ...
-executeCommand("write '{knowledge_folder}/People/Sarah Chen.md' '{full_updated_content}'")
+**For EXISTING entities (use workspace-edit):**
+- Read current content first with workspace-readFile
+- Use workspace-edit to add activity entry at TOP (reverse chronological)
+- Update fields using targeted edits
+\`\`\`
+workspace-edit({
+  path: "{knowledge_folder}/People/Sarah Chen.md",
+  oldString: "## Activity\\n",
+  newString: "## Activity\\n- **2026-02-03** (meeting): Met to discuss project timeline\\n"
+})
 \`\`\`
 
 ## 9b: Emails — Update Existing Notes Only
@@ -1054,7 +1091,7 @@ For each state change identified in Step 7:
 ### Update Project Status
 \`\`\`bash
 # Read current project note
-executeCommand("cat '{knowledge_folder}/Projects/Acme Integration.md'")
+workspace-readFile({ path: "{knowledge_folder}/Projects/Acme Integration.md" })
 
 # Update the Status field
 # Change: **Status:** planning
@@ -1064,7 +1101,7 @@ executeCommand("cat '{knowledge_folder}/Projects/Acme Integration.md'")
 ### Mark Open Items Complete
 \`\`\`bash
 # Read current note
-executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
+workspace-readFile({ path: "{knowledge_folder}/People/Sarah Chen.md" })
 
 # Find matching open item and update
 # Change: - [ ] Send API documentation — by Friday
@@ -1074,7 +1111,7 @@ executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
 ### Update Role
 \`\`\`bash
 # Read current person note
-executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
+workspace-readFile({ path: "{knowledge_folder}/People/Sarah Chen.md" })
 
 # Update role field
 # Change: **Role:** Engineering Lead
@@ -1084,7 +1121,7 @@ executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
 ### Update Relationship
 \`\`\`bash
 # Read current org note
-executeCommand("cat '{knowledge_folder}/Organizations/Acme Corp.md'")
+workspace-readFile({ path: "{knowledge_folder}/Organizations/Acme Corp.md" })
 
 # Update relationship field
 # Change: **Relationship:** prospect
@@ -1149,8 +1186,8 @@ This ensures:
 ## Check Each New Link
 
 If you added \`[[People/Jennifer]]\` to \`Organizations/Acme Corp.md\`:
-\`\`\`bash
-executeCommand("grep 'Acme Corp' '{knowledge_folder}/People/Jennifer.md'")
+\`\`\`
+workspace-grep({ pattern: "Acme Corp", searchPath: "{knowledge_folder}/People/Jennifer.md" })
 \`\`\`
 
 If not found, update Jennifer.md to add the link.
@@ -1384,11 +1421,11 @@ Not mass email, not automated. Continue.
 - Variants: "Sarah Chen", "sarah@acme.com", "David Kim", "David", "Jennifer", "CTO", "Acme", "the pilot"
 
 ### Step 3: Search Existing Notes
-\`\`\`bash
-executeCommand("grep -r -i -l 'Sarah Chen' 'knowledge/'")
+\`\`\`
+workspace-grep({ pattern: "Sarah Chen", searchPath: "knowledge" })
 # Output: (none)
 
-executeCommand("grep -r -i -l 'acme' 'knowledge/'")
+workspace-grep({ pattern: "acme", searchPath: "knowledge" })
 # Output: (none)
 \`\`\`
 
@@ -1527,8 +1564,8 @@ VP Engineering, Acme Corp
 ### Step 1: Filter
 
 Check for existing relationship:
-\`\`\`bash
-executeCommand("grep -r -i -l 'sarah@acme.com' 'knowledge/'")
+\`\`\`
+workspace-grep({ pattern: "sarah@acme.com", searchPath: "knowledge" })
 # Output: notes/People/Sarah Chen.md
 \`\`\`
 
@@ -1663,11 +1700,11 @@ John Smith
 ### Step 1: Filter
 
 Check for existing relationship:
-\`\`\`bash
-executeCommand("grep -r -i -l 'randomvendor' 'knowledge/'")
+\`\`\`
+workspace-grep({ pattern: "randomvendor", searchPath: "knowledge" })
 # Output: (none)
 
-executeCommand("grep -r -i -l 'John Smith' 'knowledge/'")
+workspace-grep({ pattern: "John Smith", searchPath: "knowledge" })
 # Output: (none)
 \`\`\`
 
@@ -1710,8 +1747,8 @@ David
 ### Step 1: Filter
 
 Check for sender:
-\`\`\`bash
-executeCommand("grep -r -i -l 'david@friendly.vc' 'knowledge/'")
+\`\`\`
+workspace-grep({ pattern: "david@friendly.vc", searchPath: "knowledge" })
 # Output: notes/People/David Park.md
 \`\`\`
 

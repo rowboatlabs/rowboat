@@ -183,6 +183,7 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
   const chunksRef = React.useRef<Blob[]>([])
   const notePathRef = React.useRef<string | null>(null)
   const timestampRef = React.useRef<string | null>(null)
+  const relativePathRef = React.useRef<string | null>(null)
 
   const startRecording = async () => {
     try {
@@ -195,6 +196,9 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
 
       timestampRef.current = timestamp
       notePathRef.current = notePath
+      // Relative path for linking (from knowledge/ root, without .md extension)
+      const relativePath = `Voice Memos/${dateStr}/${noteName}`
+      relativePathRef.current = relativePath
 
       // Create the note immediately with a "Recording..." placeholder
       await window.ipc.invoke('workspace:mkdir', {
@@ -206,6 +210,7 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
 
 **Type:** voice memo
 **Recorded:** ${now.toLocaleString()}
+**Path:** ${relativePath}
 
 ## Transcript
 
@@ -264,11 +269,13 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
 
         // Update note to show transcribing status
         const currentNotePath = notePathRef.current
-        if (currentNotePath) {
+        const currentRelativePath = relativePathRef.current
+        if (currentNotePath && currentRelativePath) {
           const transcribingContent = `# Voice Memo
 
 **Type:** voice memo
 **Recorded:** ${new Date().toLocaleString()}
+**Path:** ${currentRelativePath}
 
 ## Transcript
 
@@ -283,12 +290,13 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
 
         // Transcribe and update the note with the transcript
         const transcript = await transcribeWithDeepgram(blob)
-        if (currentNotePath) {
+        if (currentNotePath && currentRelativePath) {
           const finalContent = transcript
             ? `# Voice Memo
 
 **Type:** voice memo
 **Recorded:** ${new Date().toLocaleString()}
+**Path:** ${currentRelativePath}
 
 ## Transcript
 
@@ -298,6 +306,7 @@ ${transcript}
 
 **Type:** voice memo
 **Recorded:** ${new Date().toLocaleString()}
+**Path:** ${currentRelativePath}
 
 ## Transcript
 

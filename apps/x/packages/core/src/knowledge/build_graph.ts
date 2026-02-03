@@ -30,90 +30,87 @@ const SOURCE_FOLDERS = [
     'granola_notes',
 ];
 
-// Voice memos are handled separately - they get moved to knowledge/Voice Memos/<date>/
-const VOICE_MEMOS_DIR = path.join(WorkDir, 'voice_memos');
+// Voice memos are now created directly in knowledge/Voice Memos/<date>/
 const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
 
 /**
- * Extract date from voice memo filename
- * Filename format: voice-memo-2026-02-03T04-56-53-182Z.txt
- * Returns date string like "2026-02-03"
+ * Get unprocessed voice memo files from knowledge/Voice Memos/
+ * Voice memos are created directly in this directory by the UI.
+ * Returns paths to files that need entity extraction.
  */
-function extractDateFromVoiceMemoFilename(filename: string): string {
-    // Match the date pattern: YYYY-MM-DD from voice-memo-YYYY-MM-DDTHH-MM-SS-MMMZ
-    const match = filename.match(/voice-memo-(\d{4}-\d{2}-\d{2})T/);
-    if (match) {
-        return match[1];
-    }
-    // Fallback to current date if pattern doesn't match
-    return new Date().toISOString().split('T')[0];
-}
+function getUnprocessedVoiceMemos(state: GraphState): string[] {
+    console.log(`[VoiceMemos] Checking directory: ${VOICE_MEMOS_KNOWLEDGE_DIR}`);
 
-/**
- * Move voice memo transcripts to knowledge/Voice Memos/<date>/
- * Returns info about moved files for processing.
- */
-function moveVoiceMemosToKnowledge(state: GraphState): { sourcePath: string; targetPath: string }[] {
-    if (!fs.existsSync(VOICE_MEMOS_DIR)) {
+    if (!fs.existsSync(VOICE_MEMOS_KNOWLEDGE_DIR)) {
+        console.log(`[VoiceMemos] Directory does not exist`);
         return [];
     }
 
-    const movedFiles: { sourcePath: string; targetPath: string }[] = [];
-    const entries = fs.readdirSync(VOICE_MEMOS_DIR);
+    const unprocessedFiles: string[] = [];
 
-    for (const entry of entries) {
-        // Only process .txt transcript files
-        if (!entry.endsWith('.txt')) {
+    // Scan date folders (e.g., 2026-02-03)
+    const dateFolders = fs.readdirSync(VOICE_MEMOS_KNOWLEDGE_DIR);
+    console.log(`[VoiceMemos] Found ${dateFolders.length} date folders: ${dateFolders.join(', ')}`);
+
+    for (const dateFolder of dateFolders) {
+        const dateFolderPath = path.join(VOICE_MEMOS_KNOWLEDGE_DIR, dateFolder);
+
+        // Skip if not a directory
+        try {
+            if (!fs.statSync(dateFolderPath).isDirectory()) {
+                continue;
+            }
+        } catch (err) {
+            console.log(`[VoiceMemos] Error checking ${dateFolderPath}:`, err);
             continue;
         }
 
-        const sourcePath = path.join(VOICE_MEMOS_DIR, entry);
+        // Scan markdown files in this date folder
+        const files = fs.readdirSync(dateFolderPath);
+        console.log(`[VoiceMemos] Found ${files.length} files in ${dateFolder}: ${files.join(', ')}`);
 
-        // Skip if already processed (check by source path)
-        if (state.processedFiles[sourcePath]) {
-            continue;
+        for (const file of files) {
+            // Only process voice memo markdown files
+            if (!file.endsWith('.md') || !file.startsWith('voice-memo-')) {
+                console.log(`[VoiceMemos] Skipping ${file} - not a voice memo file`);
+                continue;
+            }
+
+            const filePath = path.join(dateFolderPath, file);
+
+            // Skip if already processed
+            if (state.processedFiles[filePath]) {
+                console.log(`[VoiceMemos] Skipping ${file} - already processed`);
+                continue;
+            }
+
+            // Check if the file has actual content (not still recording/transcribing)
+            try {
+                const content = fs.readFileSync(filePath, 'utf-8');
+                // Skip files that are still recording or transcribing
+                if (content.includes('*Recording in progress...*')) {
+                    console.log(`[VoiceMemos] Skipping ${file} - still recording`);
+                    continue;
+                }
+                if (content.includes('*Transcribing...*')) {
+                    console.log(`[VoiceMemos] Skipping ${file} - still transcribing`);
+                    continue;
+                }
+                if (content.includes('*Transcription failed')) {
+                    console.log(`[VoiceMemos] Skipping ${file} - transcription failed`);
+                    continue;
+                }
+                console.log(`[VoiceMemos] Found unprocessed voice memo: ${file}`);
+                unprocessedFiles.push(filePath);
+            } catch (err) {
+                console.log(`[VoiceMemos] Error reading ${file}:`, err);
+                continue;
+            }
         }
-
-        // Extract date and create target directory
-        const date = extractDateFromVoiceMemoFilename(entry);
-        const targetDir = path.join(VOICE_MEMOS_KNOWLEDGE_DIR, date);
-
-        if (!fs.existsSync(targetDir)) {
-            fs.mkdirSync(targetDir, { recursive: true });
-        }
-
-        // Convert .txt to .md and create a proper markdown file
-        const baseName = entry.replace('.txt', '');
-        const targetPath = path.join(targetDir, `${baseName}.md`);
-
-        // Read original content and wrap in markdown format
-        const originalContent = fs.readFileSync(sourcePath, 'utf-8');
-
-        // Create a relative path for linking (from knowledge/ root)
-        const relativePath = `Voice Memos/${date}/${baseName}`;
-
-        const mdContent = `# Voice Memo - ${date}
-
-**Type:** voice memo
-**Recorded:** ${date}
-**Path:** ${relativePath}
-
-## Transcript
-
-${originalContent}
-`;
-
-        // Write to knowledge directory
-        fs.writeFileSync(targetPath, mdContent);
-        console.log(`[VoiceMemos] Moved transcript to ${targetPath}`);
-
-        // Delete the original .txt file (it's been moved)
-        fs.unlinkSync(sourcePath);
-
-        movedFiles.push({ sourcePath, targetPath });
     }
 
-    return movedFiles;
+    console.log(`[VoiceMemos] Total unprocessed files: ${unprocessedFiles.length}`);
+    return unprocessedFiles;
 }
 
 /**
@@ -272,23 +269,26 @@ export async function buildGraph(sourceDir: string): Promise<void> {
 }
 
 /**
- * Process voice memos and run entity extraction on them
+ * Process voice memos from knowledge/Voice Memos/ and run entity extraction on them
+ * Voice memos are now created directly in the knowledge directory by the UI.
  */
 async function processVoiceMemosForKnowledge(): Promise<boolean> {
+    console.log(`[VoiceMemos] Starting voice memo processing...`);
     const state = loadState();
 
-    // Move voice memos to knowledge directory
-    const movedFiles = moveVoiceMemosToKnowledge(state);
+    // Get unprocessed voice memos from knowledge/Voice Memos/
+    const unprocessedFiles = getUnprocessedVoiceMemos(state);
 
-    if (movedFiles.length === 0) {
+    if (unprocessedFiles.length === 0) {
+        console.log(`[VoiceMemos] No unprocessed voice memos found`);
         return false;
     }
 
-    console.log(`[VoiceMemos] Processing ${movedFiles.length} voice memo transcripts for entity extraction...`);
+    console.log(`[VoiceMemos] Processing ${unprocessedFiles.length} voice memo transcripts for entity extraction...`);
+    console.log(`[VoiceMemos] Files to process: ${unprocessedFiles.map(f => path.basename(f)).join(', ')}`);
 
-    // Read the moved files
-    const targetPaths = movedFiles.map(f => f.targetPath);
-    const contentFiles = await readFileContents(targetPaths);
+    // Read the files
+    const contentFiles = await readFileContents(unprocessedFiles);
 
     if (contentFiles.length === 0) {
         return false;
@@ -300,7 +300,6 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
 
     for (let i = 0; i < contentFiles.length; i += BATCH_SIZE) {
         const batch = contentFiles.slice(i, i + BATCH_SIZE);
-        const batchMovedFiles = movedFiles.slice(i, i + BATCH_SIZE);
         const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
 
         try {
@@ -313,11 +312,9 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
             await createNotesFromBatch(batch, batchNumber, indexForPrompt);
             console.log(`[VoiceMemos] Batch ${batchNumber}/${totalBatches} complete`);
 
-            // Mark files as processed using SOURCE path as key (to prevent reprocessing)
-            for (const { sourcePath, targetPath } of batchMovedFiles) {
-                markFileAsProcessed(targetPath, state);
-                // Also track by source path so we don't reprocess if a new file with same name appears
-                state.processedFiles[sourcePath] = state.processedFiles[targetPath];
+            // Mark files as processed
+            for (const file of batch) {
+                markFileAsProcessed(file.path, state);
             }
 
             // Save state after each batch
@@ -392,7 +389,7 @@ async function processAllSources(): Promise<void> {
  */
 export async function init() {
     console.log('[GraphBuilder] Starting Knowledge Graph Builder Service...');
-    console.log(`[GraphBuilder] Monitoring folders: ${SOURCE_FOLDERS.join(', ')}, voice_memos`);
+    console.log(`[GraphBuilder] Monitoring folders: ${SOURCE_FOLDERS.join(', ')}, knowledge/Voice Memos`);
     console.log(`[GraphBuilder] Will check for new content every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run

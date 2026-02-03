@@ -7,15 +7,21 @@ tools:
   workspace-readFile:
     type: builtin
     name: workspace-readFile
+  workspace-edit:
+    type: builtin
+    name: workspace-edit
   workspace-readdir:
     type: builtin
     name: workspace-readdir
   workspace-mkdir:
     type: builtin
     name: workspace-mkdir
-  executeCommand:
+  workspace-grep:
     type: builtin
-    name: executeCommand
+    name: workspace-grep
+  workspace-glob:
+    type: builtin
+    name: workspace-glob
 ---
 # Task
 
@@ -70,20 +76,51 @@ When you need to:
 
 # Tools Available
 
-You have access to \`executeCommand\` to run shell commands:
+You have access to these tools:
+
+**For reading files:**
 \`\`\`
-executeCommand("ls {path}")                     # List directory contents
-executeCommand("cat {path}")                    # Read file contents
-executeCommand("head -50 {path}")               # Read first 50 lines
-executeCommand("write {path} {content}")        # Create or overwrite file
+workspace-readFile({ path: "knowledge/People/Sarah Chen.md" })
 \`\`\`
 
-**Important:** Use shell escaping for paths with spaces:
+**For creating NEW files:**
 \`\`\`
-executeCommand("cat 'knowledge_folder/People/Sarah Chen.md'")
+workspace-writeFile({ path: "knowledge/People/Sarah Chen.md", data: "# Sarah Chen\\n\\n..." })
 \`\`\`
 
-**NOTE:** Do NOT use grep to search for entities. Use the provided knowledge_index instead.
+**For editing EXISTING files (preferred for updates):**
+\`\`\`
+workspace-edit({
+  path: "knowledge/People/Sarah Chen.md",
+  oldString: "## Activity\\n",
+  newString: "## Activity\\n- **2026-02-03** (meeting): New activity entry\\n"
+})
+\`\`\`
+
+**For listing directories:**
+\`\`\`
+workspace-readdir({ path: "knowledge/People" })
+\`\`\`
+
+**For creating directories:**
+\`\`\`
+workspace-mkdir({ path: "knowledge/Projects", recursive: true })
+\`\`\`
+
+**For searching files:**
+\`\`\`
+workspace-grep({ pattern: "Acme Corp", searchPath: "knowledge", fileGlob: "*.md" })
+\`\`\`
+
+**For finding files by pattern:**
+\`\`\`
+workspace-glob({ pattern: "**/*.md", cwd: "knowledge/People" })
+\`\`\`
+
+**IMPORTANT:**
+- Use \`workspace-edit\` for updating existing notes (adding activity, updating fields)
+- Use \`workspace-writeFile\` only for creating new notes
+- Prefer the knowledge_index for entity resolution (it's faster than grep)
 
 # Output
 
@@ -120,7 +157,7 @@ This mode prioritizes comprehensive capture over selectivity. The goal is to nev
 
 Read the source file and determine if it's a meeting or email.
 \`\`\`
-executeCommand("cat '{source_file}'")
+workspace-readFile({ path: "{source_file}" })
 \`\`\`
 
 **Meeting indicators:**
@@ -210,7 +247,7 @@ If processing, continue to Step 2.
 
 # Step 2: Read and Parse Source File
 \`\`\`
-executeCommand("cat '{source_file}'")
+workspace-readFile({ path: "{source_file}" })
 \`\`\`
 
 Extract metadata:
@@ -297,8 +334,8 @@ From index, find matches for:
 ## 3d: Read Full Notes When Needed
 
 Only read the full note content when you need details not in the index (e.g., activity logs, open items):
-\`\`\`bash
-executeCommand("cat '{knowledge_folder}/People/Sarah Chen.md'")
+\`\`\`
+workspace-readFile({ path: "{knowledge_folder}/People/Sarah Chen.md" })
 \`\`\`
 
 **Why read these notes:**
@@ -566,21 +603,29 @@ Before writing:
 
 **IMPORTANT: Write sequentially, one file at a time.**
 - Generate content for exactly one note.
-- Issue exactly one \`write\` command.
+- Issue exactly one write/edit command.
 - Wait for the tool to return before generating the next note.
-- Do NOT batch multiple \`write\` commands in a single response.
+- Do NOT batch multiple write commands in a single response.
 
-**For new entities:**
-\`\`\`bash
-executeCommand("write '{knowledge_folder}/People/Jennifer.md' '{content}'")
+**For NEW entities (use workspace-writeFile):**
+\`\`\`
+workspace-writeFile({
+  path: "{knowledge_folder}/People/Jennifer.md",
+  data: "# Jennifer\\n\\n## Summary\\n..."
+})
 \`\`\`
 
-**For existing entities:**
-- Read current content first
-- Add activity entry at TOP (reverse chronological)
-- Update "Last seen" date
-- Add new key facts (skip duplicates)
-- Add new open items
+**For EXISTING entities (use workspace-edit):**
+- Read current content first with workspace-readFile
+- Use workspace-edit to add activity entry at TOP (reverse chronological)
+- Update fields using targeted edits
+\`\`\`
+workspace-edit({
+  path: "{knowledge_folder}/People/Sarah Chen.md",
+  oldString: "## Activity\\n",
+  newString: "## Activity\\n- **2026-02-03** (meeting): Met to discuss project timeline\\n"
+})
+\`\`\`
 
 ## 9b: Apply State Changes
 
