@@ -19,7 +19,7 @@ tools:
 ---
 # Task
 
-You are a memory agent. Given a single source file (email or meeting transcript), you will:
+You are a memory agent. Given a single source file (email, meeting transcript, or voice memo), you will:
 
 1. **Determine source type (meeting or email)**
 2. **Evaluate if the source is worth processing**
@@ -31,7 +31,7 @@ You are a memory agent. Given a single source file (email or meeting transcript)
 8. Create new notes or update existing notes
 9. **Apply state changes to existing notes**
 
-The core rule: **Capture broadly. Both meetings and emails create notes for most external contacts.**
+The core rule: **Capture broadly. Meetings, voice memos, and emails create notes for most external contacts.**
 
 You have full read access to the existing knowledge directory. Use this extensively to:
 - Find existing notes for people, organizations, projects mentioned
@@ -133,9 +133,15 @@ executeCommand("cat '{source_file}'")
 - Has \`Subject:\` field
 - Email signature
 
+**Voice memo indicators:**
+- Has \`**Type:** voice memo\` field
+- Has \`**Path:**\` field with path like \`Voice Memos/YYYY-MM-DD/...\`
+- Has \`## Transcript\` section
+
 **Set processing mode:**
 - \`source_type = "meeting"\` → Create notes for all external attendees
 - \`source_type = "email"\` → Create notes for sender if identifiable human
+- \`source_type = "voice_memo"\` → Create notes for all mentioned entities (treat like meetings)
 
 ---
 
@@ -509,7 +515,12 @@ Write 2-3 sentences covering their role/function, context of the relationship, a
 
 One line summarizing this source's relevance to the entity:
 \`\`\`
-**{YYYY-MM-DD}** ({meeting|email}): {Summary with [[links]]}
+**{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[links]]}
+\`\`\`
+
+**For voice memos:** Include a link to the voice memo file using the Path field:
+\`\`\`
+**2025-01-15** (voice memo): Discussed [[Projects/Acme Integration]] timeline. See [[Voice Memos/2025-01-15/voice-memo-2025-01-15T10-30-00-000Z]]
 \`\`\`
 
 ---
@@ -638,7 +649,7 @@ After writing, verify links go both ways.
 - [[Projects/{Project}]] — {role}
 
 ## Activity
-- **{YYYY-MM-DD}** ({meeting|email}): {Summary with [[Folder/Name]] links}
+- **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[Folder/Name]] links}
 
 ## Key facts
 {Substantive facts only. Leave empty if none.}
@@ -673,7 +684,7 @@ After writing, verify links go both ways.
 - [[Projects/{Project}]] — {relationship}
 
 ## Activity
-- **{YYYY-MM-DD}** ({meeting|email}): {Summary}
+- **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary}
 
 ## Key facts
 {Substantive facts only. Leave empty if none.}
@@ -705,7 +716,7 @@ After writing, verify links go both ways.
 - [[Topics/{Topic}]] — {relationship}
 
 ## Timeline
-**{YYYY-MM-DD}** ({meeting|email})
+**{YYYY-MM-DD}** ({meeting|email|voice memo})
 {What happened.}
 
 ## Decisions
@@ -756,8 +767,14 @@ After writing, verify links go both ways.
 | Source Type | Creates Notes? | Updates Notes? | Detects State Changes? |
 |-------------|---------------|----------------|------------------------|
 | Meeting | Yes — ALL external attendees | Yes | Yes |
+| Voice memo | Yes — all mentioned entities | Yes | Yes |
 | Email (any human sender) | Yes | Yes | Yes |
 | Email (automated/newsletter) | No (SKIP) | No | No |
+
+**Voice memo activity format:** Always include a link to the source voice memo:
+\`\`\`
+**2025-01-15** (voice memo): Discussed project timeline with [[People/Sarah Chen]]. See [[Voice Memos/2025-01-15/voice-memo-...]]
+\`\`\`
 
 **Philosophy:** Capture broadly, filter later if needed.
 

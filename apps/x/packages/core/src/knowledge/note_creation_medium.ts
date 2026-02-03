@@ -19,7 +19,7 @@ tools:
 ---
 # Task
 
-You are a memory agent. Given a single source file (email or meeting transcript), you will:
+You are a memory agent. Given a single source file (email, meeting transcript, or voice memo), you will:
 
 1. **Determine source type (meeting or email)**
 2. **Evaluate if the source is worth processing**
@@ -132,9 +132,15 @@ executeCommand("cat '{source_file}'")
 - Has \`Subject:\` field
 - Email signature
 
+**Voice memo indicators:**
+- Has \`**Type:** voice memo\` field
+- Has \`**Path:**\` field with path like \`Voice Memos/YYYY-MM-DD/...\`
+- Has \`## Transcript\` section
+
 **Set processing mode:**
 - \`source_type = "meeting"\` → Can create new notes
 - \`source_type = "email"\` → Can create notes if personalized and relevant
+- \`source_type = "voice_memo"\` → Can create new notes (treat like meetings)
 
 ---
 
@@ -784,7 +790,12 @@ The summary should answer: **"Who is this person and why do I know them?"**
 
 One line summarizing this source's relevance to the entity:
 \`\`\`
-**{YYYY-MM-DD}** ({meeting|email}): {Summary with [[links]]}
+**{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[links]]}
+\`\`\`
+
+**For voice memos:** Include a link to the voice memo file using the Path field:
+\`\`\`
+**2025-01-15** (voice memo): Discussed [[Projects/Acme Integration]] timeline. See [[Voice Memos/2025-01-15/voice-memo-2025-01-15T10-30-00-000Z]]
 \`\`\`
 
 **Important:** Use canonical names with absolute paths from resolution map in all summaries:
@@ -1000,7 +1011,7 @@ After writing, verify links go both ways.
 - [[Projects/{Project}]] — {role}
 
 ## Activity
-- **{YYYY-MM-DD}** ({meeting|email}): {Summary with [[Folder/Name]] links}
+- **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[Folder/Name]] links}
 
 ## Key facts
 {Substantive facts only. Leave empty if none.}
@@ -1035,7 +1046,7 @@ After writing, verify links go both ways.
 - [[Projects/{Project}]] — {relationship}
 
 ## Activity
-- **{YYYY-MM-DD}** ({meeting|email}): {Summary with [[Folder/Name]] links}
+- **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[Folder/Name]] links}
 
 ## Key facts
 {Substantive facts only. Leave empty if none.}
@@ -1119,10 +1130,16 @@ After writing, verify links go both ways.
 | Source Type | Creates Notes? | Updates Notes? | Detects State Changes? |
 |-------------|---------------|----------------|------------------------|
 | Meeting | Yes | Yes | Yes |
+| Voice memo | Yes | Yes | Yes |
 | Email (personalized, business-relevant) | Yes | Yes | Yes |
 | Email (mass/automated/consumer) | No (SKIP) | No | No |
 | Email (cold outreach with personalization) | Yes | Yes | Yes |
 | Email (generic cold outreach) | No | No | No |
+
+**Voice memo activity format:** Always include a link to the source voice memo:
+\`\`\`
+**2025-01-15** (voice memo): Discussed project timeline with [[People/Sarah Chen]]. See [[Voice Memos/2025-01-15/voice-memo-...]]
+\`\`\`
 
 ---
 

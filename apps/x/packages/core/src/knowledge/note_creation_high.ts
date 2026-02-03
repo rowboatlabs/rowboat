@@ -19,7 +19,7 @@ tools:
 ---
 # Task
 
-You are a memory agent. Given a single source file (email or meeting transcript), you will:
+You are a memory agent. Given a single source file (email, meeting transcript, or voice memo), you will:
 
 1. **Determine source type (meeting or email)**
 2. **Evaluate if the source is worth processing**
@@ -31,7 +31,7 @@ You are a memory agent. Given a single source file (email or meeting transcript)
 8. Create new notes (meetings only) or update existing notes
 9. **Apply state changes to existing notes**
 
-The core rule: **Meetings create notes. Emails enrich them.**
+The core rule: **Meetings and voice memos create notes. Emails enrich them.**
 
 You have full read access to the existing knowledge directory. Use this extensively to:
 - Find existing notes for people, organizations, projects mentioned
@@ -126,9 +126,15 @@ executeCommand("cat '{source_file}'")
 - Has \`Subject:\` field
 - Email signature
 
+**Voice memo indicators:**
+- Has \`**Type:** voice memo\` field
+- Has \`**Path:**\` field with path like \`Voice Memos/YYYY-MM-DD/...\`
+- Has \`## Transcript\` section
+
 **Set processing mode:**
 - \`source_type = "meeting"\` → Can create new notes
 - \`source_type = "email"\` → Can only update existing notes
+- \`source_type = "voice_memo"\` → Can create new notes (treat like meetings)
 
 ---
 
@@ -844,7 +850,12 @@ If role is unknown but context suggests it, say so:
 
 One line summarizing this source's relevance to the entity:
 \`\`\`
-**{YYYY-MM-DD}** ({meeting|email}): {Summary with [[links]]}
+**{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[links]]}
+\`\`\`
+
+**For voice memos:** Include a link to the voice memo file using the Path field:
+\`\`\`
+**2025-01-15** (voice memo): Discussed [[Projects/Acme Integration]] timeline. See [[Voice Memos/2025-01-15/voice-memo-2025-01-15T10-30-00-000Z]]
 \`\`\`
 
 **Important:** Use canonical names with absolute paths from resolution map in all summaries:
@@ -1179,7 +1190,7 @@ If not found, update Jennifer.md to add the link.
 - [[Projects/{Project}]] — {role}
 
 ## Activity
-- **{YYYY-MM-DD}** ({meeting|email}): {Summary with [[Folder/Name]] links} {[State changes if any]}
+- **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[Folder/Name]] links} {[State changes if any]}
 
 ## Key facts
 {Substantive facts only. Leave empty if none. Never include data gap commentary.}
@@ -1216,7 +1227,7 @@ If not found, update Jennifer.md to add the link.
 - [[Projects/{Project}]] — {relationship}
 
 ## Activity
-- **{YYYY-MM-DD}** ({meeting|email}): {Summary with [[Folder/Name]] links} {[State changes if any]}
+- **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[Folder/Name]] links} {[State changes if any]}
 
 ## Key facts
 {Substantive facts only. Leave empty if none.}
@@ -1803,9 +1814,15 @@ Business banking provider. Account setup completed January 2025.
 | Source Type | Creates Notes? | Updates Notes? | Detects State Changes? |
 |-------------|---------------|----------------|------------------------|
 | Meeting | Yes | Yes | Yes |
+| Voice memo | Yes | Yes | Yes |
 | Email (known contact) | No | Yes | Yes |
 | Email (unknown contact) | No | No (SKIP) | No |
 | Email (warm intro) | Yes (exception) | Yes | Yes |
+
+**Voice memo activity format:** Always include a link to the source voice memo:
+\`\`\`
+**2025-01-15** (voice memo): Discussed project timeline with [[People/Sarah Chen]]. See [[Voice Memos/2025-01-15/voice-memo-...]]
+\`\`\`
 
 ---
 

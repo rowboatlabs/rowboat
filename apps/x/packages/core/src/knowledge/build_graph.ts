@@ -89,7 +89,19 @@ function moveVoiceMemosToKnowledge(state: GraphState): { sourcePath: string; tar
         // Read original content and wrap in markdown format
         const originalContent = fs.readFileSync(sourcePath, 'utf-8');
 
-        const mdContent = `# Voice Memo - ${date}\n\n**Recorded:** ${date}\n\n## Transcript\n\n${originalContent}\n`;
+        // Create a relative path for linking (from knowledge/ root)
+        const relativePath = `Voice Memos/${date}/${baseName}`;
+
+        const mdContent = `# Voice Memo - ${date}
+
+**Type:** voice memo
+**Recorded:** ${date}
+**Path:** ${relativePath}
+
+## Transcript
+
+${originalContent}
+`;
 
         // Write to knowledge directory
         fs.writeFileSync(targetPath, mdContent);
