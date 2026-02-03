@@ -90,6 +90,7 @@ type SidebarContentPanelProps = {
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
   knowledgeActions: KnowledgeActions
+  onVoiceNoteCreated?: (path: string) => void
   runs?: RunListItem[]
   currentRunId?: string | null
   tasksActions?: TasksActions
@@ -106,6 +107,7 @@ export function SidebarContentPanel({
   expandedPaths,
   onSelectFile,
   knowledgeActions,
+  onVoiceNoteCreated,
   runs = [],
   currentRunId,
   tasksActions,
@@ -128,6 +130,7 @@ export function SidebarContentPanel({
             expandedPaths={expandedPaths}
             onSelectFile={onSelectFile}
             actions={knowledgeActions}
+            onVoiceNoteCreated={onVoiceNoteCreated}
           />
         )}
         {activeSection === "tasks" && (
@@ -174,13 +177,50 @@ async function transcribeWithDeepgram(audioBlob: Blob): Promise<string | null> {
 }
 
 // Voice Note Recording Button
-function VoiceNoteButton() {
+function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => void }) {
   const [isRecording, setIsRecording] = React.useState(false)
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null)
   const chunksRef = React.useRef<Blob[]>([])
+  const notePathRef = React.useRef<string | null>(null)
+  const timestampRef = React.useRef<string | null>(null)
 
   const startRecording = async () => {
     try {
+      // Generate timestamp and paths immediately
+      const now = new Date()
+      const timestamp = now.toISOString().replace(/[:.]/g, '-')
+      const dateStr = now.toISOString().split('T')[0] // YYYY-MM-DD
+      const noteName = `voice-memo-${timestamp}`
+      const notePath = `knowledge/Voice Memos/${dateStr}/${noteName}.md`
+
+      timestampRef.current = timestamp
+      notePathRef.current = notePath
+
+      // Create the note immediately with a "Recording..." placeholder
+      await window.ipc.invoke('workspace:mkdir', {
+        path: `knowledge/Voice Memos/${dateStr}`,
+        recursive: true,
+      })
+
+      const initialContent = `# Voice Memo
+
+**Type:** voice memo
+**Recorded:** ${now.toLocaleString()}
+
+## Transcript
+
+*Recording in progress...*
+`
+      await window.ipc.invoke('workspace:writeFile', {
+        path: notePath,
+        data: initialContent,
+        opts: { encoding: 'utf8' },
+      })
+
+      // Select the note so the user can see it
+      onNoteCreated?.(notePath)
+
+      // Start actual recording
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mimeType = MediaRecorder.isTypeSupported('audio/mp4')
         ? 'audio/mp4'
@@ -196,9 +236,9 @@ function VoiceNoteButton() {
         stream.getTracks().forEach((t) => t.stop())
         const blob = new Blob(chunksRef.current, { type: mimeType })
         const ext = mimeType === 'audio/mp4' ? 'm4a' : 'webm'
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-        const filename = `voice-memo-${timestamp}.${ext}`
+        const audioFilename = `voice-memo-${timestampRef.current}.${ext}`
 
+        // Save audio file to voice_memos folder (for backup/reference)
         try {
           await window.ipc.invoke('workspace:mkdir', {
             path: 'voice_memos',
@@ -214,34 +254,76 @@ function VoiceNoteButton() {
           )
 
           await window.ipc.invoke('workspace:writeFile', {
-            path: `voice_memos/${filename}`,
+            path: `voice_memos/${audioFilename}`,
             data: base64,
             opts: { encoding: 'base64' },
           })
-          toast('Voice memo saved', 'success')
         } catch {
-          toast('Failed to save voice memo', 'error')
-          return
+          console.error('Failed to save audio file')
         }
 
-        // Transcribe and save transcript alongside the audio file
-        const transcript = await transcribeWithDeepgram(blob)
-        if (transcript) {
-          const txtFilename = filename.replace(/\.[^.]+$/, '.txt')
+        // Update note to show transcribing status
+        const currentNotePath = notePathRef.current
+        if (currentNotePath) {
+          const transcribingContent = `# Voice Memo
+
+**Type:** voice memo
+**Recorded:** ${new Date().toLocaleString()}
+
+## Transcript
+
+*Transcribing...*
+`
           await window.ipc.invoke('workspace:writeFile', {
-            path: `voice_memos/${txtFilename}`,
-            data: transcript,
+            path: currentNotePath,
+            data: transcribingContent,
             opts: { encoding: 'utf8' },
           })
-          toast('Transcription saved', 'success')
-        } else {
-          toast('Transcription failed', 'error')
+        }
+
+        // Transcribe and update the note with the transcript
+        const transcript = await transcribeWithDeepgram(blob)
+        if (currentNotePath) {
+          const finalContent = transcript
+            ? `# Voice Memo
+
+**Type:** voice memo
+**Recorded:** ${new Date().toLocaleString()}
+
+## Transcript
+
+${transcript}
+`
+            : `# Voice Memo
+
+**Type:** voice memo
+**Recorded:** ${new Date().toLocaleString()}
+
+## Transcript
+
+*Transcription failed. Please try again.*
+`
+          await window.ipc.invoke('workspace:writeFile', {
+            path: currentNotePath,
+            data: finalContent,
+            opts: { encoding: 'utf8' },
+          })
+
+          // Re-select to trigger refresh
+          onNoteCreated?.(currentNotePath)
+
+          if (transcript) {
+            toast('Voice note transcribed', 'success')
+          } else {
+            toast('Transcription failed', 'error')
+          }
         }
       }
 
       recorder.start()
       mediaRecorderRef.current = recorder
       setIsRecording(true)
+      toast('Recording started', 'success')
     } catch {
       toast('Could not access microphone', 'error')
     }
@@ -283,15 +365,17 @@ function KnowledgeSection({
   expandedPaths,
   onSelectFile,
   actions,
+  onVoiceNoteCreated,
 }: {
   tree: TreeNode[]
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
   actions: KnowledgeActions
+  onVoiceNoteCreated?: (path: string) => void
 }) {
   const isExpanded = expandedPaths.size > 0
-  
+
   const quickActions = [
     { icon: FilePlus, label: "New Note", action: () => actions.createNote() },
     { icon: FolderPlus, label: "New Folder", action: () => actions.createFolder() },
@@ -316,7 +400,7 @@ function KnowledgeSection({
                 <TooltipContent side="bottom">{action.label}</TooltipContent>
               </Tooltip>
             ))}
-            <VoiceNoteButton />
+            <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

@@ -1441,6 +1441,29 @@ function App() {
     },
   }), [tree, selectedPath, workspaceRoot, collectDirPaths])
 
+  // Handler for when a voice note is created/updated
+  const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
+    // Refresh the tree to show the new file/folder
+    const newTree = await loadDirectory()
+    setTree(newTree)
+
+    // Expand parent directories to show the file
+    const parts = notePath.split('/')
+    const parentPaths: string[] = []
+    for (let i = 1; i < parts.length; i++) {
+      parentPaths.push(parts.slice(0, i).join('/'))
+    }
+    setExpandedPaths(prev => {
+      const newSet = new Set(prev)
+      parentPaths.forEach(p => newSet.add(p))
+      return newSet
+    })
+
+    // Select the file to show it in the editor
+    setIsGraphOpen(false)
+    setSelectedPath(notePath)
+  }, [loadDirectory])
+
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
     if (!resolvedPath) return null
@@ -1687,6 +1710,7 @@ function App() {
               expandedPaths={expandedPaths}
               onSelectFile={toggleExpand}
               knowledgeActions={knowledgeActions}
+              onVoiceNoteCreated={handleVoiceNoteCreated}
               runs={runs}
               currentRunId={runId}
               tasksActions={{
