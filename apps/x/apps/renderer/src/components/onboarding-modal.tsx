@@ -42,12 +42,8 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [granolaEnabled, setGranolaEnabled] = useState(false)
   const [granolaLoading, setGranolaLoading] = useState(true)
 
-  // Composio state (Gmail + Slack)
+  // Composio/Slack state
   const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
-  const [composioApiKeyTarget, setComposioApiKeyTarget] = useState<'gmail' | 'slack'>('gmail')
-  const [gmailConnected, setGmailConnected] = useState(false)
-  const [gmailLoading, setGmailLoading] = useState(true)
-  const [gmailConnecting, setGmailConnecting] = useState(false)
   const [slackConnected, setSlackConnected] = useState(false)
   const [slackLoading, setSlackLoading] = useState(true)
   const [slackConnecting, setSlackConnecting] = useState(false)
@@ -105,47 +101,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
   }, [])
 
-  // Load Gmail connection status
-  const refreshGmailStatus = useCallback(async () => {
-    try {
-      setGmailLoading(true)
-      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'gmail' })
-      setGmailConnected(result.isConnected)
-    } catch (error) {
-      console.error('Failed to load Gmail status:', error)
-      setGmailConnected(false)
-    } finally {
-      setGmailLoading(false)
-    }
-  }, [])
-
-  // Connect to Gmail via Composio
-  const startGmailConnect = useCallback(async () => {
-    try {
-      setGmailConnecting(true)
-      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'gmail' })
-      if (!result.success) {
-        toast.error(result.error || 'Failed to connect to Gmail')
-        setGmailConnecting(false)
-      }
-    } catch (error) {
-      console.error('Failed to connect to Gmail:', error)
-      toast.error('Failed to connect to Gmail')
-      setGmailConnecting(false)
-    }
-  }, [])
-
-  // Handle Gmail connect button click
-  const handleConnectGmail = useCallback(async () => {
-    const configResult = await window.ipc.invoke('composio:is-configured', null)
-    if (!configResult.configured) {
-      setComposioApiKeyTarget('gmail')
-      setComposioApiKeyOpen(true)
-      return
-    }
-    await startGmailConnect()
-  }, [startGmailConnect])
-
   // Load Slack connection status
   const refreshSlackStatus = useCallback(async () => {
     try {
@@ -179,9 +134,9 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Connect to Slack via Composio (checks if configured first)
   const handleConnectSlack = useCallback(async () => {
+    // Check if Composio is configured
     const configResult = await window.ipc.invoke('composio:is-configured', null)
     if (!configResult.configured) {
-      setComposioApiKeyTarget('slack')
       setComposioApiKeyOpen(true)
       return
     }
@@ -194,24 +149,20 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       await window.ipc.invoke('composio:set-api-key', { apiKey })
       setComposioApiKeyOpen(false)
       toast.success('Composio API key saved')
-      if (composioApiKeyTarget === 'gmail') {
-        await startGmailConnect()
-      } else {
-        await startSlackConnect()
-      }
+      // Now start the Slack connection
+      await startSlackConnect()
     } catch (error) {
       console.error('Failed to save Composio API key:', error)
       toast.error('Failed to save API key')
     }
-  }, [composioApiKeyTarget, startGmailConnect, startSlackConnect])
+  }, [startSlackConnect])
 
   // Check connection status for all providers
   const refreshAllStatuses = useCallback(async () => {
     // Refresh Granola
     refreshGranolaConfig()
 
-    // Refresh Composio connections
-    refreshGmailStatus()
+    // Refresh Slack status
     refreshSlackStatus()
 
     // Refresh OAuth providers
@@ -240,7 +191,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     )
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshGmailStatus, refreshSlackStatus])
+  }, [providers, refreshGranolaConfig, refreshSlackStatus])
 
   // Refresh statuses when modal opens or providers list changes
   useEffect(() => {
@@ -279,16 +230,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     const cleanup = window.ipc.on('composio:didConnect', (event) => {
       const { toolkitSlug, success, error } = event
 
-      if (toolkitSlug === 'gmail') {
-        setGmailConnected(success)
-        setGmailConnecting(false)
-
-        if (success) {
-          toast.success('Connected to Gmail')
-        } else {
-          toast.error(error || 'Failed to connect to Gmail')
-        }
-      } else if (toolkitSlug === 'slack') {
+      if (toolkitSlug === 'slack') {
         setSlackConnected(success)
         setSlackConnecting(false)
 
@@ -435,48 +377,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     </div>
   )
 
-  // Render Gmail row (Composio)
-  const renderGmailRow = () => (
-    <div className="flex items-center justify-between gap-3 rounded-md px-3 py-3 hover:bg-accent">
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="flex size-10 items-center justify-center rounded-md bg-muted">
-          <Mail className="size-5" />
-        </div>
-        <div className="flex flex-col min-w-0">
-          <span className="text-sm font-medium truncate">Gmail</span>
-          {gmailLoading ? (
-            <span className="text-xs text-muted-foreground">Checking...</span>
-          ) : (
-            <span className="text-xs text-muted-foreground truncate">Sync emails</span>
-          )}
-        </div>
-      </div>
-      <div className="shrink-0">
-        {gmailLoading ? (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
-        ) : gmailConnected ? (
-          <div className="flex items-center gap-1.5 text-sm text-green-600">
-            <CheckCircle2 className="size-4" />
-            <span>Connected</span>
-          </div>
-        ) : (
-          <Button
-            variant="default"
-            size="sm"
-            onClick={handleConnectGmail}
-            disabled={gmailConnecting}
-          >
-            {gmailConnecting ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              "Connect"
-            )}
-          </Button>
-        )}
-      </div>
-    </div>
-  )
-
   // Render Slack row
   const renderSlackRow = () => (
     <div className="flex items-center justify-between gap-3 rounded-md px-3 py-3 hover:bg-accent">
@@ -570,13 +470,15 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           </div>
         ) : (
           <>
-            {/* Email Section - Gmail via Composio */}
-            <div className="space-y-2">
-              <div className="px-3">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Email</span>
+            {/* Email & Calendar Section */}
+            {providers.includes('google') && (
+              <div className="space-y-2">
+                <div className="px-3">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Email & Calendar</span>
+                </div>
+                {renderOAuthProvider('google', 'Google', <Mail className="size-5" />, 'Sync emails and calendar events')}
               </div>
-              {renderGmailRow()}
-            </div>
+            )}
 
             {/* Meeting Notes Section */}
             <div className="space-y-2">
@@ -611,7 +513,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Step 2: Completion
   const CompletionStep = () => {
-    const hasConnections = connectedProviders.length > 0 || gmailConnected || granolaEnabled || slackConnected
+    const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackConnected
 
     return (
       <div className="flex flex-col items-center text-center">
@@ -634,10 +536,10 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
             <div className="rounded-lg border bg-muted/50 p-4">
               <p className="text-sm font-medium mb-2">Connected accounts:</p>
               <div className="space-y-1">
-                {gmailConnected && (
+                {connectedProviders.includes('google') && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <CheckCircle2 className="size-4 text-green-600" />
-                    <span>Gmail (Email)</span>
+                    <span>Google (Email & Calendar)</span>
                   </div>
                 )}
                 {connectedProviders.includes('fireflies-ai') && (
@@ -676,7 +578,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       open={composioApiKeyOpen}
       onOpenChange={setComposioApiKeyOpen}
       onSubmit={handleComposioApiKeySubmit}
-      isSubmitting={gmailConnecting || slackConnecting}
+      isSubmitting={slackConnecting}
     />
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
