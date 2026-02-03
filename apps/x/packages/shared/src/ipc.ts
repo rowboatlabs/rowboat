@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
+import { LlmModelConfig } from './models.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -172,6 +173,34 @@ const ipcSchemas = {
   'runs:events': {
     req: z.null(),
     res: z.null(),
+  },
+  'models:list': {
+    req: z.null(),
+    res: z.object({
+      providers: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        models: z.array(z.object({
+          id: z.string(),
+          name: z.string().optional(),
+          release_date: z.string().optional(),
+        })),
+      })),
+      lastUpdated: z.string().optional(),
+    }),
+  },
+  'models:test': {
+    req: LlmModelConfig,
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'models:saveConfig': {
+    req: LlmModelConfig,
+    res: z.object({
+      success: z.literal(true),
+    }),
   },
   'oauth:connect': {
     req: z.object({

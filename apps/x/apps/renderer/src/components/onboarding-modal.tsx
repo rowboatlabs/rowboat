@@ -13,6 +13,14 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
@@ -30,10 +38,37 @@ interface OnboardingModalProps {
   onComplete: () => void
 }
 
-type Step = 0 | 1 | 2
+type Step = 0 | 1 | 2 | 3
+
+type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+
+interface LlmModelOption {
+  id: string
+  name?: string
+  release_date?: string
+}
 
 export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [currentStep, setCurrentStep] = useState<Step>(0)
+
+  // LLM setup state
+  const [llmProvider, setLlmProvider] = useState<LlmProviderFlavor>("openai")
+  const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [modelsError, setModelsError] = useState<string | null>(null)
+  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; model: string }>>({
+    openai: { apiKey: "", baseURL: "", model: "" },
+    anthropic: { apiKey: "", baseURL: "", model: "" },
+    google: { apiKey: "", baseURL: "", model: "" },
+    openrouter: { apiKey: "", baseURL: "", model: "" },
+    aigateway: { apiKey: "", baseURL: "", model: "" },
+    ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "" },
+    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", model: "" },
+  })
+  const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({
+    status: "idle",
+  })
+  const [savingLlmConfig, setSavingLlmConfig] = useState(false)
 
   // OAuth provider states
   const [providers, setProviders] = useState<string[]>([])
@@ -50,6 +85,27 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [slackConnected, setSlackConnected] = useState(false)
   const [slackLoading, setSlackLoading] = useState(true)
   const [slackConnecting, setSlackConnecting] = useState(false)
+
+  const updateProviderConfig = useCallback(
+    (provider: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string }>) => {
+      setProviderConfigs(prev => ({
+        ...prev,
+        [provider]: { ...prev[provider], ...updates },
+      }))
+      setTestState({ status: "idle" })
+    },
+    []
+  )
+
+  const activeConfig = providerConfigs[llmProvider]
+  const requiresApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "openrouter" || llmProvider === "aigateway"
+  const requiresBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible"
+  const showBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible" || llmProvider === "aigateway"
+  const isLocalProvider = llmProvider === "ollama" || llmProvider === "openai-compatible"
+  const canTest =
+    activeConfig.model.trim().length > 0 &&
+    (!requiresApiKey || activeConfig.apiKey.trim().length > 0) &&
+    (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
   // Track connected providers for the completion step
   const connectedProviders = Object.entries(providerStates)
@@ -74,6 +130,48 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
     loadProviders()
   }, [open])
+
+  // Load LLM models catalog on open
+  useEffect(() => {
+    if (!open) return
+
+    async function loadModels() {
+      try {
+        setModelsLoading(true)
+        setModelsError(null)
+        const result = await window.ipc.invoke("models:list", null)
+        const catalog: Record<string, LlmModelOption[]> = {}
+        for (const provider of result.providers || []) {
+          catalog[provider.id] = provider.models || []
+        }
+        setModelsCatalog(catalog)
+      } catch (error) {
+        console.error("Failed to load models catalog:", error)
+        setModelsError("Failed to load models list")
+        setModelsCatalog({})
+      } finally {
+        setModelsLoading(false)
+      }
+    }
+
+    loadModels()
+  }, [open])
+
+  // Initialize default models from catalog
+  useEffect(() => {
+    if (Object.keys(modelsCatalog).length === 0) return
+    setProviderConfigs(prev => {
+      const next = { ...prev }
+      const cloudProviders: LlmProviderFlavor[] = ["openai", "anthropic", "google"]
+      for (const provider of cloudProviders) {
+        const models = modelsCatalog[provider]
+        if (models?.length && !next[provider].model) {
+          next[provider] = { ...next[provider], model: models[0]?.id || "" }
+        }
+      }
+      return next
+    })
+  }, [modelsCatalog])
 
   // Load Granola config
   const refreshGranolaConfig = useCallback(async () => {
@@ -159,6 +257,69 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       toast.error('Failed to save API key')
     }
   }, [startSlackConnect])
+
+  const handleNext = () => {
+    if (currentStep < 3) {
+      setCurrentStep((prev) => (prev + 1) as Step)
+    }
+  }
+
+  const handleComplete = () => {
+    onComplete()
+  }
+
+  const handleTestConnection = useCallback(async () => {
+    if (!canTest) return
+    setTestState({ status: "testing" })
+    try {
+      const apiKey = activeConfig.apiKey.trim() || undefined
+      const baseURL = activeConfig.baseURL.trim() || undefined
+      const model = activeConfig.model.trim()
+      const result = await window.ipc.invoke("models:test", {
+        provider: {
+          flavor: llmProvider,
+          apiKey,
+          baseURL,
+        },
+        model,
+      })
+      if (result.success) {
+        setTestState({ status: "success" })
+        toast.success("Connection successful")
+      } else {
+        setTestState({ status: "error", error: result.error })
+        toast.error(result.error || "Connection test failed")
+      }
+    } catch (error) {
+      console.error("Connection test failed:", error)
+      setTestState({ status: "error", error: "Connection test failed" })
+      toast.error("Connection test failed")
+    }
+  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, canTest, llmProvider])
+
+  const handleSaveLlmConfig = useCallback(async () => {
+    if (testState.status !== "success") return
+    setSavingLlmConfig(true)
+    try {
+      const apiKey = activeConfig.apiKey.trim() || undefined
+      const baseURL = activeConfig.baseURL.trim() || undefined
+      const model = activeConfig.model.trim()
+      await window.ipc.invoke("models:saveConfig", {
+        provider: {
+          flavor: llmProvider,
+          apiKey,
+          baseURL,
+        },
+        model,
+      })
+      setSavingLlmConfig(false)
+      handleNext()
+    } catch (error) {
+      console.error("Failed to save LLM config:", error)
+      toast.error("Failed to save LLM settings")
+      setSavingLlmConfig(false)
+    }
+  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, handleNext, llmProvider, testState.status])
 
   // Check connection status for all providers
   const refreshAllStatuses = useCallback(async () => {
@@ -295,20 +456,10 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     startConnect('google', clientId)
   }, [startConnect])
 
-  const handleNext = () => {
-    if (currentStep < 2) {
-      setCurrentStep((prev) => (prev + 1) as Step)
-    }
-  }
-
-  const handleComplete = () => {
-    onComplete()
-  }
-
   // Step indicator component
   const StepIndicator = () => (
     <div className="flex gap-2 justify-center mb-6">
-      {[0, 1, 2].map((step) => (
+      {[0, 1, 2, 3].map((step) => (
         <div
           key={step}
           className={cn(
@@ -476,7 +627,156 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     </div>
   )
 
-  // Step 1: Connect Accounts
+  // Step 1: LLM Setup
+  const LlmSetupStep = () => {
+    const providerOptions: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
+      { id: "openai", name: "OpenAI", description: "Use your OpenAI API key" },
+      { id: "anthropic", name: "Anthropic", description: "Use your Anthropic API key" },
+      { id: "google", name: "Google", description: "Use your Google AI Studio key" },
+      { id: "openrouter", name: "OpenRouter", description: "Access multiple models with one key" },
+      { id: "aigateway", name: "AI Gateway (Vercel)", description: "Use Vercel's AI Gateway" },
+      { id: "ollama", name: "Ollama (Local)", description: "Run a local model via Ollama" },
+      { id: "openai-compatible", name: "OpenAI-Compatible", description: "Local or hosted OpenAI-compatible API" },
+    ]
+
+    const modelsForProvider = modelsCatalog[llmProvider] || []
+    const showModelInput = isLocalProvider || modelsForProvider.length === 0
+
+    return (
+      <div className="flex flex-col">
+        <DialogHeader className="text-center mb-6">
+          <DialogTitle className="text-2xl">Choose your model</DialogTitle>
+          <DialogDescription className="text-base">
+            Select your provider and model to power Rowboat’s AI.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5">
+          <div className="space-y-2">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Provider</span>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {providerOptions.map((provider) => (
+                <button
+                  key={provider.id}
+                  onClick={() => {
+                    setLlmProvider(provider.id)
+                    setTestState({ status: "idle" })
+                  }}
+                  className={cn(
+                    "rounded-md border px-3 py-3 text-left transition-colors",
+                    llmProvider === provider.id
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:bg-accent"
+                  )}
+                >
+                  <div className="text-sm font-medium">{provider.name}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{provider.description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model</span>
+            {modelsLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Loading models...
+              </div>
+            ) : showModelInput ? (
+              <Input
+                value={activeConfig.model}
+                onChange={(e) => updateProviderConfig(llmProvider, { model: e.target.value })}
+                placeholder="Enter model ID"
+              />
+            ) : (
+              <Select
+                value={activeConfig.model}
+                onValueChange={(value) => updateProviderConfig(llmProvider, { model: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {modelsForProvider.map((model) => (
+                    <SelectItem key={model.id} value={model.id}>
+                      {model.name || model.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {modelsError && (
+              <div className="text-xs text-destructive">{modelsError}</div>
+            )}
+          </div>
+
+          {requiresApiKey && (
+            <div className="space-y-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">API Key</span>
+              <Input
+                type="password"
+                value={activeConfig.apiKey}
+                onChange={(e) => updateProviderConfig(llmProvider, { apiKey: e.target.value })}
+                placeholder="Paste your API key"
+              />
+            </div>
+          )}
+
+          {showBaseURL && (
+            <div className="space-y-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Base URL</span>
+              <Input
+                value={activeConfig.baseURL}
+                onChange={(e) => updateProviderConfig(llmProvider, { baseURL: e.target.value })}
+                placeholder={
+                  llmProvider === "ollama"
+                    ? "http://localhost:11434"
+                    : llmProvider === "openai-compatible"
+                      ? "http://localhost:1234/v1"
+                      : "https://ai-gateway.vercel.sh/v1"
+                }
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 flex items-center gap-3">
+          <Button
+            variant="default"
+            onClick={handleTestConnection}
+            disabled={!canTest || testState.status === "testing"}
+          >
+            {testState.status === "testing" ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              "Test connection"
+            )}
+          </Button>
+          {testState.status === "success" && (
+            <span className="text-sm text-green-600">Connected</span>
+          )}
+          {testState.status === "error" && (
+            <span className="text-sm text-destructive">
+              {testState.error || "Test failed"}
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-3 mt-8">
+          <Button
+            onClick={handleSaveLlmConfig}
+            size="lg"
+            disabled={testState.status !== "success" || savingLlmConfig}
+          >
+            {savingLlmConfig ? <Loader2 className="size-4 animate-spin" /> : "Continue"}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // Step 2: Connect Accounts
   const AccountConnectionStep = () => (
     <div className="flex flex-col">
       <DialogHeader className="text-center mb-6">
@@ -534,7 +834,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     </div>
   )
 
-  // Step 2: Completion
+  // Step 3: Completion
   const CompletionStep = () => {
     const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackConnected
 
@@ -618,8 +918,9 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       >
         <StepIndicator />
         {currentStep === 0 && <WelcomeStep />}
-        {currentStep === 1 && <AccountConnectionStep />}
-        {currentStep === 2 && <CompletionStep />}
+        {currentStep === 1 && <LlmSetupStep />}
+        {currentStep === 2 && <AccountConnectionStep />}
+        {currentStep === 3 && <CompletionStep />}
       </DialogContent>
     </Dialog>
     </>

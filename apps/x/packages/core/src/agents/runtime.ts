@@ -15,7 +15,7 @@ import { CopilotAgent } from "../application/assistant/agent.js";
 import { isBlocked } from "../application/lib/command-executor.js";
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
-import { getProvider } from "../models/models.js";
+import { createProvider } from "../models/models.js";
 import { IAgentsRepo } from "./repo.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { IBus } from "../application/lib/bus.js";
@@ -623,8 +623,8 @@ export async function* streamAgent({
     const tools = await buildTools(agent);
 
     // set up provider + model
-    const provider = await getProvider(agent.provider);
-    const model = provider.languageModel(agent.model || modelConfig.defaults.model);
+    const provider = createProvider(modelConfig.provider);
+    const model = provider.languageModel(modelConfig.model);
 
     let loopCounter = 0;
     while (true) {

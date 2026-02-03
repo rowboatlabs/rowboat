@@ -17,6 +17,9 @@ import fs from 'node:fs/promises';
 import z from 'zod';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import container from '@x/core/dist/di/container.js';
+import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
+import { testModelConnection } from '@x/core/dist/models/models.js';
+import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
@@ -304,6 +307,17 @@ export function setupIpcHandlers() {
     },
     'runs:list': async (_event, args) => {
       return runsCore.listRuns(args.cursor);
+    },
+    'models:list': async () => {
+      return await listOnboardingModels();
+    },
+    'models:test': async (_event, args) => {
+      return await testModelConnection(args.provider, args.model);
+    },
+    'models:saveConfig': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.setConfig(args);
+      return { success: true };
     },
     'oauth:connect': async (_event, args) => {
       return await connectProvider(args.provider, args.clientId);

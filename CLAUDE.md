@@ -104,6 +104,11 @@ pnpm uses symlinks for workspace packages. Electron Forge's dependency walker ca
 
 ## Common Tasks
 
+### LLM configuration (single provider)
+- Config file: `~/.rowboat/config/models.json`
+- Schema: `{ provider: { flavor, apiKey?, baseURL?, headers? }, model: string }`
+- Models catalog cache: `~/.rowboat/config/models.dev.json` (OpenAI/Anthropic/Google only)
+
 ### Add a new shared type
 1. Edit `apps/x/packages/shared/src/`
 2. Run `cd apps/x && npm run deps` to rebuild
@@ -133,7 +138,7 @@ cd apps/x && npm run deps && npm run lint
 | UI | React 19, Vite 7 |
 | Styling | TailwindCSS, Radix UI |
 | State | React hooks |
-| AI | Vercel AI SDK, Anthropic/OpenAI/Google providers |
+| AI | Vercel AI SDK, OpenAI/Anthropic/Google/OpenRouter providers, Vercel AI Gateway, Ollama, models.dev catalog |
 | IPC | Electron contextBridge |
 | Build | TypeScript 5.9, esbuild, Electron Forge |
 
