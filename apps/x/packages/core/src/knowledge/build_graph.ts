@@ -29,7 +29,80 @@ const SOURCE_FOLDERS = [
     'fireflies_transcripts',
     'granola_notes',
 ];
-const MAX_CONCURRENT_BATCHES = 1; // Process only 1 batch at a time to avoid overwhelming the agent
+
+// Voice memos are handled separately - they get moved to knowledge/Voice Memos/<date>/
+const VOICE_MEMOS_DIR = path.join(WorkDir, 'voice_memos');
+const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
+
+/**
+ * Extract date from voice memo filename
+ * Filename format: voice-memo-2026-02-03T04-56-53-182Z.txt
+ * Returns date string like "2026-02-03"
+ */
+function extractDateFromVoiceMemoFilename(filename: string): string {
+    // Match the date pattern: YYYY-MM-DD from voice-memo-YYYY-MM-DDTHH-MM-SS-MMMZ
+    const match = filename.match(/voice-memo-(\d{4}-\d{2}-\d{2})T/);
+    if (match) {
+        return match[1];
+    }
+    // Fallback to current date if pattern doesn't match
+    return new Date().toISOString().split('T')[0];
+}
+
+/**
+ * Move voice memo transcripts to knowledge/Voice Memos/<date>/
+ * Returns info about moved files for processing.
+ */
+function moveVoiceMemosToKnowledge(state: GraphState): { sourcePath: string; targetPath: string }[] {
+    if (!fs.existsSync(VOICE_MEMOS_DIR)) {
+        return [];
+    }
+
+    const movedFiles: { sourcePath: string; targetPath: string }[] = [];
+    const entries = fs.readdirSync(VOICE_MEMOS_DIR);
+
+    for (const entry of entries) {
+        // Only process .txt transcript files
+        if (!entry.endsWith('.txt')) {
+            continue;
+        }
+
+        const sourcePath = path.join(VOICE_MEMOS_DIR, entry);
+
+        // Skip if already processed (check by source path)
+        if (state.processedFiles[sourcePath]) {
+            continue;
+        }
+
+        // Extract date and create target directory
+        const date = extractDateFromVoiceMemoFilename(entry);
+        const targetDir = path.join(VOICE_MEMOS_KNOWLEDGE_DIR, date);
+
+        if (!fs.existsSync(targetDir)) {
+            fs.mkdirSync(targetDir, { recursive: true });
+        }
+
+        // Convert .txt to .md and create a proper markdown file
+        const baseName = entry.replace('.txt', '');
+        const targetPath = path.join(targetDir, `${baseName}.md`);
+
+        // Read original content and wrap in markdown format
+        const originalContent = fs.readFileSync(sourcePath, 'utf-8');
+
+        const mdContent = `# Voice Memo - ${date}\n\n**Recorded:** ${date}\n\n## Transcript\n\n${originalContent}\n`;
+
+        // Write to knowledge directory
+        fs.writeFileSync(targetPath, mdContent);
+        console.log(`[VoiceMemos] Moved transcript to ${targetPath}`);
+
+        // Delete the original .txt file (it's been moved)
+        fs.unlinkSync(sourcePath);
+
+        movedFiles.push({ sourcePath, targetPath });
+    }
+
+    return movedFiles;
+}
 
 /**
  * Read content for specific files
@@ -187,6 +260,69 @@ export async function buildGraph(sourceDir: string): Promise<void> {
 }
 
 /**
+ * Process voice memos and run entity extraction on them
+ */
+async function processVoiceMemosForKnowledge(): Promise<boolean> {
+    const state = loadState();
+
+    // Move voice memos to knowledge directory
+    const movedFiles = moveVoiceMemosToKnowledge(state);
+
+    if (movedFiles.length === 0) {
+        return false;
+    }
+
+    console.log(`[VoiceMemos] Processing ${movedFiles.length} voice memo transcripts for entity extraction...`);
+
+    // Read the moved files
+    const targetPaths = movedFiles.map(f => f.targetPath);
+    const contentFiles = await readFileContents(targetPaths);
+
+    if (contentFiles.length === 0) {
+        return false;
+    }
+
+    // Process in batches like other sources
+    const BATCH_SIZE = 10;
+    const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
+
+    for (let i = 0; i < contentFiles.length; i += BATCH_SIZE) {
+        const batch = contentFiles.slice(i, i + BATCH_SIZE);
+        const batchMovedFiles = movedFiles.slice(i, i + BATCH_SIZE);
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+
+        try {
+            // Build knowledge index
+            console.log(`[VoiceMemos] Building knowledge index for batch ${batchNumber}...`);
+            const index = buildKnowledgeIndex();
+            const indexForPrompt = formatIndexForPrompt(index);
+
+            console.log(`[VoiceMemos] Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
+            await createNotesFromBatch(batch, batchNumber, indexForPrompt);
+            console.log(`[VoiceMemos] Batch ${batchNumber}/${totalBatches} complete`);
+
+            // Mark files as processed using SOURCE path as key (to prevent reprocessing)
+            for (const { sourcePath, targetPath } of batchMovedFiles) {
+                markFileAsProcessed(targetPath, state);
+                // Also track by source path so we don't reprocess if a new file with same name appears
+                state.processedFiles[sourcePath] = state.processedFiles[targetPath];
+            }
+
+            // Save state after each batch
+            saveState(state);
+        } catch (error) {
+            console.error(`[VoiceMemos] Error processing batch ${batchNumber}:`, error);
+        }
+    }
+
+    // Update last build time
+    state.lastBuildTime = new Date().toISOString();
+    saveState(state);
+
+    return true;
+}
+
+/**
  * Process all configured source directories
  */
 async function processAllSources(): Promise<void> {
@@ -196,6 +332,16 @@ async function processAllSources(): Promise<void> {
     autoConfigureStrictnessIfNeeded();
 
     let anyFilesProcessed = false;
+
+    // Process voice memos first (they get moved to knowledge/)
+    try {
+        const voiceMemosProcessed = await processVoiceMemosForKnowledge();
+        if (voiceMemosProcessed) {
+            anyFilesProcessed = true;
+        }
+    } catch (error) {
+        console.error('[GraphBuilder] Error processing voice memos:', error);
+    }
 
     for (const folder of SOURCE_FOLDERS) {
         const sourceDir = path.join(WorkDir, folder);
@@ -234,7 +380,7 @@ async function processAllSources(): Promise<void> {
  */
 export async function init() {
     console.log('[GraphBuilder] Starting Knowledge Graph Builder Service...');
-    console.log(`[GraphBuilder] Monitoring folders: ${SOURCE_FOLDERS.join(', ')}`);
+    console.log(`[GraphBuilder] Monitoring folders: ${SOURCE_FOLDERS.join(', ')}, voice_memos`);
     console.log(`[GraphBuilder] Will check for new content every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run
