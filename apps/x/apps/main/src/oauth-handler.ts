@@ -9,12 +9,9 @@ import { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
-import { emitOAuthEvent, emitAuthEvent } from './ipc.js';
+import { emitOAuthEvent } from './ipc.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
-
-// Cached user info for the rowboat provider
-let cachedRowboatUser: { email: string; name?: string } | null = null;
 
 // Store active OAuth flows (state -> { codeVerifier, provider, config })
 const activeFlows = new Map<string, {
@@ -132,64 +129,6 @@ async function getProviderConfiguration(provider: string): Promise<Configuration
 }
 
 /**
- * Get authentication status for the rowboat provider
- */
-export async function getAuthStatus(): Promise<{ isAuthenticated: boolean; user: { email: string; name?: string } | null }> {
-  try {
-    const oauthRepo = getOAuthRepo();
-    const connected = await oauthRepo.isConnected('rowboat');
-    if (!connected) {
-      cachedRowboatUser = null;
-      return { isAuthenticated: false, user: null };
-    }
-
-    // If we have cached user info, return it
-    if (cachedRowboatUser) {
-      return { isAuthenticated: true, user: cachedRowboatUser };
-    }
-
-    // Get stored tokens to check for id_token_sub
-    const storedTokens = await oauthRepo.getTokens('rowboat');
-    if (!storedTokens?.id_token_sub) {
-      // Legacy tokens without sub claim — require re-login
-      console.log('[OAuth] No id_token_sub in stored tokens, requiring re-login');
-      cachedRowboatUser = null;
-      return { isAuthenticated: false, user: null };
-    }
-
-    // Try to get access token (will refresh if needed)
-    const accessToken = await getAccessToken('rowboat');
-    if (!accessToken) {
-      cachedRowboatUser = null;
-      return { isAuthenticated: false, user: null };
-    }
-
-    // Fetch user info via OIDC discovery
-    try {
-      const config = await getProviderConfiguration('rowboat');
-      cachedRowboatUser = await oauthClient.fetchUserInfo(config, accessToken, storedTokens.id_token_sub);
-    } catch (error) {
-      console.error('[OAuth] Failed to fetch user info via OIDC:', error);
-      cachedRowboatUser = null;
-      return { isAuthenticated: false, user: null };
-    }
-
-    return { isAuthenticated: true, user: cachedRowboatUser };
-  } catch (error) {
-    console.error('[OAuth] Auth status check failed:', error);
-    return { isAuthenticated: false, user: null };
-  }
-}
-
-/**
- * Logout from rowboat (clear tokens and cached user)
- */
-export async function logoutRowboat(): Promise<{ success: boolean }> {
-  cachedRowboatUser = null;
-  return disconnectProvider('rowboat');
-}
-
-/**
  * Initiate OAuth flow for a provider
  */
 export async function connectProvider(provider: string): Promise<{ success: boolean; error?: string }> {
@@ -241,17 +180,12 @@ export async function connectProvider(provider: string): Promise<{ success: bool
 
         // Exchange code for tokens
         console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);
-        const { tokens, sub } = await oauthClient.exchangeCodeForTokens(
+        const tokens = await oauthClient.exchangeCodeForTokens(
           flow.config,
           callbackUrl,
           flow.codeVerifier,
           state
         );
-
-        // Persist the subject claim for future userinfo fetches
-        if (sub) {
-          tokens.id_token_sub = sub;
-        }
 
         // Save tokens
         console.log(`[OAuth] Token exchange successful for ${provider}`);
@@ -262,18 +196,6 @@ export async function connectProvider(provider: string): Promise<{ success: bool
           triggerCalendarSync();
         } else if (provider === 'fireflies-ai') {
           triggerFirefliesSync();
-        }
-
-        // For rowboat provider, fetch user info and emit auth event
-        if (provider === 'rowboat' && sub) {
-          try {
-            const userInfo = await oauthClient.fetchUserInfo(flow.config, tokens.access_token, sub);
-            cachedRowboatUser = userInfo;
-            emitAuthEvent({ isAuthenticated: true, user: userInfo });
-          } catch (error) {
-            console.error('[OAuth] Failed to fetch user info via OIDC:', error);
-            emitAuthEvent({ isAuthenticated: true, user: null });
-          }
         }
 
         // Emit success event to renderer

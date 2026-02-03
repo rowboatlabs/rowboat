@@ -4,7 +4,6 @@ import * as React from "react"
 import {
   Brain,
   HelpCircle,
-  LogOut,
   MessageSquare,
   Plug,
   Settings,
@@ -32,12 +31,7 @@ const navItems: NavItem[] = [
   { id: "knowledge", title: "Knowledge", icon: Brain },
 ]
 
-interface SidebarIconProps {
-  user?: { email: string; name?: string } | null;
-  onLogout?: () => void;
-}
-
-export function SidebarIcon({ user, onLogout }: SidebarIconProps = {}) {
+export function SidebarIcon() {
   const { activeSection, setActiveSection } = useSidebarSection()
 
   return (
@@ -94,23 +88,6 @@ export function SidebarIcon({ user, onLogout }: SidebarIconProps = {}) {
             <HelpCircle className="size-5" />
           </button>
         </HelpPopover>
-
-        {/* Sign out */}
-        {onLogout && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={onLogout}
-                className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-              >
-                <LogOut className="size-5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" sideOffset={8}>
-              {user?.email ? `Sign out (${user.email})` : 'Sign out'}
-            </TooltipContent>
-          </Tooltip>
-        )}
       </nav>
     </div>
   )

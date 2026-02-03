@@ -50,8 +50,6 @@ import { Separator } from "@/components/ui/separator"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { OnboardingModal } from '@/components/onboarding-modal'
-import { useRowboatAuth } from '@/hooks/useRowboatAuth'
-import { LoginScreen } from '@/components/login-screen'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -443,24 +441,6 @@ function ChatInputWithMentions({
 }
 
 function App() {
-  const auth = useRowboatAuth()
-
-  if (auth.isLoading) {
-    return (
-      <div className="flex h-svh w-full items-center justify-center bg-background">
-        <LoaderIcon className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
-  if (!auth.isAuthenticated) {
-    return <LoginScreen isLoggingIn={auth.isLoggingIn} error={auth.error} login={auth.login} />
-  }
-
-  return <AppContent auth={auth} />
-}
-
-function AppContent({ auth }: { auth: ReturnType<typeof useRowboatAuth> }) {
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [fileHistoryBack, setFileHistoryBack] = useState<string[]>([])
@@ -1712,7 +1692,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useRowboatAuth> }) {
       <SidebarSectionProvider defaultSection="tasks" onSectionChange={handleSectionChange}>
         <div className="flex h-svh w-full">
           {/* Icon sidebar - always visible, fixed position */}
-          <SidebarIcon user={auth.user} onLogout={auth.logout} />
+          <SidebarIcon />
 
           {/* Spacer for the fixed icon sidebar */}
           <div className="w-14 shrink-0" />

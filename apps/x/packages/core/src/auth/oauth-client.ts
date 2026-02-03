@@ -159,16 +159,13 @@ export function buildAuthorizationUrl(
     state: string;
   }
 ): URL {
-  const url = client.buildAuthorizationUrl(config, {
+  return client.buildAuthorizationUrl(config, {
     redirect_uri: params.redirectUri,
     scope: params.scope,
     code_challenge: params.codeChallenge,
     code_challenge_method: 'S256',
     state: params.state,
   });
-
-  console.log(`[OAuth] Authorization URL: ${url}`);
-  return url;
 }
 
 /**
@@ -179,7 +176,7 @@ export async function exchangeCodeForTokens(
   callbackUrl: URL,
   codeVerifier: string,
   expectedState: string
-): Promise<{ tokens: OAuthTokens; sub?: string }> {
+): Promise<OAuthTokens> {
   console.log(`[OAuth] Exchanging authorization code for tokens...`);
 
   const response = await client.authorizationCodeGrant(config, callbackUrl, {
@@ -187,27 +184,8 @@ export async function exchangeCodeForTokens(
     expectedState,
   });
 
-  const claims = response.claims();
   console.log(`[OAuth] Token exchange successful`);
-  return {
-    tokens: toOAuthTokens(response),
-    sub: claims?.sub,
-  };
-}
-
-/**
- * Fetch user info from the OIDC userinfo endpoint (discovered via issuer metadata)
- */
-export async function fetchUserInfo(
-  config: client.Configuration,
-  accessToken: string,
-  expectedSubject: string
-): Promise<{ email: string; name?: string }> {
-  const userInfo = await client.fetchUserInfo(config, accessToken, expectedSubject);
-  return {
-    email: userInfo.email ?? '',
-    name: userInfo.name,
-  };
+  return toOAuthTokens(response);
 }
 
 /**
