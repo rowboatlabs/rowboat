@@ -50,10 +50,10 @@ export function useOAuth(provider: string) {
       return cleanup;
     }, [provider, checkConnection]);
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (clientId?: string) => {
     try {
       setIsConnecting(true);
-      const result = await window.ipc.invoke('oauth:connect', { provider });
+      const result = await window.ipc.invoke('oauth:connect', { provider, clientId });
       if (result.success) {
         // OAuth flow started - keep isConnecting state, wait for event
         // Event listener will handle the actual completion
