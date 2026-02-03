@@ -4,6 +4,13 @@ import fs from "fs/promises";
 import path from "path";
 import z from "zod";
 
+const DEFAULT_MCP_SERVERS = {
+    exa: {
+        type: "http" as const,
+        url: "https://mcp.exa.ai/mcp",
+    },
+};
+
 export interface IMcpConfigRepo {
     ensureConfig(): Promise<void>;
     getConfig(): Promise<z.infer<typeof McpServerConfig>>;
@@ -18,7 +25,7 @@ export class FSMcpConfigRepo implements IMcpConfigRepo {
         try {
             await fs.access(this.configPath);
         } catch {
-            await fs.writeFile(this.configPath, JSON.stringify({ mcpServers: {} }, null, 2));
+            await fs.writeFile(this.configPath, JSON.stringify({ mcpServers: DEFAULT_MCP_SERVERS }, null, 2));
         }
     }
 
