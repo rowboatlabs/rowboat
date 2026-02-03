@@ -265,12 +265,12 @@ function VoiceNoteButton() {
           {isRecording ? (
             <Square className="size-4 fill-red-500 text-red-500 animate-pulse" />
           ) : (
-            <Mic className="size-4 text-red-500" />
+            <Mic className="size-4" />
           )}
         </button>
       </TooltipTrigger>
       <TooltipContent side="bottom">
-        {isRecording ? 'Stop Recording' : 'Voice Note'}
+        {isRecording ? 'Stop Recording' : 'New Voice Note'}
       </TooltipContent>
     </Tooltip>
   )
