@@ -39,10 +39,10 @@ const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
  * Returns paths to files that need entity extraction.
  */
 function getUnprocessedVoiceMemos(state: GraphState): string[] {
-    console.log(`[VoiceMemos] Checking directory: ${VOICE_MEMOS_KNOWLEDGE_DIR}`);
+    console.log(`[GraphBuilder] Checking directory: ${VOICE_MEMOS_KNOWLEDGE_DIR}`);
 
     if (!fs.existsSync(VOICE_MEMOS_KNOWLEDGE_DIR)) {
-        console.log(`[VoiceMemos] Directory does not exist`);
+        console.log(`[GraphBuilder] Directory does not exist`);
         return [];
     }
 
@@ -50,7 +50,7 @@ function getUnprocessedVoiceMemos(state: GraphState): string[] {
 
     // Scan date folders (e.g., 2026-02-03)
     const dateFolders = fs.readdirSync(VOICE_MEMOS_KNOWLEDGE_DIR);
-    console.log(`[VoiceMemos] Found ${dateFolders.length} date folders: ${dateFolders.join(', ')}`);
+    console.log(`[GraphBuilder] Found ${dateFolders.length} date folders: ${dateFolders.join(', ')}`);
 
     for (const dateFolder of dateFolders) {
         const dateFolderPath = path.join(VOICE_MEMOS_KNOWLEDGE_DIR, dateFolder);
@@ -61,18 +61,18 @@ function getUnprocessedVoiceMemos(state: GraphState): string[] {
                 continue;
             }
         } catch (err) {
-            console.log(`[VoiceMemos] Error checking ${dateFolderPath}:`, err);
+            console.log(`[GraphBuilder] Error checking ${dateFolderPath}:`, err);
             continue;
         }
 
         // Scan markdown files in this date folder
         const files = fs.readdirSync(dateFolderPath);
-        console.log(`[VoiceMemos] Found ${files.length} files in ${dateFolder}: ${files.join(', ')}`);
+        console.log(`[GraphBuilder] Found ${files.length} files in ${dateFolder}: ${files.join(', ')}`);
 
         for (const file of files) {
             // Only process voice memo markdown files
             if (!file.endsWith('.md') || !file.startsWith('voice-memo-')) {
-                console.log(`[VoiceMemos] Skipping ${file} - not a voice memo file`);
+                console.log(`[GraphBuilder] Skipping ${file} - not a voice memo file`);
                 continue;
             }
 
@@ -80,7 +80,7 @@ function getUnprocessedVoiceMemos(state: GraphState): string[] {
 
             // Skip if already processed
             if (state.processedFiles[filePath]) {
-                console.log(`[VoiceMemos] Skipping ${file} - already processed`);
+                console.log(`[GraphBuilder] Skipping ${file} - already processed`);
                 continue;
             }
 
@@ -89,27 +89,27 @@ function getUnprocessedVoiceMemos(state: GraphState): string[] {
                 const content = fs.readFileSync(filePath, 'utf-8');
                 // Skip files that are still recording or transcribing
                 if (content.includes('*Recording in progress...*')) {
-                    console.log(`[VoiceMemos] Skipping ${file} - still recording`);
+                    console.log(`[GraphBuilder] Skipping ${file} - still recording`);
                     continue;
                 }
                 if (content.includes('*Transcribing...*')) {
-                    console.log(`[VoiceMemos] Skipping ${file} - still transcribing`);
+                    console.log(`[GraphBuilder] Skipping ${file} - still transcribing`);
                     continue;
                 }
                 if (content.includes('*Transcription failed')) {
-                    console.log(`[VoiceMemos] Skipping ${file} - transcription failed`);
+                    console.log(`[GraphBuilder] Skipping ${file} - transcription failed`);
                     continue;
                 }
-                console.log(`[VoiceMemos] Found unprocessed voice memo: ${file}`);
+                console.log(`[GraphBuilder] Found unprocessed voice memo: ${file}`);
                 unprocessedFiles.push(filePath);
             } catch (err) {
-                console.log(`[VoiceMemos] Error reading ${file}:`, err);
+                console.log(`[GraphBuilder] Error reading ${file}:`, err);
                 continue;
             }
         }
     }
 
-    console.log(`[VoiceMemos] Total unprocessed files: ${unprocessedFiles.length}`);
+    console.log(`[GraphBuilder] Total unprocessed files: ${unprocessedFiles.length}`);
     return unprocessedFiles;
 }
 
@@ -273,19 +273,19 @@ export async function buildGraph(sourceDir: string): Promise<void> {
  * Voice memos are now created directly in the knowledge directory by the UI.
  */
 async function processVoiceMemosForKnowledge(): Promise<boolean> {
-    console.log(`[VoiceMemos] Starting voice memo processing...`);
+    console.log(`[GraphBuilder] Starting voice memo processing...`);
     const state = loadState();
 
     // Get unprocessed voice memos from knowledge/Voice Memos/
     const unprocessedFiles = getUnprocessedVoiceMemos(state);
 
     if (unprocessedFiles.length === 0) {
-        console.log(`[VoiceMemos] No unprocessed voice memos found`);
+        console.log(`[GraphBuilder] No unprocessed voice memos found`);
         return false;
     }
 
-    console.log(`[VoiceMemos] Processing ${unprocessedFiles.length} voice memo transcripts for entity extraction...`);
-    console.log(`[VoiceMemos] Files to process: ${unprocessedFiles.map(f => path.basename(f)).join(', ')}`);
+    console.log(`[GraphBuilder] Processing ${unprocessedFiles.length} voice memo transcripts for entity extraction...`);
+    console.log(`[GraphBuilder] Files to process: ${unprocessedFiles.map(f => path.basename(f)).join(', ')}`);
 
     // Read the files
     const contentFiles = await readFileContents(unprocessedFiles);
@@ -304,13 +304,13 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
 
         try {
             // Build knowledge index
-            console.log(`[VoiceMemos] Building knowledge index for batch ${batchNumber}...`);
+            console.log(`[GraphBuilder] Building knowledge index for batch ${batchNumber}...`);
             const index = buildKnowledgeIndex();
             const indexForPrompt = formatIndexForPrompt(index);
 
-            console.log(`[VoiceMemos] Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
+            console.log(`[GraphBuilder] Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
             await createNotesFromBatch(batch, batchNumber, indexForPrompt);
-            console.log(`[VoiceMemos] Batch ${batchNumber}/${totalBatches} complete`);
+            console.log(`[GraphBuilder] Batch ${batchNumber}/${totalBatches} complete`);
 
             // Mark files as processed
             for (const file of batch) {
@@ -320,7 +320,7 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
             // Save state after each batch
             saveState(state);
         } catch (error) {
-            console.error(`[VoiceMemos] Error processing batch ${batchNumber}:`, error);
+            console.error(`[GraphBuilder] Error processing batch ${batchNumber}:`, error);
         }
     }
 
