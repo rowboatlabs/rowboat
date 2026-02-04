@@ -1,8 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { useState, useEffect } from "react"
-import { Server, Key, Shield } from "lucide-react"
+import { useState, useEffect, useCallback } from "react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon } from "lucide-react"
 
 import {
   Dialog,
@@ -11,14 +11,15 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { useTheme, type Theme } from "@/contexts/theme-context"
 
-type ConfigTab = "models" | "mcp" | "security"
+type ConfigTab = "models" | "mcp" | "security" | "appearance"
 
 interface TabConfig {
   id: ConfigTab
   label: string
   icon: React.ElementType
-  path: string
+  path?: string
   description: string
 }
 
@@ -44,10 +45,80 @@ const tabs: TabConfig[] = [
     path: "config/security.json",
     description: "Configure allowed shell commands",
   },
+  {
+    id: "appearance",
+    label: "Appearance",
+    icon: Palette,
+    description: "Customize the look and feel",
+  },
 ]
 
 interface SettingsDialogProps {
   children: React.ReactNode
+}
+
+function ThemeOption({
+  label,
+  icon: Icon,
+  isSelected,
+  onClick,
+}: {
+  label: string
+  icon: React.ElementType
+  isSelected: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all",
+        isSelected
+          ? "border-primary bg-primary/5"
+          : "border-border hover:border-primary/50 hover:bg-muted/50"
+      )}
+    >
+      <Icon className={cn("size-6", isSelected ? "text-primary" : "text-muted-foreground")} />
+      <span className={cn("text-sm font-medium", isSelected ? "text-primary" : "text-foreground")}>
+        {label}
+      </span>
+    </button>
+  )
+}
+
+function AppearanceSettings() {
+  const { theme, setTheme } = useTheme()
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h4 className="text-sm font-medium mb-3">Theme</h4>
+        <p className="text-xs text-muted-foreground mb-4">
+          Select your preferred color scheme
+        </p>
+        <div className="grid grid-cols-3 gap-3">
+          <ThemeOption
+            label="Light"
+            icon={Sun}
+            isSelected={theme === "light"}
+            onClick={() => setTheme("light")}
+          />
+          <ThemeOption
+            label="Dark"
+            icon={Moon}
+            isSelected={theme === "dark"}
+            onClick={() => setTheme("dark")}
+          />
+          <ThemeOption
+            label="System"
+            icon={Monitor}
+            isSelected={theme === "system"}
+            onClick={() => setTheme("system")}
+          />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function SettingsDialog({ children }: SettingsDialogProps) {
@@ -60,9 +131,20 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   const [error, setError] = useState<string | null>(null)
 
   const activeTabConfig = tabs.find((t) => t.id === activeTab)!
+  const isConfigTab = activeTab !== "appearance"
 
-  const loadConfig = async (tab: ConfigTab) => {
+  const formatJson = (jsonString: string): string => {
+    try {
+      return JSON.stringify(JSON.parse(jsonString), null, 2)
+    } catch {
+      return jsonString
+    }
+  }
+
+  const loadConfig = useCallback(async (tab: ConfigTab) => {
+    if (tab === "appearance") return
     const tabConfig = tabs.find((t) => t.id === tab)!
+    if (!tabConfig.path) return
     setLoading(true)
     setError(null)
     try {
@@ -72,16 +154,17 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
       const formattedContent = formatJson(result.data)
       setContent(formattedContent)
       setOriginalContent(formattedContent)
-    } catch (err) {
+    } catch {
       setError(`Failed to load ${tabConfig.label} config`)
       setContent("")
       setOriginalContent("")
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   const saveConfig = async () => {
+    if (!isConfigTab || !activeTabConfig.path) return
     setSaving(true)
     setError(null)
     try {
@@ -103,14 +186,6 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
     }
   }
 
-  const formatJson = (jsonString: string): string => {
-    try {
-      return JSON.stringify(JSON.parse(jsonString), null, 2)
-    } catch {
-      return jsonString
-    }
-  }
-
   const handleFormat = () => {
     setContent(formatJson(content))
   }
@@ -118,10 +193,10 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   const hasChanges = content !== originalContent
 
   useEffect(() => {
-    if (open) {
+    if (open && activeTab !== "appearance") {
       loadConfig(activeTab)
     }
-  }, [open, activeTab])
+  }, [open, activeTab, loadConfig])
 
   const handleTabChange = (tab: ConfigTab) => {
     if (hasChanges) {
@@ -173,9 +248,11 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
               </p>
             </div>
 
-            {/* Editor */}
+            {/* Content */}
             <div className="flex-1 p-4 overflow-hidden">
-              {loading ? (
+              {activeTab === "appearance" ? (
+                <AppearanceSettings />
+              ) : loading ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                   Loading...
                 </div>
@@ -190,36 +267,38 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
               )}
             </div>
 
-            {/* Footer */}
-            <div className="px-4 py-3 border-t flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                {error && (
-                  <span className="text-xs text-destructive">{error}</span>
-                )}
-                {hasChanges && !error && (
-                  <span className="text-xs text-muted-foreground">
-                    Unsaved changes
-                  </span>
-                )}
+            {/* Footer - only show for config tabs */}
+            {isConfigTab && (
+              <div className="px-4 py-3 border-t flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {error && (
+                    <span className="text-xs text-destructive">{error}</span>
+                  )}
+                  {hasChanges && !error && (
+                    <span className="text-xs text-muted-foreground">
+                      Unsaved changes
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleFormat}
+                    disabled={loading || saving}
+                  >
+                    Format
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={saveConfig}
+                    disabled={loading || saving || !hasChanges}
+                  >
+                    {saving ? "Saving..." : "Save"}
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleFormat}
-                  disabled={loading || saving}
-                >
-                  Format
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={saveConfig}
-                  disabled={loading || saving || !hasChanges}
-                >
-                  {saving ? "Saving..." : "Save"}
-                </Button>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       </DialogContent>
