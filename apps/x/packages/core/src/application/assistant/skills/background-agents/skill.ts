@@ -39,6 +39,8 @@ Background agents run automatically based on schedules defined in ` + "`~/.rowbo
 
 ### Schedule Types
 
+**IMPORTANT: All times are in local time** (the timezone of the machine running Rowboat).
+
 **1. Cron Schedule** - Runs at exact times defined by cron expression
 ` + "```json" + `
 {
@@ -76,13 +78,25 @@ The agent will run once at a random time within the window. Use this when you wa
 {
   "schedule": {
     "type": "once",
-    "runAt": "2024-02-05T10:30:00Z"
+    "runAt": "2024-02-05T10:30:00"
   },
   "enabled": true
 }
 ` + "```" + `
 
-Use this for one-time tasks like migrations or setup scripts.
+Use this for one-time tasks like migrations or setup scripts. The ` + "`runAt`" + ` is in local time (no Z suffix).
+
+### Starting Message
+
+You can specify a ` + "`startingMessage`" + ` that gets sent to the agent when it starts. If not provided, defaults to ` + "`\"go\"`" + `.
+
+` + "```json" + `
+{
+  "schedule": { "type": "cron", "expression": "0 8 * * *" },
+  "enabled": true,
+  "startingMessage": "Please summarize my emails from the last 24 hours"
+}
+` + "```" + `
 
 ### Complete Schedule Example
 
@@ -94,7 +108,8 @@ Use this for one-time tasks like migrations or setup scripts.
         "type": "cron",
         "expression": "0 8 * * *"
       },
-      "enabled": true
+      "enabled": true,
+      "startingMessage": "Summarize my emails and calendar for today"
     },
     "morning_briefing": {
       "schedule": {
@@ -108,7 +123,7 @@ Use this for one-time tasks like migrations or setup scripts.
     "one_time_setup": {
       "schedule": {
         "type": "once",
-        "runAt": "2024-12-01T12:00:00Z"
+        "runAt": "2024-12-01T12:00:00"
       },
       "enabled": true
     }
@@ -301,89 +316,96 @@ summariser:
 
 ## Complete Multi-Agent Workflow Example
 
-**Podcast creation workflow** - This is all done through agents calling other agents:
+**Email digest workflow** - This is all done through agents calling other agents:
 
-**1. Task-specific agent** (` + "`agents/summariser_agent.md`" + `):
+**1. Task-specific agent** (` + "`agents/email_reader.md`" + `):
 ` + "```markdown" + `
 ---
 model: gpt-5.1
 tools:
-  bash:
+  read_file:
     type: builtin
-    name: executeCommand
+    name: workspace-readFile
+  list_dir:
+    type: builtin
+    name: workspace-readdir
 ---
-# Summariser Agent
+# Email Reader Agent
 
-Download and summarise an arxiv paper. Use curl to fetch the PDF.
-Output just the GIST in two lines. Don't ask for human input.
+Read emails from the gmail_sync folder and extract key information.
+Look for unread or recent emails and summarize the sender, subject, and key points.
+Don't ask for human input.
 ` + "```" + `
 
-**2. Agent that delegates to other agents** (` + "`agents/summarise-a-few.md`" + `):
+**2. Agent that delegates to other agents** (` + "`agents/daily_summary.md`" + `):
 ` + "```markdown" + `
 ---
 model: gpt-5.1
 tools:
-  summariser:
+  email_reader:
     type: agent
-    name: summariser_agent
+    name: email_reader
+  write_file:
+    type: builtin
+    name: workspace-writeFile
 ---
-# Summarise Multiple Papers
+# Daily Summary Agent
 
-Pick 2 interesting papers and summarise each using the summariser tool.
-Pass the paper URL to the tool. Don't ask for human input.
+1. Use the email_reader tool to get email summaries
+2. Create a consolidated daily digest
+3. Save the digest to the knowledge base
+
+Don't ask for human input.
 ` + "```" + `
 
-**3. Orchestrator agent** (` + "`agents/podcast_workflow.md`" + `):
+**3. Orchestrator agent** (` + "`agents/morning_briefing.md`" + `):
 ` + "```markdown" + `
 ---
 model: gpt-5.1
 tools:
-  bash:
-    type: builtin
-    name: executeCommand
-  summarise_papers:
+  daily_summary:
     type: agent
-    name: summarise-a-few
-  text_to_speech:
+    name: daily_summary
+  search:
     type: mcp
-    name: text_to_speech
-    mcpServerName: elevenLabs
-    description: Generate audio from text
+    name: search
+    mcpServerName: exa
+    description: Search the web for news
     inputSchema:
       type: object
       properties:
-        text:
+        query:
           type: string
-          description: Text to convert to speech
+          description: Search query
 ---
-# Podcast Workflow
+# Morning Briefing Workflow
 
-Create a podcast from arXiv papers:
+Create a morning briefing:
 
-1. Fetch arXiv papers about agents using bash
-2. Pick papers and summarise them using summarise_papers
-3. Create a podcast transcript
-4. Generate audio using text_to_speech
+1. Get email digest using daily_summary
+2. Search for relevant news using the search tool
+3. Compile a comprehensive morning briefing
 
-Execute these steps in sequence.
+Execute these steps in sequence. Don't ask for human input.
 ` + "```" + `
 
 **4. Schedule the workflow** in ` + "`~/.rowboat/config/agent-schedule.json`" + `:
 ` + "```json" + `
 {
   "agents": {
-    "podcast_workflow": {
+    "morning_briefing": {
       "schedule": {
         "type": "cron",
-        "expression": "0 6 * * 1"
+        "expression": "0 7 * * *"
       },
-      "enabled": true
+      "enabled": true,
+      "startingMessage": "Create my morning briefing for today"
     }
   }
 }
 ` + "```" + `
 
-This schedules the podcast workflow to run every Monday at 6am.
+This schedules the morning briefing workflow to run every day at 7am local time.
 
 ## Naming and organization rules
 - **All agents live in ` + "`agents/*.md`" + `** - Markdown files with YAML frontmatter
@@ -401,6 +423,7 @@ This schedules the podcast workflow to run every Monday at 6am.
 6. **Orchestration**: Create a top-level agent that coordinates the workflow
 7. **Scheduling**: Use appropriate schedule types - cron for recurring, window for flexible timing, once for one-time tasks
 8. **Error handling**: Background agents should handle errors gracefully since there's no human to intervene
+9. **Avoid executeCommand**: Do NOT attach ` + "`executeCommand`" + ` to background agents as it poses security risks when running unattended. Instead, use the specific builtin tools needed (` + "`workspace-readFile`" + `, ` + "`workspace-writeFile`" + `, etc.) or MCP tools for external integrations
 
 ## Validation & Best Practices
 

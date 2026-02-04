@@ -40,6 +40,7 @@ export class FSAgentScheduleStateRepo implements IAgentScheduleStateRepo {
         const state = await this.getState();
         const existing = state.agents[agentName] ?? {
             status: "scheduled" as const,
+            startedAt: null,
             lastRunAt: null,
             nextRunAt: null,
             lastError: null,

@@ -24,10 +24,10 @@ export const WindowSchedule = z.object({
 
 // Once schedule - runs exactly once at a specific time, then never again.
 // Examples:
-//   - Run once at specific datetime: runAt="2024-02-05T10:30:00Z"
+//   - Run once at specific datetime: runAt="2024-02-05T10:30:00"
 export const OnceSchedule = z.object({
     type: z.literal("once"),
-    runAt: z.string().datetime(), // ISO 8601 datetime
+    runAt: z.string(), // ISO 8601 datetime (local time, e.g., "2024-02-05T10:30:00")
 });
 
 export const ScheduleDefinition = z.union([CronSchedule, WindowSchedule, OnceSchedule]);
@@ -35,6 +35,7 @@ export const ScheduleDefinition = z.union([CronSchedule, WindowSchedule, OnceSch
 export const AgentScheduleEntry = z.object({
     schedule: ScheduleDefinition,
     enabled: z.boolean().optional().default(true),
+    startingMessage: z.string().optional(), // Message sent to agent when run starts (defaults to "go")
 });
 
 export const AgentScheduleConfig = z.object({
