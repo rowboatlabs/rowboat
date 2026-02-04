@@ -20,6 +20,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
+  ScrollPositionPreserver,
 } from '@/components/ai-elements/conversation';
 import {
   Message,
@@ -1821,6 +1822,7 @@ function App() {
               ) : (
               <div className="flex min-h-0 flex-1 flex-col">
                 <Conversation className="relative flex-1 overflow-y-auto">
+                  <ScrollPositionPreserver />
                   <ConversationContent className={conversationContentClassName}>
                     {!hasConversation ? (
                       <ConversationEmptyState className="h-auto">

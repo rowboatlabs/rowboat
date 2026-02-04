@@ -12,6 +12,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
+  ScrollPositionPreserver,
 } from '@/components/ai-elements/conversation'
 import {
   Message,
@@ -481,6 +482,7 @@ export function ChatSidebar({
       {/* Conversation area */}
       <div className="flex min-h-0 flex-1 flex-col relative">
         <Conversation className="relative flex-1 overflow-y-auto">
+          <ScrollPositionPreserver />
           <ConversationContent className={hasConversation ? "px-4 pb-24" : "px-4 min-h-full items-center justify-center"}>
             {!hasConversation ? (
               <ConversationEmptyState className="h-auto">

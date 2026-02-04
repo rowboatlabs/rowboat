@@ -3,115 +3,149 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ArrowDownIcon } from "lucide-react";
-import type { ComponentProps } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import type { ComponentProps, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
-export type ConversationProps = ComponentProps<typeof StickToBottom>;
+// Context to share scroll preservation state
+interface ScrollPreservationContextValue {
+  registerScrollContainer: (container: HTMLElement | null) => void;
+  markUserEngaged: () => void;
+  resetEngagement: () => void;
+}
 
-export const Conversation = ({ className, ...props }: ConversationProps) => (
-  <StickToBottom
-    className={cn("relative flex-1 overflow-y-hidden", className)}
-    initial="smooth"
-    resize="smooth"
-    role="log"
-    {...props}
-  />
-);
+const ScrollPreservationContext = createContext<ScrollPreservationContextValue | null>(null);
 
-// Threshold in pixels - if user scrolls more than this from bottom, they're considered "engaged"
-const SCROLL_ENGAGEMENT_THRESHOLD = 100;
+export type ConversationProps = ComponentProps<typeof StickToBottom> & {
+  children?: ReactNode;
+};
+
+export const Conversation = ({ className, children, ...props }: ConversationProps) => {
+  const [scrollContainer, setScrollContainer] = useState<HTMLElement | null>(null);
+  const isUserEngagedRef = useRef(false);
+  const savedScrollTopRef = useRef<number>(0);
+  const lastScrollHeightRef = useRef<number>(0);
+
+  const contextValue: ScrollPreservationContextValue = {
+    registerScrollContainer: (container) => {
+      setScrollContainer(container);
+    },
+    markUserEngaged: () => {
+      // Only save position on first engagement, not on repeated calls
+      if (!isUserEngagedRef.current && scrollContainer) {
+        savedScrollTopRef.current = scrollContainer.scrollTop;
+        lastScrollHeightRef.current = scrollContainer.scrollHeight;
+      }
+      isUserEngagedRef.current = true;
+    },
+    resetEngagement: () => {
+      isUserEngagedRef.current = false;
+    },
+  };
+
+  // Watch for content changes and restore scroll position if user was engaged
+  useEffect(() => {
+    if (!scrollContainer) return;
+
+    let rafId: number | null = null;
+
+    const checkAndRestoreScroll = () => {
+      if (!isUserEngagedRef.current) return;
+
+      const currentScrollTop = scrollContainer.scrollTop;
+      const currentScrollHeight = scrollContainer.scrollHeight;
+      const savedScrollTop = savedScrollTopRef.current;
+
+      // If scroll position jumped significantly (auto-scroll happened)
+      // and scroll height also changed (content changed), restore position
+      if (
+        Math.abs(currentScrollTop - savedScrollTop) > 50 &&
+        currentScrollHeight !== lastScrollHeightRef.current
+      ) {
+        scrollContainer.scrollTop = savedScrollTop;
+      }
+
+      lastScrollHeightRef.current = currentScrollHeight;
+    };
+
+    // Use ResizeObserver to detect content changes
+    const resizeObserver = new ResizeObserver(() => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(checkAndRestoreScroll);
+    });
+
+    resizeObserver.observe(scrollContainer);
+
+    return () => {
+      resizeObserver.disconnect();
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [scrollContainer]);
+
+  return (
+    <ScrollPreservationContext.Provider value={contextValue}>
+      <StickToBottom
+        className={cn("relative flex-1 overflow-y-hidden", className)}
+        initial="smooth"
+        resize="smooth"
+        role="log"
+        {...props}
+      >
+        {children}
+      </StickToBottom>
+    </ScrollPreservationContext.Provider>
+  );
+};
 
 /**
- * Component that preserves scroll position when user has scrolled away from bottom.
- * Place this inside a StickToBottom context to prevent unwanted scroll jumps.
+ * Component that tracks scroll engagement and preserves position.
+ * Must be used inside Conversation component.
  */
 export const ScrollPositionPreserver = () => {
   const { isAtBottom } = useStickToBottomContext();
-  const scrollContainerRef = useRef<HTMLElement | null>(null);
-  const isUserEngagedRef = useRef(false);
-  const savedScrollTopRef = useRef<number | null>(null);
-  const lastContentHeightRef = useRef<number>(0);
+  const preservationContext = useContext(ScrollPreservationContext);
+  const containerFoundRef = useRef(false);
 
-  useEffect(() => {
-    // Find the scroll container (StickToBottom creates a scrollable element)
-    const findScrollContainer = () => {
-      // The scroll container is the element with overflow-y-auto/scroll
-      const containers = document.querySelectorAll('[data-stick-to-bottom-scroll-container]');
-      if (containers.length > 0) {
-        return containers[0] as HTMLElement;
-      }
-      // Fallback: find by class pattern from the library
-      const fallback = document.querySelector('.use-stick-to-bottom-scroll-container');
-      return fallback as HTMLElement | null;
-    };
+  // Find and register scroll container on mount
+  useLayoutEffect(() => {
+    if (containerFoundRef.current || !preservationContext) return;
 
-    // Try to find it, the library creates it dynamically
-    const container = findScrollContainer();
-    if (container) {
-      scrollContainerRef.current = container;
-    }
-  }, []);
-
-  // Track when user scrolls away from bottom
-  useEffect(() => {
-    if (!isAtBottom) {
-      // User is not at bottom - they've scrolled up
-      isUserEngagedRef.current = true;
-
-      // Save their current position
-      if (scrollContainerRef.current) {
-        savedScrollTopRef.current = scrollContainerRef.current.scrollTop;
-        lastContentHeightRef.current = scrollContainerRef.current.scrollHeight;
-      }
-    }
-  }, [isAtBottom]);
-
-  // When user reaches bottom again, reset engagement
-  useEffect(() => {
-    if (isAtBottom && isUserEngagedRef.current) {
-      isUserEngagedRef.current = false;
-      savedScrollTopRef.current = null;
-    }
-  }, [isAtBottom]);
-
-  // Use MutationObserver to detect content changes and restore position if needed
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    const observer = new MutationObserver(() => {
-      // If user was engaged (scrolled away) and we have a saved position
-      if (isUserEngagedRef.current && savedScrollTopRef.current !== null) {
-        const currentHeight = container.scrollHeight;
-        const previousHeight = lastContentHeightRef.current;
-
-        // If content height changed significantly and user was scrolled away
-        if (Math.abs(currentHeight - previousHeight) > 10) {
-          // Calculate how far from bottom they were
-          const distanceFromBottom = previousHeight - savedScrollTopRef.current - container.clientHeight;
-
-          // Restore position relative to where they were
-          // If they were reading something in the middle, keep them there
-          if (distanceFromBottom > SCROLL_ENGAGEMENT_THRESHOLD) {
-            // Keep them at the same scroll position (reading older content)
-            container.scrollTop = savedScrollTopRef.current;
+    // Find the scroll container (StickToBottom creates one)
+    // It's the first parent with overflow-y scroll/auto
+    const findScrollContainer = (): HTMLElement | null => {
+      const candidates = document.querySelectorAll('[role="log"]');
+      for (const candidate of candidates) {
+        // The scroll container is a direct child of the role="log" element
+        const children = candidate.children;
+        for (const child of children) {
+          const style = window.getComputedStyle(child);
+          if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+            return child as HTMLElement;
           }
-
-          // Update saved values
-          lastContentHeightRef.current = currentHeight;
         }
       }
-    });
+      return null;
+    };
 
-    observer.observe(container, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
+    const container = findScrollContainer();
+    if (container) {
+      preservationContext.registerScrollContainer(container);
+      containerFoundRef.current = true;
+    }
+  }, [preservationContext]);
 
-    return () => observer.disconnect();
-  }, []);
+  // Track engagement based on scroll position
+  useEffect(() => {
+    if (!preservationContext) return;
+
+    if (!isAtBottom) {
+      // User is not at bottom - mark as engaged
+      preservationContext.markUserEngaged();
+    } else {
+      // User is back at bottom - reset
+      preservationContext.resetEngagement();
+    }
+  }, [isAtBottom, preservationContext]);
 
   return null;
 };
