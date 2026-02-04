@@ -3,6 +3,8 @@ import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, Work
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
 import { LlmModelConfig } from './models.js';
+import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
+import { AgentScheduleState } from './agent-schedule-state.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -352,6 +354,32 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
     res: z.null(),
+  },
+  // Agent schedule channels
+  'agent-schedule:getConfig': {
+    req: z.null(),
+    res: AgentScheduleConfig,
+  },
+  'agent-schedule:getState': {
+    req: z.null(),
+    res: AgentScheduleState,
+  },
+  'agent-schedule:updateAgent': {
+    req: z.object({
+      agentName: z.string(),
+      entry: AgentScheduleEntry,
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  'agent-schedule:deleteAgent': {
+    req: z.object({
+      agentName: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
   },
 } as const;
 

@@ -146,14 +146,18 @@ You can add a ` + "`description`" + ` field to describe what the agent does. Thi
 }
 ` + "```" + `
 
-### Schedule State
+### Schedule State (Read-Only)
 
-The runner tracks execution state in ` + "`~/.rowboat/config/agent-schedule-state.json`" + `:
+**IMPORTANT: Do NOT modify ` + "`agent-schedule-state.json`" + `** - it is managed automatically by the background runner.
+
+The runner automatically tracks execution state in ` + "`~/.rowboat/config/agent-schedule-state.json`" + `:
 - ` + "`status`" + `: scheduled, running, finished, failed, triggered (for once-schedules)
 - ` + "`lastRunAt`" + `: When the agent last ran
 - ` + "`nextRunAt`" + `: When the agent will run next
 - ` + "`lastError`" + `: Error message if the last run failed
 - ` + "`runCount`" + `: Total number of runs
+
+When you add an agent to ` + "`agent-schedule.json`" + `, the runner will automatically create and manage its state entry. You only need to edit ` + "`agent-schedule.json`" + `.
 
 ## Agent File Format
 
@@ -544,7 +548,7 @@ Use the search tool to find information on the web.
 5. When creating multi-agent workflows, create an orchestrator agent
 6. Add other agents as tools with ` + "`type: agent`" + ` for chaining
 7. Use ` + "`listMcpServers`" + ` and ` + "`listMcpTools`" + ` when adding MCP integrations
-8. Configure schedules in ` + "`~/.rowboat/config/agent-schedule.json`" + `
+8. Configure schedules in ` + "`~/.rowboat/config/agent-schedule.json`" + ` (ONLY edit this file, NOT the state file)
 9. Confirm work done and outline next steps once changes are complete
 `;
 
