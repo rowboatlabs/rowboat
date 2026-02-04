@@ -390,13 +390,21 @@ export function setupIpcHandlers() {
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
       const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
-      await repo.ensureConfig();
-      return repo.getConfig();
+      try {
+        return await repo.getConfig();
+      } catch {
+        // Return empty config if file doesn't exist
+        return { agents: {} };
+      }
     },
     'agent-schedule:getState': async () => {
       const repo = container.resolve<IAgentScheduleStateRepo>('agentScheduleStateRepo');
-      await repo.ensureState();
-      return repo.getState();
+      try {
+        return await repo.getState();
+      } catch {
+        // Return empty state if file doesn't exist
+        return { agents: {} };
+      }
     },
     'agent-schedule:updateAgent': async (_event, args) => {
       const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');

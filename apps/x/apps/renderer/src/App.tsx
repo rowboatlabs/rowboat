@@ -547,11 +547,16 @@ function App() {
     const cleanup = window.ipc.on('workspace:didChange', async (event) => {
       loadDirectory().then(setTree)
 
-      // Reload current file if it was changed externally
-      if (!selectedPath) return
-
       const changedPath = event.type === 'changed' ? event.path : null
       const changedPaths = (event.type === 'bulkChanged' ? event.paths : []) ?? []
+
+      // Reload background tasks if agent-schedule.json changed
+      if (changedPath === 'config/agent-schedule.json' || changedPaths.includes('config/agent-schedule.json')) {
+        loadBackgroundTasks()
+      }
+
+      // Reload current file if it was changed externally
+      if (!selectedPath) return
 
       const isCurrentFileChanged =
         changedPath === selectedPath || changedPaths.includes(selectedPath)
@@ -567,6 +572,7 @@ function App() {
       }
     })
     return cleanup
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadDirectory, selectedPath, editorContent])
 
   // Load file content when selected
