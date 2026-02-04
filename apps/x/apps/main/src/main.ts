@@ -10,6 +10,7 @@ import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
 import { init as initPreBuiltRunner } from "@x/core/dist/pre_built/runner.js";
+import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -96,7 +97,7 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Register custom protocol before creating window (for production builds)
   if (app.isPackaged) {
     registerAppProtocol();
@@ -112,6 +113,9 @@ app.whenReady().then(() => {
       notifyUser: true, // Shows native dialog when update is available
     });
   }
+
+  // Initialize all config files before UI can access them
+  await initConfigs();
 
   setupIpcHandlers();
 

@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import fsPromises from "fs/promises";
 import { WorkDir } from "./config.js";
 
 export const SECURITY_CONFIG_PATH = path.join(WorkDir, "config", "security.json");
@@ -19,7 +20,26 @@ const DEFAULT_ALLOW_LIST = [
 let cachedAllowList: string[] | null = null;
 let cachedMtimeMs: number | null = null;
 
-function ensureSecurityConfig() {
+/**
+ * Async function to ensure security config file exists.
+ * Called explicitly at app startup via initConfigs().
+ */
+export async function ensureSecurityConfig(): Promise<void> {
+    try {
+        await fsPromises.access(SECURITY_CONFIG_PATH);
+    } catch {
+        await fsPromises.writeFile(
+            SECURITY_CONFIG_PATH,
+            JSON.stringify(DEFAULT_ALLOW_LIST, null, 2) + "\n",
+            "utf8",
+        );
+    }
+}
+
+/**
+ * Sync version for internal use by getSecurityAllowList() and readAllowList().
+ */
+function ensureSecurityConfigSync() {
     if (!fs.existsSync(SECURITY_CONFIG_PATH)) {
         fs.writeFileSync(
             SECURITY_CONFIG_PATH,
@@ -63,7 +83,7 @@ function parseSecurityPayload(payload: unknown): string[] {
 }
 
 function readAllowList(): string[] {
-    ensureSecurityConfig();
+    ensureSecurityConfigSync();
 
     try {
         const configContent = fs.readFileSync(SECURITY_CONFIG_PATH, "utf8");
@@ -76,7 +96,7 @@ function readAllowList(): string[] {
 }
 
 export function getSecurityAllowList(): string[] {
-    ensureSecurityConfig();
+    ensureSecurityConfigSync();
     try {
         const stats = fs.statSync(SECURITY_CONFIG_PATH);
         if (cachedAllowList && cachedMtimeMs === stats.mtimeMs) {

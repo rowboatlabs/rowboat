@@ -12,8 +12,10 @@ import {
   Folder,
   FolderPlus,
   MessageSquare,
+  Mic,
   Network,
   Pencil,
+  Square,
   SquarePen,
   Trash2,
 } from "lucide-react"
@@ -88,6 +90,7 @@ type SidebarContentPanelProps = {
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
   knowledgeActions: KnowledgeActions
+  onVoiceNoteCreated?: (path: string) => void
   runs?: RunListItem[]
   currentRunId?: string | null
   tasksActions?: TasksActions
@@ -95,7 +98,7 @@ type SidebarContentPanelProps = {
 
 const sectionTitles = {
   knowledge: "Knowledge",
-  tasks: "Tasks",
+  tasks: "Chats",
 }
 
 export function SidebarContentPanel({
@@ -104,6 +107,7 @@ export function SidebarContentPanel({
   expandedPaths,
   onSelectFile,
   knowledgeActions,
+  onVoiceNoteCreated,
   runs = [],
   currentRunId,
   tasksActions,
@@ -126,6 +130,7 @@ export function SidebarContentPanel({
             expandedPaths={expandedPaths}
             onSelectFile={onSelectFile}
             actions={knowledgeActions}
+            onVoiceNoteCreated={onVoiceNoteCreated}
           />
         )}
         {activeSection === "tasks" && (
@@ -141,6 +146,227 @@ export function SidebarContentPanel({
   )
 }
 
+async function transcribeWithDeepgram(audioBlob: Blob): Promise<string | null> {
+  try {
+    const configResult = await window.ipc.invoke('workspace:readFile', {
+      path: 'config/deepgram.json',
+      encoding: 'utf8',
+    })
+    const { apiKey } = JSON.parse(configResult.data) as { apiKey: string }
+    if (!apiKey) throw new Error('No apiKey in deepgram.json')
+
+    const response = await fetch(
+      'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          'Content-Type': audioBlob.type,
+        },
+        body: audioBlob,
+      },
+    )
+
+    if (!response.ok) throw new Error(`Deepgram API error: ${response.status}`)
+    const result = await response.json()
+    return result.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? null
+  } catch (err) {
+    console.error('Deepgram transcription failed:', err)
+    return null
+  }
+}
+
+// Voice Note Recording Button
+function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => void }) {
+  const [isRecording, setIsRecording] = React.useState(false)
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null)
+  const chunksRef = React.useRef<Blob[]>([])
+  const notePathRef = React.useRef<string | null>(null)
+  const timestampRef = React.useRef<string | null>(null)
+  const relativePathRef = React.useRef<string | null>(null)
+
+  const startRecording = async () => {
+    try {
+      // Generate timestamp and paths immediately
+      const now = new Date()
+      const timestamp = now.toISOString().replace(/[:.]/g, '-')
+      const dateStr = now.toISOString().split('T')[0] // YYYY-MM-DD
+      const noteName = `voice-memo-${timestamp}`
+      const notePath = `knowledge/Voice Memos/${dateStr}/${noteName}.md`
+
+      timestampRef.current = timestamp
+      notePathRef.current = notePath
+      // Relative path for linking (from knowledge/ root, without .md extension)
+      const relativePath = `Voice Memos/${dateStr}/${noteName}`
+      relativePathRef.current = relativePath
+
+      // Create the note immediately with a "Recording..." placeholder
+      await window.ipc.invoke('workspace:mkdir', {
+        path: `knowledge/Voice Memos/${dateStr}`,
+        recursive: true,
+      })
+
+      const initialContent = `# Voice Memo
+
+**Type:** voice memo
+**Recorded:** ${now.toLocaleString()}
+**Path:** ${relativePath}
+
+## Transcript
+
+*Recording in progress...*
+`
+      await window.ipc.invoke('workspace:writeFile', {
+        path: notePath,
+        data: initialContent,
+        opts: { encoding: 'utf8' },
+      })
+
+      // Select the note so the user can see it
+      onNoteCreated?.(notePath)
+
+      // Start actual recording
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : 'audio/webm'
+      const recorder = new MediaRecorder(stream, { mimeType })
+      chunksRef.current = []
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const blob = new Blob(chunksRef.current, { type: mimeType })
+        const ext = mimeType === 'audio/mp4' ? 'm4a' : 'webm'
+        const audioFilename = `voice-memo-${timestampRef.current}.${ext}`
+
+        // Save audio file to voice_memos folder (for backup/reference)
+        try {
+          await window.ipc.invoke('workspace:mkdir', {
+            path: 'voice_memos',
+            recursive: true,
+          })
+
+          const arrayBuffer = await blob.arrayBuffer()
+          const base64 = btoa(
+            new Uint8Array(arrayBuffer).reduce(
+              (data, byte) => data + String.fromCharCode(byte),
+              '',
+            ),
+          )
+
+          await window.ipc.invoke('workspace:writeFile', {
+            path: `voice_memos/${audioFilename}`,
+            data: base64,
+            opts: { encoding: 'base64' },
+          })
+        } catch {
+          console.error('Failed to save audio file')
+        }
+
+        // Update note to show transcribing status
+        const currentNotePath = notePathRef.current
+        const currentRelativePath = relativePathRef.current
+        if (currentNotePath && currentRelativePath) {
+          const transcribingContent = `# Voice Memo
+
+**Type:** voice memo
+**Recorded:** ${new Date().toLocaleString()}
+**Path:** ${currentRelativePath}
+
+## Transcript
+
+*Transcribing...*
+`
+          await window.ipc.invoke('workspace:writeFile', {
+            path: currentNotePath,
+            data: transcribingContent,
+            opts: { encoding: 'utf8' },
+          })
+        }
+
+        // Transcribe and update the note with the transcript
+        const transcript = await transcribeWithDeepgram(blob)
+        if (currentNotePath && currentRelativePath) {
+          const finalContent = transcript
+            ? `# Voice Memo
+
+**Type:** voice memo
+**Recorded:** ${new Date().toLocaleString()}
+**Path:** ${currentRelativePath}
+
+## Transcript
+
+${transcript}
+`
+            : `# Voice Memo
+
+**Type:** voice memo
+**Recorded:** ${new Date().toLocaleString()}
+**Path:** ${currentRelativePath}
+
+## Transcript
+
+*Transcription failed. Please try again.*
+`
+          await window.ipc.invoke('workspace:writeFile', {
+            path: currentNotePath,
+            data: finalContent,
+            opts: { encoding: 'utf8' },
+          })
+
+          // Re-select to trigger refresh
+          onNoteCreated?.(currentNotePath)
+
+          if (transcript) {
+            toast('Voice note transcribed', 'success')
+          } else {
+            toast('Transcription failed', 'error')
+          }
+        }
+      }
+
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      setIsRecording(true)
+      toast('Recording started', 'success')
+    } catch {
+      toast('Could not access microphone', 'error')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    mediaRecorderRef.current = null
+    setIsRecording(false)
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={isRecording ? stopRecording : startRecording}
+          className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+        >
+          {isRecording ? (
+            <Square className="size-4 fill-red-500 text-red-500 animate-pulse" />
+          ) : (
+            <Mic className="size-4" />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        {isRecording ? 'Stop Recording' : 'New Voice Note'}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 // Knowledge Section
 function KnowledgeSection({
   tree,
@@ -148,15 +374,17 @@ function KnowledgeSection({
   expandedPaths,
   onSelectFile,
   actions,
+  onVoiceNoteCreated,
 }: {
   tree: TreeNode[]
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
   actions: KnowledgeActions
+  onVoiceNoteCreated?: (path: string) => void
 }) {
   const isExpanded = expandedPaths.size > 0
-  
+
   const quickActions = [
     { icon: FilePlus, label: "New Note", action: () => actions.createNote() },
     { icon: FolderPlus, label: "New Folder", action: () => actions.createFolder() },
@@ -181,6 +409,7 @@ function KnowledgeSection({
                 <TooltipContent side="bottom">{action.label}</TooltipContent>
               </Tooltip>
             ))}
+            <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

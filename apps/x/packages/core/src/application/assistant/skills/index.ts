@@ -7,17 +7,17 @@ import draftEmailsSkill from "./draft-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
+import slackSkill from "./slack/skill.js";
 import workflowAuthoringSkill from "./workflow-authoring/skill.js";
+import createPresentationsSkill from "./create-presentations/skill.js";
 import workflowRunOpsSkill from "./workflow-run-ops/skill.js";
 
-const CURRENT_FILE = fileURLToPath(import.meta.url);
-const CURRENT_DIR = path.dirname(CURRENT_FILE);
+const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
 
 type SkillDefinition = {
-  id: string;
+  id: string;  // Also used as folder name
   title: string;
-  folder: string;
   summary: string;
   content: string;
 };
@@ -30,65 +30,68 @@ type ResolvedSkill = {
 
 const definitions: SkillDefinition[] = [
   {
+    id: "create-presentations",
+    title: "Create Presentations",
+    summary: "Create PDF presentations and slide decks from natural language requests using knowledge base context.",
+    content: createPresentationsSkill,
+  },
+  {
     id: "doc-collab",
     title: "Document Collaboration",
-    folder: "doc-collab",
     summary: "Collaborate on documents - create, edit, and refine notes and documents in the knowledge base.",
     content: docCollabSkill,
   },
   {
     id: "draft-emails",
     title: "Draft Emails",
-    folder: "draft-emails",
     summary: "Process incoming emails and create draft responses using calendar and knowledge base for context.",
     content: draftEmailsSkill,
   },
   {
     id: "meeting-prep",
     title: "Meeting Prep",
-    folder: "meeting-prep",
     summary: "Prepare for meetings by gathering context about attendees from the knowledge base.",
     content: meetingPrepSkill,
   },
   {
     id: "organize-files",
     title: "Organize Files",
-    folder: "organize-files",
     summary: "Find, organize, and tidy up files on the user's machine. Move files to folders, clean up Desktop/Downloads, locate specific files.",
     content: organizeFilesSkill,
   },
   {
+    id: "slack",
+    title: "Slack Integration",
+    summary: "Send Slack messages, view channel history, search conversations, find users, and manage team communication.",
+    content: slackSkill,
+  },
+  {
     id: "workflow-authoring",
     title: "Workflow Authoring",
-    folder: "workflow-authoring",
     summary: "Creating or editing workflows/agents, validating schema rules, and keeping filenames aligned with JSON ids.",
     content: workflowAuthoringSkill,
   },
   {
     id: "builtin-tools",
     title: "Builtin Tools Reference",
-    folder: "builtin-tools",
     summary: "Understanding and using builtin tools (especially executeCommand for bash/shell) in agent definitions.",
     content: builtinToolsSkill,
   },
   {
     id: "mcp-integration",
     title: "MCP Integration Guidance",
-    folder: "mcp-integration",
     summary: "Discovering, executing, and integrating MCP tools. Use this to check what external capabilities are available and execute MCP tools on behalf of users.",
     content: mcpIntegrationSkill,
   },
   {
     id: "deletion-guardrails",
     title: "Deletion Guardrails",
-    folder: "deletion-guardrails",
     summary: "Following the confirmation process before removing workflows or agents and their dependencies.",
     content: deletionGuardrailsSkill,
   },
   {
     id: "workflow-run-ops",
     title: "Workflow Run Operations",
-    folder: "workflow-run-ops",
     summary: "Commands that list workflow runs, inspect paused executions, or manage cron schedules for workflows.",
     content: workflowRunOpsSkill,
   },
@@ -96,7 +99,7 @@ const definitions: SkillDefinition[] = [
 
 const skillEntries = definitions.map((definition) => ({
   ...definition,
-  catalogPath: `${CATALOG_PREFIX}/${definition.folder}/skill.ts`,
+  catalogPath: `${CATALOG_PREFIX}/${definition.id}/skill.ts`,
 }));
 
 const catalogSections = skillEntries.map((entry) => [
@@ -146,8 +149,8 @@ const registerAliasVariants = (alias: string, entry: ResolvedSkill) => {
 };
 
 for (const entry of skillEntries) {
-  const absoluteTs = path.join(CURRENT_DIR, entry.folder, "skill.ts");
-  const absoluteJs = path.join(CURRENT_DIR, entry.folder, "skill.js");
+  const absoluteTs = path.join(CURRENT_DIR, entry.id, "skill.ts");
+  const absoluteJs = path.join(CURRENT_DIR, entry.id, "skill.js");
   const resolvedEntry: ResolvedSkill = {
     id: entry.id,
     catalogPath: entry.catalogPath,
@@ -156,14 +159,13 @@ for (const entry of skillEntries) {
 
   const baseAliases = [
     entry.id,
-    entry.folder,
-    `${entry.folder}/skill`,
-    `${entry.folder}/skill.ts`,
-    `${entry.folder}/skill.js`,
-    `skills/${entry.folder}/skill.ts`,
-    `skills/${entry.folder}/skill.js`,
-    `${CATALOG_PREFIX}/${entry.folder}/skill.ts`,
-    `${CATALOG_PREFIX}/${entry.folder}/skill.js`,
+    `${entry.id}/skill`,
+    `${entry.id}/skill.ts`,
+    `${entry.id}/skill.js`,
+    `skills/${entry.id}/skill.ts`,
+    `skills/${entry.id}/skill.js`,
+    `${CATALOG_PREFIX}/${entry.id}/skill.ts`,
+    `${CATALOG_PREFIX}/${entry.id}/skill.js`,
     absoluteTs,
     absoluteJs,
   ];

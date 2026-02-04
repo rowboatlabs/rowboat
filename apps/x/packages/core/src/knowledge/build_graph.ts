@@ -29,7 +29,89 @@ const SOURCE_FOLDERS = [
     'fireflies_transcripts',
     'granola_notes',
 ];
-const MAX_CONCURRENT_BATCHES = 1; // Process only 1 batch at a time to avoid overwhelming the agent
+
+// Voice memos are now created directly in knowledge/Voice Memos/<date>/
+const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
+
+/**
+ * Get unprocessed voice memo files from knowledge/Voice Memos/
+ * Voice memos are created directly in this directory by the UI.
+ * Returns paths to files that need entity extraction.
+ */
+function getUnprocessedVoiceMemos(state: GraphState): string[] {
+    console.log(`[GraphBuilder] Checking directory: ${VOICE_MEMOS_KNOWLEDGE_DIR}`);
+
+    if (!fs.existsSync(VOICE_MEMOS_KNOWLEDGE_DIR)) {
+        console.log(`[GraphBuilder] Directory does not exist`);
+        return [];
+    }
+
+    const unprocessedFiles: string[] = [];
+
+    // Scan date folders (e.g., 2026-02-03)
+    const dateFolders = fs.readdirSync(VOICE_MEMOS_KNOWLEDGE_DIR);
+    console.log(`[GraphBuilder] Found ${dateFolders.length} date folders: ${dateFolders.join(', ')}`);
+
+    for (const dateFolder of dateFolders) {
+        const dateFolderPath = path.join(VOICE_MEMOS_KNOWLEDGE_DIR, dateFolder);
+
+        // Skip if not a directory
+        try {
+            if (!fs.statSync(dateFolderPath).isDirectory()) {
+                continue;
+            }
+        } catch (err) {
+            console.log(`[GraphBuilder] Error checking ${dateFolderPath}:`, err);
+            continue;
+        }
+
+        // Scan markdown files in this date folder
+        const files = fs.readdirSync(dateFolderPath);
+        console.log(`[GraphBuilder] Found ${files.length} files in ${dateFolder}: ${files.join(', ')}`);
+
+        for (const file of files) {
+            // Only process voice memo markdown files
+            if (!file.endsWith('.md') || !file.startsWith('voice-memo-')) {
+                console.log(`[GraphBuilder] Skipping ${file} - not a voice memo file`);
+                continue;
+            }
+
+            const filePath = path.join(dateFolderPath, file);
+
+            // Skip if already processed
+            if (state.processedFiles[filePath]) {
+                console.log(`[GraphBuilder] Skipping ${file} - already processed`);
+                continue;
+            }
+
+            // Check if the file has actual content (not still recording/transcribing)
+            try {
+                const content = fs.readFileSync(filePath, 'utf-8');
+                // Skip files that are still recording or transcribing
+                if (content.includes('*Recording in progress...*')) {
+                    console.log(`[GraphBuilder] Skipping ${file} - still recording`);
+                    continue;
+                }
+                if (content.includes('*Transcribing...*')) {
+                    console.log(`[GraphBuilder] Skipping ${file} - still transcribing`);
+                    continue;
+                }
+                if (content.includes('*Transcription failed')) {
+                    console.log(`[GraphBuilder] Skipping ${file} - transcription failed`);
+                    continue;
+                }
+                console.log(`[GraphBuilder] Found unprocessed voice memo: ${file}`);
+                unprocessedFiles.push(filePath);
+            } catch (err) {
+                console.log(`[GraphBuilder] Error reading ${file}:`, err);
+                continue;
+            }
+        }
+    }
+
+    console.log(`[GraphBuilder] Total unprocessed files: ${unprocessedFiles.length}`);
+    return unprocessedFiles;
+}
 
 /**
  * Read content for specific files
@@ -187,6 +269,69 @@ export async function buildGraph(sourceDir: string): Promise<void> {
 }
 
 /**
+ * Process voice memos from knowledge/Voice Memos/ and run entity extraction on them
+ * Voice memos are now created directly in the knowledge directory by the UI.
+ */
+async function processVoiceMemosForKnowledge(): Promise<boolean> {
+    console.log(`[GraphBuilder] Starting voice memo processing...`);
+    const state = loadState();
+
+    // Get unprocessed voice memos from knowledge/Voice Memos/
+    const unprocessedFiles = getUnprocessedVoiceMemos(state);
+
+    if (unprocessedFiles.length === 0) {
+        console.log(`[GraphBuilder] No unprocessed voice memos found`);
+        return false;
+    }
+
+    console.log(`[GraphBuilder] Processing ${unprocessedFiles.length} voice memo transcripts for entity extraction...`);
+    console.log(`[GraphBuilder] Files to process: ${unprocessedFiles.map(f => path.basename(f)).join(', ')}`);
+
+    // Read the files
+    const contentFiles = await readFileContents(unprocessedFiles);
+
+    if (contentFiles.length === 0) {
+        return false;
+    }
+
+    // Process in batches like other sources
+    const BATCH_SIZE = 10;
+    const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
+
+    for (let i = 0; i < contentFiles.length; i += BATCH_SIZE) {
+        const batch = contentFiles.slice(i, i + BATCH_SIZE);
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+
+        try {
+            // Build knowledge index
+            console.log(`[GraphBuilder] Building knowledge index for batch ${batchNumber}...`);
+            const index = buildKnowledgeIndex();
+            const indexForPrompt = formatIndexForPrompt(index);
+
+            console.log(`[GraphBuilder] Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
+            await createNotesFromBatch(batch, batchNumber, indexForPrompt);
+            console.log(`[GraphBuilder] Batch ${batchNumber}/${totalBatches} complete`);
+
+            // Mark files as processed
+            for (const file of batch) {
+                markFileAsProcessed(file.path, state);
+            }
+
+            // Save state after each batch
+            saveState(state);
+        } catch (error) {
+            console.error(`[GraphBuilder] Error processing batch ${batchNumber}:`, error);
+        }
+    }
+
+    // Update last build time
+    state.lastBuildTime = new Date().toISOString();
+    saveState(state);
+
+    return true;
+}
+
+/**
  * Process all configured source directories
  */
 async function processAllSources(): Promise<void> {
@@ -196,6 +341,16 @@ async function processAllSources(): Promise<void> {
     autoConfigureStrictnessIfNeeded();
 
     let anyFilesProcessed = false;
+
+    // Process voice memos first (they get moved to knowledge/)
+    try {
+        const voiceMemosProcessed = await processVoiceMemosForKnowledge();
+        if (voiceMemosProcessed) {
+            anyFilesProcessed = true;
+        }
+    } catch (error) {
+        console.error('[GraphBuilder] Error processing voice memos:', error);
+    }
 
     for (const folder of SOURCE_FOLDERS) {
         const sourceDir = path.join(WorkDir, folder);
@@ -234,7 +389,7 @@ async function processAllSources(): Promise<void> {
  */
 export async function init() {
     console.log('[GraphBuilder] Starting Knowledge Graph Builder Service...');
-    console.log(`[GraphBuilder] Monitoring folders: ${SOURCE_FOLDERS.join(', ')}`);
+    console.log(`[GraphBuilder] Monitoring folders: ${SOURCE_FOLDERS.join(', ')}, knowledge/Voice Memos`);
     console.log(`[GraphBuilder] Will check for new content every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run

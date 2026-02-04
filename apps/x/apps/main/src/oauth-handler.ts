@@ -1,8 +1,15 @@
 import { shell } from 'electron';
+import type { Server } from 'http';
 import { createAuthServer } from './auth-server.js';
 import * as oauthClient from '@x/core/dist/auth/oauth-client.js';
 import type { Configuration } from '@x/core/dist/auth/oauth-client.js';
 import { getProviderConfig, getAvailableProviders } from '@x/core/dist/auth/providers.js';
+import {
+  clearProviderClientIdOverride,
+  getProviderClientIdOverride,
+  hasProviderClientIdOverride,
+  setProviderClientIdOverride,
+} from '@x/core/dist/auth/provider-client-id.js';
 import container from '@x/core/dist/di/container.js';
 import { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
@@ -14,11 +21,47 @@ import { emitOAuthEvent } from './ipc.js';
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
 
 // Store active OAuth flows (state -> { codeVerifier, provider, config })
-const activeFlows = new Map<string, { 
-  codeVerifier: string; 
+const activeFlows = new Map<string, {
+  codeVerifier: string;
   provider: string;
   config: Configuration;
 }>();
+
+// Module-level state for tracking the active OAuth flow
+interface ActiveOAuthFlow {
+  provider: string;
+  state: string;
+  server: Server;
+  cleanupTimeout: NodeJS.Timeout;
+}
+
+let activeFlow: ActiveOAuthFlow | null = null;
+
+/**
+ * Cancel any active OAuth flow, cleaning up resources
+ */
+function cancelActiveFlow(reason: string = 'cancelled'): void {
+  if (!activeFlow) {
+    return;
+  }
+
+  console.log(`[OAuth] Cancelling active flow for ${activeFlow.provider}: ${reason}`);
+
+  clearTimeout(activeFlow.cleanupTimeout);
+  activeFlow.server.close();
+  activeFlows.delete(activeFlow.state);
+
+  // Only emit event for user-visible cancellations
+  if (reason !== 'new_flow_started') {
+    emitOAuthEvent({
+      provider: activeFlow.provider,
+      success: false,
+      error: `OAuth flow ${reason}`
+    });
+  }
+
+  activeFlow = null;
+}
 
 /**
  * Get OAuth repository from DI container
@@ -39,14 +82,25 @@ function getClientRegistrationRepo(): IClientRegistrationRepo {
  */
 async function getProviderConfiguration(provider: string): Promise<Configuration> {
   const config = getProviderConfig(provider);
+  const resolveClientId = (): string => {
+    const override = getProviderClientIdOverride(provider);
+    if (override) {
+      return override;
+    }
+    if (config.client.mode === 'static' && config.client.clientId) {
+      return config.client.clientId;
+    }
+    throw new Error(`${provider} client ID not configured. Please provide a client ID.`);
+  };
 
   if (config.discovery.mode === 'issuer') {
     if (config.client.mode === 'static') {
       // Discover endpoints, use static client ID
       console.log(`[OAuth] ${provider}: Discovery from issuer with static client ID`);
+      const clientId = resolveClientId();
       return await oauthClient.discoverConfiguration(
         config.discovery.issuer,
-        config.client.clientId
+        clientId
       );
     } else {
       // DCR mode - check for existing registration or register new
@@ -83,10 +137,11 @@ async function getProviderConfiguration(provider: string): Promise<Configuration
     }
     
     console.log(`[OAuth] ${provider}: Using static endpoints (no discovery)`);
+    const clientId = resolveClientId();
     return oauthClient.createStaticConfiguration(
       config.discovery.authorizationEndpoint,
       config.discovery.tokenEndpoint,
-      config.client.clientId,
+      clientId,
       config.discovery.revocationEndpoint
     );
   }
@@ -95,11 +150,23 @@ async function getProviderConfiguration(provider: string): Promise<Configuration
 /**
  * Initiate OAuth flow for a provider
  */
-export async function connectProvider(provider: string): Promise<{ success: boolean; error?: string }> {
+export async function connectProvider(provider: string, clientId?: string): Promise<{ success: boolean; error?: string }> {
   try {
     console.log(`[OAuth] Starting connection flow for ${provider}...`);
+
+    // Cancel any existing flow before starting a new one
+    cancelActiveFlow('new_flow_started');
+
     const oauthRepo = getOAuthRepo();
     const providerConfig = getProviderConfig(provider);
+
+    if (provider === 'google') {
+      const trimmedClientId = clientId?.trim();
+      if (!trimmedClientId) {
+        return { success: false, error: 'Google client ID is required to connect.' };
+      }
+      setProviderClientIdOverride(provider, trimmedClientId);
+    }
 
     // Get or create OAuth configuration
     const config = await getProviderConfiguration(provider);
@@ -122,9 +189,6 @@ export async function connectProvider(provider: string): Promise<{ success: bool
       state,
     });
 
-    // Declare timeout variable (will be set after server is created)
-    let cleanupTimeout: NodeJS.Timeout;
-
     // Create callback server
     const { server } = await createAuthServer(8080, async (code, receivedState) => {
       // Validate state
@@ -140,7 +204,7 @@ export async function connectProvider(provider: string): Promise<{ success: bool
       try {
         // Build callback URL for token exchange
         const callbackUrl = new URL(`${REDIRECT_URI}?code=${code}&state=${receivedState}`);
-        
+
         // Exchange code for tokens
         console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);
         const tokens = await oauthClient.exchangeCodeForTokens(
@@ -172,21 +236,30 @@ export async function connectProvider(provider: string): Promise<{ success: bool
       } finally {
         // Clean up
         activeFlows.delete(state);
-        server.close();
-        clearTimeout(cleanupTimeout);
+        if (activeFlow && activeFlow.state === state) {
+          clearTimeout(activeFlow.cleanupTimeout);
+          activeFlow.server.close();
+          activeFlow = null;
+        }
       }
     });
 
-    // Set timeout to clean up abandoned flows (5 minutes)
+    // Set timeout to clean up abandoned flows (2 minutes)
     // This prevents memory leaks if user never completes the OAuth flow
-    cleanupTimeout = setTimeout(() => {
-      if (activeFlows.has(state)) {
+    const cleanupTimeout = setTimeout(() => {
+      if (activeFlow?.state === state) {
         console.log(`[OAuth] Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
-        activeFlows.delete(state);
-        server.close();
-        emitOAuthEvent({ provider, success: false, error: 'OAuth flow timed out' });
+        cancelActiveFlow('timed_out');
       }
-    }, 5 * 60 * 1000); // 5 minutes
+    }, 2 * 60 * 1000); // 2 minutes
+
+    // Store complete flow state for cleanup
+    activeFlow = {
+      provider,
+      state,
+      server,
+      cleanupTimeout,
+    };
 
     // Open in system browser (shares cookies/sessions with user's regular browser)
     shell.openExternal(authUrl.toString());
@@ -209,6 +282,9 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
   try {
     const oauthRepo = getOAuthRepo();
     await oauthRepo.clearTokens(provider);
+    if (provider === 'google') {
+      clearProviderClientIdOverride(provider);
+    }
     return { success: true };
   } catch (error) {
     console.error('OAuth disconnect failed:', error);
@@ -222,6 +298,9 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
 export async function isConnected(provider: string): Promise<{ isConnected: boolean }> {
   try {
     const oauthRepo = getOAuthRepo();
+    if (provider === 'google' && !hasProviderClientIdOverride(provider)) {
+      return { isConnected: false };
+    }
     const connected = await oauthRepo.isConnected(provider);
     return { isConnected: connected };
   } catch (error) {
@@ -278,7 +357,10 @@ export async function getConnectedProviders(): Promise<{ providers: string[] }> 
   try {
     const oauthRepo = getOAuthRepo();
     const providers = await oauthRepo.getConnectedProviders();
-    return { providers };
+    const filteredProviders = providers.filter((provider) =>
+      provider === 'google' ? hasProviderClientIdOverride(provider) : true
+    );
+    return { providers: filteredProviders };
   } catch (error) {
     console.error('Get connected providers failed:', error);
     return { providers: [] };

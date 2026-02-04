@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, ArrowUp, PanelRightIcon, SquarePen } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelRightIcon, SquarePen, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
@@ -279,7 +279,9 @@ const collectFilePaths = (nodes: TreeNode[]): string[] =>
 // Inner component that uses the controller to access mentions
 interface ChatInputInnerProps {
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
+  onStop?: () => void
   isProcessing: boolean
+  isStopping?: boolean
   presetMessage?: string
   onPresetMessageConsumed?: () => void
   runId?: string | null
@@ -287,7 +289,9 @@ interface ChatInputInnerProps {
 
 function ChatInputInner({
   onSubmit,
+  onStop,
   isProcessing,
+  isStopping,
   presetMessage,
   onPresetMessageConsumed,
   runId,
@@ -318,6 +322,37 @@ function ChatInputInner({
     }
   }, [handleSubmit])
 
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes("Files")) {
+        e.preventDefault()
+      }
+    }
+    const onDrop = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes("Files")) {
+        e.preventDefault()
+      }
+      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+        const paths = Array.from(e.dataTransfer.files)
+          .map((f) => window.electronUtils?.getPathForFile(f))
+          .filter(Boolean)
+        if (paths.length > 0) {
+          const currentText = controller.textInput.value
+          const pathText = paths.join(' ')
+          controller.textInput.setInput(
+            currentText ? `${currentText} ${pathText}` : pathText
+          )
+        }
+      }
+    }
+    document.addEventListener("dragover", onDragOver)
+    document.addEventListener("drop", onDrop)
+    return () => {
+      document.removeEventListener("dragover", onDragOver)
+      document.removeEventListener("drop", onDrop)
+    }
+  }, [controller])
+
   return (
     <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
       <PromptInputTextarea
@@ -327,19 +362,39 @@ function ChatInputInner({
         focusTrigger={runId}
         className="min-h-6 py-0 border-0 shadow-none focus-visible:ring-0 rounded-none"
       />
-      <Button
-        size="icon"
-        onClick={handleSubmit}
-        disabled={!canSubmit}
-        className={cn(
-          "h-7 w-7 rounded-full shrink-0 transition-all",
-          canSubmit
-            ? "bg-primary text-primary-foreground hover:bg-primary/90"
-            : "bg-muted text-muted-foreground"
-        )}
-      >
-        <ArrowUp className="h-4 w-4" />
-      </Button>
+      {isProcessing ? (
+        <Button
+          size="icon"
+          onClick={onStop}
+          title={isStopping ? "Click again to force stop" : "Stop generation"}
+          className={cn(
+            "h-7 w-7 rounded-full shrink-0 transition-all",
+            isStopping
+              ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              : "bg-primary text-primary-foreground hover:bg-primary/90"
+          )}
+        >
+          {isStopping ? (
+            <LoaderIcon className="h-4 w-4 animate-spin" />
+          ) : (
+            <Square className="h-3 w-3 fill-current" />
+          )}
+        </Button>
+      ) : (
+        <Button
+          size="icon"
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          className={cn(
+            "h-7 w-7 rounded-full shrink-0 transition-all",
+            canSubmit
+              ? "bg-primary text-primary-foreground hover:bg-primary/90"
+              : "bg-muted text-muted-foreground"
+          )}
+        >
+          <ArrowUp className="h-4 w-4" />
+        </Button>
+      )}
     </div>
   )
 }
@@ -350,7 +405,9 @@ interface ChatInputWithMentionsProps {
   recentFiles: string[]
   visibleFiles: string[]
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
+  onStop?: () => void
   isProcessing: boolean
+  isStopping?: boolean
   presetMessage?: string
   onPresetMessageConsumed?: () => void
   runId?: string | null
@@ -361,7 +418,9 @@ function ChatInputWithMentions({
   recentFiles,
   visibleFiles,
   onSubmit,
+  onStop,
   isProcessing,
+  isStopping,
   presetMessage,
   onPresetMessageConsumed,
   runId,
@@ -370,7 +429,9 @@ function ChatInputWithMentions({
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
       <ChatInputInner
         onSubmit={onSubmit}
+        onStop={onStop}
         isProcessing={isProcessing}
+        isStopping={isStopping}
         presetMessage={presetMessage}
         onPresetMessageConsumed={onPresetMessageConsumed}
         runId={runId}
@@ -414,6 +475,8 @@ function App() {
   const [runId, setRunId] = useState<string | null>(null)
   const runIdRef = useRef<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [isStopping, setIsStopping] = useState(false)
+  const [stopClickedAt, setStopClickedAt] = useState<number | null>(null)
   const [agentId] = useState<string>('copilot')
   const [presetMessage, setPresetMessage] = useState<string | undefined>(undefined)
 
@@ -758,6 +821,8 @@ function App() {
 
       case 'run-processing-end':
         setIsProcessing(false)
+        setIsStopping(false)
+        setStopClickedAt(null)
         break
 
       case 'start':
@@ -936,8 +1001,32 @@ function App() {
         break
       }
 
+      case 'run-stopped':
+        setIsProcessing(false)
+        setIsStopping(false)
+        setStopClickedAt(null)
+        // Clear pending requests since they've been aborted
+        setPendingPermissionRequests(new Map())
+        setPendingAskHumanRequests(new Map())
+        // Flush any streaming content as a message
+        setCurrentAssistantMessage(currentMsg => {
+          if (currentMsg) {
+            setConversation(prev => [...prev, {
+              id: `assistant-stopped-${Date.now()}`,
+              role: 'assistant',
+              content: currentMsg,
+              timestamp: Date.now(),
+            }])
+          }
+          return ''
+        })
+        setCurrentReasoning('')
+        break
+
       case 'error':
         setIsProcessing(false)
+        setIsStopping(false)
+        setStopClickedAt(null)
         console.error('Run error:', event.error)
         break
     }
@@ -1008,6 +1097,21 @@ function App() {
       console.error('Failed to send message:', error)
     }
   }
+
+  const handleStop = useCallback(async () => {
+    if (!runId) return
+    const now = Date.now()
+    const isForce = isStopping && stopClickedAt !== null && (now - stopClickedAt) < 2000
+
+    setStopClickedAt(now)
+    setIsStopping(true)
+
+    try {
+      await window.ipc.invoke('runs:stop', { runId, force: isForce })
+    } catch (error) {
+      console.error('Failed to stop run:', error)
+    }
+  }, [runId, isStopping, stopClickedAt])
 
   const handlePermissionResponse = useCallback(async (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => {
     if (!runId) return
@@ -1337,6 +1441,29 @@ function App() {
     },
   }), [tree, selectedPath, workspaceRoot, collectDirPaths])
 
+  // Handler for when a voice note is created/updated
+  const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
+    // Refresh the tree to show the new file/folder
+    const newTree = await loadDirectory()
+    setTree(newTree)
+
+    // Expand parent directories to show the file
+    const parts = notePath.split('/')
+    const parentPaths: string[] = []
+    for (let i = 1; i < parts.length; i++) {
+      parentPaths.push(parts.slice(0, i).join('/'))
+    }
+    setExpandedPaths(prev => {
+      const newSet = new Set(prev)
+      parentPaths.forEach(p => newSet.add(p))
+      return newSet
+    })
+
+    // Select the file to show it in the editor
+    setIsGraphOpen(false)
+    setSelectedPath(notePath)
+  }, [loadDirectory])
+
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
     if (!resolvedPath) return null
@@ -1562,7 +1689,7 @@ function App() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <SidebarSectionProvider defaultSection="knowledge" onSectionChange={handleSectionChange}>
+      <SidebarSectionProvider defaultSection="tasks" onSectionChange={handleSectionChange}>
         <div className="flex h-svh w-full">
           {/* Icon sidebar - always visible, fixed position */}
           <SidebarIcon />
@@ -1583,6 +1710,7 @@ function App() {
               expandedPaths={expandedPaths}
               onSelectFile={toggleExpand}
               knowledgeActions={knowledgeActions}
+              onVoiceNoteCreated={handleVoiceNoteCreated}
               runs={runs}
               currentRunId={runId}
               tasksActions={{
@@ -1779,7 +1907,9 @@ function App() {
                       recentFiles={recentWikiFiles}
                       visibleFiles={visibleKnowledgeFiles}
                       onSubmit={handlePromptSubmit}
+                      onStop={handleStop}
                       isProcessing={isProcessing}
+                      isStopping={isStopping}
                       presetMessage={presetMessage}
                       onPresetMessageConsumed={() => setPresetMessage(undefined)}
                       runId={runId}
@@ -1801,6 +1931,8 @@ function App() {
                 currentAssistantMessage={currentAssistantMessage}
                 currentReasoning={currentReasoning}
                 isProcessing={isProcessing}
+                isStopping={isStopping}
+                onStop={handleStop}
                 message={message}
                 onMessageChange={setMessage}
                 onSubmit={handlePromptSubmit}

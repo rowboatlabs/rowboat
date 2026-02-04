@@ -15,13 +15,14 @@ import { CopilotAgent } from "../application/assistant/agent.js";
 import { isBlocked } from "../application/lib/command-executor.js";
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
-import { getProvider } from "../models/models.js";
+import { createProvider } from "../models/models.js";
 import { IAgentsRepo } from "./repo.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { IBus } from "../application/lib/bus.js";
 import { IMessageQueue } from "../application/lib/message-queue.js";
 import { IRunsRepo } from "../runs/repo.js";
 import { IRunsLock } from "../runs/lock.js";
+import { IAbortRegistry } from "../runs/abort-registry.js";
 import { PrefixLogger } from "@x/shared";
 import { parse } from "yaml";
 import { raw as noteCreationMediumRaw } from "../knowledge/note_creation_medium.js";
@@ -39,6 +40,7 @@ export class AgentRuntime implements IAgentRuntime {
     private messageQueue: IMessageQueue;
     private modelConfigRepo: IModelConfigRepo;
     private runsLock: IRunsLock;
+    private abortRegistry: IAbortRegistry;
 
     constructor({
         runsRepo,
@@ -47,6 +49,7 @@ export class AgentRuntime implements IAgentRuntime {
         messageQueue,
         modelConfigRepo,
         runsLock,
+        abortRegistry,
     }: {
         runsRepo: IRunsRepo;
         idGenerator: IMonotonicallyIncreasingIdGenerator;
@@ -54,6 +57,7 @@ export class AgentRuntime implements IAgentRuntime {
         messageQueue: IMessageQueue;
         modelConfigRepo: IModelConfigRepo;
         runsLock: IRunsLock;
+        abortRegistry: IAbortRegistry;
     }) {
         this.runsRepo = runsRepo;
         this.idGenerator = idGenerator;
@@ -61,6 +65,7 @@ export class AgentRuntime implements IAgentRuntime {
         this.messageQueue = messageQueue;
         this.modelConfigRepo = modelConfigRepo;
         this.runsLock = runsLock;
+        this.abortRegistry = abortRegistry;
     }
 
     async trigger(runId: string): Promise<void> {
@@ -68,6 +73,7 @@ export class AgentRuntime implements IAgentRuntime {
             console.log(`unable to acquire lock on run ${runId}`);
             return;
         }
+        const signal = this.abortRegistry.createForRun(runId);
         try {
             await this.bus.publish({
                 runId,
@@ -75,6 +81,11 @@ export class AgentRuntime implements IAgentRuntime {
                 subflow: [],
             });
             while (true) {
+                // Check for abort before each iteration
+                if (signal.aborted) {
+                    break;
+                }
+
                 let eventCount = 0;
                 const run = await this.runsRepo.fetch(runId);
                 if (!run) {
@@ -84,18 +95,28 @@ export class AgentRuntime implements IAgentRuntime {
                 for (const event of run.log) {
                     state.ingest(event);
                 }
-                for await (const event of streamAgent({
-                    state,
-                    idGenerator: this.idGenerator,
-                    runId,
-                    messageQueue: this.messageQueue,
-                    modelConfigRepo: this.modelConfigRepo,
-                })) {
-                    eventCount++;
-                    if (event.type !== "llm-stream-event") {
-                        await this.runsRepo.appendEvents(runId, [event]);
+                try {
+                    for await (const event of streamAgent({
+                        state,
+                        idGenerator: this.idGenerator,
+                        runId,
+                        messageQueue: this.messageQueue,
+                        modelConfigRepo: this.modelConfigRepo,
+                        signal,
+                        abortRegistry: this.abortRegistry,
+                    })) {
+                        eventCount++;
+                        if (event.type !== "llm-stream-event") {
+                            await this.runsRepo.appendEvents(runId, [event]);
+                        }
+                        await this.bus.publish(event);
                     }
-                    await this.bus.publish(event);
+                } catch (error) {
+                    if (error instanceof Error && error.name === "AbortError") {
+                        // Abort detected — exit cleanly
+                        break;
+                    }
+                    throw error;
                 }
 
                 // if no events, break
@@ -103,7 +124,20 @@ export class AgentRuntime implements IAgentRuntime {
                     break;
                 }
             }
+
+            // Emit run-stopped event if aborted
+            if (signal.aborted) {
+                const stoppedEvent: z.infer<typeof RunEvent> = {
+                    runId,
+                    type: "run-stopped",
+                    reason: "user-requested",
+                    subflow: [],
+                };
+                await this.runsRepo.appendEvents(runId, [stoppedEvent]);
+                await this.bus.publish(stoppedEvent);
+            }
         } finally {
+            this.abortRegistry.cleanup(runId);
             await this.runsLock.release(runId);
             await this.bus.publish({
                 runId,
@@ -428,6 +462,39 @@ export class AgentState {
         return response;
     }
 
+    /**
+     * Returns tool-result messages for all pending tool calls, marking them as aborted.
+     * This is called when a run is stopped so the LLM knows what happened to its tool requests.
+     */
+    getAbortedToolResults(): z.infer<typeof ToolMessage>[] {
+        const results: z.infer<typeof ToolMessage>[] = [];
+        for (const toolCallId of Object.keys(this.pendingToolCalls)) {
+            const toolCall = this.toolCallIdMap[toolCallId];
+            if (toolCall) {
+                results.push({
+                    role: "tool",
+                    content: JSON.stringify({ error: "Tool execution aborted" }),
+                    toolCallId,
+                    toolName: toolCall.toolName,
+                });
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Clear all pending state (permissions, ask-human, tool calls).
+     * Used when a run is stopped.
+     */
+    clearAllPending(): void {
+        this.pendingToolPermissionRequests = {};
+        this.pendingAskHumanRequests = {};
+        // Recursively clear subflows
+        for (const subflow of Object.values(this.subflowStates)) {
+            subflow.clearAllPending();
+        }
+    }
+
     finalResponse(): string {
         if (!this.lastAssistantMsg) {
             return '';
@@ -526,12 +593,16 @@ export async function* streamAgent({
     runId,
     messageQueue,
     modelConfigRepo,
+    signal,
+    abortRegistry,
 }: {
     state: AgentState,
     idGenerator: IMonotonicallyIncreasingIdGenerator;
     runId: string;
     messageQueue: IMessageQueue;
     modelConfigRepo: IModelConfigRepo;
+    signal: AbortSignal;
+    abortRegistry: IAbortRegistry;
 }): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
     const logger = new PrefixLogger(`run-${runId}-${state.agentName}`);
 
@@ -552,11 +623,14 @@ export async function* streamAgent({
     const tools = await buildTools(agent);
 
     // set up provider + model
-    const provider = await getProvider(agent.provider);
-    const model = provider.languageModel(agent.model || modelConfig.defaults.model);
+    const provider = createProvider(modelConfig.provider);
+    const model = provider.languageModel(modelConfig.model);
 
     let loopCounter = 0;
     while (true) {
+        // Check abort at the top of each iteration
+        signal.throwIfAborted();
+
         loopCounter++;
         const loopLogger = logger.child(`iter-${loopCounter}`);
         loopLogger.log('starting loop iteration');
@@ -598,6 +672,11 @@ export async function* streamAgent({
             }
 
             // execute approved tool
+            // Check abort before starting tool execution
+            if (signal.aborted) {
+                _logger.log('skipping, reason: aborted');
+                break;
+            }
             _logger.log('executing tool');
             yield* processEvent({
                 runId,
@@ -616,6 +695,8 @@ export async function* streamAgent({
                     runId,
                     messageQueue,
                     modelConfigRepo,
+                    signal,
+                    abortRegistry,
                 })) {
                     yield* processEvent({
                         ...event,
@@ -626,7 +707,7 @@ export async function* streamAgent({
                     result = subflowState.finalResponse();
                 }
             } else {
-                result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments);
+                result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments, { runId, signal, abortRegistry });
             }
             const resultPayload = result === undefined ? null : result;
             const resultMsg: z.infer<typeof ToolMessage> = {
@@ -709,6 +790,7 @@ export async function* streamAgent({
             state.messages,
             instructionsWithDateTime,
             tools,
+            signal,
         )) {
             // Only log significant events (not text-delta to reduce noise)
             if (event.type !== 'text-delta') {
@@ -791,6 +873,7 @@ async function* streamLlm(
     messages: z.infer<typeof MessageList>,
     instructions: string,
     tools: ToolSet,
+    signal?: AbortSignal,
 ): AsyncGenerator<z.infer<typeof LlmStepStreamEvent>, void, unknown> {
     const { fullStream } = streamText({
         model,
@@ -798,8 +881,11 @@ async function* streamLlm(
         system: instructions,
         tools,
         stopWhen: stepCountIs(1),
+        abortSignal: signal,
     });
     for await (const event of fullStream) {
+        // Check abort on every chunk for responsiveness
+        signal?.throwIfAborted();
         // console.log("\n\n\t>>>>\t\tstream event", JSON.stringify(event));
         switch (event.type) {
             case "reasoning-start":

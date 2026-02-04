@@ -4,7 +4,7 @@ import * as React from "react"
 import {
   Brain,
   HelpCircle,
-  ListTodo,
+  MessageSquare,
   Plug,
   Settings,
 } from "lucide-react"
@@ -27,8 +27,8 @@ type NavItem = {
 }
 
 const navItems: NavItem[] = [
+  { id: "tasks", title: "Chats", icon: MessageSquare },
   { id: "knowledge", title: "Knowledge", icon: Brain },
-  { id: "tasks", title: "Tasks", icon: ListTodo },
 ]
 
 export function SidebarIcon() {

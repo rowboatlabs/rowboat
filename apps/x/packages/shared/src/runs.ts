@@ -80,6 +80,11 @@ export const RunErrorEvent = BaseRunEvent.extend({
     error: z.string(),
 });
 
+export const RunStoppedEvent = BaseRunEvent.extend({
+    type: z.literal("run-stopped"),
+    reason: z.enum(["user-requested", "force-stopped"]).optional(),
+});
+
 export const RunEvent = z.union([
     RunProcessingStartEvent,
     RunProcessingEndEvent,
@@ -94,6 +99,7 @@ export const RunEvent = z.union([
     ToolPermissionRequestEvent,
     ToolPermissionResponseEvent,
     RunErrorEvent,
+    RunStoppedEvent,
 ]);
 
 export const ToolPermissionAuthorizePayload = ToolPermissionResponseEvent.pick({

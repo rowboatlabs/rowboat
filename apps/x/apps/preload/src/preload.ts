@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { ipc as ipcShared } from '@x/shared';
 
 type InvokeChannels = ipcShared.InvokeChannels;
@@ -52,3 +52,7 @@ const ipc = {
 };
 
 contextBridge.exposeInMainWorld('ipc', ipc);
+
+contextBridge.exposeInMainWorld('electronUtils', {
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
+});
