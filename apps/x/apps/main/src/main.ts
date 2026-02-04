@@ -64,6 +64,8 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    show: false, // Don't show until ready
+    backgroundColor: "#252525", // Prevent white flash (matches dark mode)
     webPreferences: {
       // IMPORTANT: keep Node out of renderer
       nodeIntegration: false,
@@ -71,6 +73,11 @@ function createWindow() {
       sandbox: true,
       preload: preloadPath,
     },
+  });
+
+  // Show window when content is ready to prevent blank screen
+  win.once("ready-to-show", () => {
+    win.show();
   });
 
   // Open external links in system browser (not sandboxed Electron window)

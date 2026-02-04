@@ -5,6 +5,22 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Rowboat</title>
+    <style>
+      /* Prevent flash of white background before CSS loads */
+      html, body { margin: 0; padding: 0; }
+      html.dark, html.dark body { background-color: #252525; }
+      html.light, html.light body { background-color: #fff; }
+    </style>
+    <script>
+      // Apply theme class immediately before render
+      (function() {
+        var stored = localStorage.getItem('rowboat-theme');
+        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = stored || 'system';
+        var resolved = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
+        document.documentElement.classList.add(resolved);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
