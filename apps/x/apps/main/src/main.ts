@@ -10,6 +10,7 @@ import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
 import { init as initPreBuiltRunner } from "@x/core/dist/pre_built/runner.js";
+import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -155,6 +156,9 @@ app.whenReady().then(async () => {
 
   // start pre-built agent runner
   initPreBuiltRunner();
+
+  // start background agent runner (scheduled agents)
+  initAgentRunner();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

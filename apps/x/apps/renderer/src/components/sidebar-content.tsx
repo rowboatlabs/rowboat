@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useState } from "react"
 import {
+  Bot,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -78,9 +79,27 @@ type RunListItem = {
   agentId: string
 }
 
+type BackgroundTaskItem = {
+  name: string
+  description?: string
+  schedule: {
+    type: "cron" | "window" | "once"
+    expression?: string
+    cron?: string
+    startTime?: string
+    endTime?: string
+    runAt?: string
+  }
+  enabled: boolean
+  status?: "scheduled" | "running" | "finished" | "failed" | "triggered"
+  nextRunAt?: string | null
+  lastRunAt?: string | null
+}
+
 type TasksActions = {
   onNewChat: () => void
   onSelectRun: (runId: string) => void
+  onSelectBackgroundTask?: (taskName: string) => void
 }
 
 type SidebarContentPanelProps = {
@@ -93,6 +112,8 @@ type SidebarContentPanelProps = {
   runs?: RunListItem[]
   currentRunId?: string | null
   tasksActions?: TasksActions
+  backgroundTasks?: BackgroundTaskItem[]
+  selectedBackgroundTask?: string | null
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTitles = {
@@ -110,6 +131,8 @@ export function SidebarContentPanel({
   runs = [],
   currentRunId,
   tasksActions,
+  backgroundTasks = [],
+  selectedBackgroundTask,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection } = useSidebarSection()
@@ -137,6 +160,8 @@ export function SidebarContentPanel({
             runs={runs}
             currentRunId={currentRunId}
             actions={tasksActions}
+            backgroundTasks={backgroundTasks}
+            selectedBackgroundTask={selectedBackgroundTask}
           />
         )}
       </SidebarContent>
@@ -653,15 +678,40 @@ function Tree({
   )
 }
 
+// Get status indicator color
+function getStatusColor(status?: string, enabled?: boolean): string {
+  // Disabled agents always show gray
+  if (enabled === false) {
+    return "bg-gray-400"
+  }
+  switch (status) {
+    case "running":
+      return "bg-blue-500"
+    case "finished":
+      return "bg-green-500"
+    case "failed":
+      return "bg-red-500"
+    case "triggered":
+      return "bg-gray-400"
+    case "scheduled":
+    default:
+      return "bg-yellow-500"
+  }
+}
+
 // Tasks Section
 function TasksSection({
   runs,
   currentRunId,
   actions,
+  backgroundTasks = [],
+  selectedBackgroundTask,
 }: {
   runs: RunListItem[]
   currentRunId?: string | null
   actions?: TasksActions
+  backgroundTasks?: BackgroundTaskItem[]
+  selectedBackgroundTask?: string | null
 }) {
   return (
     <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
@@ -677,9 +727,38 @@ function TasksSection({
         </SidebarMenu>
       </div>
       <SidebarGroupContent className="flex-1 overflow-y-auto">
-        {runs.length > 0 && (
+        {/* Background Tasks Section */}
+        {backgroundTasks.length > 0 && (
           <>
             <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+              Background Tasks
+            </div>
+            <SidebarMenu>
+              {backgroundTasks.map((task) => (
+                <SidebarMenuItem key={task.name}>
+                  <SidebarMenuButton
+                    isActive={selectedBackgroundTask === task.name}
+                    onClick={() => actions?.onSelectBackgroundTask?.(task.name)}
+                    className="gap-2"
+                  >
+                    <div className="relative">
+                      <Bot className="size-4 shrink-0" />
+                      <span
+                        className={`absolute -bottom-0.5 -right-0.5 size-2 rounded-full ${getStatusColor(task.status, task.enabled)} ${task.status === "running" && task.enabled ? "animate-pulse" : ""}`}
+                      />
+                    </div>
+                    <span className={`truncate text-sm ${!task.enabled ? "text-muted-foreground" : ""}`}>
+                      {task.name}
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </>
+        )}
+        {runs.length > 0 && (
+          <>
+            <div className="px-3 py-1.5 mt-4 text-xs font-medium text-muted-foreground">
               Chat history
             </div>
             <SidebarMenu>

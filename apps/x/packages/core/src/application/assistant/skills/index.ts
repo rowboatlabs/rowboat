@@ -8,9 +8,8 @@ import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
 import slackSkill from "./slack/skill.js";
-import workflowAuthoringSkill from "./workflow-authoring/skill.js";
+import backgroundAgentsSkill from "./background-agents/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
-import workflowRunOpsSkill from "./workflow-run-ops/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
@@ -66,10 +65,10 @@ const definitions: SkillDefinition[] = [
     content: slackSkill,
   },
   {
-    id: "workflow-authoring",
-    title: "Workflow Authoring",
-    summary: "Creating or editing workflows/agents, validating schema rules, and keeping filenames aligned with JSON ids.",
-    content: workflowAuthoringSkill,
+    id: "background-agents",
+    title: "Background Agents",
+    summary: "Creating, editing, and scheduling background agents. Configure schedules in agent-schedule.json and build multi-agent workflows.",
+    content: backgroundAgentsSkill,
   },
   {
     id: "builtin-tools",
@@ -88,12 +87,6 @@ const definitions: SkillDefinition[] = [
     title: "Deletion Guardrails",
     summary: "Following the confirmation process before removing workflows or agents and their dependencies.",
     content: deletionGuardrailsSkill,
-  },
-  {
-    id: "workflow-run-ops",
-    title: "Workflow Run Operations",
-    summary: "Commands that list workflow runs, inspect paused executions, or manage cron schedules for workflows.",
-    content: workflowRunOpsSkill,
   },
 ];
 

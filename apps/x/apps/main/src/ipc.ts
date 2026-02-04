@@ -24,6 +24,9 @@ import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import * as composioHandler from './composio-handler.js';
+import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
+import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
+import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -383,6 +386,39 @@ export function setupIpcHandlers() {
     },
     'composio:execute-action': async (_event, args) => {
       return composioHandler.executeAction(args.actionSlug, args.toolkitSlug, args.input);
+    },
+    // Agent schedule handlers
+    'agent-schedule:getConfig': async () => {
+      const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
+      try {
+        return await repo.getConfig();
+      } catch {
+        // Return empty config if file doesn't exist
+        return { agents: {} };
+      }
+    },
+    'agent-schedule:getState': async () => {
+      const repo = container.resolve<IAgentScheduleStateRepo>('agentScheduleStateRepo');
+      try {
+        return await repo.getState();
+      } catch {
+        // Return empty state if file doesn't exist
+        return { agents: {} };
+      }
+    },
+    'agent-schedule:updateAgent': async (_event, args) => {
+      const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
+      await repo.upsert(args.agentName, args.entry);
+      // Trigger the runner to pick up the change immediately
+      triggerAgentScheduleRun();
+      return { success: true };
+    },
+    'agent-schedule:deleteAgent': async (_event, args) => {
+      const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
+      const stateRepo = container.resolve<IAgentScheduleStateRepo>('agentScheduleStateRepo');
+      await repo.delete(args.agentName);
+      await stateRepo.deleteAgentState(args.agentName);
+      return { success: true };
     },
   });
 }

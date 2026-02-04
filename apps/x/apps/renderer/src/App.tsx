@@ -51,6 +51,9 @@ import { Separator } from "@/components/ui/separator"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { OnboardingModal } from '@/components/onboarding-modal'
+import { BackgroundTaskDetail } from '@/components/background-task-detail'
+import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
+import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -499,6 +502,22 @@ function App() {
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false)
 
+  // Background tasks state
+  type BackgroundTaskItem = {
+    name: string
+    description?: string
+    schedule: z.infer<typeof AgentScheduleConfig>["agents"][string]["schedule"]
+    enabled: boolean
+    startingMessage?: string
+    status?: z.infer<typeof AgentScheduleState>["agents"][string]["status"]
+    nextRunAt?: string | null
+    lastRunAt?: string | null
+    lastError?: string | null
+    runCount?: number
+  }
+  const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTaskItem[]>([])
+  const [selectedBackgroundTask, setSelectedBackgroundTask] = useState<string | null>(null)
+
   // Keep runIdRef in sync with runId state (for use in event handlers to avoid stale closures)
   useEffect(() => {
     runIdRef.current = runId
@@ -528,11 +547,16 @@ function App() {
     const cleanup = window.ipc.on('workspace:didChange', async (event) => {
       loadDirectory().then(setTree)
 
-      // Reload current file if it was changed externally
-      if (!selectedPath) return
-
       const changedPath = event.type === 'changed' ? event.path : null
       const changedPaths = (event.type === 'bulkChanged' ? event.paths : []) ?? []
+
+      // Reload background tasks if agent-schedule.json changed
+      if (changedPath === 'config/agent-schedule.json' || changedPaths.includes('config/agent-schedule.json')) {
+        loadBackgroundTasks()
+      }
+
+      // Reload current file if it was changed externally
+      if (!selectedPath) return
 
       const isCurrentFileChanged =
         changedPath === selectedPath || changedPaths.includes(selectedPath)
@@ -548,6 +572,7 @@ function App() {
       }
     })
     return cleanup
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadDirectory, selectedPath, editorContent])
 
   // Load file content when selected
@@ -662,6 +687,63 @@ function App() {
   useEffect(() => {
     loadRuns()
   }, [loadRuns])
+
+  // Load background tasks
+  const loadBackgroundTasks = useCallback(async () => {
+    try {
+      const [configResult, stateResult] = await Promise.all([
+        window.ipc.invoke('agent-schedule:getConfig', null),
+        window.ipc.invoke('agent-schedule:getState', null),
+      ])
+
+      const tasks: BackgroundTaskItem[] = Object.entries(configResult.agents).map(([name, entry]) => {
+        const state = stateResult.agents[name]
+        return {
+          name,
+          description: entry.description,
+          schedule: entry.schedule,
+          enabled: entry.enabled ?? true,
+          startingMessage: entry.startingMessage,
+          status: state?.status,
+          nextRunAt: state?.nextRunAt,
+          lastRunAt: state?.lastRunAt,
+          lastError: state?.lastError,
+          runCount: state?.runCount ?? 0,
+        }
+      })
+
+      setBackgroundTasks(tasks)
+    } catch (err) {
+      console.error('Failed to load background tasks:', err)
+    }
+  }, [])
+
+  // Load background tasks on mount
+  useEffect(() => {
+    loadBackgroundTasks()
+  }, [loadBackgroundTasks])
+
+  // Handle toggling background task enabled state
+  const handleToggleBackgroundTask = useCallback(async (taskName: string, enabled: boolean) => {
+    const task = backgroundTasks.find(t => t.name === taskName)
+    if (!task) return
+
+    try {
+      await window.ipc.invoke('agent-schedule:updateAgent', {
+        agentName: taskName,
+        entry: {
+          schedule: task.schedule,
+          enabled,
+          startingMessage: task.startingMessage,
+          description: task.description,
+        },
+      })
+      // Reload to get updated state
+      await loadBackgroundTasks()
+    } catch (err) {
+      console.error('Failed to update background task:', err)
+    }
+  }, [backgroundTasks, loadBackgroundTasks])
 
   // Load a specific run and populate conversation
   const loadRun = useCallback(async (id: string) => {
@@ -1169,6 +1251,7 @@ function App() {
     setPendingAskHumanRequests(new Map())
     setAllPermissionRequests(new Map())
     setPermissionResponses(new Map())
+    setSelectedBackgroundTask(null)
   }, [])
 
   const handleChatInputSubmit = (text: string) => {
@@ -1193,6 +1276,8 @@ function App() {
     // Clear forward history when navigating to a new file
     setFileHistoryForward([])
     setSelectedPath(path)
+    // Clear background task selection when navigating to a file
+    setSelectedBackgroundTask(null)
   }, [selectedPath])
 
   const navigateBack = useCallback(() => {
@@ -1686,7 +1771,16 @@ function App() {
   const conversationContentClassName = hasConversation
     ? "mx-auto w-full max-w-4xl pb-28"
     : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
-  const headerTitle = selectedPath ? selectedPath : (isGraphOpen ? 'Graph View' : 'Chat')
+  const headerTitle = selectedPath
+    ? selectedPath
+    : isGraphOpen
+      ? 'Graph View'
+      : selectedBackgroundTask
+        ? `Background Task: ${selectedBackgroundTask}`
+        : 'Chat'
+  const selectedTask = selectedBackgroundTask
+    ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
+    : null
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -1716,8 +1810,18 @@ function App() {
               currentRunId={runId}
               tasksActions={{
                 onNewChat: handleNewChat,
-                onSelectRun: loadRun,
+                onSelectRun: (runIdToLoad) => {
+                  setSelectedBackgroundTask(null)
+                  loadRun(runIdToLoad)
+                },
+                onSelectBackgroundTask: (taskName) => {
+                  setSelectedBackgroundTask(taskName)
+                  setSelectedPath(null)
+                  setIsGraphOpen(false)
+                },
               }}
+              backgroundTasks={backgroundTasks}
+              selectedBackgroundTask={selectedBackgroundTask}
             />
             <SidebarInset className="overflow-hidden! min-h-0">
               {/* Header with sidebar triggers */}
@@ -1819,6 +1923,21 @@ function App() {
                     </pre>
                   </div>
                 )
+              ) : selectedTask ? (
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <BackgroundTaskDetail
+                    name={selectedTask.name}
+                    description={selectedTask.description}
+                    schedule={selectedTask.schedule}
+                    enabled={selectedTask.enabled}
+                    status={selectedTask.status}
+                    nextRunAt={selectedTask.nextRunAt}
+                    lastRunAt={selectedTask.lastRunAt}
+                    lastError={selectedTask.lastError}
+                    runCount={selectedTask.runCount}
+                    onToggleEnabled={(enabled) => handleToggleBackgroundTask(selectedTask.name, enabled)}
+                  />
+                </div>
               ) : (
               <div className="flex min-h-0 flex-1 flex-col">
                 <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
