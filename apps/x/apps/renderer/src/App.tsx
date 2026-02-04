@@ -1821,7 +1821,7 @@ function App() {
                 )
               ) : (
               <div className="flex min-h-0 flex-1 flex-col">
-                <Conversation className="relative flex-1 overflow-y-auto">
+                <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
                   <ScrollPositionPreserver />
                   <ConversationContent className={conversationContentClassName}>
                     {!hasConversation ? (
