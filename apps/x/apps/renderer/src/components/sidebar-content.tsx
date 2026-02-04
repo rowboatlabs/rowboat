@@ -11,7 +11,6 @@ import {
   FilePlus,
   Folder,
   FolderPlus,
-  MessageSquare,
   Mic,
   Network,
   Pencil,
@@ -689,9 +688,7 @@ function TasksSection({
                   <SidebarMenuButton
                     isActive={currentRunId === run.id}
                     onClick={() => actions?.onSelectRun(run.id)}
-                    className="gap-2"
                   >
-                    <MessageSquare className="size-4 shrink-0" />
                     <span className="truncate text-sm">{run.title || '(Untitled chat)'}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
