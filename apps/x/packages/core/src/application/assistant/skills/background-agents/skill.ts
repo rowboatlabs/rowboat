@@ -353,10 +353,12 @@ tools:
 
 1. Use the email_reader tool to get email summaries
 2. Create a consolidated daily digest
-3. Save the digest to the knowledge base
+3. Save the digest to ~/Desktop/daily_digest.md
 
 Don't ask for human input.
 ` + "```" + `
+
+Note: The output path (` + "`~/Desktop/daily_digest.md`" + `) is hardcoded in the instructions. When creating agents that output files, always ask the user where they want files saved and include the full path in the agent instructions.
 
 **3. Orchestrator agent** (` + "`agents/morning_briefing.md`" + `):
 ` + "```markdown" + `
@@ -424,6 +426,7 @@ This schedules the morning briefing workflow to run every day at 7am local time.
 7. **Scheduling**: Use appropriate schedule types - cron for recurring, window for flexible timing, once for one-time tasks
 8. **Error handling**: Background agents should handle errors gracefully since there's no human to intervene
 9. **Avoid executeCommand**: Do NOT attach ` + "`executeCommand`" + ` to background agents as it poses security risks when running unattended. Instead, use the specific builtin tools needed (` + "`workspace-readFile`" + `, ` + "`workspace-writeFile`" + `, etc.) or MCP tools for external integrations
+10. **File output paths**: When creating an agent that outputs files, ASK the user where the file should be stored (default to Desktop: ` + "`~/Desktop`" + `). Then hardcode the full output path in the agent's instructions so it knows exactly where to write files. Example instruction: "Save the output to /Users/username/Desktop/daily_report.md"
 
 ## Validation & Best Practices
 
