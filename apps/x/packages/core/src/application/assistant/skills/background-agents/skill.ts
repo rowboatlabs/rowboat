@@ -98,6 +98,18 @@ You can specify a ` + "`startingMessage`" + ` that gets sent to the agent when i
 }
 ` + "```" + `
 
+### Description
+
+You can add a ` + "`description`" + ` field to describe what the agent does. This is displayed in the UI.
+
+` + "```json" + `
+{
+  "schedule": { "type": "cron", "expression": "0 8 * * *" },
+  "enabled": true,
+  "description": "Summarizes emails and calendar events every morning"
+}
+` + "```" + `
+
 ### Complete Schedule Example
 
 ` + "```json" + `
@@ -109,6 +121,7 @@ You can specify a ` + "`startingMessage`" + ` that gets sent to the agent when i
         "expression": "0 8 * * *"
       },
       "enabled": true,
+      "description": "Daily email and calendar summary",
       "startingMessage": "Summarize my emails and calendar for today"
     },
     "morning_briefing": {
@@ -118,14 +131,16 @@ You can specify a ` + "`startingMessage`" + ` that gets sent to the agent when i
         "startTime": "07:00",
         "endTime": "09:00"
       },
-      "enabled": true
+      "enabled": true,
+      "description": "Morning news and updates briefing"
     },
     "one_time_setup": {
       "schedule": {
         "type": "once",
         "runAt": "2024-12-01T12:00:00"
       },
-      "enabled": true
+      "enabled": true,
+      "description": "One-time data migration task"
     }
   }
 }

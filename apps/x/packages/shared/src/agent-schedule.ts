@@ -36,6 +36,7 @@ export const AgentScheduleEntry = z.object({
     schedule: ScheduleDefinition,
     enabled: z.boolean().optional().default(true),
     startingMessage: z.string().optional(), // Message sent to agent when run starts (defaults to "go")
+    description: z.string().optional(), // Brief description of what the agent does (for UI display)
 });
 
 export const AgentScheduleConfig = z.object({
