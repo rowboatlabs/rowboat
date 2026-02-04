@@ -157,6 +157,12 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     loadModels()
   }, [open])
 
+  // Preferred default models for each provider
+  const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
+    openai: "gpt-5.2",
+    anthropic: "claude-opus-4-5-20251101",
+  }
+
   // Initialize default models from catalog
   useEffect(() => {
     if (Object.keys(modelsCatalog).length === 0) return
@@ -166,7 +172,10 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       for (const provider of cloudProviders) {
         const models = modelsCatalog[provider]
         if (models?.length && !next[provider].model) {
-          next[provider] = { ...next[provider], model: models[0]?.id || "" }
+          // Check if preferred default exists in the catalog
+          const preferredModel = preferredDefaults[provider]
+          const hasPreferred = preferredModel && models.some(m => m.id === preferredModel)
+          next[provider] = { ...next[provider], model: hasPreferred ? preferredModel : (models[0]?.id || "") }
         }
       }
       return next
