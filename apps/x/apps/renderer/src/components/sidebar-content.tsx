@@ -758,7 +758,7 @@ function TasksSection({
         )}
         {runs.length > 0 && (
           <>
-            <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+            <div className="px-3 py-1.5 mt-4 text-xs font-medium text-muted-foreground">
               Chat history
             </div>
             <SidebarMenu>
