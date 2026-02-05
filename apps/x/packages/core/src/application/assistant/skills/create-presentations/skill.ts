@@ -50,6 +50,7 @@ Use workspace-writeFile and workspace-readFile for ALL file operations. Do NOT u
 2. **No box-shadow** - Use borders instead: \`border: 1px solid #e5e7eb\`
 3. **Bullets via CSS only** - Use \`li::before\` pseudo-elements, not separate DOM elements
 4. **Content must fit** - Slides are 1280x720px with 60px padding. Safe area is 1160x600px. Use \`overflow: hidden\`.
+5. **No footers or headers** - Never add fixed/absolute-positioned footer or header elements to slides. They overlap with content in PDF rendering. If you need a slide number or title, include it as part of the normal content flow.
 
 ## Required CSS
 
