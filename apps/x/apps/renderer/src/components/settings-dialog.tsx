@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { useTheme, type Theme } from "@/contexts/theme-context"
+import { useTheme } from "@/contexts/theme-context"
 
 type ConfigTab = "models" | "mcp" | "security" | "appearance"
 

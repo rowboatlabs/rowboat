@@ -2,7 +2,8 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, Mic, Mail, CheckCircle2, MessageSquare } from "lucide-react"
+import { Loader2, Mic, Mail, CheckCircle2 } from "lucide-react"
+// import { MessageSquare } from "lucide-react"
 
 import {
   Dialog,
@@ -81,7 +82,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   // Composio/Slack state
   const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
   const [slackConnected, setSlackConnected] = useState(false)
-  const [slackLoading, setSlackLoading] = useState(true)
+  // const [slackLoading, setSlackLoading] = useState(true)
   const [slackConnecting, setSlackConnecting] = useState(false)
 
   const updateProviderConfig = useCallback(
@@ -212,14 +213,14 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   // Load Slack connection status
   const refreshSlackStatus = useCallback(async () => {
     try {
-      setSlackLoading(true)
+      // setSlackLoading(true)
       const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'slack' })
       setSlackConnected(result.isConnected)
     } catch (error) {
       console.error('Failed to load Slack status:', error)
       setSlackConnected(false)
     } finally {
-      setSlackLoading(false)
+      // setSlackLoading(false)
     }
   }, [])
 
@@ -241,6 +242,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   }, [])
 
   // Connect to Slack via Composio (checks if configured first)
+  /*
   const handleConnectSlack = useCallback(async () => {
     // Check if Composio is configured
     const configResult = await window.ipc.invoke('composio:is-configured', null)
@@ -250,6 +252,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
     await startSlackConnect()
   }, [startSlackConnect])
+  */
 
   // Handle Composio API key submission
   const handleComposioApiKeySubmit = useCallback(async (apiKey: string) => {
@@ -538,6 +541,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   )
 
   // Render Slack row
+  /*
   const renderSlackRow = () => (
     <div className="flex items-center justify-between gap-3 rounded-md px-3 py-3 hover:bg-accent">
       <div className="flex items-center gap-3 min-w-0">
@@ -580,6 +584,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       </div>
     </div>
   )
+  */
 
   // Step 0: LLM Setup
   const LlmSetupStep = () => {
