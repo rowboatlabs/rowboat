@@ -5,11 +5,20 @@ import { NodeHtmlMarkdown } from 'node-html-markdown'
 import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
+import { serviceLogger } from '../services/service_logger.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const MAX_EVENT_ITEMS = 50;
+
+function limitEventItems(items: string[], max: number = MAX_EVENT_ITEMS): { items: string[]; truncated: boolean } {
+    if (items.length <= max) {
+        return { items, truncated: false };
+    }
+    return { items: items.slice(0, max), truncated: true };
+}
 
 const nhm = new NodeHtmlMarkdown();
 
@@ -200,6 +209,7 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const currentHistoryId = profile.data.historyId!;
 
+    const threadIds: string[] = [];
     let pageToken: string | undefined;
     do {
         const res = await gmail.users.threads.list({
@@ -211,13 +221,52 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
         const threads = res.data.threads;
         if (threads) {
             for (const thread of threads) {
-                await processThread(auth, thread.id!, syncDir, attachmentsDir);
+                if (thread.id) {
+                    threadIds.push(thread.id);
+                }
             }
         }
         pageToken = res.data.nextPageToken ?? undefined;
     } while (pageToken);
 
+    if (threadIds.length === 0) {
+        saveState(currentHistoryId, stateFile);
+        console.log("Full sync complete. No threads found.");
+        return;
+    }
+
+    const run = await serviceLogger.startRun({
+        service: 'gmail',
+        message: 'Syncing Gmail',
+        trigger: 'timer',
+    });
+    const limitedThreads = limitEventItems(threadIds);
+    await serviceLogger.log({
+        type: 'changes_identified',
+        service: run.service,
+        runId: run.runId,
+        level: 'info',
+        message: `Found ${threadIds.length} thread${threadIds.length === 1 ? '' : 's'} to sync`,
+        counts: { threads: threadIds.length },
+        items: limitedThreads.items,
+        truncated: limitedThreads.truncated,
+    });
+
+    for (const threadId of threadIds) {
+        await processThread(auth, threadId, syncDir, attachmentsDir);
+    }
+
     saveState(currentHistoryId, stateFile);
+    await serviceLogger.log({
+        type: 'run_complete',
+        service: run.service,
+        runId: run.runId,
+        level: 'info',
+        message: `Gmail sync complete: ${threadIds.length} thread${threadIds.length === 1 ? '' : 's'}`,
+        durationMs: Date.now() - run.startedAt,
+        outcome: 'ok',
+        summary: { threads: threadIds.length },
+    });
     console.log("Full sync complete.");
 }
 
@@ -253,12 +302,46 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
             }
         }
 
-        for (const tid of threadIds) {
+        if (threadIds.size === 0) {
+            const profile = await gmail.users.getProfile({ userId: 'me' });
+            saveState(profile.data.historyId!, stateFile);
+            return;
+        }
+
+        const run = await serviceLogger.startRun({
+            service: 'gmail',
+            message: 'Syncing Gmail',
+            trigger: 'timer',
+        });
+        const threadIdList = Array.from(threadIds);
+        const limitedThreads = limitEventItems(threadIdList);
+        await serviceLogger.log({
+            type: 'changes_identified',
+            service: run.service,
+            runId: run.runId,
+            level: 'info',
+            message: `Found ${threadIdList.length} new thread${threadIdList.length === 1 ? '' : 's'}`,
+            counts: { threads: threadIdList.length },
+            items: limitedThreads.items,
+            truncated: limitedThreads.truncated,
+        });
+
+        for (const tid of threadIdList) {
             await processThread(auth, tid, syncDir, attachmentsDir);
         }
 
         const profile = await gmail.users.getProfile({ userId: 'me' });
         saveState(profile.data.historyId!, stateFile);
+        await serviceLogger.log({
+            type: 'run_complete',
+            service: run.service,
+            runId: run.runId,
+            level: 'info',
+            message: `Gmail sync complete: ${threadIdList.length} thread${threadIdList.length === 1 ? '' : 's'}`,
+            durationMs: Date.now() - run.startedAt,
+            outcome: 'ok',
+            summary: { threads: threadIdList.length },
+        });
 
     } catch (error: unknown) {
         const e = error as { response?: { status?: number } };

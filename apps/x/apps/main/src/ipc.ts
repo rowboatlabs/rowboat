@@ -12,10 +12,12 @@ import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
 import * as runsCore from '@x/core/dist/runs/runs.js';
 import { bus } from '@x/core/dist/runs/bus.js';
+import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
 import z from 'zod';
 import { RunEvent } from '@x/shared/dist/runs.js';
+import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection } from '@x/core/dist/models/models.js';
@@ -218,6 +220,15 @@ function emitRunEvent(event: z.infer<typeof RunEvent>): void {
   }
 }
 
+function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('services:events', event);
+    }
+  }
+}
+
 export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string }): void {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
@@ -234,6 +245,16 @@ export async function startRunsWatcher(): Promise<void> {
   }
   runsWatcher = await bus.subscribe('*', async (event) => {
     emitRunEvent(event);
+  });
+}
+
+let servicesWatcher: (() => void) | null = null;
+export async function startServicesWatcher(): Promise<void> {
+  if (servicesWatcher) {
+    return;
+  }
+  servicesWatcher = await serviceBus.subscribe(async (event) => {
+    emitServiceEvent(event);
   });
 }
 

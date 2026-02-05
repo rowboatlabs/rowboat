@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Bot,
   ChevronRight,
@@ -15,6 +15,7 @@ import {
   Mic,
   Network,
   Pencil,
+  LoaderIcon,
   Square,
   SquarePen,
   Trash2,
@@ -28,6 +29,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -36,6 +38,7 @@ import {
   SidebarMenuItem,
   SidebarMenuSub,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import {
   Tooltip,
@@ -52,6 +55,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { useSidebarSection } from "@/contexts/sidebar-context"
 import { toast } from "@/lib/toast"
+import { ServiceEvent } from "@x/shared/src/service-events.js"
+import z from "zod"
 
 interface TreeNode {
   path: string
@@ -96,6 +101,11 @@ type BackgroundTaskItem = {
   lastRunAt?: string | null
 }
 
+type ServiceEventType = z.infer<typeof ServiceEvent>
+
+const MAX_SYNC_EVENTS = 30
+const RUN_STALE_MS = 2 * 60 * 60 * 1000
+
 type TasksActions = {
   onNewChat: () => void
   onSelectRun: (runId: string) => void
@@ -119,6 +129,117 @@ type SidebarContentPanelProps = {
 const sectionTitles = {
   knowledge: "Knowledge",
   tasks: "Chats",
+}
+
+function formatEventTime(ts: string): string {
+  const date = new Date(ts)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+}
+
+function SyncStatusBar() {
+  const { state, isMobile } = useSidebar()
+  const [events, setEvents] = useState<ServiceEventType[]>([])
+  const [activeRuns, setActiveRuns] = useState<Set<string>>(new Set())
+  const [isExpanded, setIsExpanded] = useState(false)
+  const runTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  useEffect(() => {
+    const cleanup = window.ipc.on('services:events', (event) => {
+      const nextEvent = event as ServiceEventType
+      setEvents((prev) => [nextEvent, ...prev].slice(0, MAX_SYNC_EVENTS))
+      if (nextEvent.type === 'run_start') {
+        setActiveRuns((prev) => {
+          const next = new Set(prev)
+          next.add(nextEvent.runId)
+          return next
+        })
+        const existingTimeout = runTimeoutsRef.current.get(nextEvent.runId)
+        if (existingTimeout) {
+          clearTimeout(existingTimeout)
+        }
+        const timeout = setTimeout(() => {
+          setActiveRuns((prev) => {
+            if (!prev.has(nextEvent.runId)) return prev
+            const next = new Set(prev)
+            next.delete(nextEvent.runId)
+            return next
+          })
+          runTimeoutsRef.current.delete(nextEvent.runId)
+        }, RUN_STALE_MS)
+        runTimeoutsRef.current.set(nextEvent.runId, timeout)
+      } else if (nextEvent.type === 'run_complete') {
+        setActiveRuns((prev) => {
+          const next = new Set(prev)
+          next.delete(nextEvent.runId)
+          return next
+        })
+        const existingTimeout = runTimeoutsRef.current.get(nextEvent.runId)
+        if (existingTimeout) {
+          clearTimeout(existingTimeout)
+          runTimeoutsRef.current.delete(nextEvent.runId)
+        }
+      }
+    })
+    return cleanup
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      runTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout))
+      runTimeoutsRef.current.clear()
+    }
+  }, [])
+
+  const isSyncing = activeRuns.size > 0
+  const isCollapsed = state === "collapsed"
+
+  return (
+    <>
+      {!isMobile && isCollapsed && isSyncing && (
+        <div
+          className="fixed bottom-4 z-40 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+          style={{ left: "calc(var(--sidebar-offset) + 0.5rem)" }}
+          aria-label="Syncing"
+        >
+          <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
+        </div>
+      )}
+      <SidebarFooter className="border-t border-sidebar-border px-2 py-2">
+        <button
+          type="button"
+          onClick={() => setIsExpanded((prev) => !prev)}
+          className="flex w-full items-center justify-between rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-sidebar-accent"
+        >
+          <span className="flex items-center gap-2">
+            {isSyncing ? (
+              <LoaderIcon className="h-3 w-3 animate-spin" />
+            ) : (
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+            )}
+            {isSyncing ? "Syncing" : "All caught up"}
+          </span>
+          <ChevronRight className={`h-3 w-3 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+        </button>
+        {isExpanded && (
+          <div className="mt-2 max-h-40 space-y-1 overflow-auto rounded-md border border-border bg-background p-2 text-xs text-muted-foreground">
+            {events.length === 0 ? (
+              <div>No recent activity.</div>
+            ) : (
+              events.map((event, idx) => (
+                <div key={`${event.runId}-${event.ts}-${idx}`} className="flex items-start gap-2">
+                  <span className="shrink-0 text-[10px] text-muted-foreground/70">
+                    {formatEventTime(event.ts)}
+                  </span>
+                  <span className="leading-4">{event.message}</span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </SidebarFooter>
+    </>
+  )
 }
 
 export function SidebarContentPanel({
@@ -165,6 +286,7 @@ export function SidebarContentPanel({
           />
         )}
       </SidebarContent>
+      <SyncStatusBar />
       <SidebarRail />
     </Sidebar>
   )
@@ -779,4 +901,3 @@ function TasksSection({
     </SidebarGroup>
   )
 }
-

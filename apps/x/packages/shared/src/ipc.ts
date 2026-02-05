@@ -5,6 +5,7 @@ import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolP
 import { LlmModelConfig } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
+import { ServiceEvent } from './service-events.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -174,6 +175,10 @@ const ipcSchemas = {
   },
   'runs:events': {
     req: z.null(),
+    res: z.null(),
+  },
+  'services:events': {
+    req: ServiceEvent,
     res: z.null(),
   },
   'models:list': {
