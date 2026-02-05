@@ -1945,13 +1945,8 @@ function App() {
                   <ConversationContent className={conversationContentClassName}>
                     {!hasConversation ? (
                       <ConversationEmptyState className="h-auto">
-                        <div className="text-4xl font-semibold tracking-tight text-foreground/80 sm:text-5xl md:text-6xl">
-                          Rowboat
-                        </div>
-                        <div className="mt-3 text-sm text-muted-foreground flex items-center gap-1">
-                          <kbd className="px-1.5 py-0.5 text-xs font-medium bg-muted rounded border border-border">⌘</kbd>
-                          <kbd className="px-1.5 py-0.5 text-xs font-medium bg-muted rounded border border-border">L</kbd>
-                          <span className="ml-1">to open chat from anywhere</span>
+                        <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
+                          What are we working on?
                         </div>
                       </ConversationEmptyState>
                     ) : (

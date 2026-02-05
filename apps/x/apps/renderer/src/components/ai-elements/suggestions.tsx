@@ -1,4 +1,4 @@
-import { Mail, Calendar, FolderOpen, FileText } from 'lucide-react'
+import { Mail, Calendar, FolderOpen, FileText, Presentation } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export interface Suggestion {
@@ -32,6 +32,12 @@ const defaultSuggestions: Suggestion[] = [
     label: 'Organize files',
     prompt: 'Help me organize [folder or files]',
     icon: <FolderOpen className="h-4 w-4" />,
+  },
+  {
+    id: 'create-presentation',
+    label: 'Create a presentation',
+    prompt: 'Create a pdf presentation on [topic]',
+    icon: <Presentation className="h-4 w-4" />,
   },
 ]
 
