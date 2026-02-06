@@ -64,6 +64,8 @@ module.exports = {
             name: '@electron-forge/maker-rpm',
             config: {
                 options: {
+                    name: `Rowboat-linux`,
+                    bin: "rowboat",
                     description: 'AI coworker with memory',
                     homepage: 'https://rowboatlabs.com'
                 }
