@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, SquarePen, Square } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
@@ -1874,22 +1874,6 @@ function App() {
                       </>
                     ) : null}
                   </div>
-                )}
-                {!isGraphOpen && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      handleNewChat()
-                      if (selectedPath) {
-                        setIsChatSidebarOpen(true)
-                      }
-                    }}
-                    className="titlebar-no-drag text-foreground gap-1.5"
-                  >
-                    <SquarePen className="size-4" />
-                    New Chat
-                  </Button>
                 )}
                 {!selectedPath && isGraphOpen && (
                   <Button
