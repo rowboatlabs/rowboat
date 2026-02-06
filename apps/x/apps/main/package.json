@@ -24,6 +24,7 @@
         "@electron-forge/maker-zip": "^7.10.2",
         "@electron-forge/publisher-github": "^7.11.1",
         "@electron-forge/publisher-s3": "^7.10.2",
+        "@types/electron-squirrel-startup": "^1.0.2",
         "@types/node": "^25.0.3",
         "electron": "^39.2.7",
         "esbuild": "^0.24.2"

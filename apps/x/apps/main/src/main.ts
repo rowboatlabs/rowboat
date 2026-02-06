@@ -12,12 +12,13 @@ import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js"
 import { init as initPreBuiltRunner } from "@x/core/dist/pre_built/runner.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
+import started from "electron-squirrel-startup";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // run this as early in the main process as possible
-if (require('electron-squirrel-startup')) app.quit();
+if (started) app.quit();
 
 // Path resolution differs between development and production:
 const preloadPath = app.isPackaged
