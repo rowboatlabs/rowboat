@@ -1,26 +1,70 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BookOpen, ExternalLink, FileIcon, Pause, Play } from 'lucide-react'
+import { BookOpen, FileIcon, FileText, Image, Music, Pause, Play, Video } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useFileCard } from '@/contexts/file-card-context'
 import { wikiLabel } from '@/lib/wiki-links'
 
 const AUDIO_EXTENSIONS = new Set(['.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac'])
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm'])
+const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.rtf', '.csv'])
 
 function getExtension(filePath: string): string {
   const dot = filePath.lastIndexOf('.')
   return dot >= 0 ? filePath.slice(dot).toLowerCase() : ''
 }
 
-function getFileName(filePath: string): string {
-  return filePath.split('/').pop() || filePath
+function getFileNameWithoutExt(filePath: string): string {
+  const name = filePath.split('/').pop() || filePath
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(0, dot) : name
 }
 
-function truncatePath(filePath: string, maxLen = 40): string {
-  if (filePath.length <= maxLen) return filePath
-  const parts = filePath.split('/')
-  if (parts.length <= 2) return filePath
-  return `.../${parts.slice(-2).join('/')}`
+function getFileCategory(ext: string): { label: string; icon: typeof FileIcon } {
+  if (AUDIO_EXTENSIONS.has(ext)) return { label: 'Audio', icon: Music }
+  if (IMAGE_EXTENSIONS.has(ext)) return { label: 'Image', icon: Image }
+  if (VIDEO_EXTENSIONS.has(ext)) return { label: 'Video', icon: Video }
+  if (DOCUMENT_EXTENSIONS.has(ext)) return { label: 'Document', icon: FileText }
+  if (ext === '.md') return { label: 'Markdown', icon: FileText }
+  return { label: 'File', icon: FileIcon }
+}
+
+function getExtLabel(ext: string): string {
+  return ext ? ext.slice(1).toUpperCase() : ''
+}
+
+// Shared card shell used by all variants
+function CardShell({
+  icon,
+  title,
+  subtitle,
+  onClick,
+  action,
+}: {
+  icon: React.ReactNode
+  title: string
+  subtitle: string
+  onClick?: () => void
+  action?: React.ReactNode
+}) {
+  return (
+    <div
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+      className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 pr-4 text-left transition-colors hover:bg-accent/50 cursor-pointer w-full my-2"
+    >
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="truncate text-sm font-medium">{title}</div>
+        <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
+      </div>
+      {action}
+    </div>
+  )
 }
 
 // --- Knowledge File Card ---
@@ -28,15 +72,21 @@ function truncatePath(filePath: string, maxLen = 40): string {
 function KnowledgeFileCard({ filePath }: { filePath: string }) {
   const { onOpenKnowledgeFile } = useFileCard()
   const label = wikiLabel(filePath)
+  const ext = getExtension(filePath)
+  const extLabel = getExtLabel(ext)
 
   return (
-    <button
+    <CardShell
+      icon={<BookOpen className="h-5 w-5 text-muted-foreground" />}
+      title={label}
+      subtitle={extLabel ? `Knowledge \u00b7 ${extLabel}` : 'Knowledge'}
       onClick={() => onOpenKnowledgeFile(filePath)}
-      className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-accent max-w-xs text-left transition-colors cursor-pointer w-full"
-    >
-      <BookOpen className="h-5 w-5 shrink-0 text-primary" />
-      <span className="truncate text-sm font-medium">{label}</span>
-    </button>
+      action={
+        <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
+          Open
+        </Button>
+      }
+    />
   )
 }
 
@@ -46,8 +96,11 @@ function AudioFileCard({ filePath }: { filePath: string }) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const ext = getExtension(filePath)
+  const extLabel = getExtLabel(ext)
 
-  const handlePlayPause = useCallback(async () => {
+  const handlePlayPause = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation()
     if (isPlaying && audioRef.current) {
       audioRef.current.pause()
       setIsPlaying(false)
@@ -88,30 +141,28 @@ function AudioFileCard({ filePath }: { filePath: string }) {
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 max-w-xs w-full">
-      <Button
-        size="icon"
-        variant="ghost"
-        onClick={handlePlayPause}
-        disabled={isLoading}
-        className="h-8 w-8 shrink-0"
-      >
-        {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-      </Button>
-      <div className="flex-1 min-w-0">
-        <div className="truncate text-sm font-medium">{getFileName(filePath)}</div>
-        <div className="truncate text-xs text-muted-foreground">{truncatePath(filePath)}</div>
-      </div>
-      <Button
-        size="icon"
-        variant="ghost"
-        onClick={handleOpen}
-        className="h-7 w-7 shrink-0"
-        title="Open externally"
-      >
-        <ExternalLink className="h-3.5 w-3.5" />
-      </Button>
-    </div>
+    <CardShell
+      icon={
+        <button
+          onClick={handlePlayPause}
+          disabled={isLoading}
+          className="flex h-full w-full items-center justify-center"
+        >
+          {isPlaying
+            ? <Pause className="h-5 w-5 text-muted-foreground" />
+            : <Play className="h-5 w-5 text-muted-foreground" />
+          }
+        </button>
+      }
+      title={getFileNameWithoutExt(filePath)}
+      subtitle={`Audio \u00b7 ${extLabel}`}
+      onClick={handleOpen}
+      action={
+        <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
+          Open
+        </Button>
+      }
+    />
   )
 }
 
@@ -121,6 +172,8 @@ function SystemFileCard({ filePath }: { filePath: string }) {
   const ext = getExtension(filePath)
   const isImage = IMAGE_EXTENSIONS.has(ext)
   const [thumbnail, setThumbnail] = useState<string | null>(null)
+  const { label: categoryLabel, icon: CategoryIcon } = getFileCategory(ext)
+  const extLabel = getExtLabel(ext)
 
   useEffect(() => {
     if (!isImage) return
@@ -140,21 +193,21 @@ function SystemFileCard({ filePath }: { filePath: string }) {
   }
 
   return (
-    <button
+    <CardShell
+      icon={
+        thumbnail
+          ? <img src={thumbnail} alt="" className="h-10 w-10 rounded-lg object-cover" />
+          : <CategoryIcon className="h-5 w-5 text-muted-foreground" />
+      }
+      title={getFileNameWithoutExt(filePath)}
+      subtitle={extLabel ? `${categoryLabel} \u00b7 ${extLabel}` : categoryLabel}
       onClick={handleOpen}
-      className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-accent max-w-xs text-left transition-colors cursor-pointer w-full"
-    >
-      {thumbnail ? (
-        <img src={thumbnail} alt="" className="h-10 w-10 rounded object-cover shrink-0" />
-      ) : (
-        <FileIcon className="h-5 w-5 shrink-0 text-muted-foreground" />
-      )}
-      <div className="flex-1 min-w-0">
-        <div className="truncate text-sm font-medium">{getFileName(filePath)}</div>
-        <div className="truncate text-xs text-muted-foreground">{truncatePath(filePath)}</div>
-      </div>
-      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-    </button>
+      action={
+        <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
+          Open
+        </Button>
+      }
+    />
   )
 }
 
