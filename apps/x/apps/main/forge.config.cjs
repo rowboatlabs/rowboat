@@ -53,6 +53,7 @@ module.exports = {
             name: '@electron-forge/maker-deb',
             config: {
                 options: {
+                    description: 'AI coworker with memory',
                     maintainer: 'rowboatlabs',
                     homepage: 'https://rowboatlabs.com'
                 }
