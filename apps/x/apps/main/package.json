@@ -1,5 +1,7 @@
 {
-    "name": "Rowboat",
+    "name": "rowboat",
+    "productName": "Rowboat",
+    "description": "AI coworker with memory",
     "type": "module",
     "version": "0.1.0",
     "main": ".package/dist/main.cjs",

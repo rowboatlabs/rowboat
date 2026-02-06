@@ -7,7 +7,6 @@ const pkg = require('./package.json');
 
 module.exports = {
     packagerConfig: {
-        name: 'Rowboat',
         executableName: 'rowboat',
         icon: './icons/icon',  // .icns extension added automatically
         appBundleId: 'com.rowboat.app',
@@ -54,6 +53,7 @@ module.exports = {
             config: (arch) => ({
                 options: {
                     name: `Rowboat-linux`,
+                    bin: "rowboat",
                     description: 'AI coworker with memory',
                     maintainer: 'rowboatlabs',
                     homepage: 'https://rowboatlabs.com'
