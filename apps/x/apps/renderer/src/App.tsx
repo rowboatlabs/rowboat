@@ -46,7 +46,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { Separator } from "@/components/ui/separator"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { OnboardingModal } from '@/components/onboarding-modal'
@@ -474,7 +473,7 @@ function ContentHeader({ children }: { children: React.ReactNode }) {
   return (
     <header
       className={cn(
-        "titlebar-drag-region flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 bg-background transition-[padding] duration-200 ease-linear",
+        "titlebar-drag-region flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 bg-sidebar transition-[padding] duration-200 ease-linear",
         isCollapsed && "pl-[108px]"
       )}
     >
@@ -1903,18 +1902,14 @@ function App() {
                   </Button>
                 )}
                 {(selectedPath || isGraphOpen) && (
-                  <>
-                    <Separator orientation="vertical" className="h-4" />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setIsChatSidebarOpen(!isChatSidebarOpen)}
-                      className="titlebar-no-drag size-7 -mr-1"
-                    >
-                      <PanelRightIcon />
-                      <span className="sr-only">Toggle Chat Sidebar</span>
-                    </Button>
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => setIsChatSidebarOpen(!isChatSidebarOpen)}
+                    className="titlebar-no-drag flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1"
+                    aria-label="Toggle Chat Sidebar"
+                  >
+                    <PanelRightIcon className="size-4" />
+                  </button>
                 )}
               </ContentHeader>
 

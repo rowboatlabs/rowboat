@@ -458,7 +458,7 @@ export function ChatSidebar({
       {showContent && (
         <>
           {/* Header - minimal, expand and new chat buttons */}
-          <header className="titlebar-drag-region flex h-12 shrink-0 items-center justify-end gap-1 px-2">
+          <header className="titlebar-drag-region flex h-10 shrink-0 items-center justify-end gap-1 px-2 bg-sidebar">
             {onOpenFullScreen && (
               <Tooltip>
                 <TooltipTrigger asChild>
