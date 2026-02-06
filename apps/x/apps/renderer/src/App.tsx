@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, ArrowUp, PanelRightIcon, SquarePen, Square } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, SquarePen, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
@@ -43,7 +43,7 @@ import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/
 import {
   SidebarInset,
   SidebarProvider,
-  SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
@@ -440,6 +440,46 @@ function ChatInputWithMentions({
         runId={runId}
       />
     </PromptInputProvider>
+  )
+}
+
+/** Traffic light placeholders + toggle button, fixed next to macOS traffic lights */
+function FixedSidebarToggle() {
+  const { toggleSidebar } = useSidebar()
+  return (
+    <div className="fixed left-0 top-0 z-50 flex h-10 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      {/* Placeholder dots that show through when traffic lights are hidden (window unfocused) */}
+      <div className="flex items-center gap-2 pl-[13px]">
+        <div className="h-3 w-3 rounded-full bg-border" />
+        <div className="h-3 w-3 rounded-full bg-border" />
+        <div className="h-3 w-3 rounded-full bg-border" />
+      </div>
+      {/* Sidebar toggle */}
+      <button
+        type="button"
+        onClick={toggleSidebar}
+        className="ml-2.5 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        aria-label="Toggle Sidebar"
+      >
+        <PanelLeftIcon className="size-4" />
+      </button>
+    </div>
+  )
+}
+
+/** Main content header that adjusts padding based on sidebar state */
+function ContentHeader({ children }: { children: React.ReactNode }) {
+  const { state } = useSidebar()
+  const isCollapsed = state === "collapsed"
+  return (
+    <header
+      className={cn(
+        "titlebar-drag-region flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 bg-background transition-[padding] duration-200 ease-linear",
+        isCollapsed && "pl-[108px]"
+      )}
+    >
+      {children}
+    </header>
   )
 }
 
@@ -1816,10 +1856,8 @@ function App() {
               selectedBackgroundTask={selectedBackgroundTask}
             />
             <SidebarInset className="overflow-hidden! min-h-0">
-              {/* Header with sidebar triggers */}
-              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 bg-background">
-                <SidebarTrigger className="-ml-1" />
-                <Separator orientation="vertical" className="h-4" />
+              {/* Header - also serves as titlebar drag region, adjusts padding when sidebar collapsed */}
+              <ContentHeader>
                 <span className="text-sm font-medium text-muted-foreground flex-1">
                   {headerTitle}
                 </span>
@@ -1848,7 +1886,7 @@ function App() {
                         setIsChatSidebarOpen(true)
                       }
                     }}
-                    className="text-foreground gap-1.5"
+                    className="titlebar-no-drag text-foreground gap-1.5"
                   >
                     <SquarePen className="size-4" />
                     New Chat
@@ -1859,7 +1897,7 @@ function App() {
                     variant="ghost"
                     size="sm"
                     onClick={() => setIsGraphOpen(false)}
-                    className="text-foreground"
+                    className="titlebar-no-drag text-foreground"
                   >
                     Close Graph
                   </Button>
@@ -1871,14 +1909,14 @@ function App() {
                       variant="ghost"
                       size="icon"
                       onClick={() => setIsChatSidebarOpen(!isChatSidebarOpen)}
-                      className="size-7 -mr-1"
+                      className="titlebar-no-drag size-7 -mr-1"
                     >
                       <PanelRightIcon />
                       <span className="sr-only">Toggle Chat Sidebar</span>
                     </Button>
                   </>
                 )}
-              </header>
+              </ContentHeader>
 
               {isGraphOpen ? (
                 <div className="flex-1 min-h-0">
@@ -2056,6 +2094,8 @@ function App() {
                 onAskHumanResponse={handleAskHumanResponse}
               />
             )}
+            {/* Rendered last so its no-drag region paints over the sidebar drag region */}
+            <FixedSidebarToggle />
           </SidebarProvider>
 
           {/* Floating chat input - shown when viewing files/graph and chat sidebar is closed */}

@@ -267,9 +267,12 @@ export function SidebarContentPanel({
 
   return (
     <Sidebar className="border-r-0" {...props}>
-      <SidebarHeader>
+      <SidebarHeader className="titlebar-drag-region">
+        {/* Top spacer to clear the traffic lights + fixed toggle row */}
+        <div className="h-8" />
+        {/* Tab switcher - centered below the traffic lights row */}
         <div className="flex items-center px-2 py-1.5">
-          <div className="flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
+          <div className="titlebar-no-drag flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
             {sectionTabs.map((tab) => (
               <button
                 key={tab.id}

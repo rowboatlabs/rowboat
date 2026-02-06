@@ -255,6 +255,15 @@
   }
 }
 
+/* Titlebar drag regions for frameless window */
+.titlebar-drag-region {
+  -webkit-app-region: drag;
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
 .graph-view {
   background-color: var(--background);
   user-select: none;

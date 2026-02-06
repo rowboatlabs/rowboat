@@ -71,6 +71,8 @@ function createWindow() {
     height: 800,
     show: false, // Don't show until ready
     backgroundColor: "#252525", // Prevent white flash (matches dark mode)
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 12, y: 12 },
     webPreferences: {
       // IMPORTANT: keep Node out of renderer
       nodeIntegration: false,
