@@ -3,6 +3,7 @@
 // Forge loads configs with require(), which fails on ESM files
 
 const path = require('path');
+const pkg = require('./package.json');
 
 module.exports = {
     packagerConfig: {
@@ -36,7 +37,7 @@ module.exports = {
             name: '@electron-forge/maker-dmg',
             config: (arch) => ({
                 format: 'ULFO',
-                name: `Rowboat-darwin-${arch}`,  // Architecture-specific name to avoid conflicts
+                name: `Rowboat-darwin-${arch}-${pkg.version}`,  // Architecture-specific name to avoid conflicts
             })
         },
         {
@@ -45,7 +46,7 @@ module.exports = {
                 authors: 'rowboatlabs',
                 description: 'AI coworker with memory',
                 name: `Rowboat-win32-${arch}`,
-                setupExe: `Rowboat-win32-${arch}`,
+                setupExe: `Rowboat-win32-${arch}-${pkg.version}-setup.exe`,
             })
         },
         {
