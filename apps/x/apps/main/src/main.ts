@@ -16,6 +16,9 @@ import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// run this as early in the main process as possible
+if (require('electron-squirrel-startup')) app.quit();
+
 // Path resolution differs between development and production:
 const preloadPath = app.isPackaged
   ? path.join(__dirname, "../preload/dist/preload.js")
@@ -115,8 +118,8 @@ app.whenReady().then(async () => {
   if (app.isPackaged) {
     updateElectronApp({
       updateSource: {
-        type: UpdateSourceType.StaticStorage,
-        baseUrl: `https://rowboat-desktop-app-releases.s3.amazonaws.com/releases/${process.platform}/${process.arch}`,
+        type: UpdateSourceType.ElectronPublicUpdateService,
+        repo: "rowboatlabs/rowboat",
       },
       notifyUser: true, // Shows native dialog when update is available
     });
