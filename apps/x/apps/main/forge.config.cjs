@@ -50,6 +50,23 @@ module.exports = {
             })
         },
         {
+            name: '@electron-forge/maker-deb',
+            config: {
+                options: {
+                    maintainer: 'rowboatlabs',
+                    homepage: 'https://rowboatlabs.com'
+                }
+            }
+        },
+        {
+            name: '@electron-forge/maker-rpm',
+            config: {
+                options: {
+                    homepage: 'https://rowboatlabs.com'
+                }
+            }
+        },
+        {
             name: '@electron-forge/maker-zip',
             platform: ["darwin", "win32", "linux"],
         }
