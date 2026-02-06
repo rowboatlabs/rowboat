@@ -51,18 +51,20 @@ module.exports = {
         },
         {
             name: '@electron-forge/maker-deb',
-            config: {
+            config: (arch) => ({
                 options: {
+                    name: `Rowboat-linux`,
                     description: 'AI coworker with memory',
                     maintainer: 'rowboatlabs',
                     homepage: 'https://rowboatlabs.com'
                 }
-            }
+            })
         },
         {
             name: '@electron-forge/maker-rpm',
             config: {
                 options: {
+                    description: 'AI coworker with memory',
                     homepage: 'https://rowboatlabs.com'
                 }
             }

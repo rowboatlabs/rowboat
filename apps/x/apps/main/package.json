@@ -3,6 +3,7 @@
     "type": "module",
     "version": "0.1.0",
     "main": ".package/dist/main.cjs",
+    "license": "Apache-2.0",
     "scripts": {
         "start": "electron .",
         "build": "rm -rf dist && tsc && node bundle.mjs",
