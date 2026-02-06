@@ -36,15 +36,16 @@ module.exports = {
             name: '@electron-forge/maker-dmg',
             config: (arch) => ({
                 format: 'ULFO',
-                name: `Rowboat-${arch}`,  // Architecture-specific name to avoid conflicts
+                name: `Rowboat-darwin-${arch}`,  // Architecture-specific name to avoid conflicts
             })
         },
         {
             name: '@electron-forge/maker-squirrel',
             config: (arch) => ({
-                authors: 'Rowboat',
+                authors: 'rowboatlabs',
                 description: 'AI coworker with memory',
                 name: `Rowboat-win32-${arch}`,
+                setupExe: `Rowboat-win32-${arch}`,
             })
         },
         {
