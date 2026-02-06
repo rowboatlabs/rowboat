@@ -94,7 +94,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VITE_PUBLIC_POSTHOG_KEY: ${{ secrets.VITE_PUBLIC_POSTHOG_KEY }}
           VITE_PUBLIC_POSTHOG_HOST: ${{ secrets.VITE_PUBLIC_POSTHOG_HOST }}
-        run: electron-forge publish --arch=arm64,x64 --platform=darwin
+        run: npx electron-forge publish --arch=arm64,x64 --platform=darwin
         working-directory: apps/x/apps/main
 
       - name: Cleanup keychain
@@ -166,7 +166,7 @@ jobs:
           VITE_PUBLIC_POSTHOG_KEY: ${{ secrets.VITE_PUBLIC_POSTHOG_KEY }}
           VITE_PUBLIC_POSTHOG_HOST: ${{ secrets.VITE_PUBLIC_POSTHOG_HOST }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: electron-forge publish --arch=x64,arm64 --platform=linux
+        run: npx electron-forge publish --arch=x64,arm64 --platform=linux
         working-directory: apps/x/apps/main
 
       - name: Upload workflow artifacts
@@ -232,7 +232,7 @@ jobs:
           VITE_PUBLIC_POSTHOG_KEY: ${{ secrets.VITE_PUBLIC_POSTHOG_KEY }}
           VITE_PUBLIC_POSTHOG_HOST: ${{ secrets.VITE_PUBLIC_POSTHOG_HOST }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: electron-forge publish --arch=x64 --platform=win32
+        run: npx electron-forge publish --arch=x64 --platform=win32
         working-directory: apps/x/apps/main
 
       - name: Upload workflow artifacts
