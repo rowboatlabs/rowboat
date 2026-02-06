@@ -258,6 +258,20 @@ export async function startServicesWatcher(): Promise<void> {
   });
 }
 
+export function stopRunsWatcher(): void {
+  if (runsWatcher) {
+    runsWatcher();
+    runsWatcher = null;
+  }
+}
+
+export function stopServicesWatcher(): void {
+  if (servicesWatcher) {
+    servicesWatcher();
+    servicesWatcher = null;
+  }
+}
+
 // ============================================================================
 // Handler Implementations
 // ============================================================================

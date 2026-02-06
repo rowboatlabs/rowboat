@@ -5,6 +5,7 @@ import { WorkDir } from '../../config/config.js';
 import container from '../../di/container.js';
 import { IGranolaConfigRepo } from './repo.js';
 import { serviceLogger } from '../../services/service_logger.js';
+import { limitEventItems } from '../limit_event_items.js';
 import {
     GetDocumentsResponse,
     SyncState,
@@ -23,14 +24,6 @@ const API_DELAY_MS = 1000; // 1 second delay between API calls
 const RATE_LIMIT_RETRY_DELAY_MS = 60 * 1000; // Wait 1 minute on rate limit
 const MAX_RETRIES = 3; // Maximum retries for rate-limited requests
 const MAX_BATCH_SIZE = 10; // Process max 10 documents per folder per sync
-const MAX_EVENT_ITEMS = 50;
-
-function limitEventItems(items: string[], max: number = MAX_EVENT_ITEMS): { items: string[]; truncated: boolean } {
-    if (items.length <= max) {
-        return { items, truncated: false };
-    }
-    return { items: items.slice(0, max), truncated: true };
-}
 
 // --- Wake Signal for Immediate Sync Trigger ---
 let wakeResolve: (() => void) | null = null;

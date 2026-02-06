@@ -3,6 +3,7 @@ import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { FirefliesClientFactory } from './fireflies-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
+import { limitEventItems } from './limit_event_items.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'fireflies_transcripts');
@@ -12,14 +13,6 @@ const LOOKBACK_DAYS = 30; // Last 1 month
 const API_DELAY_MS = 2000; // 2 second delay between API calls
 const RATE_LIMIT_RETRY_DELAY_MS = 60 * 1000; // Wait 1 minute on rate limit
 const MAX_RETRIES = 3; // Maximum retries for rate-limited requests
-const MAX_EVENT_ITEMS = 50;
-
-function limitEventItems(items: string[], max: number = MAX_EVENT_ITEMS): { items: string[]; truncated: boolean } {
-    if (items.length <= max) {
-        return { items, truncated: false };
-    }
-    return { items: items.slice(0, max), truncated: true };
-}
 
 // --- Wake Signal for Immediate Sync Trigger ---
 let wakeResolve: (() => void) | null = null;
@@ -603,7 +596,7 @@ async function syncMeetings() {
             level: 'info',
             message: `Fireflies sync complete: ${newCount} transcript${newCount === 1 ? '' : 's'}`,
             durationMs: Date.now() - run.startedAt,
-            outcome: newCount > 0 ? 'ok' : 'error',
+            outcome: newCount > 0 ? 'ok' : 'idle',
             summary: { transcripts: newCount },
         });
         

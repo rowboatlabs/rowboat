@@ -14,6 +14,7 @@ import {
     type GraphState,
 } from './graph_state.js';
 import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js';
+import { limitEventItems } from './limit_event_items.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -33,14 +34,6 @@ const SOURCE_FOLDERS = [
 
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
 const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
-const MAX_EVENT_ITEMS = 50;
-
-function limitEventItems(items: string[], max: number = MAX_EVENT_ITEMS): { items: string[]; truncated: boolean } {
-    if (items.length <= max) {
-        return { items, truncated: false };
-    }
-    return { items: items.slice(0, max), truncated: true };
-}
 
 function extractPathFromToolInput(input: string): string | null {
     try {

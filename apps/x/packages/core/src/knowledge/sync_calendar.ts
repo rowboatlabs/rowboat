@@ -6,6 +6,7 @@ import { NodeHtmlMarkdown } from 'node-html-markdown'
 import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger } from '../services/service_logger.js';
+import { limitEventItems } from './limit_event_items.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'calendar_sync');
@@ -15,15 +16,6 @@ const REQUIRED_SCOPES = [
     'https://www.googleapis.com/auth/calendar.events.readonly',
     'https://www.googleapis.com/auth/drive.readonly'
 ];
-const MAX_EVENT_ITEMS = 50;
-
-function limitEventItems(items: string[], max: number = MAX_EVENT_ITEMS): { items: string[]; truncated: boolean } {
-    if (items.length <= max) {
-        return { items, truncated: false };
-    }
-    return { items: items.slice(0, max), truncated: true };
-}
-
 const nhm = new NodeHtmlMarkdown();
 
 // --- Wake Signal for Immediate Sync Trigger ---

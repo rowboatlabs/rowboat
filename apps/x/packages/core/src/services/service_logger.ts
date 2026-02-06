@@ -7,7 +7,7 @@ import type { ServiceEventType } from "@x/shared/dist/service-events.js";
 import { serviceBus } from "./service_bus.js";
 
 type ServiceNameType = ServiceEventType["service"];
-type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type ServiceEventInput = DistributiveOmit<ServiceEventType, "ts">;
 
 const LOG_DIR = path.join(WorkDir, "logs");
@@ -47,8 +47,18 @@ export class ServiceLogger {
     private async rotateIfNeeded(nextBytes: number): Promise<void> {
         if (this.currentSize + nextBytes <= MAX_LOG_BYTES) return;
         if (this.stream) {
-            this.stream.close();
+            const stream = this.stream;
             this.stream = null;
+            await new Promise<void>((resolve) => {
+                let settled = false;
+                const done = () => {
+                    if (settled) return;
+                    settled = true;
+                    resolve();
+                };
+                stream.once("error", done);
+                stream.end(done);
+            });
         }
         const ts = safeTimestampForFile(new Date().toISOString());
         const rotatedPath = path.join(LOG_DIR, `services.${ts}.jsonl`);

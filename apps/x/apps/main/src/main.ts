@@ -1,6 +1,14 @@
 import { app, BrowserWindow, protocol, net, shell } from "electron";
 import path from "node:path";
-import { setupIpcHandlers, startRunsWatcher, startServicesWatcher, startWorkspaceWatcher, stopWorkspaceWatcher } from "./ipc.js";
+import {
+  setupIpcHandlers,
+  startRunsWatcher,
+  startServicesWatcher,
+  startWorkspaceWatcher,
+  stopRunsWatcher,
+  stopServicesWatcher,
+  stopWorkspaceWatcher
+} from "./ipc.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
@@ -185,4 +193,6 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   // Clean up watcher on app quit
   stopWorkspaceWatcher();
+  stopRunsWatcher();
+  stopServicesWatcher();
 });
