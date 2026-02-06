@@ -12,10 +12,13 @@ import {
   FilePlus,
   Folder,
   FolderPlus,
+  HelpCircle,
   Mic,
   Network,
   Pencil,
+  Plug,
   LoaderIcon,
+  Settings,
   Square,
   SquarePen,
   Trash2,
@@ -53,7 +56,11 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { Input } from "@/components/ui/input"
-import { useSidebarSection } from "@/contexts/sidebar-context"
+import { cn } from "@/lib/utils"
+import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
+import { ConnectorsPopover } from "@/components/connectors-popover"
+import { HelpPopover } from "@/components/help-popover"
+import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
@@ -126,10 +133,10 @@ type SidebarContentPanelProps = {
   selectedBackgroundTask?: string | null
 } & React.ComponentProps<typeof Sidebar>
 
-const sectionTitles = {
-  knowledge: "Knowledge",
-  tasks: "Chats",
-}
+const sectionTabs: { id: ActiveSection; label: string }[] = [
+  { id: "tasks", label: "Chat" },
+  { id: "knowledge", label: "Knowledge" },
+]
 
 function formatEventTime(ts: string): string {
   const date = new Date(ts)
@@ -199,7 +206,7 @@ function SyncStatusBar() {
       {!isMobile && isCollapsed && isSyncing && (
         <div
           className="fixed bottom-4 z-40 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background shadow-sm"
-          style={{ left: "calc(var(--sidebar-offset) + 0.5rem)" }}
+          style={{ left: "0.5rem" }}
           aria-label="Syncing"
         >
           <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -256,13 +263,28 @@ export function SidebarContentPanel({
   selectedBackgroundTask,
   ...props
 }: SidebarContentPanelProps) {
-  const { activeSection } = useSidebarSection()
+  const { activeSection, setActiveSection } = useSidebarSection()
 
   return (
     <Sidebar className="border-r-0" {...props}>
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <span className="font-semibold text-lg">{sectionTitles[activeSection]}</span>
+        <div className="flex items-center px-2 py-1.5">
+          <div className="flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
+            {sectionTabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveSection(tab.id)}
+                className={cn(
+                  "flex-1 rounded-md px-3 py-1 text-sm font-medium transition-colors",
+                  activeSection === tab.id
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                    : "text-sidebar-foreground/70 hover:text-sidebar-foreground"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
       </SidebarHeader>
       <SidebarContent>
@@ -286,6 +308,26 @@ export function SidebarContentPanel({
           />
         )}
       </SidebarContent>
+      {/* Bottom actions */}
+      <div className="border-t border-sidebar-border px-2 py-2">
+        <div className="flex items-center justify-center gap-1">
+          <ConnectorsPopover tooltip="Connectors">
+            <button className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+              <Plug className="size-4" />
+            </button>
+          </ConnectorsPopover>
+          <SettingsDialog>
+            <button className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+              <Settings className="size-4" />
+            </button>
+          </SettingsDialog>
+          <HelpPopover tooltip="Help">
+            <button className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+              <HelpCircle className="size-4" />
+            </button>
+          </HelpPopover>
+        </div>
+      </div>
       <SyncStatusBar />
       <SidebarRail />
     </Sidebar>
