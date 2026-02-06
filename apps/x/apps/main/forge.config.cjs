@@ -58,15 +58,6 @@ module.exports = {
     ],
     publishers: [
         {
-            name: '@electron-forge/publisher-s3',
-            config: {
-                bucket: 'rowboat-desktop-app-releases',
-                region: 'us-east-1',
-                public: true,
-                folder: 'releases'  // Creates structure: releases/darwin/{arch}/files (separate builds for arm64 and x64)
-            }
-        },
-        {
             name: '@electron-forge/publisher-github',
             config: {
                 repository: {
