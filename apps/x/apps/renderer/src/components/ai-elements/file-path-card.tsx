@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { BookOpen, FileIcon, FileText, Image, Music, Pause, Play, Video } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useFileCard } from '@/contexts/file-card-context'
+import { useSidebarSection } from '@/contexts/sidebar-context'
 import { wikiLabel } from '@/lib/wiki-links'
 
 const AUDIO_EXTENSIONS = new Set(['.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac'])
@@ -71,6 +72,7 @@ function CardShell({
 
 function KnowledgeFileCard({ filePath }: { filePath: string }) {
   const { onOpenKnowledgeFile } = useFileCard()
+  const { setActiveSection } = useSidebarSection()
   const label = wikiLabel(filePath)
   const ext = getExtension(filePath)
   const extLabel = getExtLabel(ext)
@@ -80,7 +82,7 @@ function KnowledgeFileCard({ filePath }: { filePath: string }) {
       icon={<BookOpen className="h-5 w-5 text-muted-foreground" />}
       title={label}
       subtitle={extLabel ? `Knowledge \u00b7 ${extLabel}` : 'Knowledge'}
-      onClick={() => onOpenKnowledgeFile(filePath)}
+      onClick={() => { setActiveSection('knowledge'); onOpenKnowledgeFile(filePath) }}
       action={
         <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
           Open
