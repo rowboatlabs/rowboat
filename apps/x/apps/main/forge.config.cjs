@@ -19,9 +19,6 @@ module.exports = {
             appleIdPassword: process.env.APPLE_PASSWORD,
             teamId: process.env.APPLE_TEAM_ID
         },
-        // NOTE: Electron Forge ignores packagerConfig.dir and always packages from the
-        // config file's directory. We use packageAfterCopy hook instead to customize output.
-        // dir: path.join(__dirname, '.package'),  // Not supported by Forge
         // Since we bundle everything with esbuild, we don't need node_modules at all.
         // These settings prevent Forge's dependency walker (flora-colossus) from trying
         // to analyze/copy node_modules, which fails with pnpm's symlinked workspaces.
@@ -43,8 +40,16 @@ module.exports = {
             })
         },
         {
+            name: '@electron-forge/maker-squirrel',
+            config: (arch) => ({
+                authors: 'Rowboat',
+                description: 'AI coworker with memory',
+                name: `Rowboat-${arch}`,
+            })
+        },
+        {
             name: '@electron-forge/maker-zip',
-            platforms: ['darwin'],
+            platform: ["darwin", "win32", "linux"],
             // ZIP is used by Squirrel.Mac for auto-updates
             config: (arch) => ({
                 // Path must match S3 publisher's folder structure: releases/darwin/{arch}
@@ -54,12 +59,13 @@ module.exports = {
     ],
     publishers: [
         {
-            name: '@electron-forge/publisher-s3',
+            name: '@electron-forge/publisher-github',
             config: {
-                bucket: 'rowboat-desktop-app-releases',
-                region: 'us-east-1',
-                public: true,
-                folder: 'releases'  // Creates structure: releases/darwin/{arch}/files (separate builds for arm64 and x64)
+                repository: {
+                    owner: 'rowboatlabs',
+                    name: 'rowboat'
+                },
+                prerelease: true
             }
         }
     ],
