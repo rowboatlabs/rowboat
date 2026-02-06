@@ -1,8 +1,11 @@
 {
-    "name": "Rowboat",
+    "name": "rowboat",
+    "productName": "Rowboat",
+    "description": "AI coworker with memory",
     "type": "module",
     "version": "0.1.0",
     "main": ".package/dist/main.cjs",
+    "license": "Apache-2.0",
     "scripts": {
         "start": "electron .",
         "build": "rm -rf dist && tsc && node bundle.mjs",
@@ -19,8 +22,9 @@
     },
     "devDependencies": {
         "@electron-forge/cli": "^7.10.2",
-        "@electron-forge/maker-deb": "^7.10.2",
+        "@electron-forge/maker-deb": "^7.11.1",
         "@electron-forge/maker-dmg": "^7.10.2",
+        "@electron-forge/maker-rpm": "^7.11.1",
         "@electron-forge/maker-squirrel": "^7.10.2",
         "@electron-forge/maker-zip": "^7.10.2",
         "@electron-forge/publisher-github": "^7.11.1",

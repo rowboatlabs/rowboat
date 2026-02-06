@@ -7,7 +7,6 @@ const pkg = require('./package.json');
 
 module.exports = {
     packagerConfig: {
-        name: 'Rowboat',
         executableName: 'rowboat',
         icon: './icons/icon',  // .icns extension added automatically
         appBundleId: 'com.rowboat.app',
@@ -48,6 +47,29 @@ module.exports = {
                 name: `Rowboat-win32-${arch}`,
                 setupExe: `Rowboat-win32-${arch}-${pkg.version}-setup.exe`,
             })
+        },
+        {
+            name: '@electron-forge/maker-deb',
+            config: (arch) => ({
+                options: {
+                    name: `Rowboat-linux`,
+                    bin: "rowboat",
+                    description: 'AI coworker with memory',
+                    maintainer: 'rowboatlabs',
+                    homepage: 'https://rowboatlabs.com'
+                }
+            })
+        },
+        {
+            name: '@electron-forge/maker-rpm',
+            config: {
+                options: {
+                    name: `Rowboat-linux`,
+                    bin: "rowboat",
+                    description: 'AI coworker with memory',
+                    homepage: 'https://rowboatlabs.com'
+                }
+            }
         },
         {
             name: '@electron-forge/maker-zip',
