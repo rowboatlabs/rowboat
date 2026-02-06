@@ -33,6 +33,8 @@ import { getMentionHighlightSegments } from '@/lib/mention-highlights'
 import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js'
 import z from 'zod'
 import React from 'react'
+import { FileCardProvider } from '@/contexts/file-card-context'
+import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 
 interface ChatMessage {
   id: string
@@ -103,6 +105,8 @@ const normalizeToolOutput = (output: ToolCall['result'] | undefined, status: Too
   return output
 }
 
+const streamdownComponents = { pre: MarkdownPreOverride }
+
 const MIN_WIDTH = 300
 const MAX_WIDTH = 700
 const DEFAULT_WIDTH = 400
@@ -131,6 +135,7 @@ interface ChatSidebarProps {
   permissionResponses?: Map<string, 'approve' | 'deny'>
   onPermissionResponse?: (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => void
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
+  onOpenKnowledgeFile?: (path: string) => void
 }
 
 export function ChatSidebar({
@@ -156,6 +161,7 @@ export function ChatSidebar({
   permissionResponses = new Map(),
   onPermissionResponse,
   onAskHumanResponse,
+  onOpenKnowledgeFile,
 }: ChatSidebarProps) {
   const [width, setWidth] = useState(defaultWidth)
   const [isResizing, setIsResizing] = useState(false)
@@ -391,7 +397,7 @@ export function ChatSidebar({
         <Message key={item.id} from={item.role}>
           <MessageContent>
             {item.role === 'assistant' ? (
-              <MessageResponse>{item.content}</MessageResponse>
+              <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
             ) : (
               item.content
             )}
@@ -480,6 +486,7 @@ export function ChatSidebar({
           </header>
 
       {/* Conversation area */}
+      <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})}>
       <div className="flex min-h-0 flex-1 flex-col relative">
         <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
           <ScrollPositionPreserver />
@@ -538,7 +545,7 @@ export function ChatSidebar({
                 {currentAssistantMessage && (
                   <Message from="assistant">
                     <MessageContent>
-                      <MessageResponse>{currentAssistantMessage}</MessageResponse>
+                      <MessageResponse components={streamdownComponents}>{currentAssistantMessage}</MessageResponse>
                     </MessageContent>
                   </Message>
                 )}
@@ -650,6 +657,7 @@ export function ChatSidebar({
           )}
         </div>
       </div>
+      </FileCardProvider>
         </>
       )}
     </div>
