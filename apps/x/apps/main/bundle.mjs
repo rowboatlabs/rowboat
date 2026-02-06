@@ -22,7 +22,7 @@ await esbuild.build({
   platform: 'node',
   target: 'node20',
   outfile: './.package/dist/main.cjs',
-  external: ['electron'],  // Provided by Electron runtime
+  external: ['electron', 'electron-squirrel-startup'],  // Provided by Electron runtime
   // Use CommonJS format - many dependencies use require() which doesn't work
   // well with esbuild's ESM shim. CJS handles dynamic requires natively.
   format: 'cjs',

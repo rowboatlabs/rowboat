@@ -16,6 +16,9 @@ import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// run this as early in the main process as possible
+if (require('electron-squirrel-startup')) app.quit();
+
 // Path resolution differs between development and production:
 const preloadPath = app.isPackaged
   ? path.join(__dirname, "../preload/dist/preload.js")
