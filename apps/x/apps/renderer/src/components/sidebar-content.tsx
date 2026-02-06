@@ -313,20 +313,23 @@ export function SidebarContentPanel({
       </SidebarContent>
       {/* Bottom actions */}
       <div className="border-t border-sidebar-border px-2 py-2">
-        <div className="flex items-center justify-center gap-1">
-          <ConnectorsPopover tooltip="Connectors">
-            <button className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+        <div className="flex flex-col gap-1">
+          <ConnectorsPopover>
+            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
               <Plug className="size-4" />
+              <span>Connectors</span>
             </button>
           </ConnectorsPopover>
           <SettingsDialog>
-            <button className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
               <Settings className="size-4" />
+              <span>Settings</span>
             </button>
           </SettingsDialog>
-          <HelpPopover tooltip="Help">
-            <button className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+          <HelpPopover>
+            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
               <HelpCircle className="size-4" />
+              <span>Help</span>
             </button>
           </HelpPopover>
         </div>
