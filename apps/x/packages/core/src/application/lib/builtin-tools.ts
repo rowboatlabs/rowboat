@@ -1,5 +1,6 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
+import * as fs from "fs/promises";
 import { execSync } from "child_process";
 import { glob } from "glob";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
@@ -15,6 +16,11 @@ import { composioAccountsRepo } from "../../composio/repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, listToolkitTools } from "../../composio/client.js";
 import { slackToolCatalog } from "../assistant/skills/slack/tool-catalog.js";
 import type { ToolContext } from "./exec-tool.js";
+// Parser libraries are loaded dynamically inside parseFile.execute()
+// to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
+// Import paths are computed so esbuild cannot statically resolve them.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _importDynamic = new Function('mod', 'return import(mod)') as (mod: string) => Promise<any>;
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const BuiltinToolsSchema = z.record(z.string(), z.object({
@@ -686,6 +692,114 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 }
             } catch (error) {
                 return { error: error instanceof Error ? error.message : 'Unknown error' };
+            }
+        },
+    },
+
+    'parseFile': {
+        description: 'Parse and extract text content from files (PDF, Excel, CSV, Word .docx). Auto-detects format from file extension.',
+        inputSchema: z.object({
+            path: z.string().min(1).describe('File path to parse. Can be an absolute path or a workspace-relative path.'),
+        }),
+        execute: async ({ path: filePath }: { path: string }) => {
+            try {
+                const fileName = path.basename(filePath);
+                const ext = path.extname(filePath).toLowerCase();
+                const supportedExts = ['.pdf', '.xlsx', '.xls', '.csv', '.docx'];
+
+                if (!supportedExts.includes(ext)) {
+                    return {
+                        success: false,
+                        error: `Unsupported file format '${ext}'. Supported formats: ${supportedExts.join(', ')}`,
+                    };
+                }
+
+                // Read file as buffer — support both absolute and workspace-relative paths
+                let buffer: Buffer;
+                if (path.isAbsolute(filePath)) {
+                    buffer = await fs.readFile(filePath);
+                } else {
+                    const result = await workspace.readFile(filePath, 'base64');
+                    buffer = Buffer.from(result.data, 'base64');
+                }
+
+                if (ext === '.pdf') {
+                    const { PDFParse } = await _importDynamic("pdf-parse");
+                    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+                    try {
+                        const textResult = await parser.getText();
+                        const infoResult = await parser.getInfo();
+                        return {
+                            success: true,
+                            fileName,
+                            format: 'pdf',
+                            content: textResult.text,
+                            metadata: {
+                                pages: textResult.total,
+                                title: infoResult.info?.Title || undefined,
+                                author: infoResult.info?.Author || undefined,
+                            },
+                        };
+                    } finally {
+                        await parser.destroy();
+                    }
+                }
+
+                if (ext === '.xlsx' || ext === '.xls') {
+                    const XLSX = await _importDynamic("xlsx");
+                    const workbook = XLSX.read(buffer, { type: 'buffer' });
+                    const sheets: Record<string, string> = {};
+                    for (const sheetName of workbook.SheetNames) {
+                        const sheet = workbook.Sheets[sheetName];
+                        sheets[sheetName] = XLSX.utils.sheet_to_csv(sheet);
+                    }
+                    return {
+                        success: true,
+                        fileName,
+                        format: ext === '.xlsx' ? 'xlsx' : 'xls',
+                        content: Object.values(sheets).join('\n\n'),
+                        metadata: {
+                            sheetNames: workbook.SheetNames,
+                            sheetCount: workbook.SheetNames.length,
+                        },
+                        sheets,
+                    };
+                }
+
+                if (ext === '.csv') {
+                    const Papa = (await _importDynamic("papaparse")).default;
+                    const text = buffer.toString('utf8');
+                    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+                    return {
+                        success: true,
+                        fileName,
+                        format: 'csv',
+                        content: text,
+                        metadata: {
+                            rowCount: parsed.data.length,
+                            headers: parsed.meta.fields || [],
+                        },
+                        data: parsed.data,
+                    };
+                }
+
+                if (ext === '.docx') {
+                    const mammoth = (await _importDynamic("mammoth")).default;
+                    const docResult = await mammoth.extractRawText({ buffer });
+                    return {
+                        success: true,
+                        fileName,
+                        format: 'docx',
+                        content: docResult.value,
+                    };
+                }
+
+                return { success: false, error: 'Unexpected error' };
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                };
             }
         },
     },

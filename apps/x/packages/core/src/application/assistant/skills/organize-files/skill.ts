@@ -72,6 +72,11 @@ grep -r "search term" ~/Documents --include="*.txt" --include="*.md"
 find ~/Downloads -name "*.pdf" -exec basename {} \;
 \`\`\`
 
+**Extracting content from documents:**
+When users want to read or summarize a document's contents (PDF, Excel, CSV, Word .docx), use the \`parseFile\` builtin tool. It extracts text from binary formats so you can answer questions about them.
+- Accepts absolute paths (e.g., \`~/Downloads/report.pdf\`) or workspace-relative paths — no need to copy files first.
+- Supported formats: \`.pdf\`, \`.xlsx\`, \`.xls\`, \`.csv\`, \`.docx\`
+
 ## Organizing Files
 
 **Create destination folder:**

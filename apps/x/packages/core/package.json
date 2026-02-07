@@ -28,14 +28,20 @@
     "glob": "^13.0.0",
     "google-auth-library": "^10.5.0",
     "googleapis": "^169.0.0",
+    "mammoth": "^1.11.0",
     "node-html-markdown": "^2.0.0",
     "ollama-ai-provider-v2": "^1.5.4",
     "openid-client": "^6.8.1",
+    "papaparse": "^5.5.3",
+    "pdf-parse": "^2.4.5",
     "react": "^19.2.3",
+    "xlsx": "^0.18.5",
     "yaml": "^2.8.2",
     "zod": "^4.2.1"
   },
   "devDependencies": {
-    "@types/node": "^25.0.3"
+    "@types/node": "^25.0.3",
+    "@types/papaparse": "^5.5.2",
+    "@types/pdf-parse": "^1.1.5"
   }
 }
