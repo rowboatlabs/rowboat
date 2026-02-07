@@ -1,5 +1,7 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, shell } from 'electron';
 import { ipc } from '@x/shared';
+import path from 'node:path';
+import os from 'node:os';
 import {
   connectProvider,
   disconnectProvider,
@@ -454,6 +456,38 @@ export function setupIpcHandlers() {
       await repo.delete(args.agentName);
       await stateRepo.deleteAgentState(args.agentName);
       return { success: true };
+    },
+    // Shell integration handlers
+    'shell:openPath': async (_event, args) => {
+      let filePath = args.path;
+      if (filePath.startsWith('~')) {
+        filePath = path.join(os.homedir(), filePath.slice(1));
+      }
+      const error = await shell.openPath(filePath);
+      return { error: error || undefined };
+    },
+    'shell:readFileBase64': async (_event, args) => {
+      let filePath = args.path;
+      if (filePath.startsWith('~')) {
+        filePath = path.join(os.homedir(), filePath.slice(1));
+      }
+      const stat = await fs.stat(filePath);
+      if (stat.size > 10 * 1024 * 1024) {
+        throw new Error('File too large (>10MB)');
+      }
+      const buffer = await fs.readFile(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeMap: Record<string, string> = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+        '.bmp': 'image/bmp', '.ico': 'image/x-icon',
+        '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4',
+        '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.aac': 'audio/aac',
+        '.pdf': 'application/pdf', '.json': 'application/json',
+        '.txt': 'text/plain', '.md': 'text/markdown',
+      };
+      const mimeType = mimeMap[ext] || 'application/octet-stream';
+      return { data: buffer.toString('base64'), mimeType, size: stat.size };
     },
   });
 }

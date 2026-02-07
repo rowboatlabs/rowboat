@@ -50,6 +50,8 @@ import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { OnboardingModal } from '@/components/onboarding-modal'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
+import { FileCardProvider } from '@/contexts/file-card-context'
+import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 
@@ -107,6 +109,8 @@ const toToolState = (status: ToolCall['status']): ToolState => {
       return 'input-available'
   }
 }
+
+const streamdownComponents = { pre: MarkdownPreOverride }
 
 const DEFAULT_SIDEBAR_WIDTH = 256
 const wikiLinkRegex = /\[\[([^[\]]+)\]\]/g
@@ -1766,7 +1770,7 @@ function App() {
       return (
         <Message key={item.id} from={item.role}>
           <MessageContent>
-            <MessageResponse>{item.content}</MessageResponse>
+            <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
           </MessageContent>
         </Message>
       )
@@ -1948,6 +1952,7 @@ function App() {
                   />
                 </div>
               ) : (
+              <FileCardProvider onOpenKnowledgeFile={(path) => { setSelectedPath(path); setIsGraphOpen(false) }}>
               <div className="flex min-h-0 flex-1 flex-col">
                 <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
                   <ScrollPositionPreserver />
@@ -2004,7 +2009,7 @@ function App() {
                         {currentAssistantMessage && (
                           <Message from="assistant">
                             <MessageContent>
-                              <MessageResponse>{currentAssistantMessage}</MessageResponse>
+                              <MessageResponse components={streamdownComponents}>{currentAssistantMessage}</MessageResponse>
                             </MessageContent>
                           </Message>
                         )}
@@ -2042,6 +2047,7 @@ function App() {
                   </div>
                 </div>
               </div>
+              </FileCardProvider>
               )}
             </SidebarInset>
 
@@ -2071,6 +2077,7 @@ function App() {
                 permissionResponses={permissionResponses}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
+                onOpenKnowledgeFile={(path) => { setSelectedPath(path); setIsGraphOpen(false) }}
               />
             )}
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}

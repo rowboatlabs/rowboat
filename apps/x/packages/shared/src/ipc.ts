@@ -386,6 +386,15 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  // Shell integration channels
+  'shell:openPath': {
+    req: z.object({ path: z.string() }),
+    res: z.object({ error: z.string().optional() }),
+  },
+  'shell:readFileBase64': {
+    req: z.object({ path: z.string() }),
+    res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
+  },
 } as const;
 
 // ============================================================================
