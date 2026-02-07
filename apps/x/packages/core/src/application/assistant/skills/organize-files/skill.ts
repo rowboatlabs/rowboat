@@ -77,6 +77,10 @@ When users want to read or summarize a document's contents (PDF, Excel, CSV, Wor
 - Accepts absolute paths (e.g., \`~/Downloads/report.pdf\`) or workspace-relative paths — no need to copy files first.
 - Supported formats: \`.pdf\`, \`.xlsx\`, \`.xls\`, \`.csv\`, \`.docx\`
 
+For scanned PDFs, images with text, complex layouts, or presentations where local parsing falls short, use the \`LLMParse\` builtin tool instead. It sends the file to the configured LLM as a multimodal attachment and returns well-structured markdown.
+- Supports everything \`parseFile\` does plus images (\`.png\`, \`.jpg\`, \`.gif\`, \`.webp\`, \`.svg\`, \`.bmp\`, \`.tiff\`), PowerPoint (\`.pptx\`), HTML, and plain text.
+- Also accepts an optional \`prompt\` parameter for custom extraction instructions.
+
 ## Organizing Files
 
 **Create destination folder:**

@@ -158,7 +158,8 @@ When a user asks for ANY task that might require external capabilities (web sear
 - \`workspace-readFile\`, \`workspace-writeFile\`, \`workspace-edit\`, \`workspace-remove\` - File operations
 - \`workspace-readdir\`, \`workspace-exists\`, \`workspace-stat\`, \`workspace-glob\`, \`workspace-grep\` - Directory exploration and file search
 - \`workspace-mkdir\`, \`workspace-rename\`, \`workspace-copy\` - File/directory management
-- \`parseFile\` - Parse and extract text from files (PDF, Excel, CSV, Word .docx). Accepts absolute paths or workspace-relative paths — no need to copy files into the workspace first.
+- \`parseFile\` - Parse and extract text from files (PDF, Excel, CSV, Word .docx). Accepts absolute paths or workspace-relative paths — no need to copy files into the workspace first. Best for well-structured digital documents.
+- \`LLMParse\` - Send a file to the configured LLM as a multimodal attachment to extract content as markdown. Use this instead of \`parseFile\` for scanned PDFs, images with text, complex layouts, presentations, or any format where local parsing falls short. Supports documents and images.
 - \`analyzeAgent\` - Agent analysis
 - \`addMcpServer\`, \`listMcpServers\`, \`listMcpTools\`, \`executeMcpTool\` - MCP server management and execution
 - \`loadSkill\` - Skill loading
