@@ -183,10 +183,6 @@ interface MarkdownEditorProps {
   placeholder?: string
   wikiLinks?: WikiLinkConfig
   onImageUpload?: (file: File) => Promise<string | null>
-  onNavigateBack?: () => void
-  onNavigateForward?: () => void
-  canNavigateBack?: boolean
-  canNavigateForward?: boolean
 }
 
 type WikiLinkMatch = {
@@ -235,10 +231,6 @@ export function MarkdownEditor({
   placeholder = 'Start writing...',
   wikiLinks,
   onImageUpload,
-  onNavigateBack,
-  onNavigateForward,
-  canNavigateBack,
-  canNavigateForward,
 }: MarkdownEditorProps) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -488,10 +480,6 @@ export function MarkdownEditor({
         editor={editor}
         onSelectionHighlight={setSelectionHighlight}
         onImageUpload={handleImageUploadWithPlaceholder}
-        onNavigateBack={onNavigateBack}
-        onNavigateForward={onNavigateForward}
-        canNavigateBack={canNavigateBack}
-        canNavigateForward={canNavigateForward}
       />
       <div className="editor-content-wrapper" ref={wrapperRef} onScroll={handleScroll}>
         <EditorContent editor={editor} />

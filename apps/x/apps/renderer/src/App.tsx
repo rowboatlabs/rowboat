@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Square, X } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Square, X, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
@@ -446,8 +446,33 @@ function ChatInputWithMentions({
   )
 }
 
-/** Traffic light placeholders + toggle button, fixed next to macOS traffic lights */
-function FixedSidebarToggle() {
+/** A snapshot of which view the user is on */
+type ViewState =
+  | { type: 'chat'; runId: string | null }
+  | { type: 'file'; path: string }
+  | { type: 'graph' }
+  | { type: 'task'; name: string }
+
+function viewStatesEqual(a: ViewState, b: ViewState): boolean {
+  if (a.type !== b.type) return false
+  if (a.type === 'chat' && b.type === 'chat') return a.runId === b.runId
+  if (a.type === 'file' && b.type === 'file') return a.path === b.path
+  if (a.type === 'task' && b.type === 'task') return a.name === b.name
+  return true // both graph
+}
+
+/** Traffic light placeholders + toggle button + back/forward nav, fixed next to macOS traffic lights */
+function FixedSidebarToggle({
+  onNavigateBack,
+  onNavigateForward,
+  canNavigateBack,
+  canNavigateForward,
+}: {
+  onNavigateBack: () => void
+  onNavigateForward: () => void
+  canNavigateBack: boolean
+  canNavigateForward: boolean
+}) {
   const { toggleSidebar } = useSidebar()
   return (
     <div className="fixed left-0 top-0 z-50 flex h-10 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
@@ -465,6 +490,25 @@ function FixedSidebarToggle() {
         aria-label="Toggle Sidebar"
       >
         <PanelLeftIcon className="size-4" />
+      </button>
+      {/* Back / Forward navigation */}
+      <button
+        type="button"
+        onClick={onNavigateBack}
+        disabled={!canNavigateBack}
+        className="ml-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+        aria-label="Go back"
+      >
+        <ChevronLeftIcon className="size-4" />
+      </button>
+      <button
+        type="button"
+        onClick={onNavigateForward}
+        disabled={!canNavigateForward}
+        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+        aria-label="Go forward"
+      >
+        <ChevronRightIcon className="size-4" />
       </button>
     </div>
   )
@@ -489,8 +533,6 @@ function ContentHeader({ children }: { children: React.ReactNode }) {
 function App() {
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [fileHistoryBack, setFileHistoryBack] = useState<string[]>([])
-  const [fileHistoryForward, setFileHistoryForward] = useState<string[]>([])
   const [fileContent, setFileContent] = useState<string>('')
   const [editorContent, setEditorContent] = useState<string>('')
   const [tree, setTree] = useState<TreeNode[]>([])
@@ -505,6 +547,16 @@ function App() {
   const [graphStatus, setGraphStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [graphError, setGraphError] = useState<string | null>(null)
   const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(true)
+
+  // Keep the latest selected path in a ref (avoids stale async updates when switching rapidly)
+  const selectedPathRef = useRef<string | null>(null)
+  const editorPathRef = useRef<string | null>(null)
+  const fileLoadRequestIdRef = useRef(0)
+  const initialContentByPathRef = useRef<Map<string, string>>(new Map())
+
+  // Global navigation history (back/forward) across views (chat/file/graph/task)
+  const historyRef = useRef<{ back: ViewState[]; forward: ViewState[] }>({ back: [], forward: [] })
+  const [viewHistory, setViewHistory] = useState(historyRef.current)
 
   // Auto-save state
   const [isSaving, setIsSaving] = useState(false)
@@ -521,6 +573,7 @@ function App() {
   const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const runIdRef = useRef<string | null>(null)
+  const loadRunRequestIdRef = useRef(0)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
   const [stopClickedAt, setStopClickedAt] = useState<number | null>(null)
@@ -561,10 +614,27 @@ function App() {
   const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTaskItem[]>([])
   const [selectedBackgroundTask, setSelectedBackgroundTask] = useState<string | null>(null)
 
+  // Keep selectedPathRef in sync for async guards
+  useEffect(() => {
+    selectedPathRef.current = selectedPath
+    if (!selectedPath) {
+      editorPathRef.current = null
+    }
+  }, [selectedPath])
+
   // Keep runIdRef in sync with runId state (for use in event handlers to avoid stale closures)
   useEffect(() => {
     runIdRef.current = runId
   }, [runId])
+
+  const handleEditorChange = useCallback((markdown: string) => {
+    const nextSelectedPath = selectedPathRef.current
+    // Avoid clobbering editorPath during rapid transitions (e.g. autosave rename) where refs may lag a tick.
+    if (!editorPathRef.current || (nextSelectedPath && editorPathRef.current === nextSelectedPath)) {
+      editorPathRef.current = nextSelectedPath
+    }
+    setEditorContent(markdown)
+  }, [])
 
   // Load directory tree
   const loadDirectory = useCallback(async () => {
@@ -600,16 +670,21 @@ function App() {
 
       // Reload current file if it was changed externally
       if (!selectedPath) return
+      const pathToReload = selectedPath
 
       const isCurrentFileChanged =
-        changedPath === selectedPath || changedPaths.includes(selectedPath)
+        changedPath === pathToReload || changedPaths.includes(pathToReload)
 
       if (isCurrentFileChanged) {
         // Only reload if no unsaved edits
-        if (editorContent === initialContentRef.current) {
-          const result = await window.ipc.invoke('workspace:readFile', { path: selectedPath })
+        const baseline = initialContentByPathRef.current.get(pathToReload) ?? initialContentRef.current
+        if (editorContent === baseline) {
+          const result = await window.ipc.invoke('workspace:readFile', { path: pathToReload })
+          if (selectedPathRef.current !== pathToReload) return
           setFileContent(result.data)
           setEditorContent(result.data)
+          editorPathRef.current = pathToReload
+          initialContentByPathRef.current.set(pathToReload, result.data)
           initialContentRef.current = result.data
         }
       }
@@ -627,13 +702,20 @@ function App() {
       setLastSaved(null)
       return
     }
-    (async () => {
+    const requestId = (fileLoadRequestIdRef.current += 1)
+    const pathToLoad = selectedPath
+    let cancelled = false
+    ;(async () => {
       try {
-        const stat = await window.ipc.invoke('workspace:stat', { path: selectedPath })
+        const stat = await window.ipc.invoke('workspace:stat', { path: pathToLoad })
+        if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
         if (stat.kind === 'file') {
-          const result = await window.ipc.invoke('workspace:readFile', { path: selectedPath })
+          const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
+          if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
           setFileContent(result.data)
           setEditorContent(result.data)
+          editorPathRef.current = pathToLoad
+          initialContentByPathRef.current.set(pathToLoad, result.data)
           initialContentRef.current = result.data
           setLastSaved(null)
         } else {
@@ -643,11 +725,16 @@ function App() {
         }
       } catch (err) {
         console.error('Failed to load file:', err)
-        setFileContent('')
-        setEditorContent('')
-        initialContentRef.current = ''
+        if (!cancelled && fileLoadRequestIdRef.current === requestId && selectedPathRef.current === pathToLoad) {
+          setFileContent('')
+          setEditorContent('')
+          initialContentRef.current = ''
+        }
       }
     })()
+    return () => {
+      cancelled = true
+    }
   }, [selectedPath])
 
   // Track recently opened markdown files for wiki links
@@ -662,28 +749,42 @@ function App() {
 
   // Auto-save when content changes
   useEffect(() => {
-    if (!selectedPath || !selectedPath.endsWith('.md')) return
-    if (debouncedContent === initialContentRef.current) return
+    const pathAtStart = editorPathRef.current
+    if (!pathAtStart || !pathAtStart.endsWith('.md')) return
+
+    const baseline = initialContentByPathRef.current.get(pathAtStart) ?? initialContentRef.current
+    if (debouncedContent === baseline) return
     if (!debouncedContent) return
 
     const saveFile = async () => {
-      setIsSaving(true)
-      let pathToSave = selectedPath
+      const wasActiveAtStart = selectedPathRef.current === pathAtStart
+      if (wasActiveAtStart) setIsSaving(true)
+      let pathToSave = pathAtStart
       try {
-        if (!renameInProgressRef.current && selectedPath.startsWith('knowledge/')) {
+        // Only rename the currently active file (avoids renaming/jumping while user switches rapidly)
+        if (
+          wasActiveAtStart &&
+          selectedPathRef.current === pathAtStart &&
+          !renameInProgressRef.current &&
+          pathAtStart.startsWith('knowledge/')
+        ) {
           const headingTitle = getHeadingTitle(debouncedContent)
           const desiredName = headingTitle ? sanitizeHeadingForFilename(headingTitle) : null
-          const currentBase = getBaseName(selectedPath)
+          const currentBase = getBaseName(pathAtStart)
           if (desiredName && desiredName !== currentBase) {
-            const parentDir = selectedPath.split('/').slice(0, -1).join('/')
+            const parentDir = pathAtStart.split('/').slice(0, -1).join('/')
             const targetPath = `${parentDir}/${desiredName}.md`
-            if (targetPath !== selectedPath) {
+            if (targetPath !== pathAtStart) {
               const exists = await window.ipc.invoke('workspace:exists', { path: targetPath })
               if (!exists.exists) {
                 renameInProgressRef.current = true
-                await window.ipc.invoke('workspace:rename', { from: selectedPath, to: targetPath })
+                await window.ipc.invoke('workspace:rename', { from: pathAtStart, to: targetPath })
                 pathToSave = targetPath
-                setSelectedPath(targetPath)
+                editorPathRef.current = targetPath
+                initialContentByPathRef.current.delete(pathAtStart)
+                if (selectedPathRef.current === pathAtStart) {
+                  setSelectedPath(targetPath)
+                }
               }
             }
           }
@@ -693,17 +794,24 @@ function App() {
           data: debouncedContent,
           opts: { encoding: 'utf8' }
         })
-        initialContentRef.current = debouncedContent
-        setLastSaved(new Date())
+        initialContentByPathRef.current.set(pathToSave, debouncedContent)
+
+        // Only update "current file" UI state if we're still on this file
+        if (selectedPathRef.current === pathAtStart || selectedPathRef.current === pathToSave) {
+          initialContentRef.current = debouncedContent
+          setLastSaved(new Date())
+        }
       } catch (err) {
         console.error('Failed to save file:', err)
       } finally {
         renameInProgressRef.current = false
-        setIsSaving(false)
+        if (wasActiveAtStart && (selectedPathRef.current === pathAtStart || selectedPathRef.current === pathToSave)) {
+          setIsSaving(false)
+        }
       }
     }
     saveFile()
-  }, [debouncedContent, selectedPath])
+  }, [debouncedContent])
 
   // Load runs list (all pages)
   const loadRuns = useCallback(async () => {
@@ -790,8 +898,10 @@ function App() {
 
   // Load a specific run and populate conversation
   const loadRun = useCallback(async (id: string) => {
+    const requestId = (loadRunRequestIdRef.current += 1)
     try {
       const run = await window.ipc.invoke('runs:fetch', { runId: id })
+      if (loadRunRequestIdRef.current !== requestId) return
 
       // Parse the log events into conversation items
       const items: ConversationItem[] = []
@@ -875,6 +985,7 @@ function App() {
           }
         }
       }
+      if (loadRunRequestIdRef.current !== requestId) return
 
       // Track permission requests and responses from history
       const allPermissionRequests = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
@@ -893,6 +1004,7 @@ function App() {
           respondedAskHumanIds.add(event.toolCallId)
         }
       }
+      if (loadRunRequestIdRef.current !== requestId) return
 
       // Separate pending vs responded permission requests
       const pendingPerms = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
@@ -908,6 +1020,7 @@ function App() {
           pendingAsks.set(id, req)
         }
       }
+      if (loadRunRequestIdRef.current !== requestId) return
 
       // Set the conversation and runId
       setConversation(items)
@@ -1283,6 +1396,8 @@ function App() {
   }, [runId])
 
   const handleNewChat = useCallback(() => {
+    // Invalidate any in-flight run loads (rapid switching can otherwise "pop" old conversations back in)
+    loadRunRequestIdRef.current += 1
     setConversation([])
     setCurrentAssistantMessage('')
     setCurrentReasoning('')
@@ -1327,54 +1442,139 @@ function App() {
     }
   }, [expandedFrom])
 
-  // File navigation with history tracking
-  const navigateToFile = useCallback((path: string | null) => {
-    if (path === selectedPath) return
+  const setHistory = useCallback((next: { back: ViewState[]; forward: ViewState[] }) => {
+    historyRef.current = next
+    setViewHistory(next)
+  }, [])
 
-    // Push current path to back history (if we have one)
-    if (selectedPath) {
-      setFileHistoryBack(prev => [...prev, selectedPath])
+  const currentViewState = React.useMemo<ViewState>(() => {
+    if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
+    if (selectedPath) return { type: 'file', path: selectedPath }
+    if (isGraphOpen) return { type: 'graph' }
+    return { type: 'chat', runId }
+  }, [selectedBackgroundTask, selectedPath, isGraphOpen, runId])
+
+  const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
+    const last = stack[stack.length - 1]
+    if (last && viewStatesEqual(last, entry)) return stack
+    return [...stack, entry]
+  }, [])
+
+  const applyViewState = useCallback(async (view: ViewState) => {
+    switch (view.type) {
+      case 'file':
+        setSelectedBackgroundTask(null)
+        setIsGraphOpen(false)
+        setExpandedFrom(null)
+        setSelectedPath(view.path)
+        return
+      case 'graph':
+        setSelectedBackgroundTask(null)
+        setSelectedPath(null)
+        setExpandedFrom(null)
+        setIsGraphOpen(true)
+        return
+      case 'task':
+        setSelectedPath(null)
+        setIsGraphOpen(false)
+        setExpandedFrom(null)
+        setSelectedBackgroundTask(view.name)
+        return
+      case 'chat':
+        setSelectedPath(null)
+        setIsGraphOpen(false)
+        setExpandedFrom(null)
+        setSelectedBackgroundTask(null)
+        if (view.runId) {
+          await loadRun(view.runId)
+        } else {
+          handleNewChat()
+        }
+        return
     }
-    // Clear forward history when navigating to a new file
-    setFileHistoryForward([])
-    setSelectedPath(path)
-    // Clear background task selection when navigating to a file
-    setSelectedBackgroundTask(null)
-    setExpandedFrom(null)
-  }, [selectedPath])
+  }, [handleNewChat, loadRun])
 
-  const navigateBack = useCallback(() => {
-    if (fileHistoryBack.length === 0) return
+  const navigateToView = useCallback(async (nextView: ViewState) => {
+    const current = currentViewState
+    if (viewStatesEqual(current, nextView)) return
 
-    const newBack = [...fileHistoryBack]
-    const previousPath = newBack.pop()!
+    const nextHistory = {
+      back: appendUnique(historyRef.current.back, current),
+      forward: [] as ViewState[],
+    }
+    setHistory(nextHistory)
+    await applyViewState(nextView)
+  }, [appendUnique, applyViewState, currentViewState, setHistory])
 
-    // Push current path to forward history
-    if (selectedPath) {
-      setFileHistoryForward(prev => [...prev, selectedPath])
+  const navigateBack = useCallback(async () => {
+    const { back, forward } = historyRef.current
+    if (back.length === 0) return
+
+    let i = back.length - 1
+    while (i >= 0 && viewStatesEqual(back[i], currentViewState)) i -= 1
+    if (i < 0) {
+      setHistory({ back: [], forward })
+      return
     }
 
-    setFileHistoryBack(newBack)
-    setSelectedPath(previousPath)
-  }, [fileHistoryBack, selectedPath])
+    const target = back[i]
+    const nextHistory = {
+      back: back.slice(0, i),
+      forward: appendUnique(forward, currentViewState),
+    }
+    setHistory(nextHistory)
+    await applyViewState(target)
+  }, [appendUnique, applyViewState, currentViewState, setHistory])
 
-  const navigateForward = useCallback(() => {
-    if (fileHistoryForward.length === 0) return
+  const navigateForward = useCallback(async () => {
+    const { back, forward } = historyRef.current
+    if (forward.length === 0) return
 
-    const newForward = [...fileHistoryForward]
-    const nextPath = newForward.pop()!
-
-    // Push current path to back history
-    if (selectedPath) {
-      setFileHistoryBack(prev => [...prev, selectedPath])
+    let i = forward.length - 1
+    while (i >= 0 && viewStatesEqual(forward[i], currentViewState)) i -= 1
+    if (i < 0) {
+      setHistory({ back, forward: [] })
+      return
     }
 
-    setFileHistoryForward(newForward)
-    setSelectedPath(nextPath)
-  }, [fileHistoryForward, selectedPath])
+    const target = forward[i]
+    const nextHistory = {
+      back: appendUnique(back, currentViewState),
+      forward: forward.slice(0, i),
+    }
+    setHistory(nextHistory)
+    await applyViewState(target)
+  }, [appendUnique, applyViewState, currentViewState, setHistory])
 
-  const canNavigateBack = fileHistoryBack.length > 0
-  const canNavigateForward = fileHistoryForward.length > 0
+  const canNavigateBack = React.useMemo(() => {
+    for (let i = viewHistory.back.length - 1; i >= 0; i--) {
+      if (!viewStatesEqual(viewHistory.back[i], currentViewState)) return true
+    }
+    return false
+  }, [viewHistory.back, currentViewState])
+
+  const canNavigateForward = React.useMemo(() => {
+    for (let i = viewHistory.forward.length - 1; i >= 0; i--) {
+      if (!viewStatesEqual(viewHistory.forward[i], currentViewState)) return true
+    }
+    return false
+  }, [viewHistory.forward, currentViewState])
+
+  const navigateToFile = useCallback((path: string) => {
+    void navigateToView({ type: 'file', path })
+  }, [navigateToView])
+
+  const navigateToFullScreenChat = useCallback(() => {
+    // Only treat this as navigation when coming from another view
+    if (currentViewState.type !== 'chat') {
+      const nextHistory = {
+        back: appendUnique(historyRef.current.back, currentViewState),
+        forward: [] as ViewState[],
+      }
+      setHistory(nextHistory)
+    }
+    handleOpenFullScreenChat()
+  }, [appendUnique, currentViewState, handleOpenFullScreenChat, setHistory])
 
   // Handle image upload for the markdown editor
   const handleImageUpload = useCallback(async (file: File): Promise<string | null> => {
@@ -1424,18 +1624,17 @@ function App() {
         if (isFullScreenChat && expandedFrom) {
           handleCloseFullScreenChat()
         } else {
-          handleOpenFullScreenChat()
+          navigateToFullScreenChat()
         }
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleOpenFullScreenChat, handleCloseFullScreenChat, isFullScreenChat, expandedFrom])
+  }, [handleCloseFullScreenChat, isFullScreenChat, expandedFrom, navigateToFullScreenChat])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
       navigateToFile(path)
-      setIsGraphOpen(false)
       return
     }
 
@@ -1451,10 +1650,12 @@ function App() {
   // Handle sidebar section changes - switch to chat view for tasks
   const handleSectionChange = useCallback((section: ActiveSection) => {
     if (section === 'tasks') {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
+      if (selectedBackgroundTask) return
+      if (selectedPath || isGraphOpen) {
+        void navigateToView({ type: 'chat', runId })
+      }
     }
-  }, [])
+  }, [isGraphOpen, navigateToView, runId, selectedBackgroundTask, selectedPath])
 
   // Knowledge quick actions
   const knowledgeFiles = React.useMemo(() => {
@@ -1542,8 +1743,7 @@ function App() {
           data: `# ${name}\n\n`,
           opts: { encoding: 'utf8' }
         })
-        setIsGraphOpen(false)
-        setSelectedPath(fullPath)
+        navigateToFile(fullPath)
       } catch (err) {
         console.error('Failed to create note:', err)
         throw err
@@ -1561,8 +1761,7 @@ function App() {
       }
     },
     openGraph: () => {
-      setSelectedPath(null)
-      setIsGraphOpen(true)
+      void navigateToView({ type: 'graph' })
     },
     expandAll: () => setExpandedPaths(new Set(collectDirPaths(tree))),
     collapseAll: () => setExpandedPaths(new Set()),
@@ -1593,7 +1792,7 @@ function App() {
       const fullPath = workspaceRoot ? `${workspaceRoot}/${path}` : path
       navigator.clipboard.writeText(fullPath)
     },
-  }), [tree, selectedPath, workspaceRoot, collectDirPaths])
+  }), [tree, selectedPath, workspaceRoot, collectDirPaths, navigateToFile, navigateToView])
 
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
@@ -1614,9 +1813,8 @@ function App() {
     })
 
     // Select the file to show it in the editor
-    setIsGraphOpen(false)
-    setSelectedPath(notePath)
-  }, [loadDirectory])
+    navigateToFile(notePath)
+  }, [loadDirectory, navigateToFile])
 
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
@@ -1870,15 +2068,14 @@ function App() {
               runs={runs}
               currentRunId={runId}
               tasksActions={{
-                onNewChat: handleNewChat,
+                onNewChat: () => {
+                  void navigateToView({ type: 'chat', runId: null })
+                },
                 onSelectRun: (runIdToLoad) => {
-                  setSelectedBackgroundTask(null)
-                  loadRun(runIdToLoad)
+                  void navigateToView({ type: 'chat', runId: runIdToLoad })
                 },
                 onSelectBackgroundTask: (taskName) => {
-                  setSelectedBackgroundTask(taskName)
-                  setSelectedPath(null)
-                  setIsGraphOpen(false)
+                  void navigateToView({ type: 'task', name: taskName })
                 },
               }}
               backgroundTasks={backgroundTasks}
@@ -1909,7 +2106,7 @@ function App() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setIsGraphOpen(false)}
+                    onClick={() => { void navigateToView({ type: 'chat', runId }) }}
                     className="titlebar-no-drag text-foreground"
                   >
                     Close Graph
@@ -1945,7 +2142,6 @@ function App() {
                     isLoading={graphStatus === 'loading'}
                     error={graphStatus === 'error' ? (graphError ?? 'Failed to build graph') : null}
                     onSelectNode={(path) => {
-                      setIsGraphOpen(false)
                       navigateToFile(path)
                     }}
                   />
@@ -1955,14 +2151,10 @@ function App() {
                   <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                     <MarkdownEditor
                       content={editorContent}
-                      onChange={setEditorContent}
+                      onChange={handleEditorChange}
                       placeholder="Start writing..."
                       wikiLinks={wikiLinkConfig}
                       onImageUpload={handleImageUpload}
-                      onNavigateBack={navigateBack}
-                      onNavigateForward={navigateForward}
-                      canNavigateBack={canNavigateBack}
-                      canNavigateForward={canNavigateForward}
                     />
                   </div>
                 ) : (
@@ -1988,7 +2180,7 @@ function App() {
                   />
                 </div>
               ) : (
-              <FileCardProvider onOpenKnowledgeFile={(path) => { setSelectedPath(path); setIsGraphOpen(false) }}>
+              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
                 <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
                   <ScrollPositionPreserver />
@@ -2093,7 +2285,7 @@ function App() {
                 defaultWidth={400}
                 isOpen={isChatSidebarOpen}
                 onNewChat={handleNewChat}
-                onOpenFullScreen={handleOpenFullScreenChat}
+                onOpenFullScreen={navigateToFullScreenChat}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
                 currentReasoning={currentReasoning}
@@ -2113,11 +2305,16 @@ function App() {
                 permissionResponses={permissionResponses}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
-                onOpenKnowledgeFile={(path) => { setSelectedPath(path); setIsGraphOpen(false) }}
+                onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
               />
             )}
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}
-            <FixedSidebarToggle />
+            <FixedSidebarToggle
+              onNavigateBack={() => { void navigateBack() }}
+              onNavigateForward={() => { void navigateForward() }}
+              canNavigateBack={canNavigateBack}
+              canNavigateForward={canNavigateForward}
+            />
           </SidebarProvider>
 
           {/* Floating chat input - shown when viewing files/graph and chat sidebar is closed */}
