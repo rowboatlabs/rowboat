@@ -460,11 +460,24 @@ async function transcribeWithDeepgram(audioBlob: Blob): Promise<string | null> {
 // Voice Note Recording Button
 function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => void }) {
   const [isRecording, setIsRecording] = React.useState(false)
+  const [hasDeepgramKey, setHasDeepgramKey] = React.useState(false)
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null)
   const chunksRef = React.useRef<Blob[]>([])
   const notePathRef = React.useRef<string | null>(null)
   const timestampRef = React.useRef<string | null>(null)
   const relativePathRef = React.useRef<string | null>(null)
+
+  React.useEffect(() => {
+    window.ipc.invoke('workspace:readFile', {
+      path: 'config/deepgram.json',
+      encoding: 'utf8',
+    }).then((result: { data: string }) => {
+      const { apiKey } = JSON.parse(result.data) as { apiKey: string }
+      setHasDeepgramKey(!!apiKey)
+    }).catch(() => {
+      setHasDeepgramKey(false)
+    })
+  }, [])
 
   const startRecording = async () => {
     try {
@@ -626,6 +639,8 @@ ${transcript}
     mediaRecorderRef.current = null
     setIsRecording(false)
   }
+
+  if (!hasDeepgramKey) return null
 
   return (
     <Tooltip>

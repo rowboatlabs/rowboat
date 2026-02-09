@@ -630,7 +630,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     return (
       <div className="flex flex-col">
         <div className="flex items-center justify-center gap-3 mb-3">
-          <img src="/logo-only.png" alt="Rowboat" className="size-10" />
           <span className="text-lg font-medium text-muted-foreground">Your AI coworker, with memory</span>
         </div>
         <DialogHeader className="text-center mb-3">
