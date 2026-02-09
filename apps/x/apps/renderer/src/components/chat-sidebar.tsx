@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Expand, LoaderIcon, Plus, Square } from 'lucide-react'
+import { ArrowUp, Expand, LoaderIcon, SquarePen, Square } from 'lucide-react'
 import type { ToolUIPart } from 'ai'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -465,24 +465,24 @@ export function ChatSidebar({
         <>
           {/* Header - minimal, expand and new chat buttons */}
           <header className="titlebar-drag-region flex h-10 shrink-0 items-center justify-end gap-1 px-2 bg-sidebar">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={onNewChat} className="titlebar-no-drag h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <SquarePen className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">New chat</TooltipContent>
+            </Tooltip>
             {onOpenFullScreen && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={onOpenFullScreen} className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <Button variant="ghost" size="icon" onClick={onOpenFullScreen} className="titlebar-no-drag h-8 w-8 text-muted-foreground hover:text-foreground">
                     <Expand className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Full screen chat</TooltipContent>
               </Tooltip>
             )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={onNewChat} className="h-8 w-8 text-muted-foreground hover:text-foreground">
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">New chat</TooltipContent>
-            </Tooltip>
           </header>
 
       {/* Conversation area */}

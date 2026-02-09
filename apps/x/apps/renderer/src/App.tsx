@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Square } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Square, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
@@ -497,6 +497,7 @@ function App() {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
   const [isGraphOpen, setIsGraphOpen] = useState(false)
+  const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
     nodes: [],
     edges: [],
@@ -1303,9 +1304,28 @@ function App() {
   }
 
   const handleOpenFullScreenChat = useCallback(() => {
+    // Remember where we came from so the close button can return
+    if (selectedPath || isGraphOpen) {
+      setExpandedFrom({ path: selectedPath, graph: isGraphOpen })
+    }
+    // Copy sidebar input text to full-screen input (keep sidebar message intact for return)
+    if (message.trim()) {
+      setPresetMessage(message)
+    }
     setSelectedPath(null)
     setIsGraphOpen(false)
-  }, [])
+  }, [selectedPath, isGraphOpen, message])
+
+  const handleCloseFullScreenChat = useCallback(() => {
+    if (expandedFrom) {
+      if (expandedFrom.graph) {
+        setIsGraphOpen(true)
+      } else if (expandedFrom.path) {
+        setSelectedPath(expandedFrom.path)
+      }
+      setExpandedFrom(null)
+    }
+  }, [expandedFrom])
 
   // File navigation with history tracking
   const navigateToFile = useCallback((path: string | null) => {
@@ -1320,6 +1340,7 @@ function App() {
     setSelectedPath(path)
     // Clear background task selection when navigating to a file
     setSelectedBackgroundTask(null)
+    setExpandedFrom(null)
   }, [selectedPath])
 
   const navigateBack = useCallback(() => {
@@ -1394,17 +1415,22 @@ function App() {
     }
   }, [])
 
-  // Keyboard shortcut: Ctrl+L to open main chat view
+  // Keyboard shortcut: Ctrl+L to toggle main chat view
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !selectedBackgroundTask
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
         e.preventDefault()
-        handleOpenFullScreenChat()
+        if (isFullScreenChat && expandedFrom) {
+          handleCloseFullScreenChat()
+        } else {
+          handleOpenFullScreenChat()
+        }
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleOpenFullScreenChat])
+  }, [handleOpenFullScreenChat, handleCloseFullScreenChat, isFullScreenChat, expandedFrom])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
@@ -1888,6 +1914,16 @@ function App() {
                   >
                     Close Graph
                   </Button>
+                )}
+                {!selectedPath && !isGraphOpen && expandedFrom && (
+                  <button
+                    type="button"
+                    onClick={handleCloseFullScreenChat}
+                    className="titlebar-no-drag flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                    aria-label="Return to file"
+                  >
+                    <X className="size-4" />
+                  </button>
                 )}
                 {(selectedPath || isGraphOpen) && (
                   <button
