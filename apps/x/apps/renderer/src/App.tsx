@@ -360,7 +360,7 @@ function ChatInputInner({
   }, [controller])
 
   return (
-    <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
+    <div className="flex items-center gap-2 bg-background border border-border rounded-lg shadow-none px-4 py-4">
       <PromptInputTextarea
         placeholder="Type your message..."
         onKeyDown={handleKeyDown}

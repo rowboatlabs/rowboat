@@ -574,7 +574,7 @@ export function ChatSidebar({
               className="mb-3"
             />
           )}
-          <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
+          <div className="flex items-center gap-2 bg-background border border-border rounded-lg shadow-none px-4 py-2.5">
             <div className="relative flex-1 min-w-0">
               {mentionHighlights.hasHighlights && (
                 <div
