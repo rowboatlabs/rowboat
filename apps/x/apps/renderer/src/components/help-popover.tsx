@@ -49,7 +49,7 @@ export function HelpPopover({ children, tooltip }: HelpPopoverProps) {
       <PopoverContent
         side="right"
         align="end"
-        sideOffset={8}
+        sideOffset={4}
         className="w-80 p-0"
       >
         <div className="p-4 border-b">

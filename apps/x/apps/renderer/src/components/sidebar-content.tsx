@@ -285,7 +285,7 @@ function SyncStatusBar() {
           <PopoverContent
             side="right"
             align="end"
-            sideOffset={8}
+            sideOffset={4}
             className="w-96 p-0"
           >
             <div className="p-3 border-b">
