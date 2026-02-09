@@ -44,6 +44,11 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -110,8 +115,17 @@ type BackgroundTaskItem = {
 
 type ServiceEventType = z.infer<typeof ServiceEvent>
 
-const MAX_SYNC_EVENTS = 30
+const MAX_SYNC_EVENTS = 1000
 const RUN_STALE_MS = 2 * 60 * 60 * 1000
+
+const SERVICE_LABELS: Record<string, string> = {
+  gmail: "Syncing Gmail",
+  calendar: "Syncing Calendar",
+  fireflies: "Syncing Fireflies",
+  granola: "Syncing Granola",
+  graph: "Updating knowledge",
+  voice_memo: "Processing voice memo",
+}
 
 type TasksActions = {
   onNewChat: () => void
@@ -146,29 +160,28 @@ function formatEventTime(ts: string): string {
 
 function SyncStatusBar() {
   const { state, isMobile } = useSidebar()
-  const [events, setEvents] = useState<ServiceEventType[]>([])
-  const [activeRuns, setActiveRuns] = useState<Set<string>>(new Set())
-  const [isExpanded, setIsExpanded] = useState(false)
+  const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
+  const [popoverOpen, setPopoverOpen] = useState(false)
+  const [logEvents, setLogEvents] = useState<ServiceEventType[]>([])
+  const [logLoading, setLogLoading] = useState(false)
   const runTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
+  // Track active runs from real-time events
   useEffect(() => {
     const cleanup = window.ipc.on('services:events', (event) => {
       const nextEvent = event as ServiceEventType
-      setEvents((prev) => [nextEvent, ...prev].slice(0, MAX_SYNC_EVENTS))
       if (nextEvent.type === 'run_start') {
-        setActiveRuns((prev) => {
-          const next = new Set(prev)
-          next.add(nextEvent.runId)
+        setActiveServices((prev) => {
+          const next = new Map(prev)
+          next.set(nextEvent.runId, nextEvent.service)
           return next
         })
         const existingTimeout = runTimeoutsRef.current.get(nextEvent.runId)
-        if (existingTimeout) {
-          clearTimeout(existingTimeout)
-        }
+        if (existingTimeout) clearTimeout(existingTimeout)
         const timeout = setTimeout(() => {
-          setActiveRuns((prev) => {
+          setActiveServices((prev) => {
             if (!prev.has(nextEvent.runId)) return prev
-            const next = new Set(prev)
+            const next = new Map(prev)
             next.delete(nextEvent.runId)
             return next
           })
@@ -176,8 +189,8 @@ function SyncStatusBar() {
         }, RUN_STALE_MS)
         runTimeoutsRef.current.set(nextEvent.runId, timeout)
       } else if (nextEvent.type === 'run_complete') {
-        setActiveRuns((prev) => {
-          const next = new Set(prev)
+        setActiveServices((prev) => {
+          const next = new Map(prev)
           next.delete(nextEvent.runId)
           return next
         })
@@ -198,8 +211,47 @@ function SyncStatusBar() {
     }
   }, [])
 
-  const isSyncing = activeRuns.size > 0
+  // Load logs from JSONL file when popover opens
+  useEffect(() => {
+    if (!popoverOpen) return
+    let cancelled = false
+    async function loadLogs() {
+      setLogLoading(true)
+      try {
+        const result = await window.ipc.invoke('workspace:readFile', {
+          path: 'logs/services.jsonl',
+          encoding: 'utf8',
+        })
+        if (cancelled) return
+        const lines = result.data.trim().split('\n').filter(Boolean)
+        const parsed: ServiceEventType[] = []
+        for (const line of lines) {
+          try {
+            parsed.push(JSON.parse(line))
+          } catch {
+            // skip malformed lines
+          }
+        }
+        // Newest first, limit to 1000
+        setLogEvents(parsed.reverse().slice(0, MAX_SYNC_EVENTS))
+      } catch {
+        if (!cancelled) setLogEvents([])
+      } finally {
+        if (!cancelled) setLogLoading(false)
+      }
+    }
+    loadLogs()
+    return () => { cancelled = true }
+  }, [popoverOpen])
+
+  const isSyncing = activeServices.size > 0
   const isCollapsed = state === "collapsed"
+
+  // Build status label from active services
+  const activeServiceNames = [...new Set(activeServices.values())]
+  const statusLabel = isSyncing
+    ? activeServiceNames.map((s) => SERVICE_LABELS[s] || s).join(", ")
+    : "All caught up"
 
   return (
     <>
@@ -213,37 +265,72 @@ function SyncStatusBar() {
         </div>
       )}
       <SidebarFooter className="border-t border-sidebar-border px-2 py-2">
-        <button
-          type="button"
-          onClick={() => setIsExpanded((prev) => !prev)}
-          className="flex w-full items-center justify-between rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-sidebar-accent"
-        >
-          <span className="flex items-center gap-2">
-            {isSyncing ? (
-              <LoaderIcon className="h-3 w-3 animate-spin" />
-            ) : (
-              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
-            )}
-            {isSyncing ? "Syncing" : "All caught up"}
-          </span>
-          <ChevronRight className={`h-3 w-3 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
-        </button>
-        {isExpanded && (
-          <div className="mt-2 max-h-40 space-y-1 overflow-auto rounded-md border border-border bg-background p-2 text-xs text-muted-foreground">
-            {events.length === 0 ? (
-              <div>No recent activity.</div>
-            ) : (
-              events.map((event, idx) => (
-                <div key={`${event.runId}-${event.ts}-${idx}`} className="flex items-start gap-2">
-                  <span className="shrink-0 text-[10px] text-muted-foreground/70">
-                    {formatEventTime(event.ts)}
-                  </span>
-                  <span className="leading-4">{event.message}</span>
+        <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-sidebar-accent"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                {isSyncing ? (
+                  <LoaderIcon className="h-3 w-3 shrink-0 animate-spin" />
+                ) : (
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                )}
+                <span className="truncate">{statusLabel}</span>
+              </span>
+              <ChevronRight className="h-3 w-3 shrink-0" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            side="right"
+            align="end"
+            sideOffset={8}
+            className="w-96 p-0"
+          >
+            <div className="p-3 border-b">
+              <h4 className="font-semibold text-sm">Sync Activity</h4>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {isSyncing ? statusLabel : "All services up to date"}
+              </p>
+            </div>
+            <div className="max-h-80 overflow-y-auto p-2">
+              {logLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
                 </div>
-              ))
-            )}
-          </div>
-        )}
+              ) : logEvents.length === 0 ? (
+                <div className="py-4 text-center text-xs text-muted-foreground">
+                  No recent activity.
+                </div>
+              ) : (
+                <div className="space-y-0.5">
+                  {logEvents.map((event, idx) => (
+                    <div
+                      key={`${event.runId}-${event.ts}-${idx}`}
+                      className="flex items-start gap-2 rounded px-2 py-1 text-xs hover:bg-accent"
+                    >
+                      <span className="shrink-0 text-[10px] leading-4 text-muted-foreground/70">
+                        {formatEventTime(event.ts)}
+                      </span>
+                      <span className="shrink-0">
+                        <span className={cn(
+                          "inline-block rounded px-1 py-0.5 text-[10px] font-medium leading-none",
+                          event.level === 'error' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
+                          event.level === 'warn' ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" :
+                          "bg-muted text-muted-foreground"
+                        )}>
+                          {SERVICE_LABELS[event.service]?.split(" ").slice(-1)[0] || event.service}
+                        </span>
+                      </span>
+                      <span className="leading-4 text-foreground/80">{event.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
       </SidebarFooter>
     </>
   )
