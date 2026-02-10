@@ -124,6 +124,12 @@ Examples: Exa (web search), Twitter/X, ElevenLabs (voice), Slack, Linear/Jira, G
 - You can inspect, edit, back up, or delete everything at any time
 
 ---
+
+## Looking for Rowboat Web Studio?
+
+If you’re looking for Rowboat web Studio, start [here](https://docs.rowboatlabs.com/). 
+
+---
 <div align="center">
 
 [Discord](https://discord.com/invite/htdKpBZF) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
