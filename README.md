@@ -36,7 +36,7 @@ You can do things like:
 - Visualize, edit, and update your knowledge graph anytime (it’s just Markdown)
 - Record voice memos that automatically capture and update key takeaways in the graph
 
-Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/)
+Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/downloads)
 
 
 ## Demo
@@ -50,7 +50,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/)
 
 ## Installation
 
-**Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/)
+**Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/downloads)
 
 **All release files:**   https://github.com/rowboatlabs/rowboat/releases/latest
 
