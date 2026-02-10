@@ -49,23 +49,31 @@ export type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible
-    className={cn("not-prose mb-4 w-full rounded-md border", className)}
+    className={cn("not-prose mb-2 w-full rounded-md border", className)}
     {...props}
   />
 );
 
+// AI SDK v5's ToolUIPart["state"] is narrower than what we want to render in the UI.
+// Keep this type permissive so we can display additional states when present.
+export type ToolStatus =
+  | ToolUIPart["state"]
+  | "approval-requested"
+  | "approval-responded"
+  | "output-denied";
+
 export type ToolHeaderProps = {
   title?: string;
+  subtitle?: string;
   type: ToolUIPart["type"];
-  state: ToolUIPart["state"];
+  state: ToolStatus;
   className?: string;
 };
 
-const getStatusBadge = (status: ToolUIPart["state"]) => {
-  const labels: Record<ToolUIPart["state"], string> = {
+export const ToolStatusBadge = ({ status }: { status: ToolStatus }) => {
+  const labels: Record<ToolStatus, string> = {
     "input-streaming": "Pending",
     "input-available": "Running",
-    // @ts-expect-error state only available in AI SDK v6
     "approval-requested": "Awaiting Approval",
     "approval-responded": "Responded",
     "output-available": "Completed",
@@ -73,10 +81,9 @@ const getStatusBadge = (status: ToolUIPart["state"]) => {
     "output-denied": "Denied",
   };
 
-  const icons: Record<ToolUIPart["state"], ReactNode> = {
+  const icons: Record<ToolStatus, ReactNode> = {
     "input-streaming": <CircleIcon className="size-4" />,
     "input-available": <ClockIcon className="size-4 animate-pulse" />,
-    // @ts-expect-error state only available in AI SDK v6
     "approval-requested": <ClockIcon className="size-4 text-yellow-600" />,
     "approval-responded": <CheckCircleIcon className="size-4 text-blue-600" />,
     "output-available": <CheckCircleIcon className="size-4 text-green-600" />,
@@ -95,23 +102,33 @@ const getStatusBadge = (status: ToolUIPart["state"]) => {
 export const ToolHeader = ({
   className,
   title,
+  subtitle,
   type,
   state,
   ...props
 }: ToolHeaderProps) => (
   <CollapsibleTrigger
     className={cn(
-      "flex w-full items-center justify-between gap-4 p-3",
+      "group flex w-full items-center justify-between gap-4 p-3",
       className
     )}
     {...props}
   >
     <div className="flex items-center gap-2">
       <WrenchIcon className="size-4 text-muted-foreground" />
-      <span className="font-medium text-sm">
-        {title ?? type.split("-").slice(1).join("-")}
-      </span>
-      {getStatusBadge(state)}
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 truncate font-medium text-sm">
+            {title ?? type.split("-").slice(1).join("-")}
+          </span>
+          <ToolStatusBadge status={state} />
+        </div>
+        {subtitle ? (
+          <div className="mt-0.5 text-xs text-muted-foreground font-mono truncate">
+            {subtitle}
+          </div>
+        ) : null}
+      </div>
     </div>
     <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
   </CollapsibleTrigger>

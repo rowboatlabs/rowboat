@@ -22,6 +22,8 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
+import { ToolActivity, type ToolActivityItem } from '@/components/ai-elements/tool-activity'
+import { getToolDisplay, getToolGroupTitle } from '@/components/ai-elements/tool-display'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { Suggestions } from '@/components/ai-elements/suggestions'
@@ -410,10 +412,12 @@ export function ChatSidebar({
       const errorText = item.status === 'error' ? 'Tool error' : ''
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
+      const display = getToolDisplay(item.name)
       return (
         <Tool key={item.id}>
           <ToolHeader
-            title={item.name}
+            title={display.title}
+            subtitle={display.subtitle}
             type={`tool-${item.name}`}
             state={toToolState(item.status)}
           />
@@ -438,6 +442,85 @@ export function ChatSidebar({
 
     return null
   }
+
+  const renderedConversationItems = (() => {
+    const nodes: React.ReactNode[] = []
+
+    const toActivityItem = (toolCall: ToolCall): ToolActivityItem => {
+      const display = getToolDisplay(toolCall.name)
+      const errorText = toolCall.status === 'error' ? 'Tool error' : ''
+      return {
+        id: toolCall.id,
+        title: display.title,
+        subtitle: display.subtitle,
+        state: toToolState(toolCall.status),
+        input: normalizeToolInput(toolCall.input),
+        output: normalizeToolOutput(toolCall.result, toolCall.status) as ToolUIPart['output'],
+        errorText,
+      }
+    }
+
+    for (let i = 0; i < conversation.length; i++) {
+      const item = conversation[i]
+
+      const hasPermissionPrompt = isToolCall(item) && onPermissionResponse && allPermissionRequests.get(item.id)
+
+      // Group consecutive tool calls into a single compact "activity" block when there are no permission prompts.
+      if (isToolCall(item) && !hasPermissionPrompt) {
+        const group: ToolCall[] = [item]
+        let j = i + 1
+        while (j < conversation.length && isToolCall(conversation[j])) {
+          const next = conversation[j] as ToolCall
+          const nextHasPrompt = onPermissionResponse && allPermissionRequests.get(next.id)
+          if (nextHasPrompt) break
+          group.push(next)
+          j += 1
+        }
+
+        if (group.length > 1) {
+          const titles = group.map((t) => getToolDisplay(t.name).title).join(' · ')
+          nodes.push(
+            <ToolActivity
+              key={`tool-activity-${group[0].id}`}
+              title={getToolGroupTitle(group.map((t) => t.name))}
+              items={group.map(toActivityItem)}
+              summary={titles}
+            />
+          )
+          i = j - 1
+          continue
+        }
+      }
+
+      const rendered = renderConversationItem(item)
+      if (!rendered) continue
+
+      // If this is a tool call, check for permission request (pending or responded)
+      if (isToolCall(item) && onPermissionResponse) {
+        const permRequest = allPermissionRequests.get(item.id)
+        if (permRequest) {
+          const response = permissionResponses.get(item.id) || null
+          nodes.push(
+            <React.Fragment key={item.id}>
+              {rendered}
+              <PermissionRequest
+                toolCall={permRequest.toolCall}
+                onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                isProcessing={isProcessing}
+                response={response}
+              />
+            </React.Fragment>
+          )
+          continue
+        }
+      }
+
+      nodes.push(rendered)
+    }
+
+    return nodes
+  })()
 
   const displayWidth = isOpen ? width : 0
 
@@ -501,29 +584,7 @@ export function ChatSidebar({
               </ConversationEmptyState>
             ) : (
               <>
-                {conversation.map(item => {
-                  const rendered = renderConversationItem(item)
-                  // If this is a tool call, check for permission request (pending or responded)
-                  if (isToolCall(item) && onPermissionResponse) {
-                    const permRequest = allPermissionRequests.get(item.id)
-                    if (permRequest) {
-                      const response = permissionResponses.get(item.id) || null
-                      return (
-                        <React.Fragment key={item.id}>
-                          {rendered}
-                          <PermissionRequest
-                            toolCall={permRequest.toolCall}
-                            onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                            onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                            isProcessing={isProcessing}
-                            response={response}
-                          />
-                        </React.Fragment>
-                      )
-                    }
-                  }
-                  return rendered
-                })}
+                {renderedConversationItems}
 
                 {/* Render pending ask-human requests */}
                 {onAskHumanResponse && Array.from(pendingAskHumanRequests.values()).map((request) => (

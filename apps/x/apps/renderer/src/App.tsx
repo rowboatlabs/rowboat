@@ -36,6 +36,7 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { ToolActivity, type ToolActivityItem } from '@/components/ai-elements/tool-activity';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
@@ -52,6 +53,7 @@ import { OnboardingModal } from '@/components/onboarding-modal'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
+import { getToolDisplay, getToolGroupTitle } from '@/components/ai-elements/tool-display'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 
@@ -2037,19 +2039,21 @@ function App() {
       )
     }
 
-    if (isToolCall(item)) {
-      const errorText = item.status === 'error' ? 'Tool error' : ''
-      const output = normalizeToolOutput(item.result, item.status)
-      const input = normalizeToolInput(item.input)
-      return (
-        <Tool key={item.id}>
-          <ToolHeader
-            title={item.name}
-            type={`tool-${item.name}`}
-            state={toToolState(item.status)}
-          />
-          <ToolContent>
-            <ToolInput input={input} />
+	    if (isToolCall(item)) {
+	      const errorText = item.status === 'error' ? 'Tool error' : ''
+	      const output = normalizeToolOutput(item.result, item.status)
+	      const input = normalizeToolInput(item.input)
+	      const display = getToolDisplay(item.name)
+	      return (
+	        <Tool key={item.id}>
+	          <ToolHeader
+	            title={display.title}
+	            subtitle={display.subtitle}
+	            type={`tool-${item.name}`}
+	            state={toToolState(item.status)}
+	          />
+	          <ToolContent>
+	            <ToolInput input={input} />
             {output !== null ? (
               <ToolOutput output={output} errorText={errorText} />
             ) : null}
@@ -2084,6 +2088,84 @@ function App() {
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
+
+  const renderedConversationItems = (() => {
+    const nodes: React.ReactNode[] = []
+
+    const toActivityItem = (toolCall: ToolCall): ToolActivityItem => {
+      const display = getToolDisplay(toolCall.name)
+      const errorText = toolCall.status === 'error' ? 'Tool error' : ''
+      return {
+        id: toolCall.id,
+        title: display.title,
+        subtitle: display.subtitle,
+        state: toToolState(toolCall.status),
+        input: normalizeToolInput(toolCall.input),
+        output: normalizeToolOutput(toolCall.result, toolCall.status) as ToolUIPart['output'],
+        errorText,
+      }
+    }
+
+    for (let i = 0; i < conversation.length; i++) {
+      const item = conversation[i]
+
+      // Group consecutive tool calls into a single compact "activity" block when there are no permission prompts.
+      if (isToolCall(item) && !allPermissionRequests.get(item.id)) {
+        const group: ToolCall[] = [item]
+        let j = i + 1
+        while (
+          j < conversation.length
+          && isToolCall(conversation[j])
+          && !allPermissionRequests.get((conversation[j] as ToolCall).id)
+        ) {
+          group.push(conversation[j] as ToolCall)
+          j += 1
+        }
+
+        if (group.length > 1) {
+          const titles = group.map((t) => getToolDisplay(t.name).title).join(' · ')
+          nodes.push(
+            <ToolActivity
+              key={`tool-activity-${group[0].id}`}
+              title={getToolGroupTitle(group.map((t) => t.name))}
+              items={group.map(toActivityItem)}
+              summary={titles}
+            />
+          )
+          i = j - 1
+          continue
+        }
+      }
+
+      const rendered = renderConversationItem(item)
+      if (!rendered) continue
+
+      // If this is a tool call, check for permission request (pending or responded)
+      if (isToolCall(item)) {
+        const permRequest = allPermissionRequests.get(item.id)
+        if (permRequest) {
+          const response = permissionResponses.get(item.id) || null
+          nodes.push(
+            <React.Fragment key={item.id}>
+              {rendered}
+              <PermissionRequest
+                toolCall={permRequest.toolCall}
+                onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                isProcessing={isProcessing}
+                response={response}
+              />
+            </React.Fragment>
+          )
+          continue
+        }
+      }
+
+      nodes.push(rendered)
+    }
+
+    return nodes
+  })()
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -2228,35 +2310,13 @@ function App() {
                           What are we working on?
                         </div>
                       </ConversationEmptyState>
-                    ) : (
-                      <>
-                        {conversation.map(item => {
-                          const rendered = renderConversationItem(item)
-                          // If this is a tool call, check for permission request (pending or responded)
-                          if (isToolCall(item)) {
-                            const permRequest = allPermissionRequests.get(item.id)
-                            if (permRequest) {
-                              const response = permissionResponses.get(item.id) || null
-                              return (
-                                <React.Fragment key={item.id}>
-                                  {rendered}
-                                  <PermissionRequest
-                                    toolCall={permRequest.toolCall}
-                                    onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                    onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                    isProcessing={isProcessing}
-                                    response={response}
-                                  />
-                                </React.Fragment>
-                              )
-                            }
-                          }
-                          return rendered
-                        })}
+	                    ) : (
+	                      <>
+	                        {renderedConversationItems}
 
-                        {/* Render pending ask-human requests */}
-                        {Array.from(pendingAskHumanRequests.values()).map((request) => (
-                          <AskHumanRequest
+	                        {/* Render pending ask-human requests */}
+	                        {Array.from(pendingAskHumanRequests.values()).map((request) => (
+	                          <AskHumanRequest
                             key={request.toolCallId}
                             query={request.query}
                             onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
