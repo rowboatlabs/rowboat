@@ -35,7 +35,7 @@ import {
 } from '@/components/ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import { Shimmer } from '@/components/ai-elements/shimmer';
-import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput, type ToolStatus } from '@/components/ai-elements/tool';
 import { ToolActivity, type ToolActivityItem } from '@/components/ai-elements/tool-activity';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
@@ -1318,6 +1318,9 @@ function App() {
     if (!userMessage) return
 
     setMessage('')
+    setIsProcessing(true)
+    setIsStopping(false)
+    setStopClickedAt(null)
 
     const userMessageId = `user-${Date.now()}`
     setConversation(prev => [...prev, {
@@ -1336,7 +1339,11 @@ function App() {
         })
         currentRunId = run.id
         setRunId(currentRunId)
+        runIdRef.current = currentRunId
         isNewRun = true
+      } else {
+        // Ensure event filtering accepts events for the active run immediately.
+        runIdRef.current = currentRunId
       }
 
       // Read mentioned file contents and format message with XML context
@@ -1372,6 +1379,7 @@ function App() {
         loadRuns()
       }
     } catch (error) {
+      setIsProcessing(false)
       console.error('Failed to send message:', error)
     }
   }
@@ -2006,6 +2014,21 @@ function App() {
     }
   }, [isGraphOpen, knowledgeFilePaths])
 
+  const getToolUiState = useCallback((toolCall: ToolCall): ToolStatus => {
+    const permRequest = allPermissionRequests.get(toolCall.id)
+    const response = permissionResponses.get(toolCall.id) ?? null
+
+    if (!permRequest) {
+      return toToolState(toolCall.status)
+    }
+
+    if (response === 'deny') return 'output-denied'
+    if (!response) return 'approval-requested'
+    if (toolCall.status === 'error') return 'output-error'
+    if (toolCall.status === 'completed') return toToolState(toolCall.status)
+    return 'approval-responded'
+  }, [allPermissionRequests, permissionResponses])
+
   const renderConversationItem = (item: ConversationItem) => {
     if (isChatMessage(item)) {
       if (item.role === 'user') {
@@ -2039,23 +2062,38 @@ function App() {
       )
     }
 
-	    if (isToolCall(item)) {
-	      const errorText = item.status === 'error' ? 'Tool error' : ''
-	      const output = normalizeToolOutput(item.result, item.status)
-	      const input = normalizeToolInput(item.input)
-	      const display = getToolDisplay(item.name)
-	      return (
-	        <Tool key={item.id}>
-	          <ToolHeader
-	            title={display.title}
-	            subtitle={display.subtitle}
-	            type={`tool-${item.name}`}
-	            state={toToolState(item.status)}
-	          />
-	          <ToolContent>
-	            <ToolInput input={input} />
+    if (isToolCall(item)) {
+      const errorText = item.status === 'error' ? 'Tool error' : ''
+      const output = normalizeToolOutput(item.result, item.status)
+      const input = normalizeToolInput(item.input)
+      const display = getToolDisplay(item.name)
+      const permRequest = allPermissionRequests.get(item.id)
+      const response = permissionResponses.get(item.id) ?? null
+
+      return (
+        <Tool key={item.id} defaultOpen={getToolUiState(item) === 'approval-requested'}>
+          <ToolHeader
+            title={display.title}
+            subtitle={display.subtitle}
+            type={`tool-${item.name}`}
+            state={getToolUiState(item)}
+          />
+          <ToolContent>
+            <ToolInput input={input} />
             {output !== null ? (
               <ToolOutput output={output} errorText={errorText} />
+            ) : null}
+            {permRequest ? (
+              <div className="px-4 pb-4">
+                <PermissionRequest
+                  className="mb-0"
+                  toolCall={permRequest.toolCall}
+                  onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                  onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                  isProcessing={isProcessing}
+                  response={response}
+                />
+              </div>
             ) : null}
           </ToolContent>
         </Tool>
@@ -2075,6 +2113,15 @@ function App() {
   }
 
   const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
+  const hasActiveToolCalls = conversation.some(
+    (item) => isToolCall(item) && (item.status === 'pending' || item.status === 'running')
+  )
+  const hasPendingRequests = pendingPermissionRequests.size > 0 || pendingAskHumanRequests.size > 0
+  const showThinkingIndicator =
+    (isProcessing || hasActiveToolCalls)
+    && !hasPendingRequests
+    && !currentAssistantMessage
+    && !currentReasoning
   const conversationContentClassName = hasConversation
     ? "mx-auto w-full max-w-4xl pb-28"
     : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
@@ -2095,29 +2142,38 @@ function App() {
     const toActivityItem = (toolCall: ToolCall): ToolActivityItem => {
       const display = getToolDisplay(toolCall.name)
       const errorText = toolCall.status === 'error' ? 'Tool error' : ''
+      const permRequest = allPermissionRequests.get(toolCall.id)
+      const response = permissionResponses.get(toolCall.id) ?? null
       return {
         id: toolCall.id,
         title: display.title,
         subtitle: display.subtitle,
-        state: toToolState(toolCall.status),
+        state: getToolUiState(toolCall),
         input: normalizeToolInput(toolCall.input),
         output: normalizeToolOutput(toolCall.result, toolCall.status) as ToolUIPart['output'],
         errorText,
+        defaultOpen: getToolUiState(toolCall) === 'approval-requested' || getToolUiState(toolCall) === 'output-error',
+        extra: permRequest ? (
+          <PermissionRequest
+            className="mb-0"
+            toolCall={permRequest.toolCall}
+            onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+            onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+            isProcessing={isProcessing}
+            response={response}
+          />
+        ) : undefined,
       }
     }
 
     for (let i = 0; i < conversation.length; i++) {
       const item = conversation[i]
 
-      // Group consecutive tool calls into a single compact "activity" block when there are no permission prompts.
-      if (isToolCall(item) && !allPermissionRequests.get(item.id)) {
+      // Group consecutive tool calls into a single compact "activity" block.
+      if (isToolCall(item)) {
         const group: ToolCall[] = [item]
         let j = i + 1
-        while (
-          j < conversation.length
-          && isToolCall(conversation[j])
-          && !allPermissionRequests.get((conversation[j] as ToolCall).id)
-        ) {
+        while (j < conversation.length && isToolCall(conversation[j])) {
           group.push(conversation[j] as ToolCall)
           j += 1
         }
@@ -2130,6 +2186,10 @@ function App() {
               title={getToolGroupTitle(group.map((t) => t.name))}
               items={group.map(toActivityItem)}
               summary={titles}
+              defaultOpen={group.some((t) => {
+                const state = getToolUiState(t)
+                return state === 'approval-requested' || state === 'output-error'
+              })}
             />
           )
           i = j - 1
@@ -2139,27 +2199,6 @@ function App() {
 
       const rendered = renderConversationItem(item)
       if (!rendered) continue
-
-      // If this is a tool call, check for permission request (pending or responded)
-      if (isToolCall(item)) {
-        const permRequest = allPermissionRequests.get(item.id)
-        if (permRequest) {
-          const response = permissionResponses.get(item.id) || null
-          nodes.push(
-            <React.Fragment key={item.id}>
-              {rendered}
-              <PermissionRequest
-                toolCall={permRequest.toolCall}
-                onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                isProcessing={isProcessing}
-                response={response}
-              />
-            </React.Fragment>
-          )
-          continue
-        }
-      }
 
       nodes.push(rendered)
     }
@@ -2339,7 +2378,7 @@ function App() {
                           </Message>
                         )}
 
-                        {isProcessing && !currentAssistantMessage && !currentReasoning && (
+                        {showThinkingIndicator && (
                           <Message from="assistant">
                             <MessageContent>
                               <Shimmer duration={1}>Thinking...</Shimmer>

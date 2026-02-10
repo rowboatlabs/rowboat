@@ -21,7 +21,7 @@ import {
 } from '@/components/ai-elements/message'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
 import { Shimmer } from '@/components/ai-elements/shimmer'
-import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
+import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput, type ToolStatus } from '@/components/ai-elements/tool'
 import { ToolActivity, type ToolActivityItem } from '@/components/ai-elements/tool-activity'
 import { getToolDisplay, getToolGroupTitle } from '@/components/ai-elements/tool-display'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
@@ -187,6 +187,21 @@ export function ChatSidebar({
   const autoMentionRef = useRef<{ path: string; displayName: string } | null>(null)
   const lastSelectedPathRef = useRef<string | null>(null)
 
+  const getToolUiState = useCallback((toolCall: ToolCall): ToolStatus => {
+    const permRequest = allPermissionRequests.get(toolCall.id)
+    const response = permissionResponses.get(toolCall.id) ?? null
+
+    if (!permRequest) {
+      return toToolState(toolCall.status)
+    }
+
+    if (response === 'deny') return 'output-denied'
+    if (!response) return 'approval-requested'
+    if (toolCall.status === 'error') return 'output-error'
+    if (toolCall.status === 'completed') return toToolState(toolCall.status)
+    return 'approval-responded'
+  }, [allPermissionRequests, permissionResponses])
+
   // Build mention labels for highlighting (handles multi-word names like "AI Agents")
   const mentionLabels = useMemo(() => {
     if (knowledgeFiles.length === 0) return []
@@ -329,6 +344,18 @@ export function ChatSidebar({
   }, [selectedPath, message, onMessageChange])
 
   const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
+  const hasActiveToolCalls = conversation.some(
+    (item) => isToolCall(item) && (item.status === 'pending' || item.status === 'running')
+  )
+  const hasPendingPermissionRequests = Array.from(allPermissionRequests.keys()).some(
+    (id) => !permissionResponses.has(id)
+  )
+  const showThinkingIndicator =
+    (isProcessing || hasActiveToolCalls)
+    && !hasPendingPermissionRequests
+    && pendingAskHumanRequests.size === 0
+    && !currentAssistantMessage
+    && !currentReasoning
   const canSubmit = Boolean(message.trim()) && !isProcessing
 
   const handleSubmit = () => {
@@ -413,18 +440,32 @@ export function ChatSidebar({
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
       const display = getToolDisplay(item.name)
+      const permRequest = allPermissionRequests.get(item.id)
+      const response = permissionResponses.get(item.id) ?? null
       return (
-        <Tool key={item.id}>
+        <Tool key={item.id} defaultOpen={getToolUiState(item) === 'approval-requested'}>
           <ToolHeader
             title={display.title}
             subtitle={display.subtitle}
             type={`tool-${item.name}`}
-            state={toToolState(item.status)}
+            state={getToolUiState(item)}
           />
           <ToolContent>
             <ToolInput input={input} />
             {output !== null ? (
               <ToolOutput output={output} errorText={errorText} />
+            ) : null}
+            {permRequest ? (
+              <div className="px-4 pb-4">
+                <PermissionRequest
+                  className="mb-0"
+                  toolCall={permRequest.toolCall}
+                  onApprove={onPermissionResponse ? () => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve') : undefined}
+                  onDeny={onPermissionResponse ? () => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny') : undefined}
+                  isProcessing={isProcessing}
+                  response={response}
+                />
+              </div>
             ) : null}
           </ToolContent>
         </Tool>
@@ -449,31 +490,39 @@ export function ChatSidebar({
     const toActivityItem = (toolCall: ToolCall): ToolActivityItem => {
       const display = getToolDisplay(toolCall.name)
       const errorText = toolCall.status === 'error' ? 'Tool error' : ''
+      const permRequest = allPermissionRequests.get(toolCall.id)
+      const response = permissionResponses.get(toolCall.id) ?? null
       return {
         id: toolCall.id,
         title: display.title,
         subtitle: display.subtitle,
-        state: toToolState(toolCall.status),
+        state: getToolUiState(toolCall),
         input: normalizeToolInput(toolCall.input),
         output: normalizeToolOutput(toolCall.result, toolCall.status) as ToolUIPart['output'],
         errorText,
+        defaultOpen: getToolUiState(toolCall) === 'approval-requested' || getToolUiState(toolCall) === 'output-error',
+        extra: permRequest ? (
+          <PermissionRequest
+            className="mb-0"
+            toolCall={permRequest.toolCall}
+            onApprove={onPermissionResponse ? () => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve') : undefined}
+            onDeny={onPermissionResponse ? () => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny') : undefined}
+            isProcessing={isProcessing}
+            response={response}
+          />
+        ) : undefined,
       }
     }
 
     for (let i = 0; i < conversation.length; i++) {
       const item = conversation[i]
 
-      const hasPermissionPrompt = isToolCall(item) && onPermissionResponse && allPermissionRequests.get(item.id)
-
-      // Group consecutive tool calls into a single compact "activity" block when there are no permission prompts.
-      if (isToolCall(item) && !hasPermissionPrompt) {
+      // Group consecutive tool calls into a single compact "activity" block.
+      if (isToolCall(item)) {
         const group: ToolCall[] = [item]
         let j = i + 1
         while (j < conversation.length && isToolCall(conversation[j])) {
-          const next = conversation[j] as ToolCall
-          const nextHasPrompt = onPermissionResponse && allPermissionRequests.get(next.id)
-          if (nextHasPrompt) break
-          group.push(next)
+          group.push(conversation[j] as ToolCall)
           j += 1
         }
 
@@ -485,6 +534,10 @@ export function ChatSidebar({
               title={getToolGroupTitle(group.map((t) => t.name))}
               items={group.map(toActivityItem)}
               summary={titles}
+              defaultOpen={group.some((t) => {
+                const state = getToolUiState(t)
+                return state === 'approval-requested' || state === 'output-error'
+              })}
             />
           )
           i = j - 1
@@ -494,27 +547,6 @@ export function ChatSidebar({
 
       const rendered = renderConversationItem(item)
       if (!rendered) continue
-
-      // If this is a tool call, check for permission request (pending or responded)
-      if (isToolCall(item) && onPermissionResponse) {
-        const permRequest = allPermissionRequests.get(item.id)
-        if (permRequest) {
-          const response = permissionResponses.get(item.id) || null
-          nodes.push(
-            <React.Fragment key={item.id}>
-              {rendered}
-              <PermissionRequest
-                toolCall={permRequest.toolCall}
-                onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                isProcessing={isProcessing}
-                response={response}
-              />
-            </React.Fragment>
-          )
-          continue
-        }
-      }
 
       nodes.push(rendered)
     }
@@ -611,7 +643,7 @@ export function ChatSidebar({
                   </Message>
                 )}
 
-                {isProcessing && !currentAssistantMessage && !currentReasoning && (
+                {showThinkingIndicator && (
                   <Message from="assistant">
                     <MessageContent>
                       <Shimmer duration={1}>Thinking...</Shimmer>
