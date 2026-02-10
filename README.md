@@ -38,7 +38,6 @@ You can do things like:
 
 Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/)
 
----
 
 ## Demo
 
@@ -123,7 +122,6 @@ Examples: Exa (web search), Twitter/X, ElevenLabs (voice), Slack, Linear/Jira, G
 - No proprietary formats or hosted lock-in
 - You can inspect, edit, back up, or delete everything at any time
 
----
 
 ## Looking for Rowboat Web Studio?
 
