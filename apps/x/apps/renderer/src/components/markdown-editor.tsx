@@ -225,6 +225,41 @@ const createSelectionHighlightExtension = (getRange: () => SelectionHighlightRan
   })
 }
 
+const TabIndentExtension = Extension.create({
+  name: 'tabIndent',
+  addKeyboardShortcuts() {
+    const indentText = '  '
+    return {
+      Tab: () => {
+        // Always handle Tab so focus never leaves the editor.
+        // First try list indentation; otherwise insert spaces.
+        if (this.editor.can().sinkListItem('taskItem')) {
+          void this.editor.commands.sinkListItem('taskItem')
+          return true
+        }
+        if (this.editor.can().sinkListItem('listItem')) {
+          void this.editor.commands.sinkListItem('listItem')
+          return true
+        }
+        void this.editor.commands.insertContent(indentText)
+        return true
+      },
+      'Shift-Tab': () => {
+        // Always handle Shift+Tab so focus never leaves the editor.
+        if (this.editor.can().liftListItem('taskItem')) {
+          void this.editor.commands.liftListItem('taskItem')
+          return true
+        }
+        if (this.editor.can().liftListItem('listItem')) {
+          void this.editor.commands.liftListItem('listItem')
+          return true
+        }
+        return true
+      },
+    }
+  },
+})
+
 export function MarkdownEditor({
   content,
   onChange,
@@ -295,6 +330,7 @@ export function MarkdownEditor({
         transformPastedText: true,
       }),
       selectionHighlightExtension,
+      TabIndentExtension,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -310,35 +346,35 @@ export function MarkdownEditor({
       },
       handleKeyDown: (_view, event) => {
         const state = wikiKeyStateRef.current
-        if (!state.open) return false
+        if (state.open) {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            event.stopPropagation()
+            setActiveWikiLink(null)
+            setAnchorPosition(null)
+            setWikiCommandValue('')
+            return true
+          }
 
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          event.stopPropagation()
-          setActiveWikiLink(null)
-          setAnchorPosition(null)
-          setWikiCommandValue('')
-          return true
-        }
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            if (state.options.length === 0) return true
+            event.preventDefault()
+            event.stopPropagation()
+            const currentIndex = Math.max(0, state.options.indexOf(state.value))
+            const delta = event.key === 'ArrowDown' ? 1 : -1
+            const nextIndex = (currentIndex + delta + state.options.length) % state.options.length
+            setWikiCommandValue(state.options[nextIndex])
+            return true
+          }
 
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-          if (state.options.length === 0) return true
-          event.preventDefault()
-          event.stopPropagation()
-          const currentIndex = Math.max(0, state.options.indexOf(state.value))
-          const delta = event.key === 'ArrowDown' ? 1 : -1
-          const nextIndex = (currentIndex + delta + state.options.length) % state.options.length
-          setWikiCommandValue(state.options[nextIndex])
-          return true
-        }
-
-        if (event.key === 'Enter' || event.key === 'Tab') {
-          if (state.options.length === 0) return true
-          event.preventDefault()
-          event.stopPropagation()
-          const selected = state.options.includes(state.value) ? state.value : state.options[0]
-          handleSelectWikiLinkRef.current(selected)
-          return true
+          if (event.key === 'Enter' || event.key === 'Tab') {
+            if (state.options.length === 0) return true
+            event.preventDefault()
+            event.stopPropagation()
+            const selected = state.options.includes(state.value) ? state.value : state.options[0]
+            handleSelectWikiLinkRef.current(selected)
+            return true
+          }
         }
 
         return false

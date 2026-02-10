@@ -537,6 +537,7 @@ function App() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string>('')
   const [editorContent, setEditorContent] = useState<string>('')
+  const editorContentRef = useRef<string>('')
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
@@ -635,6 +636,7 @@ function App() {
     if (!editorPathRef.current || (nextSelectedPath && editorPathRef.current === nextSelectedPath)) {
       editorPathRef.current = nextSelectedPath
     }
+    editorContentRef.current = markdown
     setEditorContent(markdown)
   }, [])
 
@@ -685,6 +687,7 @@ function App() {
           if (selectedPathRef.current !== pathToReload) return
           setFileContent(result.data)
           setEditorContent(result.data)
+          editorContentRef.current = result.data
           editorPathRef.current = pathToReload
           initialContentByPathRef.current.set(pathToReload, result.data)
           initialContentRef.current = result.data
@@ -700,6 +703,7 @@ function App() {
     if (!selectedPath) {
       setFileContent('')
       setEditorContent('')
+      editorContentRef.current = ''
       initialContentRef.current = ''
       setLastSaved(null)
       return
@@ -715,14 +719,26 @@ function App() {
           const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
           if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
           setFileContent(result.data)
-          setEditorContent(result.data)
-          editorPathRef.current = pathToLoad
-          initialContentByPathRef.current.set(pathToLoad, result.data)
-          initialContentRef.current = result.data
-          setLastSaved(null)
+          const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
+          const isSameEditorFile = editorPathRef.current === pathToLoad
+          const wouldClobberActiveEdits =
+            isSameEditorFile
+            && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(result.data)
+          if (!wouldClobberActiveEdits) {
+            setEditorContent(result.data)
+            editorContentRef.current = result.data
+            editorPathRef.current = pathToLoad
+            initialContentByPathRef.current.set(pathToLoad, result.data)
+            initialContentRef.current = result.data
+            setLastSaved(null)
+          } else {
+            // Still update the editor's path so subsequent autosaves write to the correct file.
+            editorPathRef.current = pathToLoad
+          }
         } else {
           setFileContent('')
           setEditorContent('')
+          editorContentRef.current = ''
           initialContentRef.current = ''
         }
       } catch (err) {
@@ -730,6 +746,7 @@ function App() {
         if (!cancelled && fileLoadRequestIdRef.current === requestId && selectedPathRef.current === pathToLoad) {
           setFileContent('')
           setEditorContent('')
+          editorContentRef.current = ''
           initialContentRef.current = ''
         }
       }
@@ -758,15 +775,17 @@ function App() {
     if (debouncedContent === baseline) return
     if (!debouncedContent) return
 
-    const saveFile = async () => {
-      const wasActiveAtStart = selectedPathRef.current === pathAtStart
-      if (wasActiveAtStart) setIsSaving(true)
-      let pathToSave = pathAtStart
-      try {
-        // Only rename the currently active file (avoids renaming/jumping while user switches rapidly)
-        if (
-          wasActiveAtStart &&
-          selectedPathRef.current === pathAtStart &&
+	    const saveFile = async () => {
+	      const wasActiveAtStart = selectedPathRef.current === pathAtStart
+	      if (wasActiveAtStart) setIsSaving(true)
+	      let pathToSave = pathAtStart
+	      let renamedFrom: string | null = null
+	      let renamedTo: string | null = null
+	      try {
+	        // Only rename the currently active file (avoids renaming/jumping while user switches rapidly)
+	        if (
+	          wasActiveAtStart &&
+	          selectedPathRef.current === pathAtStart &&
           !renameInProgressRef.current &&
           pathAtStart.startsWith('knowledge/')
         ) {
@@ -778,29 +797,45 @@ function App() {
             const targetPath = `${parentDir}/${desiredName}.md`
             if (targetPath !== pathAtStart) {
               const exists = await window.ipc.invoke('workspace:exists', { path: targetPath })
-              if (!exists.exists) {
-                renameInProgressRef.current = true
-                await window.ipc.invoke('workspace:rename', { from: pathAtStart, to: targetPath })
-                pathToSave = targetPath
-                editorPathRef.current = targetPath
-                initialContentByPathRef.current.delete(pathAtStart)
-                if (selectedPathRef.current === pathAtStart) {
-                  setSelectedPath(targetPath)
-                }
-              }
-            }
-          }
-        }
-        await window.ipc.invoke('workspace:writeFile', {
-          path: pathToSave,
-          data: debouncedContent,
-          opts: { encoding: 'utf8' }
-        })
-        initialContentByPathRef.current.set(pathToSave, debouncedContent)
+	              if (!exists.exists) {
+	                renameInProgressRef.current = true
+	                await window.ipc.invoke('workspace:rename', { from: pathAtStart, to: targetPath })
+	                pathToSave = targetPath
+	                renamedFrom = pathAtStart
+	                renamedTo = targetPath
+	                editorPathRef.current = targetPath
+	                initialContentByPathRef.current.delete(pathAtStart)
+	              }
+	            }
+	          }
+	        }
+	        await window.ipc.invoke('workspace:writeFile', {
+	          path: pathToSave,
+	          data: debouncedContent,
+	          opts: { encoding: 'utf8' }
+	        })
+	        initialContentByPathRef.current.set(pathToSave, debouncedContent)
 
-        // Only update "current file" UI state if we're still on this file
-        if (selectedPathRef.current === pathAtStart || selectedPathRef.current === pathToSave) {
-          initialContentRef.current = debouncedContent
+	        // If we renamed the active file, update state/history AFTER the write completes so the editor
+	        // doesn't reload stale on-disk content mid-typing (which can drop the latest character).
+	        if (renamedFrom && renamedTo) {
+	          const fromPath = renamedFrom
+	          const toPath = renamedTo
+	          const replaceRenamedPath = (stack: ViewState[]) =>
+	            stack.map((v) => (v.type === 'file' && v.path === fromPath ? ({ type: 'file', path: toPath } satisfies ViewState) : v))
+	          setHistory({
+	            back: replaceRenamedPath(historyRef.current.back),
+	            forward: replaceRenamedPath(historyRef.current.forward),
+	          })
+
+	          if (selectedPathRef.current === fromPath) {
+	            setSelectedPath(toPath)
+	          }
+	        }
+
+	        // Only update "current file" UI state if we're still on this file
+	        if (selectedPathRef.current === pathAtStart || selectedPathRef.current === pathToSave) {
+	          initialContentRef.current = debouncedContent
           setLastSaved(new Date())
         }
       } catch (err) {
