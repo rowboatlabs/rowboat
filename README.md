@@ -56,6 +56,18 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 
 **All release files:**   https://github.com/rowboatlabs/rowboat/releases/latest
 
+### Google setup
+To connect Google services (Gmail, Calendar, and Drive), follow [Google setup](https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md).
+
+### Voice notes
+To enable voice notes (optional), add a Deepgram API key in ~/.rowboat/config/deepgram.json:
+```
+{
+  "apiKey": "<key>"
+}
+```
+
+
 ## What it does
 
 Rowboat is a **local-first AI coworker** that can:
