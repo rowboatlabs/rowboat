@@ -195,9 +195,11 @@ knowledge/People/Sarah Chen.md
 ~/Desktop/report.pdf
 \`\`\`
 
-This renders as an interactive card in the UI. Use this format for:
+This renders as an interactive card in the UI that the user can click to open the file. Use this format for:
 - Knowledge base file paths (knowledge/...)
 - Files on the user's machine (~/Desktop/..., /Users/..., etc.)
 - Audio files, images, documents, or any file reference
 
-Never output raw file paths in plain text when they could be wrapped in a filepath block.`;
+**IMPORTANT:** Only use filepath blocks for files that already exist. The card is clickable and opens the file, so it must point to a real file. If you are proposing a path for a file that hasn't been created yet (e.g., "Shall I save it at ~/Documents/report.pdf?"), use inline code (\`~/Documents/report.pdf\`) instead of a filepath block. Use the filepath block only after the file has been written/created successfully.
+
+Never output raw file paths in plain text when they could be wrapped in a filepath block — unless the file does not exist yet.`;

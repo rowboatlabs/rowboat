@@ -462,6 +462,9 @@ export function setupIpcHandlers() {
       let filePath = args.path;
       if (filePath.startsWith('~')) {
         filePath = path.join(os.homedir(), filePath.slice(1));
+      } else if (!path.isAbsolute(filePath)) {
+        // Workspace-relative path — resolve against ~/.rowboat/
+        filePath = path.join(os.homedir(), '.rowboat', filePath);
       }
       const error = await shell.openPath(filePath);
       return { error: error || undefined };
@@ -470,6 +473,9 @@ export function setupIpcHandlers() {
       let filePath = args.path;
       if (filePath.startsWith('~')) {
         filePath = path.join(os.homedir(), filePath.slice(1));
+      } else if (!path.isAbsolute(filePath)) {
+        // Workspace-relative path — resolve against ~/.rowboat/
+        filePath = path.join(os.homedir(), '.rowboat', filePath);
       }
       const stat = await fs.stat(filePath);
       if (stat.size > 10 * 1024 * 1024) {
