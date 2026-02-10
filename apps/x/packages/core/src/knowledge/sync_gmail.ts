@@ -5,12 +5,13 @@ import { NodeHtmlMarkdown } from 'node-html-markdown'
 import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
+import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
+import { limitEventItems } from './limit_event_items.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
-
 const nhm = new NodeHtmlMarkdown();
 
 // --- Wake Signal for Immediate Sync Trigger ---
@@ -192,38 +193,119 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
     console.log(`Performing full sync of last ${lookbackDays} days...`);
     const gmail = google.gmail({ version: 'v1', auth });
 
-    const pastDate = new Date();
-    pastDate.setDate(pastDate.getDate() - lookbackDays);
-    const dateQuery = pastDate.toISOString().split('T')[0].replace(/-/g, '/');
+    let run: ServiceRunContext | null = null;
+    const ensureRun = async () => {
+        if (!run) {
+            run = await serviceLogger.startRun({
+                service: 'gmail',
+                message: 'Syncing Gmail',
+                trigger: 'timer',
+            });
+        }
+    };
 
-    // Get History ID
-    const profile = await gmail.users.getProfile({ userId: 'me' });
-    const currentHistoryId = profile.data.historyId!;
+    try {
+        const pastDate = new Date();
+        pastDate.setDate(pastDate.getDate() - lookbackDays);
+        const dateQuery = pastDate.toISOString().split('T')[0].replace(/-/g, '/');
 
-    let pageToken: string | undefined;
-    do {
-        const res = await gmail.users.threads.list({
-            userId: 'me',
-            q: `after:${dateQuery}`,
-            pageToken
+        // Get History ID
+        const profile = await gmail.users.getProfile({ userId: 'me' });
+        const currentHistoryId = profile.data.historyId!;
+
+        const threadIds: string[] = [];
+        let pageToken: string | undefined;
+        do {
+            const res = await gmail.users.threads.list({
+                userId: 'me',
+                q: `after:${dateQuery}`,
+                pageToken
+            });
+
+            const threads = res.data.threads;
+            if (threads) {
+                for (const thread of threads) {
+                    if (thread.id) {
+                        threadIds.push(thread.id);
+                    }
+                }
+            }
+            pageToken = res.data.nextPageToken ?? undefined;
+        } while (pageToken);
+
+        if (threadIds.length === 0) {
+            saveState(currentHistoryId, stateFile);
+            console.log("Full sync complete. No threads found.");
+            return;
+        }
+
+        await ensureRun();
+        const limitedThreads = limitEventItems(threadIds);
+        await serviceLogger.log({
+            type: 'changes_identified',
+            service: run!.service,
+            runId: run!.runId,
+            level: 'info',
+            message: `Found ${threadIds.length} thread${threadIds.length === 1 ? '' : 's'} to sync`,
+            counts: { threads: threadIds.length },
+            items: limitedThreads.items,
+            truncated: limitedThreads.truncated,
         });
 
-        const threads = res.data.threads;
-        if (threads) {
-            for (const thread of threads) {
-                await processThread(auth, thread.id!, syncDir, attachmentsDir);
-            }
+        for (const threadId of threadIds) {
+            await processThread(auth, threadId, syncDir, attachmentsDir);
         }
-        pageToken = res.data.nextPageToken ?? undefined;
-    } while (pageToken);
 
-    saveState(currentHistoryId, stateFile);
-    console.log("Full sync complete.");
+        saveState(currentHistoryId, stateFile);
+        await serviceLogger.log({
+            type: 'run_complete',
+            service: run!.service,
+            runId: run!.runId,
+            level: 'info',
+            message: `Gmail sync complete: ${threadIds.length} thread${threadIds.length === 1 ? '' : 's'}`,
+            durationMs: Date.now() - run!.startedAt,
+            outcome: 'ok',
+            summary: { threads: threadIds.length },
+        });
+        console.log("Full sync complete.");
+    } catch (error) {
+        console.error("Error during full sync:", error);
+        await ensureRun();
+        await serviceLogger.log({
+            type: 'error',
+            service: run!.service,
+            runId: run!.runId,
+            level: 'error',
+            message: 'Gmail sync error',
+            error: error instanceof Error ? error.message : String(error),
+        });
+        await serviceLogger.log({
+            type: 'run_complete',
+            service: run!.service,
+            runId: run!.runId,
+            level: 'error',
+            message: 'Gmail sync failed',
+            durationMs: Date.now() - run!.startedAt,
+            outcome: 'error',
+        });
+        throw error;
+    }
 }
 
 async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: string, attachmentsDir: string, stateFile: string, lookbackDays: number) {
     console.log(`Checking updates since historyId ${startHistoryId}...`);
     const gmail = google.gmail({ version: 'v1', auth });
+
+    let run: ServiceRunContext | null = null;
+    const ensureRun = async () => {
+        if (!run) {
+            run = await serviceLogger.startRun({
+                service: 'gmail',
+                message: 'Syncing Gmail',
+                trigger: 'timer',
+            });
+        }
+    };
 
     try {
         const res = await gmail.users.history.list({
@@ -253,25 +335,74 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
             }
         }
 
-        for (const tid of threadIds) {
+        if (threadIds.size === 0) {
+            const profile = await gmail.users.getProfile({ userId: 'me' });
+            saveState(profile.data.historyId!, stateFile);
+            return;
+        }
+
+        await ensureRun();
+        const threadIdList = Array.from(threadIds);
+        const limitedThreads = limitEventItems(threadIdList);
+        await serviceLogger.log({
+            type: 'changes_identified',
+            service: run!.service,
+            runId: run!.runId,
+            level: 'info',
+            message: `Found ${threadIdList.length} new thread${threadIdList.length === 1 ? '' : 's'}`,
+            counts: { threads: threadIdList.length },
+            items: limitedThreads.items,
+            truncated: limitedThreads.truncated,
+        });
+
+        for (const tid of threadIdList) {
             await processThread(auth, tid, syncDir, attachmentsDir);
         }
 
         const profile = await gmail.users.getProfile({ userId: 'me' });
         saveState(profile.data.historyId!, stateFile);
+        await serviceLogger.log({
+            type: 'run_complete',
+            service: run!.service,
+            runId: run!.runId,
+            level: 'info',
+            message: `Gmail sync complete: ${threadIdList.length} thread${threadIdList.length === 1 ? '' : 's'}`,
+            durationMs: Date.now() - run!.startedAt,
+            outcome: 'ok',
+            summary: { threads: threadIdList.length },
+        });
 
     } catch (error: unknown) {
         const e = error as { response?: { status?: number } };
         if (e.response?.status === 404) {
             console.log("History ID expired. Falling back to full sync.");
             await fullSync(auth, syncDir, attachmentsDir, stateFile, lookbackDays);
-        } else {
-            console.error("Error during partial sync:", error);
-            // If 401, clear tokens to force re-auth next run
-            if (e.response?.status === 401) {
-                console.log("401 Unauthorized, clearing cache");
-                GoogleClientFactory.clearCache();
-            }
+            return;
+        }
+
+        console.error("Error during partial sync:", error);
+        await ensureRun();
+        await serviceLogger.log({
+            type: 'error',
+            service: run!.service,
+            runId: run!.runId,
+            level: 'error',
+            message: 'Gmail sync error',
+            error: error instanceof Error ? error.message : String(error),
+        });
+        await serviceLogger.log({
+            type: 'run_complete',
+            service: run!.service,
+            runId: run!.runId,
+            level: 'error',
+            message: 'Gmail sync failed',
+            durationMs: Date.now() - run!.startedAt,
+            outcome: 'error',
+        });
+        // If 401, clear tokens to force re-auth next run
+        if (e.response?.status === 401) {
+            console.log("401 Unauthorized, clearing cache");
+            GoogleClientFactory.clearCache();
         }
     }
 }

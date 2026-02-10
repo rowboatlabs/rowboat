@@ -3,6 +3,9 @@ import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, Work
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
 import { LlmModelConfig } from './models.js';
+import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
+import { AgentScheduleState } from './agent-schedule-state.js';
+import { ServiceEvent } from './service-events.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -172,6 +175,10 @@ const ipcSchemas = {
   },
   'runs:events': {
     req: z.null(),
+    res: z.null(),
+  },
+  'services:events': {
+    req: ServiceEvent,
     res: z.null(),
   },
   'models:list': {
@@ -352,6 +359,41 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
     res: z.null(),
+  },
+  // Agent schedule channels
+  'agent-schedule:getConfig': {
+    req: z.null(),
+    res: AgentScheduleConfig,
+  },
+  'agent-schedule:getState': {
+    req: z.null(),
+    res: AgentScheduleState,
+  },
+  'agent-schedule:updateAgent': {
+    req: z.object({
+      agentName: z.string(),
+      entry: AgentScheduleEntry,
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  'agent-schedule:deleteAgent': {
+    req: z.object({
+      agentName: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Shell integration channels
+  'shell:openPath': {
+    req: z.object({ path: z.string() }),
+    res: z.object({ error: z.string().optional() }),
+  },
+  'shell:readFileBase64': {
+    req: z.object({ path: z.string() }),
+    res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
   },
 } as const;
 

@@ -4,6 +4,7 @@ import { WorkDir } from '../config/config.js';
 import { autoConfigureStrictnessIfNeeded } from '../config/strictness_analyzer.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
+import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import {
     loadState,
     saveState,
@@ -13,6 +14,7 @@ import {
     type GraphState,
 } from './graph_state.js';
 import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js';
+import { limitEventItems } from './limit_event_items.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -32,6 +34,15 @@ const SOURCE_FOLDERS = [
 
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
 const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
+
+function extractPathFromToolInput(input: string): string | null {
+    try {
+        const parsed = JSON.parse(input) as { path?: string };
+        return typeof parsed.path === 'string' ? parsed.path : null;
+    } catch {
+        return null;
+    }
+}
 
 /**
  * Get unprocessed voice memo files from knowledge/Voice Memos/
@@ -148,7 +159,11 @@ async function waitForRunCompletion(runId: string): Promise<void> {
 /**
  * Run note creation agent on a batch of files to extract entities and create/update notes
  */
-async function createNotesFromBatch(files: { path: string; content: string }[], batchNumber: number, knowledgeIndex: string): Promise<string> {
+async function createNotesFromBatch(
+    files: { path: string; content: string }[],
+    batchNumber: number,
+    knowledgeIndex: string
+): Promise<{ runId: string; notesCreated: Set<string>; notesModified: Set<string> }> {
     // Ensure notes output directory exists
     if (!fs.existsSync(NOTES_OUTPUT_DIR)) {
         fs.mkdirSync(NOTES_OUTPUT_DIR, { recursive: true });
@@ -182,18 +197,155 @@ async function createNotesFromBatch(files: { path: string; content: string }[], 
         message += `\n\n---\n\n`;
     });
 
+    const notesCreated = new Set<string>();
+    const notesModified = new Set<string>();
+
+    const unsubscribe = await bus.subscribe(run.id, async (event) => {
+        if (event.type !== "tool-invocation") {
+            return;
+        }
+        if (event.toolName !== "workspace-writeFile" && event.toolName !== "workspace-edit") {
+            return;
+        }
+        const toolPath = extractPathFromToolInput(event.input);
+        if (!toolPath) {
+            return;
+        }
+        if (event.toolName === "workspace-writeFile") {
+            notesCreated.add(toolPath);
+        } else if (event.toolName === "workspace-edit") {
+            notesModified.add(toolPath);
+        }
+    });
+
     await createMessage(run.id, message);
 
     // Wait for the run to complete
     await waitForRunCompletion(run.id);
+    unsubscribe();
 
-    return run.id;
+    return { runId: run.id, notesCreated, notesModified };
 }
 
 /**
  * Build the knowledge graph from all content files in the specified source directory
  * Only processes new or changed files based on state tracking
  */
+type BatchResult = {
+    processedFiles: string[];
+    notesCreated: Set<string>;
+    notesModified: Set<string>;
+    hadError: boolean;
+};
+
+async function buildGraphWithFiles(
+    sourceDir: string,
+    filesToProcess: string[],
+    state: GraphState,
+    run?: ServiceRunContext
+): Promise<BatchResult> {
+    console.log(`[buildGraph] Starting build for directory: ${sourceDir}`);
+
+    if (filesToProcess.length === 0) {
+        console.log(`[buildGraph] No new or changed files to process in ${path.basename(sourceDir)}`);
+        return { processedFiles: [], notesCreated: new Set(), notesModified: new Set(), hadError: false };
+    }
+
+    console.log(`[buildGraph] Found ${filesToProcess.length} new/changed files to process in ${path.basename(sourceDir)}`);
+
+    // Read file contents
+    const contentFiles = await readFileContents(filesToProcess);
+
+    if (contentFiles.length === 0) {
+        console.log(`No files could be read from ${sourceDir}`);
+        return { processedFiles: [], notesCreated: new Set(), notesModified: new Set(), hadError: false };
+    }
+
+    const BATCH_SIZE = 10; // Reduced from 25 to 10 files per agent run for faster processing
+    const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
+
+    console.log(`Processing ${contentFiles.length} files in ${totalBatches} batches (${BATCH_SIZE} files per batch)...`);
+
+    const processedFiles: string[] = [];
+    const notesCreated = new Set<string>();
+    const notesModified = new Set<string>();
+    let hadError = false;
+
+    // Process files in batches
+    for (let i = 0; i < contentFiles.length; i += BATCH_SIZE) {
+        const batch = contentFiles.slice(i, i + BATCH_SIZE);
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+
+        try {
+            // Build fresh index before each batch to include notes from previous batches
+            console.log(`Building knowledge index for batch ${batchNumber}...`);
+            const indexStartTime = Date.now();
+            const index = buildKnowledgeIndex();
+            const indexForPrompt = formatIndexForPrompt(index);
+            const indexDuration = ((Date.now() - indexStartTime) / 1000).toFixed(2);
+            console.log(`Index built in ${indexDuration}s: ${index.people.length} people, ${index.organizations.length} orgs, ${index.projects.length} projects, ${index.topics.length} topics, ${index.other.length} other`);
+
+            console.log(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
+            if (run) {
+                await serviceLogger.log({
+                    type: 'progress',
+                    service: run.service,
+                    runId: run.runId,
+                    level: 'info',
+                    message: `Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)`,
+                    step: 'batch',
+                    current: batchNumber,
+                    total: totalBatches,
+                    details: { filesInBatch: batch.length },
+                });
+            }
+            const agentStartTime = Date.now();
+            const batchResult = await createNotesFromBatch(batch, batchNumber, indexForPrompt);
+            const agentDuration = ((Date.now() - agentStartTime) / 1000).toFixed(2);
+            console.log(`Batch ${batchNumber}/${totalBatches} complete in ${agentDuration}s`);
+
+            for (const note of batchResult.notesCreated) {
+                notesCreated.add(note);
+            }
+            for (const note of batchResult.notesModified) {
+                notesModified.add(note);
+            }
+
+            // Mark files in this batch as processed
+            for (const file of batch) {
+                markFileAsProcessed(file.path, state);
+                processedFiles.push(file.path);
+            }
+
+            // Save state after each successful batch
+            // This ensures partial progress is saved even if later batches fail
+            saveState(state);
+        } catch (error) {
+            hadError = true;
+            console.error(`Error processing batch ${batchNumber}:`, error);
+            if (run) {
+                await serviceLogger.log({
+                    type: 'error',
+                    service: run.service,
+                    runId: run.runId,
+                    level: 'error',
+                    message: `Error processing batch ${batchNumber}`,
+                    error: error instanceof Error ? error.message : String(error),
+                    context: { batchNumber },
+                });
+            }
+            // Continue with next batch (without saving state for failed batch)
+        }
+    }
+
+    // Update state with last build time and save
+    state.lastBuildTime = new Date().toISOString();
+    saveState(state);
+
+    console.log(`Knowledge graph build complete. Processed ${processedFiles.length} files.`);
+    return { processedFiles, notesCreated, notesModified, hadError };
+}
+
 export async function buildGraph(sourceDir: string): Promise<void> {
     console.log(`[buildGraph] Starting build for directory: ${sourceDir}`);
 
@@ -210,62 +362,7 @@ export async function buildGraph(sourceDir: string): Promise<void> {
         return;
     }
 
-    console.log(`[buildGraph] Found ${filesToProcess.length} new/changed files to process in ${path.basename(sourceDir)}`);
-
-    // Read file contents
-    const contentFiles = await readFileContents(filesToProcess);
-
-    if (contentFiles.length === 0) {
-        console.log(`No files could be read from ${sourceDir}`);
-        return;
-    }
-
-    const BATCH_SIZE = 10; // Reduced from 25 to 10 files per agent run for faster processing
-    const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
-
-    console.log(`Processing ${contentFiles.length} files in ${totalBatches} batches (${BATCH_SIZE} files per batch)...`);
-
-    // Process files in batches
-    const processedFiles: string[] = [];
-    for (let i = 0; i < contentFiles.length; i += BATCH_SIZE) {
-        const batch = contentFiles.slice(i, i + BATCH_SIZE);
-        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
-
-        try {
-            // Build fresh index before each batch to include notes from previous batches
-            console.log(`Building knowledge index for batch ${batchNumber}...`);
-            const indexStartTime = Date.now();
-            const index = buildKnowledgeIndex();
-            const indexForPrompt = formatIndexForPrompt(index);
-            const indexDuration = ((Date.now() - indexStartTime) / 1000).toFixed(2);
-            console.log(`Index built in ${indexDuration}s: ${index.people.length} people, ${index.organizations.length} orgs, ${index.projects.length} projects, ${index.topics.length} topics, ${index.other.length} other`);
-
-            console.log(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
-            const agentStartTime = Date.now();
-            await createNotesFromBatch(batch, batchNumber, indexForPrompt);
-            const agentDuration = ((Date.now() - agentStartTime) / 1000).toFixed(2);
-            console.log(`Batch ${batchNumber}/${totalBatches} complete in ${agentDuration}s`);
-
-            // Mark files in this batch as processed
-            for (const file of batch) {
-                markFileAsProcessed(file.path, state);
-                processedFiles.push(file.path);
-            }
-
-            // Save state after each successful batch
-            // This ensures partial progress is saved even if later batches fail
-            saveState(state);
-        } catch (error) {
-            console.error(`Error processing batch ${batchNumber}:`, error);
-            // Continue with next batch (without saving state for failed batch)
-        }
-    }
-
-    // Update state with last build time and save
-    state.lastBuildTime = new Date().toISOString();
-    saveState(state);
-
-    console.log(`Knowledge graph build complete. Processed ${processedFiles.length} files.`);
+    await buildGraphWithFiles(sourceDir, filesToProcess, state);
 }
 
 /**
@@ -287,16 +384,49 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
     console.log(`[GraphBuilder] Processing ${unprocessedFiles.length} voice memo transcripts for entity extraction...`);
     console.log(`[GraphBuilder] Files to process: ${unprocessedFiles.map(f => path.basename(f)).join(', ')}`);
 
+    const run = await serviceLogger.startRun({
+        service: 'voice_memo',
+        message: `Processing ${unprocessedFiles.length} voice memo${unprocessedFiles.length === 1 ? '' : 's'}`,
+        trigger: 'timer',
+    });
+
+    const relativeVoiceMemos = unprocessedFiles.map(filePath => path.relative(WorkDir, filePath));
+    const limitedVoiceMemos = limitEventItems(relativeVoiceMemos);
+    await serviceLogger.log({
+        type: 'changes_identified',
+        service: run.service,
+        runId: run.runId,
+        level: 'info',
+        message: `Found ${unprocessedFiles.length} new voice memo${unprocessedFiles.length === 1 ? '' : 's'}`,
+        counts: { voiceMemos: unprocessedFiles.length },
+        items: limitedVoiceMemos.items,
+        truncated: limitedVoiceMemos.truncated,
+    });
+
     // Read the files
     const contentFiles = await readFileContents(unprocessedFiles);
 
     if (contentFiles.length === 0) {
+        await serviceLogger.log({
+            type: 'run_complete',
+            service: run.service,
+            runId: run.runId,
+            level: 'info',
+            message: 'No voice memos could be read',
+            durationMs: Date.now() - run.startedAt,
+            outcome: 'error',
+            summary: { processedFiles: 0 },
+        });
         return false;
     }
 
     // Process in batches like other sources
     const BATCH_SIZE = 10;
     const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
+
+    const notesCreated = new Set<string>();
+    const notesModified = new Set<string>();
+    let hadError = false;
 
     for (let i = 0; i < contentFiles.length; i += BATCH_SIZE) {
         const batch = contentFiles.slice(i, i + BATCH_SIZE);
@@ -309,8 +439,26 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
             const indexForPrompt = formatIndexForPrompt(index);
 
             console.log(`[GraphBuilder] Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
-            await createNotesFromBatch(batch, batchNumber, indexForPrompt);
+            await serviceLogger.log({
+                type: 'progress',
+                service: run.service,
+                runId: run.runId,
+                level: 'info',
+                message: `Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)`,
+                step: 'batch',
+                current: batchNumber,
+                total: totalBatches,
+                details: { filesInBatch: batch.length },
+            });
+            const batchResult = await createNotesFromBatch(batch, batchNumber, indexForPrompt);
             console.log(`[GraphBuilder] Batch ${batchNumber}/${totalBatches} complete`);
+
+            for (const note of batchResult.notesCreated) {
+                notesCreated.add(note);
+            }
+            for (const note of batchResult.notesModified) {
+                notesModified.add(note);
+            }
 
             // Mark files as processed
             for (const file of batch) {
@@ -320,13 +468,38 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
             // Save state after each batch
             saveState(state);
         } catch (error) {
+            hadError = true;
             console.error(`[GraphBuilder] Error processing batch ${batchNumber}:`, error);
+            await serviceLogger.log({
+                type: 'error',
+                service: run.service,
+                runId: run.runId,
+                level: 'error',
+                message: `Error processing voice memo batch ${batchNumber}`,
+                error: error instanceof Error ? error.message : String(error),
+                context: { batchNumber },
+            });
         }
     }
 
     // Update last build time
     state.lastBuildTime = new Date().toISOString();
     saveState(state);
+
+    await serviceLogger.log({
+        type: 'run_complete',
+        service: run.service,
+        runId: run.runId,
+        level: hadError ? 'error' : 'info',
+        message: `Voice memos processed: ${contentFiles.length} files, ${notesCreated.size} created, ${notesModified.size} updated`,
+        durationMs: Date.now() - run.startedAt,
+        outcome: hadError ? 'error' : 'ok',
+        summary: {
+            processedFiles: contentFiles.length,
+            notesCreated: notesCreated.size,
+            notesModified: notesModified.size,
+        },
+    });
 
     return true;
 }
@@ -352,6 +525,11 @@ async function processAllSources(): Promise<void> {
         console.error('[GraphBuilder] Error processing voice memos:', error);
     }
 
+    const state = loadState();
+    const folderChanges: { folder: string; sourceDir: string; files: string[] }[] = [];
+    const countsByFolder: Record<string, number> = {};
+    const allFiles: string[] = [];
+
     for (const folder of SOURCE_FOLDERS) {
         const sourceDir = path.join(WorkDir, folder);
 
@@ -362,19 +540,75 @@ async function processAllSources(): Promise<void> {
         }
 
         try {
-            // Quick check if there are any files to process before doing the full build
-            const state = loadState();
             const filesToProcess = getFilesToProcess(sourceDir, state);
 
             if (filesToProcess.length > 0) {
                 console.log(`[GraphBuilder] Found ${filesToProcess.length} new/changed files in ${folder}`);
-                await buildGraph(sourceDir);
-                anyFilesProcessed = true;
+                folderChanges.push({ folder, sourceDir, files: filesToProcess });
+                countsByFolder[folder] = filesToProcess.length;
+                allFiles.push(...filesToProcess);
             }
         } catch (error) {
             console.error(`[GraphBuilder] Error processing ${folder}:`, error);
             // Continue with other folders even if one fails
         }
+    }
+
+    if (allFiles.length > 0) {
+        const run = await serviceLogger.startRun({
+            service: 'graph',
+            message: 'Syncing knowledge graph',
+            trigger: 'timer',
+            config: { sources: SOURCE_FOLDERS },
+        });
+
+        const relativeFiles = allFiles.map(filePath => path.relative(WorkDir, filePath));
+        const limitedFiles = limitEventItems(relativeFiles);
+        const foldersList = Object.keys(countsByFolder).join(', ');
+        const folderMessage = foldersList ? ` across ${foldersList}` : '';
+
+        await serviceLogger.log({
+            type: 'changes_identified',
+            service: run.service,
+            runId: run.runId,
+            level: 'info',
+            message: `Found ${allFiles.length} changed file${allFiles.length === 1 ? '' : 's'}${folderMessage}`,
+            counts: countsByFolder,
+            items: limitedFiles.items,
+            truncated: limitedFiles.truncated,
+        });
+
+        const notesCreated = new Set<string>();
+        const notesModified = new Set<string>();
+        const processedFiles: string[] = [];
+        let hadError = false;
+
+        for (const entry of folderChanges) {
+            const result = await buildGraphWithFiles(entry.sourceDir, entry.files, state, run);
+            result.processedFiles.forEach(file => processedFiles.push(file));
+            result.notesCreated.forEach(note => notesCreated.add(note));
+            result.notesModified.forEach(note => notesModified.add(note));
+            if (result.hadError) {
+                hadError = true;
+            }
+        }
+
+        await serviceLogger.log({
+            type: 'run_complete',
+            service: run.service,
+            runId: run.runId,
+            level: hadError ? 'error' : 'info',
+            message: `Graph sync complete: ${processedFiles.length} files, ${notesCreated.size} created, ${notesModified.size} updated`,
+            durationMs: Date.now() - run.startedAt,
+            outcome: hadError ? 'error' : 'ok',
+            summary: {
+                processedFiles: processedFiles.length,
+                notesCreated: notesCreated.size,
+                notesModified: notesModified.size,
+            },
+        });
+
+        anyFilesProcessed = true;
     }
 
     if (!anyFilesProcessed) {

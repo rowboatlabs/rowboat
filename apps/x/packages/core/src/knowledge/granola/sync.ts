@@ -4,6 +4,8 @@ import { homedir } from 'os';
 import { WorkDir } from '../../config/config.js';
 import container from '../../di/container.js';
 import { IGranolaConfigRepo } from './repo.js';
+import { serviceLogger } from '../../services/service_logger.js';
+import { limitEventItems } from '../limit_event_items.js';
 import {
     GetDocumentsResponse,
     SyncState,
@@ -325,102 +327,169 @@ function documentToMarkdown(doc: Document): string {
 
 async function syncNotes(): Promise<void> {
     console.log('[Granola] Starting sync...');
-    
-    // Check if enabled
-    const granolaRepo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
-    const config = await granolaRepo.getConfig();
-    if (!config.enabled) {
-        console.log('[Granola] Sync disabled in config');
-        return;
-    }
-    
-    // Extract access token
-    const accessToken = extractAccessToken();
-    if (!accessToken) {
-        console.log('[Granola] No access token available');
-        return;
-    }
-    
-    // Ensure sync directory exists
-    ensureDir(SYNC_DIR);
-    
-    // Load state
-    const state = loadState();
-    
-    let newCount = 0;
-    let updatedCount = 0;
-    let offset = 0;
-    let hasMore = true;
 
-    // Fetch documents with pagination
-    while (hasMore) {
-        // Delay before API call (except first)
-        if (offset > 0) {
-            await sleep(API_DELAY_MS);
+    let runId: string | null = null;
+    let runStartedAt = 0;
+    const ensureRun = async () => {
+        if (!runId) {
+            const run = await serviceLogger.startRun({
+                service: 'granola',
+                message: 'Syncing Granola notes',
+                trigger: 'timer',
+            });
+            runId = run.runId;
+            runStartedAt = run.startedAt;
+        }
+    };
+
+    try {
+        // Check if enabled
+        const granolaRepo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
+        const config = await granolaRepo.getConfig();
+        if (!config.enabled) {
+            console.log('[Granola] Sync disabled in config');
+            return;
         }
 
-        const docsResponse = await getDocuments(accessToken, MAX_BATCH_SIZE, offset);
-        if (!docsResponse) {
-            console.log('[Granola] Failed to fetch documents');
-            break;
+        // Extract access token
+        const accessToken = extractAccessToken();
+        if (!accessToken) {
+            console.log('[Granola] No access token available');
+            return;
         }
 
-        if (docsResponse.docs.length === 0) {
-            console.log('[Granola] No more documents to fetch');
-            hasMore = false;
-            break;
-        }
+        // Ensure sync directory exists
+        ensureDir(SYNC_DIR);
 
-        // Process each document
-        for (const doc of docsResponse.docs) {
-            const docUpdatedAt = doc.updated_at || doc.created_at;
-            const lastSyncedAt = state.syncedDocs[doc.id];
+        // Load state
+        const state = loadState();
 
-            // Check if needs sync (new or updated)
-            const needsSync = !lastSyncedAt || lastSyncedAt !== docUpdatedAt;
+        let newCount = 0;
+        let updatedCount = 0;
+        let offset = 0;
+        let hasMore = true;
+        const changedTitles: string[] = [];
 
-            if (!needsSync) {
-                continue;
+        // Fetch documents with pagination
+        while (hasMore) {
+            // Delay before API call (except first)
+            if (offset > 0) {
+                await sleep(API_DELAY_MS);
             }
 
-            // Convert to markdown and save
-            const markdown = documentToMarkdown(doc);
-            const docTitle = doc.title || 'Untitled';
-            const filename = `${doc.id}_${cleanFilename(docTitle)}.md`;
-            const filePath = path.join(SYNC_DIR, filename);
-
-            fs.writeFileSync(filePath, markdown);
-
-            if (lastSyncedAt) {
-                console.log(`[Granola] Updated: ${filename}`);
-                updatedCount++;
-            } else {
-                console.log(`[Granola] Saved: ${filename}`);
-                newCount++;
+            const docsResponse = await getDocuments(accessToken, MAX_BATCH_SIZE, offset);
+            if (!docsResponse) {
+                console.log('[Granola] Failed to fetch documents');
+                break;
             }
 
-            // Update state
-            state.syncedDocs[doc.id] = docUpdatedAt;
+            if (docsResponse.docs.length === 0) {
+                console.log('[Granola] No more documents to fetch');
+                hasMore = false;
+                break;
+            }
+
+            // Process each document
+            for (const doc of docsResponse.docs) {
+                const docUpdatedAt = doc.updated_at || doc.created_at;
+                const lastSyncedAt = state.syncedDocs[doc.id];
+
+                // Check if needs sync (new or updated)
+                const needsSync = !lastSyncedAt || lastSyncedAt !== docUpdatedAt;
+
+                if (!needsSync) {
+                    continue;
+                }
+
+                await ensureRun();
+                const docTitle = doc.title || 'Untitled';
+                changedTitles.push(docTitle);
+
+                // Convert to markdown and save
+                const markdown = documentToMarkdown(doc);
+                const filename = `${doc.id}_${cleanFilename(docTitle)}.md`;
+                const filePath = path.join(SYNC_DIR, filename);
+
+                fs.writeFileSync(filePath, markdown);
+
+                if (lastSyncedAt) {
+                    console.log(`[Granola] Updated: ${filename}`);
+                    updatedCount++;
+                } else {
+                    console.log(`[Granola] Saved: ${filename}`);
+                    newCount++;
+                }
+
+                // Update state
+                state.syncedDocs[doc.id] = docUpdatedAt;
+            }
+
+            // Move to next page
+            offset += docsResponse.docs.length;
+
+            // Stop if we got fewer docs than requested (last page)
+            if (docsResponse.docs.length < MAX_BATCH_SIZE) {
+                hasMore = false;
+            }
         }
 
-        // Move to next page
-        offset += docsResponse.docs.length;
+        // Save state
+        state.lastSyncDate = new Date().toISOString();
+        saveState(state);
 
-        // Stop if we got fewer docs than requested (last page)
-        if (docsResponse.docs.length < MAX_BATCH_SIZE) {
-            hasMore = false;
+        console.log(`[Granola] Sync complete: ${newCount} new, ${updatedCount} updated`);
+
+        if (runId) {
+            const totalChanges = newCount + updatedCount;
+            const limitedTitles = limitEventItems(changedTitles);
+            await serviceLogger.log({
+                type: 'changes_identified',
+                service: 'granola',
+                runId,
+                level: 'info',
+                message: `Granola updates: ${totalChanges} change${totalChanges === 1 ? '' : 's'}`,
+                counts: { newNotes: newCount, updatedNotes: updatedCount },
+                items: limitedTitles.items,
+                truncated: limitedTitles.truncated,
+            });
+            await serviceLogger.log({
+                type: 'run_complete',
+                service: 'granola',
+                runId,
+                level: 'info',
+                message: `Granola sync complete: ${newCount} new, ${updatedCount} updated`,
+                durationMs: Date.now() - runStartedAt,
+                outcome: 'ok',
+                summary: { newNotes: newCount, updatedNotes: updatedCount },
+            });
         }
-    }
 
-    // Save state
-    state.lastSyncDate = new Date().toISOString();
-    saveState(state);
-    
-    console.log(`[Granola] Sync complete: ${newCount} new, ${updatedCount} updated`);
-    
-    // Build knowledge graph if there were changes
-    if (newCount > 0 || updatedCount > 0) {
-        // Graph building is now handled by the independent graph builder service
+        // Build knowledge graph if there were changes
+        if (newCount > 0 || updatedCount > 0) {
+            // Graph building is now handled by the independent graph builder service
+        }
+    } catch (error) {
+        console.error('[Granola] Error in sync:', error);
+        if (runId) {
+            await serviceLogger.log({
+                type: 'error',
+                service: 'granola',
+                runId,
+                level: 'error',
+                message: 'Granola sync error',
+                error: error instanceof Error ? error.message : String(error),
+            });
+            await serviceLogger.log({
+                type: 'run_complete',
+                service: 'granola',
+                runId,
+                level: 'error',
+                message: 'Granola sync failed',
+                durationMs: Date.now() - runStartedAt,
+                outcome: 'error',
+            });
+        }
+        throw error;
     }
 }
 
@@ -443,4 +512,3 @@ export async function init(): Promise<void> {
         await interruptibleSleep(SYNC_INTERVAL_MS);
     }
 }
-

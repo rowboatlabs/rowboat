@@ -158,6 +158,8 @@ When a user asks for ANY task that might require external capabilities (web sear
 - \`workspace-readFile\`, \`workspace-writeFile\`, \`workspace-edit\`, \`workspace-remove\` - File operations
 - \`workspace-readdir\`, \`workspace-exists\`, \`workspace-stat\`, \`workspace-glob\`, \`workspace-grep\` - Directory exploration and file search
 - \`workspace-mkdir\`, \`workspace-rename\`, \`workspace-copy\` - File/directory management
+- \`parseFile\` - Parse and extract text from files (PDF, Excel, CSV, Word .docx). Accepts absolute paths or workspace-relative paths — no need to copy files into the workspace first. Best for well-structured digital documents.
+- \`LLMParse\` - Send a file to the configured LLM as a multimodal attachment to extract content as markdown. Use this instead of \`parseFile\` for scanned PDFs, images with text, complex layouts, presentations, or any format where local parsing falls short. Supports documents and images.
 - \`analyzeAgent\` - Agent analysis
 - \`addMcpServer\`, \`listMcpServers\`, \`listMcpTools\`, \`executeMcpTool\` - MCP server management and execution
 - \`loadSkill\` - Skill loading
@@ -179,4 +181,25 @@ When a user asks for ANY task that might require external capabilities (web sear
 
 **Only \`executeCommand\` (shell/bash commands) goes through the approval flow.** If you need to delete a file, use the \`workspace-remove\` builtin tool, not \`executeCommand\` with \`rm\`. If you need to create a file, use \`workspace-writeFile\`, not \`executeCommand\` with \`touch\` or \`echo >\`.
 
-Rowboat's internal builtin tools never require approval — only shell commands via \`executeCommand\` do.`;
+Rowboat's internal builtin tools never require approval — only shell commands via \`executeCommand\` do.
+
+## File Path References
+
+When you reference a file path in your response (whether a knowledge base file or a file on the user's system), ALWAYS wrap it in a filepath code block:
+
+\`\`\`filepath
+knowledge/People/Sarah Chen.md
+\`\`\`
+
+\`\`\`filepath
+~/Desktop/report.pdf
+\`\`\`
+
+This renders as an interactive card in the UI that the user can click to open the file. Use this format for:
+- Knowledge base file paths (knowledge/...)
+- Files on the user's machine (~/Desktop/..., /Users/..., etc.)
+- Audio files, images, documents, or any file reference
+
+**IMPORTANT:** Only use filepath blocks for files that already exist. The card is clickable and opens the file, so it must point to a real file. If you are proposing a path for a file that hasn't been created yet (e.g., "Shall I save it at ~/Documents/report.pdf?"), use inline code (\`~/Documents/report.pdf\`) instead of a filepath block. Use the filepath block only after the file has been written/created successfully.
+
+Never output raw file paths in plain text when they could be wrapped in a filepath block — unless the file does not exist yet.`;

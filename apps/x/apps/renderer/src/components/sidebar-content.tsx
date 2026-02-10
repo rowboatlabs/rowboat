@@ -1,8 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
+  Bot,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -11,10 +12,13 @@ import {
   FilePlus,
   Folder,
   FolderPlus,
-  MessageSquare,
+  HelpCircle,
   Mic,
   Network,
   Pencil,
+  Plug,
+  LoaderIcon,
+  Settings,
   Square,
   SquarePen,
   Trash2,
@@ -28,6 +32,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -36,7 +41,13 @@ import {
   SidebarMenuItem,
   SidebarMenuSub,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import {
   Tooltip,
   TooltipContent,
@@ -50,8 +61,14 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { Input } from "@/components/ui/input"
-import { useSidebarSection } from "@/contexts/sidebar-context"
+import { cn } from "@/lib/utils"
+import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
+import { ConnectorsPopover } from "@/components/connectors-popover"
+import { HelpPopover } from "@/components/help-popover"
+import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
+import { ServiceEvent } from "@x/shared/src/service-events.js"
+import z from "zod"
 
 interface TreeNode {
   path: string
@@ -79,9 +96,41 @@ type RunListItem = {
   agentId: string
 }
 
+type BackgroundTaskItem = {
+  name: string
+  description?: string
+  schedule: {
+    type: "cron" | "window" | "once"
+    expression?: string
+    cron?: string
+    startTime?: string
+    endTime?: string
+    runAt?: string
+  }
+  enabled: boolean
+  status?: "scheduled" | "running" | "finished" | "failed" | "triggered"
+  nextRunAt?: string | null
+  lastRunAt?: string | null
+}
+
+type ServiceEventType = z.infer<typeof ServiceEvent>
+
+const MAX_SYNC_EVENTS = 1000
+const RUN_STALE_MS = 2 * 60 * 60 * 1000
+
+const SERVICE_LABELS: Record<string, string> = {
+  gmail: "Syncing Gmail",
+  calendar: "Syncing Calendar",
+  fireflies: "Syncing Fireflies",
+  granola: "Syncing Granola",
+  graph: "Updating knowledge",
+  voice_memo: "Processing voice memo",
+}
+
 type TasksActions = {
   onNewChat: () => void
   onSelectRun: (runId: string) => void
+  onSelectBackgroundTask?: (taskName: string) => void
 }
 
 type SidebarContentPanelProps = {
@@ -93,12 +142,199 @@ type SidebarContentPanelProps = {
   onVoiceNoteCreated?: (path: string) => void
   runs?: RunListItem[]
   currentRunId?: string | null
+  processingRunIds?: Set<string>
   tasksActions?: TasksActions
+  backgroundTasks?: BackgroundTaskItem[]
+  selectedBackgroundTask?: string | null
 } & React.ComponentProps<typeof Sidebar>
 
-const sectionTitles = {
-  knowledge: "Knowledge",
-  tasks: "Chats",
+const sectionTabs: { id: ActiveSection; label: string }[] = [
+  { id: "tasks", label: "Chat" },
+  { id: "knowledge", label: "Knowledge" },
+]
+
+function formatEventTime(ts: string): string {
+  const date = new Date(ts)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+}
+
+function SyncStatusBar() {
+  const { state, isMobile } = useSidebar()
+  const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
+  const [popoverOpen, setPopoverOpen] = useState(false)
+  const [logEvents, setLogEvents] = useState<ServiceEventType[]>([])
+  const [logLoading, setLogLoading] = useState(false)
+  const runTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  // Track active runs from real-time events
+  useEffect(() => {
+    const cleanup = window.ipc.on('services:events', (event) => {
+      const nextEvent = event as ServiceEventType
+      if (nextEvent.type === 'run_start') {
+        setActiveServices((prev) => {
+          const next = new Map(prev)
+          next.set(nextEvent.runId, nextEvent.service)
+          return next
+        })
+        const existingTimeout = runTimeoutsRef.current.get(nextEvent.runId)
+        if (existingTimeout) clearTimeout(existingTimeout)
+        const timeout = setTimeout(() => {
+          setActiveServices((prev) => {
+            if (!prev.has(nextEvent.runId)) return prev
+            const next = new Map(prev)
+            next.delete(nextEvent.runId)
+            return next
+          })
+          runTimeoutsRef.current.delete(nextEvent.runId)
+        }, RUN_STALE_MS)
+        runTimeoutsRef.current.set(nextEvent.runId, timeout)
+      } else if (nextEvent.type === 'run_complete') {
+        setActiveServices((prev) => {
+          const next = new Map(prev)
+          next.delete(nextEvent.runId)
+          return next
+        })
+        const existingTimeout = runTimeoutsRef.current.get(nextEvent.runId)
+        if (existingTimeout) {
+          clearTimeout(existingTimeout)
+          runTimeoutsRef.current.delete(nextEvent.runId)
+        }
+      }
+    })
+    return cleanup
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      runTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout))
+      runTimeoutsRef.current.clear()
+    }
+  }, [])
+
+  // Load logs from JSONL file when popover opens
+  useEffect(() => {
+    if (!popoverOpen) return
+    let cancelled = false
+    async function loadLogs() {
+      setLogLoading(true)
+      try {
+        const result = await window.ipc.invoke('workspace:readFile', {
+          path: 'logs/services.jsonl',
+          encoding: 'utf8',
+        })
+        if (cancelled) return
+        const lines = result.data.trim().split('\n').filter(Boolean)
+        const parsed: ServiceEventType[] = []
+        for (const line of lines) {
+          try {
+            parsed.push(JSON.parse(line))
+          } catch {
+            // skip malformed lines
+          }
+        }
+        // Newest first, limit to 1000
+        setLogEvents(parsed.reverse().slice(0, MAX_SYNC_EVENTS))
+      } catch {
+        if (!cancelled) setLogEvents([])
+      } finally {
+        if (!cancelled) setLogLoading(false)
+      }
+    }
+    loadLogs()
+    return () => { cancelled = true }
+  }, [popoverOpen])
+
+  const isSyncing = activeServices.size > 0
+  const isCollapsed = state === "collapsed"
+
+  // Build status label from active services
+  const activeServiceNames = [...new Set(activeServices.values())]
+  const statusLabel = isSyncing
+    ? activeServiceNames.map((s) => SERVICE_LABELS[s] || s).join(", ")
+    : "All caught up"
+
+  return (
+    <>
+      {!isMobile && isCollapsed && isSyncing && (
+        <div
+          className="fixed bottom-4 z-40 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+          style={{ left: "0.5rem" }}
+          aria-label="Syncing"
+        >
+          <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
+        </div>
+      )}
+      <SidebarFooter className="border-t border-sidebar-border px-2 py-2">
+        <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-sidebar-accent"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                {isSyncing ? (
+                  <LoaderIcon className="h-3 w-3 shrink-0 animate-spin" />
+                ) : (
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                )}
+                <span className="truncate">{statusLabel}</span>
+              </span>
+              <ChevronRight className="h-3 w-3 shrink-0" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            side="right"
+            align="end"
+            sideOffset={4}
+            className="w-96 p-0"
+          >
+            <div className="p-3 border-b">
+              <h4 className="font-semibold text-sm">Sync Activity</h4>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {isSyncing ? statusLabel : "All services up to date"}
+              </p>
+            </div>
+            <div className="max-h-80 overflow-y-auto p-2">
+              {logLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : logEvents.length === 0 ? (
+                <div className="py-4 text-center text-xs text-muted-foreground">
+                  No recent activity.
+                </div>
+              ) : (
+                <div className="space-y-0.5">
+                  {logEvents.map((event, idx) => (
+                    <div
+                      key={`${event.runId}-${event.ts}-${idx}`}
+                      className="flex items-start gap-2 rounded px-2 py-1 text-xs hover:bg-accent"
+                    >
+                      <span className="shrink-0 text-[10px] leading-4 text-muted-foreground/70">
+                        {formatEventTime(event.ts)}
+                      </span>
+                      <span className="shrink-0">
+                        <span className={cn(
+                          "inline-block rounded px-1 py-0.5 text-[10px] font-medium leading-none",
+                          event.level === 'error' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
+                          event.level === 'warn' ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" :
+                          "bg-muted text-muted-foreground"
+                        )}>
+                          {SERVICE_LABELS[event.service]?.split(" ").slice(-1)[0] || event.service}
+                        </span>
+                      </span>
+                      <span className="leading-4 text-foreground/80">{event.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
+      </SidebarFooter>
+    </>
+  )
 }
 
 export function SidebarContentPanel({
@@ -110,16 +346,37 @@ export function SidebarContentPanel({
   onVoiceNoteCreated,
   runs = [],
   currentRunId,
+  processingRunIds,
   tasksActions,
+  backgroundTasks = [],
+  selectedBackgroundTask,
   ...props
 }: SidebarContentPanelProps) {
-  const { activeSection } = useSidebarSection()
+  const { activeSection, setActiveSection } = useSidebarSection()
 
   return (
     <Sidebar className="border-r-0" {...props}>
-      <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <span className="font-semibold text-lg">{sectionTitles[activeSection]}</span>
+      <SidebarHeader className="titlebar-drag-region">
+        {/* Top spacer to clear the traffic lights + fixed toggle row */}
+        <div className="h-8" />
+        {/* Tab switcher - centered below the traffic lights row */}
+        <div className="flex items-center px-2 py-1.5">
+          <div className="titlebar-no-drag flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
+            {sectionTabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveSection(tab.id)}
+                className={cn(
+                  "flex-1 rounded-md px-3 py-1 text-sm font-medium transition-colors",
+                  activeSection === tab.id
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                    : "text-sidebar-foreground/70 hover:text-sidebar-foreground"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
       </SidebarHeader>
       <SidebarContent>
@@ -137,10 +394,37 @@ export function SidebarContentPanel({
           <TasksSection
             runs={runs}
             currentRunId={currentRunId}
+            processingRunIds={processingRunIds}
             actions={tasksActions}
+            backgroundTasks={backgroundTasks}
+            selectedBackgroundTask={selectedBackgroundTask}
           />
         )}
       </SidebarContent>
+      {/* Bottom actions */}
+      <div className="border-t border-sidebar-border px-2 py-2">
+        <div className="flex flex-col gap-1">
+          <ConnectorsPopover>
+            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+              <Plug className="size-4" />
+              <span>Connectors</span>
+            </button>
+          </ConnectorsPopover>
+          <SettingsDialog>
+            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+              <Settings className="size-4" />
+              <span>Settings</span>
+            </button>
+          </SettingsDialog>
+          <HelpPopover>
+            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+              <HelpCircle className="size-4" />
+              <span>Help</span>
+            </button>
+          </HelpPopover>
+        </div>
+      </div>
+      <SyncStatusBar />
       <SidebarRail />
     </Sidebar>
   )
@@ -179,11 +463,24 @@ async function transcribeWithDeepgram(audioBlob: Blob): Promise<string | null> {
 // Voice Note Recording Button
 function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => void }) {
   const [isRecording, setIsRecording] = React.useState(false)
+  const [hasDeepgramKey, setHasDeepgramKey] = React.useState(false)
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null)
   const chunksRef = React.useRef<Blob[]>([])
   const notePathRef = React.useRef<string | null>(null)
   const timestampRef = React.useRef<string | null>(null)
   const relativePathRef = React.useRef<string | null>(null)
+
+  React.useEffect(() => {
+    window.ipc.invoke('workspace:readFile', {
+      path: 'config/deepgram.json',
+      encoding: 'utf8',
+    }).then((result: { data: string }) => {
+      const { apiKey } = JSON.parse(result.data) as { apiKey: string }
+      setHasDeepgramKey(!!apiKey)
+    }).catch(() => {
+      setHasDeepgramKey(false)
+    })
+  }, [])
 
   const startRecording = async () => {
     try {
@@ -345,6 +642,8 @@ ${transcript}
     mediaRecorderRef.current = null
     setIsRecording(false)
   }
+
+  if (!hasDeepgramKey) return null
 
   return (
     <Tooltip>
@@ -654,15 +953,42 @@ function Tree({
   )
 }
 
+// Get status indicator color
+function getStatusColor(status?: string, enabled?: boolean): string {
+  // Disabled agents always show gray
+  if (enabled === false) {
+    return "bg-gray-400"
+  }
+  switch (status) {
+    case "running":
+      return "bg-blue-500"
+    case "finished":
+      return "bg-green-500"
+    case "failed":
+      return "bg-red-500"
+    case "triggered":
+      return "bg-gray-400"
+    case "scheduled":
+    default:
+      return "bg-yellow-500"
+  }
+}
+
 // Tasks Section
 function TasksSection({
   runs,
   currentRunId,
+  processingRunIds,
   actions,
+  backgroundTasks = [],
+  selectedBackgroundTask,
 }: {
   runs: RunListItem[]
   currentRunId?: string | null
+  processingRunIds?: Set<string>
   actions?: TasksActions
+  backgroundTasks?: BackgroundTaskItem[]
+  selectedBackgroundTask?: string | null
 }) {
   return (
     <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
@@ -678,9 +1004,38 @@ function TasksSection({
         </SidebarMenu>
       </div>
       <SidebarGroupContent className="flex-1 overflow-y-auto">
-        {runs.length > 0 && (
+        {/* Background Tasks Section */}
+        {backgroundTasks.length > 0 && (
           <>
             <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+              Background Tasks
+            </div>
+            <SidebarMenu>
+              {backgroundTasks.map((task) => (
+                <SidebarMenuItem key={task.name}>
+                  <SidebarMenuButton
+                    isActive={selectedBackgroundTask === task.name}
+                    onClick={() => actions?.onSelectBackgroundTask?.(task.name)}
+                    className="gap-2"
+                  >
+                    <div className="relative">
+                      <Bot className="size-4 shrink-0" />
+                      <span
+                        className={`absolute -bottom-0.5 -right-0.5 size-2 rounded-full ${getStatusColor(task.status, task.enabled)} ${task.status === "running" && task.enabled ? "animate-pulse" : ""}`}
+                      />
+                    </div>
+                    <span className={`truncate text-sm ${!task.enabled ? "text-muted-foreground" : ""}`}>
+                      {task.name}
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </>
+        )}
+        {runs.length > 0 && (
+          <>
+            <div className="px-3 py-1.5 mt-4 text-xs font-medium text-muted-foreground">
               Chat history
             </div>
             <SidebarMenu>
@@ -689,10 +1044,13 @@ function TasksSection({
                   <SidebarMenuButton
                     isActive={currentRunId === run.id}
                     onClick={() => actions?.onSelectRun(run.id)}
-                    className="gap-2"
                   >
-                    <MessageSquare className="size-4 shrink-0" />
-                    <span className="truncate text-sm">{run.title || '(Untitled chat)'}</span>
+                    <div className="flex items-center gap-2">
+                      {processingRunIds?.has(run.id) ? (
+                        <span className="size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
+                      ) : null}
+                      <span className="truncate text-sm">{run.title || '(Untitled chat)'}</span>
+                    </div>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
@@ -703,4 +1061,3 @@ function TasksSection({
     </SidebarGroup>
   )
 }
-

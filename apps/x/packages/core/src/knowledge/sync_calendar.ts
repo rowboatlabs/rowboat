@@ -5,6 +5,8 @@ import { OAuth2Client } from 'google-auth-library';
 import { NodeHtmlMarkdown } from 'node-html-markdown'
 import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
+import { serviceLogger } from '../services/service_logger.js';
+import { limitEventItems } from './limit_event_items.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'calendar_sync');
@@ -14,7 +16,6 @@ const REQUIRED_SCOPES = [
     'https://www.googleapis.com/auth/calendar.events.readonly',
     'https://www.googleapis.com/auth/drive.readonly'
 ];
-
 const nhm = new NodeHtmlMarkdown();
 
 // --- Wake Signal for Immediate Sync Trigger ---
@@ -49,10 +50,11 @@ function cleanFilename(name: string): string {
 
 // --- Sync Logic ---
 
-function cleanUpOldFiles(currentEventIds: Set<string>, syncDir: string) {
-    if (!fs.existsSync(syncDir)) return;
+function cleanUpOldFiles(currentEventIds: Set<string>, syncDir: string): string[] {
+    if (!fs.existsSync(syncDir)) return [];
 
     const files = fs.readdirSync(syncDir);
+    const deleted: string[] = [];
     for (const filename of files) {
         if (filename === 'sync_state.json') continue;
 
@@ -79,35 +81,48 @@ function cleanUpOldFiles(currentEventIds: Set<string>, syncDir: string) {
             try {
                 fs.unlinkSync(path.join(syncDir, filename));
                 console.log(`Removed old/out-of-window file: ${filename}`);
+                deleted.push(filename);
             } catch (e) {
                 console.error(`Error deleting file ${filename}:`, e);
             }
         }
     }
+    return deleted;
 }
 
-async function saveEvent(event: cal.Schema$Event, syncDir: string): Promise<boolean> {
+async function saveEvent(event: cal.Schema$Event, syncDir: string): Promise<{ changed: boolean; isNew: boolean; title: string }> {
     const eventId = event.id;
-    if (!eventId) return false;
+    if (!eventId) return { changed: false, isNew: false, title: 'Unknown' };
 
     const filePath = path.join(syncDir, `${eventId}.json`);
+    const content = JSON.stringify(event, null, 2);
+    const exists = fs.existsSync(filePath);
 
     try {
-        fs.writeFileSync(filePath, JSON.stringify(event, null, 2));
-        return true;
+        if (exists) {
+            const existing = fs.readFileSync(filePath, 'utf-8');
+            if (existing === content) {
+                return { changed: false, isNew: false, title: event.summary || eventId };
+            }
+        }
+
+        fs.writeFileSync(filePath, content);
+        return { changed: true, isNew: !exists, title: event.summary || eventId };
     } catch (e) {
         console.error(`Error saving event ${eventId}:`, e);
-        return false;
+        return { changed: false, isNew: false, title: event.summary || eventId };
     }
 }
 
-async function processAttachments(drive: drive.Drive, event: cal.Schema$Event, syncDir: string) {
-    if (!event.attachments || event.attachments.length === 0) return;
+async function processAttachments(drive: drive.Drive, event: cal.Schema$Event, syncDir: string): Promise<number> {
+    if (!event.attachments || event.attachments.length === 0) return 0;
 
     const eventId = event.id;
     const eventTitle = event.summary || 'Untitled';
     const eventDate = event.start?.dateTime || event.start?.date || 'Unknown';
     const organizer = event.organizer?.email || 'Unknown';
+
+    let savedCount = 0;
 
     for (const att of event.attachments) {
         // We only care about Google Docs
@@ -145,12 +160,14 @@ async function processAttachments(drive: drive.Drive, event: cal.Schema$Event, s
                 ].join('\n');
 
                 fs.writeFileSync(filePath, frontmatter + md);
+                savedCount++;
                 console.log(`Synced Note: ${att.title} for event ${eventTitle}`);
             } catch (e) {
                 console.error(`Failed to download note ${att.title}:`, e);
             }
         }
     }
+    return savedCount;
 }
 
 async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackDays: number) {
@@ -166,6 +183,26 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
 
     const calendar = google.calendar({ version: 'v3', auth });
     const drive = google.drive({ version: 'v3', auth });
+
+    let runId: string | null = null;
+    let runStartedAt = 0;
+    let newCount = 0;
+    let updatedCount = 0;
+    let deletedCount = 0;
+    let attachmentCount = 0;
+    const changedTitles: string[] = [];
+
+    const ensureRun = async () => {
+        if (!runId) {
+            const run = await serviceLogger.startRun({
+                service: 'calendar',
+                message: 'Syncing calendar',
+                trigger: 'timer',
+            });
+            runId = run.runId;
+            runStartedAt = run.startedAt;
+        }
+    };
 
     try {
         const res = await calendar.events.list({
@@ -185,17 +222,90 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
             console.log(`Found ${events.length} events.`);
             for (const event of events) {
                 if (event.id) {
-                    await saveEvent(event, syncDir);
-                    await processAttachments(drive, event, syncDir);
+                    const result = await saveEvent(event, syncDir);
+                    const attachmentsSaved = await processAttachments(drive, event, syncDir);
                     currentEventIds.add(event.id);
+
+                    if (result.changed) {
+                        await ensureRun();
+                        changedTitles.push(result.title);
+                        if (result.isNew) {
+                            newCount++;
+                        } else {
+                            updatedCount++;
+                        }
+                    }
+
+                    if (attachmentsSaved > 0) {
+                        await ensureRun();
+                        attachmentCount += attachmentsSaved;
+                    }
                 }
             }
         }
 
-        cleanUpOldFiles(currentEventIds, syncDir);
+        const deletedFiles = cleanUpOldFiles(currentEventIds, syncDir);
+        if (deletedFiles.length > 0) {
+            await ensureRun();
+            deletedCount = deletedFiles.length;
+        }
+
+        if (runId) {
+            const totalChanges = newCount + updatedCount + deletedCount + attachmentCount;
+            const limitedTitles = limitEventItems(changedTitles);
+            await serviceLogger.log({
+                type: 'changes_identified',
+                service: 'calendar',
+                runId,
+                level: 'info',
+                message: `Calendar updates: ${totalChanges} change${totalChanges === 1 ? '' : 's'}`,
+                counts: {
+                    newEvents: newCount,
+                    updatedEvents: updatedCount,
+                    deletedFiles: deletedCount,
+                    attachments: attachmentCount,
+                },
+                items: limitedTitles.items,
+                truncated: limitedTitles.truncated,
+            });
+            await serviceLogger.log({
+                type: 'run_complete',
+                service: 'calendar',
+                runId,
+                level: 'info',
+                message: `Calendar sync complete: ${totalChanges} change${totalChanges === 1 ? '' : 's'}`,
+                durationMs: Date.now() - runStartedAt,
+                outcome: 'ok',
+                summary: {
+                    newEvents: newCount,
+                    updatedEvents: updatedCount,
+                    deletedFiles: deletedCount,
+                    attachments: attachmentCount,
+                },
+            });
+        }
 
     } catch (error) {
         console.error("An error occurred during calendar sync:", error);
+        if (runId) {
+            await serviceLogger.log({
+                type: 'error',
+                service: 'calendar',
+                runId,
+                level: 'error',
+                message: 'Calendar sync error',
+                error: error instanceof Error ? error.message : String(error),
+            });
+            await serviceLogger.log({
+                type: 'run_complete',
+                service: 'calendar',
+                runId,
+                level: 'error',
+                message: 'Calendar sync failed',
+                durationMs: Date.now() - runStartedAt,
+                outcome: 'error',
+            });
+        }
         // If 401, clear tokens to force re-auth next run
         const e = error as { response?: { status?: number } };
         if (e.response?.status === 401) {

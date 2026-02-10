@@ -8,7 +8,7 @@ permissions:
   contents: write  # Required to upload release assets
 
 jobs:
-  build:
+  build-macos:
     runs-on: macos-latest
 
     steps:
@@ -75,7 +75,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           
           # Add keychain to search list
-          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
           
           # Verify certificate was imported
           security find-identity -v "$KEYCHAIN_PATH"
@@ -87,31 +87,16 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: apps/x
 
-      - name: Build and publish to S3
+      - name: Build electron app
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           VITE_PUBLIC_POSTHOG_KEY: ${{ secrets.VITE_PUBLIC_POSTHOG_KEY }}
           VITE_PUBLIC_POSTHOG_HOST: ${{ secrets.VITE_PUBLIC_POSTHOG_HOST }}
-        run: npm run publish
-        working-directory: apps/x/apps/main
-
-      - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: distributables
-          path: apps/x/apps/main/out/make/*
-          retention-days: 30
-
-      - name: Attach files to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: apps/x/apps/main/out/make/*
-        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-forge publish --arch=arm64,x64 --platform=darwin
+        working-directory: apps/x/apps/main
 
       - name: Cleanup keychain
         if: always()
@@ -120,3 +105,140 @@ jobs:
           if [ -f "$KEYCHAIN_PATH" ]; then
             security delete-keychain "$KEYCHAIN_PATH" || true
           fi
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributables
+          path: apps/x/apps/main/out/make/*
+          retention-days: 30
+
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+          cache-dependency-path: 'apps/x/pnpm-lock.yaml'
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Extracted version: ${VERSION}"
+
+      - name: Update package.json versions
+        run: |
+          node -e "
+            const fs = require('fs');
+            const version = '${{ steps.version.outputs.version }}';
+            
+            // Update apps/x/package.json
+            const rootPackage = JSON.parse(fs.readFileSync('apps/x/package.json', 'utf8'));
+            rootPackage.version = version;
+            fs.writeFileSync('apps/x/package.json', JSON.stringify(rootPackage, null, 2) + '\n');
+            
+            // Update apps/x/apps/main/package.json
+            const mainPackage = JSON.parse(fs.readFileSync('apps/x/apps/main/package.json', 'utf8'));
+            mainPackage.version = version;
+            fs.writeFileSync('apps/x/apps/main/package.json', JSON.stringify(mainPackage, null, 2) + '\n');
+            
+            console.log('Updated version to:', version);
+          "
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: apps/x
+
+      - name: Build electron app
+        env:
+          VITE_PUBLIC_POSTHOG_KEY: ${{ secrets.VITE_PUBLIC_POSTHOG_KEY }}
+          VITE_PUBLIC_POSTHOG_HOST: ${{ secrets.VITE_PUBLIC_POSTHOG_HOST }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-forge publish --arch=x64,arm64 --platform=linux
+        working-directory: apps/x/apps/main
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributables-linux
+          path: apps/x/apps/main/out/make/*
+          retention-days: 30
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+          cache-dependency-path: 'apps/x/pnpm-lock.yaml'
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Extracted version: ${VERSION}"
+
+      - name: Update package.json versions
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const version = '${{ steps.version.outputs.version }}';
+            
+            // Update apps/x/package.json
+            const rootPackage = JSON.parse(fs.readFileSync('apps/x/package.json', 'utf8'));
+            rootPackage.version = version;
+            fs.writeFileSync('apps/x/package.json', JSON.stringify(rootPackage, null, 2) + '\n');
+            
+            // Update apps/x/apps/main/package.json
+            const mainPackage = JSON.parse(fs.readFileSync('apps/x/apps/main/package.json', 'utf8'));
+            mainPackage.version = version;
+            fs.writeFileSync('apps/x/apps/main/package.json', JSON.stringify(mainPackage, null, 2) + '\n');
+            
+            console.log('Updated version to:', version);
+          "
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: apps/x
+
+      - name: Build electron app
+        env:
+          VITE_PUBLIC_POSTHOG_KEY: ${{ secrets.VITE_PUBLIC_POSTHOG_KEY }}
+          VITE_PUBLIC_POSTHOG_HOST: ${{ secrets.VITE_PUBLIC_POSTHOG_HOST }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-forge publish --arch=x64 --platform=win32
+        working-directory: apps/x/apps/main
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributables-windows
+          path: apps/x/apps/main/out/make/*
+          retention-days: 30

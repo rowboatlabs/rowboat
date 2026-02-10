@@ -1,9 +1,6 @@
 name: Publish to npm
 
-on:
-  push:
-    branches:
-      - main
+on: workflow_dispatch
 
 permissions:
   id-token: write  # Required for OIDC

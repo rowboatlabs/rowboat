@@ -22,8 +22,6 @@ import {
   MinusIcon,
   LinkIcon,
   CodeSquareIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   ExternalLinkIcon,
   Trash2Icon,
   ImageIcon,
@@ -33,20 +31,12 @@ interface EditorToolbarProps {
   editor: Editor | null
   onSelectionHighlight?: (range: { from: number; to: number } | null) => void
   onImageUpload?: (file: File) => Promise<void> | void
-  onNavigateBack?: () => void
-  onNavigateForward?: () => void
-  canNavigateBack?: boolean
-  canNavigateForward?: boolean
 }
 
 export function EditorToolbar({
   editor,
   onSelectionHighlight,
   onImageUpload,
-  onNavigateBack,
-  onNavigateForward,
-  canNavigateBack,
-  canNavigateForward,
 }: EditorToolbarProps) {
   const [linkUrl, setLinkUrl] = useState('')
   const [isLinkPopoverOpen, setIsLinkPopoverOpen] = useState(false)
@@ -117,35 +107,13 @@ export function EditorToolbar({
 
   return (
     <div className="editor-toolbar">
-      {/* Back / Forward Navigation */}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        onClick={onNavigateBack}
-        disabled={!canNavigateBack}
-        title="Go back"
-      >
-        <ChevronLeftIcon className="size-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        onClick={onNavigateForward}
-        disabled={!canNavigateForward}
-        title="Go forward"
-      >
-        <ChevronRightIcon className="size-4" />
-      </Button>
-
-      <div className="separator" />
-
       {/* Text formatting */}
       <Button
         variant="ghost"
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleBold().run()}
         data-active={editor.isActive('bold') || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Bold (Ctrl+B)"
       >
         <BoldIcon className="size-4" />
@@ -155,7 +123,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleItalic().run()}
         data-active={editor.isActive('italic') || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Italic (Ctrl+I)"
       >
         <ItalicIcon className="size-4" />
@@ -165,7 +133,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleStrike().run()}
         data-active={editor.isActive('strike') || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Strikethrough"
       >
         <StrikethroughIcon className="size-4" />
@@ -175,7 +143,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleCode().run()}
         data-active={editor.isActive('code') || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Inline Code"
       >
         <CodeIcon className="size-4" />
@@ -189,7 +157,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
         data-active={editor.isActive('heading', { level: 1 }) || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Heading 1"
       >
         <Heading1Icon className="size-4" />
@@ -199,7 +167,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
         data-active={editor.isActive('heading', { level: 2 }) || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Heading 2"
       >
         <Heading2Icon className="size-4" />
@@ -209,7 +177,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
         data-active={editor.isActive('heading', { level: 3 }) || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Heading 3"
       >
         <Heading3Icon className="size-4" />
@@ -223,7 +191,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleBulletList().run()}
         data-active={editor.isActive('bulletList') || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Bullet List"
       >
         <ListIcon className="size-4" />
@@ -233,7 +201,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
         data-active={editor.isActive('orderedList') || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Ordered List"
       >
         <ListOrderedIcon className="size-4" />
@@ -243,7 +211,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleTaskList().run()}
         data-active={editor.isActive('taskList') || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Task List"
       >
         <ListTodoIcon className="size-4" />
@@ -257,7 +225,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
         data-active={editor.isActive('blockquote') || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Blockquote"
       >
         <QuoteIcon className="size-4" />
@@ -267,7 +235,7 @@ export function EditorToolbar({
         size="icon-sm"
         onClick={() => editor.chain().focus().toggleCodeBlock().run()}
         data-active={editor.isActive('codeBlock') || undefined}
-        className="data-[active]:bg-accent"
+        className="data-active:bg-accent"
         title="Code Block"
       >
         <CodeSquareIcon className="size-4" />
@@ -296,7 +264,7 @@ export function EditorToolbar({
             size="icon-sm"
             onClick={openLinkPopover}
             data-active={isLinkActive || undefined}
-            className="data-[active]:bg-accent"
+            className="data-active:bg-accent"
             title="Link"
           >
             <LinkIcon className="size-4" />

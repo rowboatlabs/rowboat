@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { FirefliesClientFactory } from './fireflies-client-factory.js';
+import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
+import { limitEventItems } from './limit_event_items.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'fireflies_transcripts');
@@ -414,6 +416,8 @@ async function syncMeetings() {
 
     console.log(`[Fireflies] Fetching meetings from ${fromDateStr} to ${toDateStr}...`);
 
+    let run: ServiceRunContext | null = null;
+
     try {
         // Step 1: Get list of transcripts with rate limiting
         const transcriptsResult = await callWithRateLimit(
@@ -456,6 +460,31 @@ async function syncMeetings() {
         }
         
         console.log(`[Fireflies] Found ${meetings.length} transcripts`);
+
+        const newMeetings = meetings.filter(m => m.id && !syncedIds.has(m.id));
+        if (newMeetings.length === 0) {
+            console.log('[Fireflies] No new transcripts to sync');
+            saveState(toDateStr, Array.from(syncedIds), new Date().toISOString());
+            return;
+        }
+
+        run = await serviceLogger.startRun({
+            service: 'fireflies',
+            message: 'Syncing Fireflies transcripts',
+            trigger: 'timer',
+        });
+        const meetingTitles = newMeetings.map(m => m.title || m.id);
+        const limitedTitles = limitEventItems(meetingTitles);
+        await serviceLogger.log({
+            type: 'changes_identified',
+            service: run.service,
+            runId: run.runId,
+            level: 'info',
+            message: `Found ${newMeetings.length} new transcript${newMeetings.length === 1 ? '' : 's'}`,
+            counts: { transcripts: newMeetings.length },
+            items: limitedTitles.items,
+            truncated: limitedTitles.truncated,
+        });
         
         // Step 2: Fetch and save each transcript
         let newCount = 0;
@@ -559,9 +588,39 @@ async function syncMeetings() {
 
         // Save state with updated timestamp
         saveState(toDateStr, Array.from(syncedIds), new Date().toISOString());
+
+        await serviceLogger.log({
+            type: 'run_complete',
+            service: run.service,
+            runId: run.runId,
+            level: 'info',
+            message: `Fireflies sync complete: ${newCount} transcript${newCount === 1 ? '' : 's'}`,
+            durationMs: Date.now() - run.startedAt,
+            outcome: newCount > 0 ? 'ok' : 'idle',
+            summary: { transcripts: newCount },
+        });
         
     } catch (error) {
         console.error('[Fireflies] Error during sync:', error);
+        if (run) {
+            await serviceLogger.log({
+                type: 'error',
+                service: run.service,
+                runId: run.runId,
+                level: 'error',
+                message: 'Fireflies sync error',
+                error: error instanceof Error ? error.message : String(error),
+            });
+            await serviceLogger.log({
+                type: 'run_complete',
+                service: run.service,
+                runId: run.runId,
+                level: 'error',
+                message: 'Fireflies sync failed',
+                durationMs: Date.now() - run.startedAt,
+                outcome: 'error',
+            });
+        }
         
         // Check if it's an auth error
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -600,4 +659,3 @@ export async function init() {
         await interruptibleSleep(SYNC_INTERVAL_MS);
     }
 }
-

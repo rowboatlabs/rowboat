@@ -123,6 +123,9 @@
   --sidebar-accent-foreground: var(--text-color, oklch(0.205 0 0));
   --sidebar-border: var(--sub-alt-color, oklch(0.922 0 0));
   --sidebar-ring: var(--main-color, oklch(0.708 0 0));
+  --scrollbar-track: oklch(0.95 0 0);
+  --scrollbar-thumb: oklch(0.75 0 0);
+  --scrollbar-thumb-hover: oklch(0.65 0 0);
 }
 
 .dark {
@@ -157,14 +160,38 @@
   --sidebar-accent-foreground: var(--text-color, oklch(0.985 0 0));
   --sidebar-border: var(--sub-alt-color, oklch(1 0 0 / 10%));
   --sidebar-ring: var(--main-color, oklch(0.556 0 0));
+  --scrollbar-track: oklch(0.2 0 0);
+  --scrollbar-thumb: oklch(0.4 0 0);
+  --scrollbar-thumb-hover: oklch(0.5 0 0);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+    scrollbar-width: thin;
   }
+
   body {
     @apply bg-background text-foreground;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
   }
 }
 
@@ -226,6 +253,15 @@
   [data-slot="message-content"] th {
     @apply bg-muted font-semibold;
   }
+}
+
+/* Titlebar drag regions for frameless window */
+.titlebar-drag-region {
+  -webkit-app-region: drag;
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
 }
 
 .graph-view {

@@ -12,9 +12,9 @@
     "@ai-sdk/anthropic": "^2.0.44",
     "@ai-sdk/google": "^2.0.25",
     "@ai-sdk/openai": "^2.0.53",
-    "@composio/core": "^0.6.0",
     "@ai-sdk/openai-compatible": "^1.0.27",
     "@ai-sdk/provider": "^2.0.0",
+    "@composio/core": "^0.6.0",
     "@google-cloud/local-auth": "^3.0.1",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@openrouter/ai-sdk-provider": "^1.2.6",
@@ -24,17 +24,24 @@
     "ai": "^5.0.102",
     "awilix": "^12.0.5",
     "chokidar": "^4.0.3",
+    "cron-parser": "^5.5.0",
     "glob": "^13.0.0",
     "google-auth-library": "^10.5.0",
     "googleapis": "^169.0.0",
+    "mammoth": "^1.11.0",
     "node-html-markdown": "^2.0.0",
     "ollama-ai-provider-v2": "^1.5.4",
     "openid-client": "^6.8.1",
+    "papaparse": "^5.5.3",
+    "pdf-parse": "^2.4.5",
     "react": "^19.2.3",
+    "xlsx": "^0.18.5",
     "yaml": "^2.8.2",
     "zod": "^4.2.1"
   },
   "devDependencies": {
-    "@types/node": "^25.0.3"
+    "@types/node": "^25.0.3",
+    "@types/papaparse": "^5.5.2",
+    "@types/pdf-parse": "^1.1.5"
   }
 }

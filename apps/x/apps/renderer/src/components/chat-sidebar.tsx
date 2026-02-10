@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Expand, LoaderIcon, Plus, Square } from 'lucide-react'
+import { ArrowUp, Expand, LoaderIcon, SquarePen, Square } from 'lucide-react'
 import type { ToolUIPart } from 'ai'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -12,6 +12,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
+  ScrollPositionPreserver,
 } from '@/components/ai-elements/conversation'
 import {
   Message,
@@ -32,6 +33,8 @@ import { getMentionHighlightSegments } from '@/lib/mention-highlights'
 import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js'
 import z from 'zod'
 import React from 'react'
+import { FileCardProvider } from '@/contexts/file-card-context'
+import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 
 interface ChatMessage {
   id: string
@@ -102,6 +105,8 @@ const normalizeToolOutput = (output: ToolCall['result'] | undefined, status: Too
   return output
 }
 
+const streamdownComponents = { pre: MarkdownPreOverride }
+
 const MIN_WIDTH = 300
 const MAX_WIDTH = 700
 const DEFAULT_WIDTH = 400
@@ -130,6 +135,7 @@ interface ChatSidebarProps {
   permissionResponses?: Map<string, 'approve' | 'deny'>
   onPermissionResponse?: (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => void
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
+  onOpenKnowledgeFile?: (path: string) => void
 }
 
 export function ChatSidebar({
@@ -155,6 +161,7 @@ export function ChatSidebar({
   permissionResponses = new Map(),
   onPermissionResponse,
   onAskHumanResponse,
+  onOpenKnowledgeFile,
 }: ChatSidebarProps) {
   const [width, setWidth] = useState(defaultWidth)
   const [isResizing, setIsResizing] = useState(false)
@@ -390,7 +397,7 @@ export function ChatSidebar({
         <Message key={item.id} from={item.role}>
           <MessageContent>
             {item.role === 'assistant' ? (
-              <MessageResponse>{item.content}</MessageResponse>
+              <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
             ) : (
               item.content
             )}
@@ -457,30 +464,32 @@ export function ChatSidebar({
       {showContent && (
         <>
           {/* Header - minimal, expand and new chat buttons */}
-          <header className="flex h-12 shrink-0 items-center justify-end gap-1 px-2">
+          <header className="titlebar-drag-region flex h-10 shrink-0 items-center justify-end gap-1 px-2 bg-sidebar">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={onNewChat} className="titlebar-no-drag h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <SquarePen className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">New chat</TooltipContent>
+            </Tooltip>
             {onOpenFullScreen && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={onOpenFullScreen} className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <Button variant="ghost" size="icon" onClick={onOpenFullScreen} className="titlebar-no-drag h-8 w-8 text-muted-foreground hover:text-foreground">
                     <Expand className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Full screen chat</TooltipContent>
               </Tooltip>
             )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={onNewChat} className="h-8 w-8 text-muted-foreground hover:text-foreground">
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">New chat</TooltipContent>
-            </Tooltip>
           </header>
 
       {/* Conversation area */}
+      <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})}>
       <div className="flex min-h-0 flex-1 flex-col relative">
-        <Conversation className="relative flex-1 overflow-y-auto">
+        <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+          <ScrollPositionPreserver />
           <ConversationContent className={hasConversation ? "px-4 pb-24" : "px-4 min-h-full items-center justify-center"}>
             {!hasConversation ? (
               <ConversationEmptyState className="h-auto">
@@ -536,7 +545,7 @@ export function ChatSidebar({
                 {currentAssistantMessage && (
                   <Message from="assistant">
                     <MessageContent>
-                      <MessageResponse>{currentAssistantMessage}</MessageResponse>
+                      <MessageResponse components={streamdownComponents}>{currentAssistantMessage}</MessageResponse>
                     </MessageContent>
                   </Message>
                 )}
@@ -565,7 +574,7 @@ export function ChatSidebar({
               className="mb-3"
             />
           )}
-          <div className="flex items-center gap-2 bg-background border border-border rounded-3xl shadow-xl px-4 py-2.5">
+          <div className="flex items-center gap-2 bg-background border border-border rounded-lg shadow-none px-4 py-2.5">
             <div className="relative flex-1 min-w-0">
               {mentionHighlights.hasHighlights && (
                 <div
@@ -648,6 +657,7 @@ export function ChatSidebar({
           )}
         </div>
       </div>
+      </FileCardProvider>
         </>
       )}
     </div>

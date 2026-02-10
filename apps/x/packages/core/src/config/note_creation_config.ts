@@ -28,6 +28,7 @@ function readConfig(): NoteCreationConfig {
                 ? config.strictness
                 : DEFAULT_STRICTNESS,
             configured: config.configured === true,
+            onboardingComplete: config.onboardingComplete === true,
         };
     } catch {
         return { strictness: DEFAULT_STRICTNESS, configured: false };
@@ -83,7 +84,10 @@ export function markStrictnessConfigured(): void {
  * Set strictness and mark as configured in one operation.
  */
 export function setStrictnessAndMarkConfigured(strictness: NoteCreationStrictness): void {
-    writeConfig({ strictness, configured: true });
+    const config = readConfig();
+    config.strictness = strictness;
+    config.configured = true;
+    writeConfig(config);
 }
 
 /**

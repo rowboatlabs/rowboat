@@ -2,7 +2,8 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, Mic, Mail, CheckCircle2, Sailboat, MessageSquare } from "lucide-react"
+import { Loader2, Mic, Mail, CheckCircle2 } from "lucide-react"
+// import { MessageSquare } from "lucide-react"
 
 import {
   Dialog,
@@ -38,7 +39,7 @@ interface OnboardingModalProps {
   onComplete: () => void
 }
 
-type Step = 0 | 1 | 2 | 3
+type Step = 0 | 1 | 2
 
 type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
@@ -68,8 +69,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({
     status: "idle",
   })
-  const [savingLlmConfig, setSavingLlmConfig] = useState(false)
-
   // OAuth provider states
   const [providers, setProviders] = useState<string[]>([])
   const [providersLoading, setProvidersLoading] = useState(true)
@@ -83,7 +82,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   // Composio/Slack state
   const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
   const [slackConnected, setSlackConnected] = useState(false)
-  const [slackLoading, setSlackLoading] = useState(true)
+  // const [slackLoading, setSlackLoading] = useState(true)
   const [slackConnecting, setSlackConnecting] = useState(false)
 
   const updateProviderConfig = useCallback(
@@ -157,6 +156,12 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     loadModels()
   }, [open])
 
+  // Preferred default models for each provider
+  const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
+    openai: "gpt-5.2",
+    anthropic: "claude-opus-4-5-20251101",
+  }
+
   // Initialize default models from catalog
   useEffect(() => {
     if (Object.keys(modelsCatalog).length === 0) return
@@ -166,7 +171,10 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       for (const provider of cloudProviders) {
         const models = modelsCatalog[provider]
         if (models?.length && !next[provider].model) {
-          next[provider] = { ...next[provider], model: models[0]?.id || "" }
+          // Check if preferred default exists in the catalog
+          const preferredModel = preferredDefaults[provider]
+          const hasPreferred = preferredModel && models.some(m => m.id === preferredModel)
+          next[provider] = { ...next[provider], model: hasPreferred ? preferredModel : (models[0]?.id || "") }
         }
       }
       return next
@@ -205,14 +213,14 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   // Load Slack connection status
   const refreshSlackStatus = useCallback(async () => {
     try {
-      setSlackLoading(true)
+      // setSlackLoading(true)
       const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'slack' })
       setSlackConnected(result.isConnected)
     } catch (error) {
       console.error('Failed to load Slack status:', error)
       setSlackConnected(false)
     } finally {
-      setSlackLoading(false)
+      // setSlackLoading(false)
     }
   }, [])
 
@@ -234,6 +242,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   }, [])
 
   // Connect to Slack via Composio (checks if configured first)
+  /*
   const handleConnectSlack = useCallback(async () => {
     // Check if Composio is configured
     const configResult = await window.ipc.invoke('composio:is-configured', null)
@@ -243,6 +252,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
     await startSlackConnect()
   }, [startSlackConnect])
+  */
 
   // Handle Composio API key submission
   const handleComposioApiKeySubmit = useCallback(async (apiKey: string) => {
@@ -259,7 +269,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   }, [startSlackConnect])
 
   const handleNext = () => {
-    if (currentStep < 3) {
+    if (currentStep < 2) {
       setCurrentStep((prev) => (prev + 1) as Step)
     }
   }
@@ -268,24 +278,27 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     onComplete()
   }
 
-  const handleTestConnection = useCallback(async () => {
+  const handleTestAndSaveLlmConfig = useCallback(async () => {
     if (!canTest) return
     setTestState({ status: "testing" })
     try {
       const apiKey = activeConfig.apiKey.trim() || undefined
       const baseURL = activeConfig.baseURL.trim() || undefined
       const model = activeConfig.model.trim()
-      const result = await window.ipc.invoke("models:test", {
+      const providerConfig = {
         provider: {
           flavor: llmProvider,
           apiKey,
           baseURL,
         },
         model,
-      })
+      }
+      const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
         setTestState({ status: "success" })
-        toast.success("Connection successful")
+        // Save and continue
+        await window.ipc.invoke("models:saveConfig", providerConfig)
+        handleNext()
       } else {
         setTestState({ status: "error", error: result.error })
         toast.error(result.error || "Connection test failed")
@@ -295,31 +308,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       setTestState({ status: "error", error: "Connection test failed" })
       toast.error("Connection test failed")
     }
-  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, canTest, llmProvider])
-
-  const handleSaveLlmConfig = useCallback(async () => {
-    if (testState.status !== "success") return
-    setSavingLlmConfig(true)
-    try {
-      const apiKey = activeConfig.apiKey.trim() || undefined
-      const baseURL = activeConfig.baseURL.trim() || undefined
-      const model = activeConfig.model.trim()
-      await window.ipc.invoke("models:saveConfig", {
-        provider: {
-          flavor: llmProvider,
-          apiKey,
-          baseURL,
-        },
-        model,
-      })
-      setSavingLlmConfig(false)
-      handleNext()
-    } catch (error) {
-      console.error("Failed to save LLM config:", error)
-      toast.error("Failed to save LLM settings")
-      setSavingLlmConfig(false)
-    }
-  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, handleNext, llmProvider, testState.status])
+  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, canTest, llmProvider, handleNext])
 
   // Check connection status for all providers
   const refreshAllStatuses = useCallback(async () => {
@@ -459,7 +448,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   // Step indicator component
   const StepIndicator = () => (
     <div className="flex gap-2 justify-center mb-6">
-      {[0, 1, 2, 3].map((step) => (
+      {[0, 1, 2].map((step) => (
         <div
           key={step}
           className={cn(
@@ -552,6 +541,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   )
 
   // Render Slack row
+  /*
   const renderSlackRow = () => (
     <div className="flex items-center justify-between gap-3 rounded-md px-3 py-3 hover:bg-accent">
       <div className="flex items-center gap-3 min-w-0">
@@ -594,86 +584,76 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       </div>
     </div>
   )
+  */
 
-  // Step 0: Welcome
-  const WelcomeStep = () => (
-    <div className="flex flex-col items-center text-center">
-      <div className="flex size-20 items-center justify-center rounded-full bg-primary/10 mb-6">
-        <Sailboat className="size-10 text-primary" />
-      </div>
-      <DialogHeader className="space-y-3">
-        <DialogTitle className="text-2xl">Your AI coworker, with memory</DialogTitle>
-        <DialogDescription className="text-base max-w-md mx-auto">
-          Rowboat connects to your email, calendar, and meetings to help you stay on top of your work.
-        </DialogDescription>
-      </DialogHeader>
-      <div className="mt-8 space-y-3 text-left w-full max-w-sm">
-        <div className="flex gap-3">
-          <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-medium">1</div>
-          <p className="text-sm text-muted-foreground">Syncs with your email, calendar, and meetings</p>
-        </div>
-        <div className="flex gap-3">
-          <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-medium">2</div>
-          <p className="text-sm text-muted-foreground">Remembers the people and context from your conversations</p>
-        </div>
-        <div className="flex gap-3">
-          <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-medium">3</div>
-          <p className="text-sm text-muted-foreground">Helps you follow up and never miss what matters</p>
-        </div>
-      </div>
-      <Button onClick={handleNext} size="lg" className="mt-8 w-full max-w-xs">
-        Get Started
-      </Button>
-    </div>
-  )
-
-  // Step 1: LLM Setup
+  // Step 0: LLM Setup
   const LlmSetupStep = () => {
-    const providerOptions: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
+    const [showMoreProviders, setShowMoreProviders] = useState(false)
+
+    const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
       { id: "openai", name: "OpenAI", description: "Use your OpenAI API key" },
       { id: "anthropic", name: "Anthropic", description: "Use your Anthropic API key" },
-      { id: "google", name: "Google", description: "Use your Google AI Studio key" },
+      { id: "google", name: "Gemini", description: "Use your Google AI Studio key" },
+      { id: "ollama", name: "Ollama (Local)", description: "Run a local model via Ollama" },
+    ]
+
+    const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
       { id: "openrouter", name: "OpenRouter", description: "Access multiple models with one key" },
       { id: "aigateway", name: "AI Gateway (Vercel)", description: "Use Vercel's AI Gateway" },
-      { id: "ollama", name: "Ollama (Local)", description: "Run a local model via Ollama" },
       { id: "openai-compatible", name: "OpenAI-Compatible", description: "Local or hosted OpenAI-compatible API" },
     ]
+
+    const isMoreProvider = moreProviders.some(p => p.id === llmProvider)
 
     const modelsForProvider = modelsCatalog[llmProvider] || []
     const showModelInput = isLocalProvider || modelsForProvider.length === 0
 
+    const renderProviderCard = (provider: { id: LlmProviderFlavor; name: string; description: string }) => (
+      <button
+        key={provider.id}
+        onClick={() => {
+          setLlmProvider(provider.id)
+          setTestState({ status: "idle" })
+        }}
+        className={cn(
+          "rounded-md border px-3 py-3 text-left transition-colors",
+          llmProvider === provider.id
+            ? "border-primary bg-primary/5"
+            : "border-border hover:bg-accent"
+        )}
+      >
+        <div className="text-sm font-medium">{provider.name}</div>
+        <div className="text-xs text-muted-foreground mt-1">{provider.description}</div>
+      </button>
+    )
+
     return (
       <div className="flex flex-col">
-        <DialogHeader className="text-center mb-6">
+        <div className="flex items-center justify-center gap-3 mb-3">
+          <span className="text-lg font-medium text-muted-foreground">Your AI coworker, with memory</span>
+        </div>
+        <DialogHeader className="text-center mb-3">
           <DialogTitle className="text-2xl">Choose your model</DialogTitle>
-          <DialogDescription className="text-base">
-            Select your provider and model to power Rowboat’s AI.
-          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5">
+        <div className="space-y-3">
           <div className="space-y-2">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Provider</span>
             <div className="grid gap-2 sm:grid-cols-2">
-              {providerOptions.map((provider) => (
-                <button
-                  key={provider.id}
-                  onClick={() => {
-                    setLlmProvider(provider.id)
-                    setTestState({ status: "idle" })
-                  }}
-                  className={cn(
-                    "rounded-md border px-3 py-3 text-left transition-colors",
-                    llmProvider === provider.id
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:bg-accent"
-                  )}
-                >
-                  <div className="text-sm font-medium">{provider.name}</div>
-                  <div className="text-xs text-muted-foreground mt-1">{provider.description}</div>
-                </button>
-              ))}
+              {primaryProviders.map(renderProviderCard)}
             </div>
+            {(showMoreProviders || isMoreProvider) ? (
+              <div className="grid gap-2 sm:grid-cols-2 mt-2">
+                {moreProviders.map(renderProviderCard)}
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowMoreProviders(true)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors mt-1"
+              >
+                More providers...
+              </button>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -741,48 +721,36 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           )}
         </div>
 
-        <div className="mt-6 flex items-center gap-3">
+        {testState.status === "error" && (
+          <div className="mt-4 text-sm text-destructive">
+            {testState.error || "Connection test failed"}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-3 mt-4">
           <Button
-            variant="default"
-            onClick={handleTestConnection}
+            onClick={handleTestAndSaveLlmConfig}
+            size="lg"
             disabled={!canTest || testState.status === "testing"}
           >
             {testState.status === "testing" ? (
-              <Loader2 className="size-4 animate-spin" />
+              <><Loader2 className="size-4 animate-spin mr-2" />Testing connection...</>
             ) : (
-              "Test connection"
+              "Continue"
             )}
-          </Button>
-          {testState.status === "success" && (
-            <span className="text-sm text-green-600">Connected</span>
-          )}
-          {testState.status === "error" && (
-            <span className="text-sm text-destructive">
-              {testState.error || "Test failed"}
-            </span>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-3 mt-8">
-          <Button
-            onClick={handleSaveLlmConfig}
-            size="lg"
-            disabled={testState.status !== "success" || savingLlmConfig}
-          >
-            {savingLlmConfig ? <Loader2 className="size-4 animate-spin" /> : "Continue"}
           </Button>
         </div>
       </div>
     )
   }
 
-  // Step 2: Connect Accounts
+  // Step 1: Connect Accounts
   const AccountConnectionStep = () => (
     <div className="flex flex-col">
       <DialogHeader className="text-center mb-6">
         <DialogTitle className="text-2xl">Connect Your Accounts</DialogTitle>
         <DialogDescription className="text-base">
-          Connect your accounts to start syncing your data. You can always add more later.
+          Connect your accounts to start syncing your data locally. You can always add more later.
         </DialogDescription>
       </DialogHeader>
 
@@ -812,13 +780,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
               {providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-5" />, 'AI meeting transcripts')}
             </div>
 
-            {/* Team Communication Section */}
-            <div className="space-y-2">
-              <div className="px-3">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Team Communication</span>
-              </div>
-              {renderSlackRow()}
-            </div>
           </>
         )}
       </div>
@@ -834,7 +795,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     </div>
   )
 
-  // Step 3: Completion
+  // Step 2: Completion
   const CompletionStep = () => {
     const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackConnected
 
@@ -847,7 +808,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           <DialogTitle className="text-2xl">You're All Set!</DialogTitle>
           <DialogDescription className="text-base max-w-md mx-auto">
             {hasConnections ? (
-              <>Your workspace will populate over the next ~30 minutes as we sync your data.</>
+              <>Give me 30 minutes to build your context graph.<br />I can still help with other things on your computer.</>
             ) : (
               <>You can connect your accounts anytime from the sidebar to start syncing data.</>
             )}
@@ -917,10 +878,9 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         onEscapeKeyDown={(e) => e.preventDefault()}
       >
         <StepIndicator />
-        {currentStep === 0 && <WelcomeStep />}
-        {currentStep === 1 && <LlmSetupStep />}
-        {currentStep === 2 && <AccountConnectionStep />}
-        {currentStep === 3 && <CompletionStep />}
+        {currentStep === 0 && <LlmSetupStep />}
+        {currentStep === 1 && <AccountConnectionStep />}
+        {currentStep === 2 && <CompletionStep />}
       </DialogContent>
     </Dialog>
     </>

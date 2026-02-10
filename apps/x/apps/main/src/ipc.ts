@@ -1,5 +1,7 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, shell } from 'electron';
 import { ipc } from '@x/shared';
+import path from 'node:path';
+import os from 'node:os';
 import {
   connectProvider,
   disconnectProvider,
@@ -12,10 +14,12 @@ import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
 import * as runsCore from '@x/core/dist/runs/runs.js';
 import { bus } from '@x/core/dist/runs/bus.js';
+import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
 import z from 'zod';
 import { RunEvent } from '@x/shared/dist/runs.js';
+import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection } from '@x/core/dist/models/models.js';
@@ -24,6 +28,9 @@ import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import * as composioHandler from './composio-handler.js';
+import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
+import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
+import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -215,6 +222,15 @@ function emitRunEvent(event: z.infer<typeof RunEvent>): void {
   }
 }
 
+function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('services:events', event);
+    }
+  }
+}
+
 export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string }): void {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
@@ -232,6 +248,30 @@ export async function startRunsWatcher(): Promise<void> {
   runsWatcher = await bus.subscribe('*', async (event) => {
     emitRunEvent(event);
   });
+}
+
+let servicesWatcher: (() => void) | null = null;
+export async function startServicesWatcher(): Promise<void> {
+  if (servicesWatcher) {
+    return;
+  }
+  servicesWatcher = await serviceBus.subscribe(async (event) => {
+    emitServiceEvent(event);
+  });
+}
+
+export function stopRunsWatcher(): void {
+  if (runsWatcher) {
+    runsWatcher();
+    runsWatcher = null;
+  }
+}
+
+export function stopServicesWatcher(): void {
+  if (servicesWatcher) {
+    servicesWatcher();
+    servicesWatcher = null;
+  }
 }
 
 // ============================================================================
@@ -383,6 +423,77 @@ export function setupIpcHandlers() {
     },
     'composio:execute-action': async (_event, args) => {
       return composioHandler.executeAction(args.actionSlug, args.toolkitSlug, args.input);
+    },
+    // Agent schedule handlers
+    'agent-schedule:getConfig': async () => {
+      const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
+      try {
+        return await repo.getConfig();
+      } catch {
+        // Return empty config if file doesn't exist
+        return { agents: {} };
+      }
+    },
+    'agent-schedule:getState': async () => {
+      const repo = container.resolve<IAgentScheduleStateRepo>('agentScheduleStateRepo');
+      try {
+        return await repo.getState();
+      } catch {
+        // Return empty state if file doesn't exist
+        return { agents: {} };
+      }
+    },
+    'agent-schedule:updateAgent': async (_event, args) => {
+      const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
+      await repo.upsert(args.agentName, args.entry);
+      // Trigger the runner to pick up the change immediately
+      triggerAgentScheduleRun();
+      return { success: true };
+    },
+    'agent-schedule:deleteAgent': async (_event, args) => {
+      const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
+      const stateRepo = container.resolve<IAgentScheduleStateRepo>('agentScheduleStateRepo');
+      await repo.delete(args.agentName);
+      await stateRepo.deleteAgentState(args.agentName);
+      return { success: true };
+    },
+    // Shell integration handlers
+    'shell:openPath': async (_event, args) => {
+      let filePath = args.path;
+      if (filePath.startsWith('~')) {
+        filePath = path.join(os.homedir(), filePath.slice(1));
+      } else if (!path.isAbsolute(filePath)) {
+        // Workspace-relative path — resolve against ~/.rowboat/
+        filePath = path.join(os.homedir(), '.rowboat', filePath);
+      }
+      const error = await shell.openPath(filePath);
+      return { error: error || undefined };
+    },
+    'shell:readFileBase64': async (_event, args) => {
+      let filePath = args.path;
+      if (filePath.startsWith('~')) {
+        filePath = path.join(os.homedir(), filePath.slice(1));
+      } else if (!path.isAbsolute(filePath)) {
+        // Workspace-relative path — resolve against ~/.rowboat/
+        filePath = path.join(os.homedir(), '.rowboat', filePath);
+      }
+      const stat = await fs.stat(filePath);
+      if (stat.size > 10 * 1024 * 1024) {
+        throw new Error('File too large (>10MB)');
+      }
+      const buffer = await fs.readFile(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeMap: Record<string, string> = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+        '.bmp': 'image/bmp', '.ico': 'image/x-icon',
+        '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4',
+        '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.aac': 'audio/aac',
+        '.pdf': 'application/pdf', '.json': 'application/json',
+        '.txt': 'text/plain', '.md': 'text/markdown',
+      };
+      const mimeType = mimeMap[ext] || 'application/octet-stream';
+      return { data: buffer.toString('base64'), mimeType, size: stat.size };
     },
   });
 }

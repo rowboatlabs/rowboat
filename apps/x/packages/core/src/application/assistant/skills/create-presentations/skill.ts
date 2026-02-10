@@ -7,20 +7,22 @@ Activate when the user wants to create presentations, slide decks, or pitch deck
 
 ## Workflow
 
-1. Check ~/.rowboat/knowledge/ for relevant context about the company, product, team, etc.
+1. Use workspace-readFile to check knowledge/ for relevant context about the company, product, team, etc.
 2. Ensure Playwright is installed: 'npm install playwright && npx playwright install chromium'
-3. Create an HTML file (e.g., /tmp/presentation.html) with slides (1280x720px each)
-4. Create a Node.js script to convert HTML to PDF:
+3. Use workspace-getRoot to get the workspace root path.
+4. Use workspace-writeFile to create the HTML file at tmp/presentation.html (workspace-relative) with slides (1280x720px each).
+5. Use workspace-writeFile to create a Node.js conversion script at tmp/convert.js (workspace-relative):
 
 ~~~javascript
-// save as /tmp/convert.js
+// save as tmp/convert.js via workspace-writeFile
 const { chromium } = require('playwright');
 const path = require('path');
 
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
-  await page.goto('file:///tmp/presentation.html', { waitUntil: 'networkidle' });
+  // Use the workspace root path from workspace-getRoot
+  await page.goto('file://<WORKSPACE_ROOT>/tmp/presentation.html', { waitUntil: 'networkidle' });
   await page.pdf({
     path: path.join(process.env.HOME, 'Desktop', 'presentation.pdf'),
     width: '1280px',
@@ -32,10 +34,13 @@ const path = require('path');
 })();
 ~~~
 
-5. Run it: 'node /tmp/convert.js'
-6. Tell the user: "Your presentation is ready at ~/Desktop/presentation.pdf"
+Replace <WORKSPACE_ROOT> with the actual absolute path returned by workspace-getRoot.
+
+6. Run it: 'node <WORKSPACE_ROOT>/tmp/convert.js'
+7. Tell the user: "Your presentation is ready at ~/Desktop/presentation.pdf"
 
 Do NOT show HTML code to the user. Do NOT explain how to export. Just create the PDF and deliver it.
+Use workspace-writeFile and workspace-readFile for ALL file operations. Do NOT use executeCommand to write or read files.
 
 ## PDF Export Rules
 
@@ -45,6 +50,7 @@ Do NOT show HTML code to the user. Do NOT explain how to export. Just create the
 2. **No box-shadow** - Use borders instead: \`border: 1px solid #e5e7eb\`
 3. **Bullets via CSS only** - Use \`li::before\` pseudo-elements, not separate DOM elements
 4. **Content must fit** - Slides are 1280x720px with 60px padding. Safe area is 1160x600px. Use \`overflow: hidden\`.
+5. **No footers or headers** - Never add fixed/absolute-positioned footer or header elements to slides. They overlap with content in PDF rendering. If you need a slide number or title, include it as part of the normal content flow.
 
 ## Required CSS
 

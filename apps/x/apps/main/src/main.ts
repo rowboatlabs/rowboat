@@ -1,6 +1,14 @@
 import { app, BrowserWindow, protocol, net, shell } from "electron";
 import path from "node:path";
-import { setupIpcHandlers, startRunsWatcher, startWorkspaceWatcher, stopWorkspaceWatcher } from "./ipc.js";
+import {
+  setupIpcHandlers,
+  startRunsWatcher,
+  startServicesWatcher,
+  startWorkspaceWatcher,
+  stopRunsWatcher,
+  stopServicesWatcher,
+  stopWorkspaceWatcher
+} from "./ipc.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
@@ -10,10 +18,15 @@ import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
 import { init as initPreBuiltRunner } from "@x/core/dist/pre_built/runner.js";
+import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
+import started from "electron-squirrel-startup";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// run this as early in the main process as possible
+if (started) app.quit();
 
 // Path resolution differs between development and production:
 const preloadPath = app.isPackaged
@@ -64,6 +77,10 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    show: false, // Don't show until ready
+    backgroundColor: "#252525", // Prevent white flash (matches dark mode)
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 12, y: 12 },
     webPreferences: {
       // IMPORTANT: keep Node out of renderer
       nodeIntegration: false,
@@ -71,6 +88,11 @@ function createWindow() {
       sandbox: true,
       preload: preloadPath,
     },
+  });
+
+  // Show window when content is ready to prevent blank screen
+  win.once("ready-to-show", () => {
+    win.show();
   });
 
   // Open external links in system browser (not sandboxed Electron window)
@@ -107,8 +129,8 @@ app.whenReady().then(async () => {
   if (app.isPackaged) {
     updateElectronApp({
       updateSource: {
-        type: UpdateSourceType.StaticStorage,
-        baseUrl: `https://rowboat-desktop-app-releases.s3.amazonaws.com/releases/${process.platform}/${process.arch}`,
+        type: UpdateSourceType.ElectronPublicUpdateService,
+        repo: "rowboatlabs/rowboat",
       },
       notifyUser: true, // Shows native dialog when update is available
     });
@@ -131,6 +153,9 @@ app.whenReady().then(async () => {
   // start runs watcher
   startRunsWatcher();
 
+  // start services watcher
+  startServicesWatcher();
+
   // start gmail sync
   initGmailSync();
 
@@ -149,6 +174,9 @@ app.whenReady().then(async () => {
   // start pre-built agent runner
   initPreBuiltRunner();
 
+  // start background agent runner (scheduled agents)
+  initAgentRunner();
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -165,4 +193,6 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   // Clean up watcher on app quit
   stopWorkspaceWatcher();
+  stopRunsWatcher();
+  stopServicesWatcher();
 });
