@@ -522,7 +522,9 @@ function ContentHeader({ children }: { children: React.ReactNode }) {
     <header
       className={cn(
         "titlebar-drag-region flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 bg-sidebar transition-[padding] duration-200 ease-linear",
-        isCollapsed && "pl-[108px]"
+        // When the sidebar is collapsed the content area shifts left, so we need enough left padding
+        // to avoid overlapping the fixed traffic-lights/toggle/back/forward controls.
+        isCollapsed && "pl-[168px]"
       )}
     >
       {children}
@@ -2084,7 +2086,7 @@ function App() {
             <SidebarInset className="overflow-hidden! min-h-0">
               {/* Header - also serves as titlebar drag region, adjusts padding when sidebar collapsed */}
               <ContentHeader>
-                <span className="text-sm font-medium text-muted-foreground flex-1">
+                <span className="text-sm font-medium text-muted-foreground flex-1 min-w-0 truncate">
                   {headerTitle}
                 </span>
                 {selectedPath && (
