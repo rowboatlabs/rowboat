@@ -1,4 +1,4 @@
-<img width="1409" height="605" alt="Work knowledge graph" src="https://github.com/user-attachments/assets/707d0452-459d-4710-be85-b5322b433151" />
+<img width="1348" height="583" alt="rowboat-image-1" src="https://github.com/user-attachments/assets/03df6176-97b3-458e-b6d3-59a5a77fe604" />
 
 <h5 align="center">
 
