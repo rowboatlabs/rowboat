@@ -26,7 +26,7 @@ https://console.cloud.google.com/projectcreate
 
 Once created, make sure the new project is selected in the top project dropdown.
 
-![Select the new project in the dropdown](/apps/docs/docs/img/google-setup/01-select-project-dropdown.png)
+![Select the new project in the dropdown](https://raw.githubusercontent.com/rowboatlabs/rowboat/dev/apps/docs/docs/img/google-setup/01-select-project-dropdown.png)
 
 ---
 
@@ -51,7 +51,7 @@ For each API:
 
 - Click **Enable**
     
-    ![Enable the API](/apps/docs/docs/img/google-setup/02-enable-api.png)
+    ![Enable the API](https://raw.githubusercontent.com/rowboatlabs/rowboat/dev/apps/docs/docs/img/google-setup/02-enable-api.png)
     
 
 ---
@@ -79,7 +79,7 @@ Click **Save and Continue** through the remaining steps.
 
 You do NOT need to publish the app — keeping it in **Testing** mode is fine.
 
-![OAuth consent screen](/apps/docs/docs/img/google-setup/03-oauth-consent-screen.png)
+![OAuth consent screen](https://raw.githubusercontent.com/rowboatlabs/rowboat/dev/apps/docs/docs/img/google-setup/03-oauth-consent-screen.png)
 
 ---
 
@@ -98,7 +98,7 @@ Under **Test Users**:
 
 Save changes.
 
-![Add test users](/apps/docs/docs/img/google-setup/04-add-test-users.png)
+![Add test users](https://raw.githubusercontent.com/rowboatlabs/rowboat/dev/apps/docs/docs/img/google-setup/04-add-test-users.png)
 
 ---
 
@@ -120,7 +120,7 @@ Select:
 - Store ID can be anything (e.g. `test` )
 - Click **Create**
 
-![Create OAuth Client ID (UWP)](/apps/docs/docs/img/google-setup/05-create-oauth-client-uwp.png)
+![Create OAuth Client ID (UWP)](https://raw.githubusercontent.com/rowboatlabs/rowboat/dev/apps/docs/docs/img/google-setup/05-create-oauth-client-uwp.png)
 
 ---
 
@@ -133,6 +133,6 @@ After creation, Google will show:
 
 Copy the **Client ID** and paste it into Rowboat where prompted.
 
-![Copy Client ID](/apps/docs/docs/img/google-setup/06-copy-client-id.png)
+![Copy Client ID](https://raw.githubusercontent.com/rowboatlabs/rowboat/dev/apps/docs/docs/img/google-setup/06-copy-client-id.png)
 
 ---
