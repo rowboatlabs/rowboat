@@ -11,6 +11,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
+const GOOGLE_CLIENT_ID_SETUP_GUIDE_URL =
+  "https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md"
+
 interface GoogleClientIdModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -53,6 +56,18 @@ export function GoogleClientIdModal({
           <label className="text-xs font-medium text-muted-foreground" htmlFor="google-client-id">
             Client ID
           </label>
+          <div className="text-xs text-muted-foreground">
+            Need help setting this up?{" "}
+            <a
+              className="text-primary underline underline-offset-4 hover:text-primary/80"
+              href={GOOGLE_CLIENT_ID_SETUP_GUIDE_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Read the setup guide
+            </a>
+            .
+          </div>
           <Input
             id="google-client-id"
             placeholder="xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com"
