@@ -142,6 +142,7 @@ type SidebarContentPanelProps = {
   onVoiceNoteCreated?: (path: string) => void
   runs?: RunListItem[]
   currentRunId?: string | null
+  processingRunIds?: Set<string>
   tasksActions?: TasksActions
   backgroundTasks?: BackgroundTaskItem[]
   selectedBackgroundTask?: string | null
@@ -345,6 +346,7 @@ export function SidebarContentPanel({
   onVoiceNoteCreated,
   runs = [],
   currentRunId,
+  processingRunIds,
   tasksActions,
   backgroundTasks = [],
   selectedBackgroundTask,
@@ -392,6 +394,7 @@ export function SidebarContentPanel({
           <TasksSection
             runs={runs}
             currentRunId={currentRunId}
+            processingRunIds={processingRunIds}
             actions={tasksActions}
             backgroundTasks={backgroundTasks}
             selectedBackgroundTask={selectedBackgroundTask}
@@ -975,12 +978,14 @@ function getStatusColor(status?: string, enabled?: boolean): string {
 function TasksSection({
   runs,
   currentRunId,
+  processingRunIds,
   actions,
   backgroundTasks = [],
   selectedBackgroundTask,
 }: {
   runs: RunListItem[]
   currentRunId?: string | null
+  processingRunIds?: Set<string>
   actions?: TasksActions
   backgroundTasks?: BackgroundTaskItem[]
   selectedBackgroundTask?: string | null
@@ -1040,7 +1045,12 @@ function TasksSection({
                     isActive={currentRunId === run.id}
                     onClick={() => actions?.onSelectRun(run.id)}
                   >
-                    <span className="truncate text-sm">{run.title || '(Untitled chat)'}</span>
+                    <div className="flex items-center gap-2">
+                      {processingRunIds?.has(run.id) ? (
+                        <span className="size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
+                      ) : null}
+                      <span className="truncate text-sm">{run.title || '(Untitled chat)'}</span>
+                    </div>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
