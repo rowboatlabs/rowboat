@@ -1,4 +1,4 @@
-<img width="1348" height="583" alt="rowboat-image-1" src="https://github.com/user-attachments/assets/03df6176-97b3-458e-b6d3-59a5a77fe604" />
+<img width="1339" height="607" alt="rowboat-github-2" src="https://github.com/user-attachments/assets/fc463b99-01b3-401c-b4a4-044dad480901" />
 
 <h5 align="center">
 
@@ -34,15 +34,18 @@ Rowboat connects your email and meeting notes, builds long-lived knowledge from 
 
 ## Demo
 
-[![Demo video](https://github.com/user-attachments/assets/f378285b-4ef3-4a4b-aa20-7dbb664e496c)](https://www.youtube.com/watch?v=T2Bmiy05FrI)
+
+[![Demo](https://github.com/user-attachments/assets/3f560bcf-d93c-4064-81eb-75a9fae31742)](https://www.youtube.com/watch?v=5AWoGo-L16I)
+
+Full video: https://www.youtube.com/watch?v=5AWoGo-L16I
 
 ---
 
-## Quick start
+## Installation
 
-**Download for Mac:**  
+**Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/)
 
-https://github.com/rowboatlabs/rowboat/releases/latest
+**All release files:**   https://github.com/rowboatlabs/rowboat/releases/latest
 
 ## What it does
 
