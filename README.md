@@ -26,7 +26,7 @@
 </p>
 
 # Rowboat  
-**An open-source, local-first AI coworker with memory for everyday work**
+**Open-source AI coworker that turns work into a knowledge graph and acts on it**
 
 </h5>
 
