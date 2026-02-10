@@ -238,6 +238,9 @@ export function MarkdownEditor({
   const [anchorPosition, setAnchorPosition] = useState<{ left: number; top: number } | null>(null)
   const [selectionHighlight, setSelectionHighlight] = useState<SelectionHighlightRange>(null)
   const selectionHighlightRef = useRef<SelectionHighlightRange>(null)
+  const [wikiCommandValue, setWikiCommandValue] = useState<string>('')
+  const wikiKeyStateRef = useRef<{ open: boolean; options: string[]; value: string }>({ open: false, options: [], value: '' })
+  const handleSelectWikiLinkRef = useRef<(path: string) => void>(() => {})
 
   // Keep ref in sync with state for the plugin to access
   selectionHighlightRef.current = selectionHighlight
@@ -304,6 +307,41 @@ export function MarkdownEditor({
     editorProps: {
       attributes: {
         class: 'prose prose-sm max-w-none focus:outline-none',
+      },
+      handleKeyDown: (_view, event) => {
+        const state = wikiKeyStateRef.current
+        if (!state.open) return false
+
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          setActiveWikiLink(null)
+          setAnchorPosition(null)
+          setWikiCommandValue('')
+          return true
+        }
+
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          if (state.options.length === 0) return true
+          event.preventDefault()
+          event.stopPropagation()
+          const currentIndex = Math.max(0, state.options.indexOf(state.value))
+          const delta = event.key === 'ArrowDown' ? 1 : -1
+          const nextIndex = (currentIndex + delta + state.options.length) % state.options.length
+          setWikiCommandValue(state.options[nextIndex])
+          return true
+        }
+
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          if (state.options.length === 0) return true
+          event.preventDefault()
+          event.stopPropagation()
+          const selected = state.options.includes(state.value) ? state.value : state.options[0]
+          handleSelectWikiLinkRef.current(selected)
+          return true
+        }
+
+        return false
       },
       handleClickOn: (_view, _pos, node, _nodePos, event) => {
         if (node.type.name === 'wikiLink') {
@@ -454,9 +492,39 @@ export function MarkdownEditor({
     setAnchorPosition(null)
   }, [editor, activeWikiLink, wikiLinks])
 
+  useEffect(() => {
+    handleSelectWikiLinkRef.current = handleSelectWikiLink
+  }, [handleSelectWikiLink])
+
   const handleScroll = useCallback(() => {
     updateWikiLinkState()
   }, [updateWikiLinkState])
+
+  const showWikiPopover = Boolean(wikiLinks && activeWikiLink && anchorPosition)
+  const wikiOptions = useMemo(() => {
+    if (!showWikiPopover) return []
+    const options: string[] = []
+    if (canCreate) options.push(createCandidate)
+    options.push(...visibleFiles)
+    return options
+  }, [showWikiPopover, canCreate, createCandidate, visibleFiles])
+
+  useEffect(() => {
+    wikiKeyStateRef.current = { open: showWikiPopover, options: wikiOptions, value: wikiCommandValue }
+  }, [showWikiPopover, wikiOptions, wikiCommandValue])
+
+  // Keep cmdk selection in sync with available options
+  useEffect(() => {
+    if (!showWikiPopover) {
+      setWikiCommandValue('')
+      return
+    }
+    if (wikiOptions.length === 0) {
+      setWikiCommandValue('')
+      return
+    }
+    setWikiCommandValue((prev) => (wikiOptions.includes(prev) ? prev : wikiOptions[0]))
+  }, [showWikiPopover, wikiOptions])
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
@@ -465,8 +533,6 @@ export function MarkdownEditor({
       // The parent component handles saving via onChange
     }
   }, [])
-
-  const showWikiPopover = Boolean(wikiLinks && activeWikiLink && anchorPosition)
 
   // Create image upload handler that shows placeholder
   const handleImageUploadWithPlaceholder = useMemo(() => {
@@ -490,6 +556,7 @@ export function MarkdownEditor({
               if (!open) {
                 setActiveWikiLink(null)
                 setAnchorPosition(null)
+                setWikiCommandValue('')
               }
             }}
           >
@@ -509,7 +576,7 @@ export function MarkdownEditor({
               side="bottom"
               onOpenAutoFocus={(event) => event.preventDefault()}
             >
-              <Command shouldFilter={false}>
+              <Command shouldFilter={false} value={wikiCommandValue} onValueChange={setWikiCommandValue}>
                 <CommandList>
                   {canCreate ? (
                     <CommandItem
