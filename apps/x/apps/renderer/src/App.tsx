@@ -1113,16 +1113,18 @@ function App() {
           if (llmEvent.type === 'reasoning-delta' && llmEvent.delta) {
             setCurrentReasoning(prev => prev + llmEvent.delta)
           } else if (llmEvent.type === 'reasoning-end') {
-            setCurrentReasoning(reasoning => {
-              if (reasoning) {
-                setConversation(prev => [...prev, {
-                  id: `reasoning-${Date.now()}`,
-                  content: reasoning,
-                  timestamp: Date.now(),
-                }])
-              }
+            let reasoningContent = ''
+            setCurrentReasoning(prev => {
+              reasoningContent = prev
               return ''
             })
+            if (reasoningContent) {
+              setConversation(prev => [...prev, {
+                id: `reasoning-${Date.now()}`,
+                content: reasoningContent,
+                timestamp: Date.now(),
+              }])
+            }
           } else if (llmEvent.type === 'text-delta' && llmEvent.delta) {
             setCurrentAssistantMessage(prev => prev + llmEvent.delta)
           } else if (llmEvent.type === 'tool-call') {
@@ -1146,23 +1148,25 @@ function App() {
         {
           const msg = event.message
           if (msg.role === 'assistant') {
-            setCurrentAssistantMessage(currentMsg => {
-              if (currentMsg) {
-                setConversation(prev => {
-                  const exists = prev.some(m =>
-                    m.id === event.messageId && 'role' in m && m.role === 'assistant'
-                  )
-                  if (exists) return prev
-                  return [...prev, {
-                    id: event.messageId,
-                    role: 'assistant',
-                    content: currentMsg,
-                    timestamp: Date.now(),
-                  }]
-                })
-              }
+            let assistantContent = ''
+            setCurrentAssistantMessage(prev => {
+              assistantContent = prev
               return ''
             })
+            if (assistantContent) {
+              setConversation(prev => {
+                const exists = prev.some(m =>
+                  m.id === event.messageId && 'role' in m && m.role === 'assistant'
+                )
+                if (exists) return prev
+                return [...prev, {
+                  id: event.messageId,
+                  role: 'assistant',
+                  content: assistantContent,
+                  timestamp: Date.now(),
+                }]
+              })
+            }
           }
         }
         break
@@ -1285,17 +1289,19 @@ function App() {
         setPendingPermissionRequests(new Map())
         setPendingAskHumanRequests(new Map())
         // Flush any streaming content as a message
-        setCurrentAssistantMessage(currentMsg => {
-          if (currentMsg) {
-            setConversation(prev => [...prev, {
-              id: `assistant-stopped-${Date.now()}`,
-              role: 'assistant',
-              content: currentMsg,
-              timestamp: Date.now(),
-            }])
-          }
+        let stoppedMsg = ''
+        setCurrentAssistantMessage(prev => {
+          stoppedMsg = prev
           return ''
         })
+        if (stoppedMsg) {
+          setConversation(prev => [...prev, {
+            id: `assistant-stopped-${Date.now()}`,
+            role: 'assistant',
+            content: stoppedMsg,
+            timestamp: Date.now(),
+          }])
+        }
         setCurrentReasoning('')
         break
 
