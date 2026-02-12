@@ -886,8 +886,7 @@ function Tree({
   if (isRenaming) {
     return (
       <SidebarMenuItem>
-        <div className="flex items-center gap-2 px-2 py-1">
-          {isDir ? <Folder className="size-4 shrink-0" /> : <File className="size-4 shrink-0" />}
+        <div className="flex items-center px-2 py-1">
           <Input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
@@ -924,7 +923,6 @@ function Tree({
               isActive={isSelected}
               onClick={() => onSelect(item.path, item.kind)}
             >
-              <File className="size-4" />
               <span>{item.name}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -946,7 +944,6 @@ function Tree({
             <CollapsibleTrigger asChild>
               <SidebarMenuButton>
                 <ChevronRight className="transition-transform size-4" />
-                <Folder className="size-4" />
                 <span>{item.name}</span>
               </SidebarMenuButton>
             </CollapsibleTrigger>
