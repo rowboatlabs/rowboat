@@ -15,8 +15,8 @@ import { CopilotAgent } from "../application/assistant/agent.js";
 import { isBlocked } from "../application/lib/command-executor.js";
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
-import { createProvider } from "../models/models.js";
 import { IAgentsRepo } from "./repo.js";
+import type { ILlmService } from "../execution/llm-service.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { IBus } from "../application/lib/bus.js";
 import { IMessageQueue } from "../application/lib/message-queue.js";
@@ -41,6 +41,7 @@ export class AgentRuntime implements IAgentRuntime {
     private modelConfigRepo: IModelConfigRepo;
     private runsLock: IRunsLock;
     private abortRegistry: IAbortRegistry;
+    private llmService: ILlmService;
 
     constructor({
         runsRepo,
@@ -50,6 +51,7 @@ export class AgentRuntime implements IAgentRuntime {
         modelConfigRepo,
         runsLock,
         abortRegistry,
+        llmService,
     }: {
         runsRepo: IRunsRepo;
         idGenerator: IMonotonicallyIncreasingIdGenerator;
@@ -58,6 +60,7 @@ export class AgentRuntime implements IAgentRuntime {
         modelConfigRepo: IModelConfigRepo;
         runsLock: IRunsLock;
         abortRegistry: IAbortRegistry;
+        llmService: ILlmService;
     }) {
         this.runsRepo = runsRepo;
         this.idGenerator = idGenerator;
@@ -66,6 +69,7 @@ export class AgentRuntime implements IAgentRuntime {
         this.modelConfigRepo = modelConfigRepo;
         this.runsLock = runsLock;
         this.abortRegistry = abortRegistry;
+        this.llmService = llmService;
     }
 
     async trigger(runId: string): Promise<void> {
@@ -104,6 +108,7 @@ export class AgentRuntime implements IAgentRuntime {
                         modelConfigRepo: this.modelConfigRepo,
                         signal,
                         abortRegistry: this.abortRegistry,
+                        llmService: this.llmService,
                     })) {
                         eventCount++;
                         if (event.type !== "llm-stream-event") {
@@ -629,6 +634,7 @@ export async function* streamAgent({
     modelConfigRepo,
     signal,
     abortRegistry,
+    llmService,
 }: {
     state: AgentState,
     idGenerator: IMonotonicallyIncreasingIdGenerator;
@@ -637,6 +643,7 @@ export async function* streamAgent({
     modelConfigRepo: IModelConfigRepo;
     signal: AbortSignal;
     abortRegistry: IAbortRegistry;
+    llmService: ILlmService;
 }): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
     const logger = new PrefixLogger(`run-${runId}-${state.agentName}`);
 
@@ -657,8 +664,7 @@ export async function* streamAgent({
     const tools = await buildTools(agent);
 
     // set up provider + model
-    const provider = createProvider(modelConfig.provider);
-    const model = provider.languageModel(modelConfig.model);
+    const model = llmService.getLanguageModel(modelConfig);
 
     let loopCounter = 0;
     while (true) {
@@ -731,6 +737,7 @@ export async function* streamAgent({
                     modelConfigRepo,
                     signal,
                     abortRegistry,
+                    llmService,
                 })) {
                     yield* processEvent({
                         ...event,

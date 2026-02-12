@@ -13,12 +13,12 @@ import * as workspace from "../../workspace/workspace.js";
 import { IAgentsRepo } from "../../agents/repo.js";
 import { WorkDir } from "../../config/config.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
-import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, listToolkitTools } from "../../composio/client.js";
 import { slackToolCatalog } from "../assistant/skills/slack/tool-catalog.js";
 import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
-import { createProvider } from "../../models/models.js";
 import { IModelConfigRepo } from "../../models/repo.js";
+import type { ILlmService } from "../../execution/llm-service.js";
+import type { IComposioService } from "../../execution/composio-service.js";
 // Parser libraries are loaded dynamically inside parseFile.execute()
 // to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
 // Import paths are computed so esbuild cannot statically resolve them.
@@ -144,8 +144,9 @@ async function executeSlackTool(
         return { success: false, error: 'Slack is not connected' };
     }
     try {
+        const composioService = container.resolve<IComposioService>('composioService');
         const toolSlug = await resolveSlackToolSlug(hintKey);
-        return await executeComposioAction(toolSlug, account.id, compactObject(params));
+        return await composioService.executeAction(toolSlug, account.id, compactObject(params));
     } catch (error) {
         return {
             success: false,
@@ -249,7 +250,8 @@ const resolveSlackToolSlug = async (hintKey: keyof typeof slackToolHints) => {
     const allSlug = resolveFromTools(slackToolCatalog);
 
     if (!allSlug) {
-        const fallback = await listToolkitTools("slack", hint.search || null);
+        const composioService = container.resolve<IComposioService>('composioService');
+        const fallback = await composioService.listToolkitTools("slack", hint.search || null);
         const fallbackSlug = resolveFromTools(fallback.items || []);
         if (!fallbackSlug) {
             throw new Error(`Unable to resolve Slack tool for ${hintKey}. Try slack-listAvailableTools.`);
@@ -858,11 +860,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
                 const base64 = buffer.toString('base64');
 
-                // Resolve model config from DI container
+                // Resolve model config and LLM service from DI container
                 const modelConfigRepo = container.resolve<IModelConfigRepo>('modelConfigRepo');
                 const modelConfig = await modelConfigRepo.getConfig();
-                const provider = createProvider(modelConfig.provider);
-                const model = provider.languageModel(modelConfig.model);
+                const llmService = container.resolve<ILlmService>('llmService');
+                const model = llmService.getLanguageModel(modelConfig);
 
                 const userPrompt = prompt || 'Convert this file to well-structured markdown.';
 
@@ -1117,7 +1119,8 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         description: 'Check if Slack is connected and ready to use. Use this before other Slack operations.',
         inputSchema: z.object({}),
         execute: async () => {
-            if (!isComposioConfigured()) {
+            const composioService = container.resolve<IComposioService>('composioService');
+            if (!composioService.isConfigured()) {
                 return {
                     connected: false,
                     error: 'Composio is not configured. Please set up your Composio API key first.',
@@ -1143,12 +1146,13 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             search: z.string().optional().describe('Optional search query to filter tools (e.g., "message", "channel", "user")'),
         }),
         execute: async ({ search }: { search?: string }) => {
-            if (!isComposioConfigured()) {
+            const composioService = container.resolve<IComposioService>('composioService');
+            if (!composioService.isConfigured()) {
                 return { success: false, error: 'Composio is not configured' };
             }
 
             try {
-                const result = await listToolkitTools('slack', search || null);
+                const result = await composioService.listToolkitTools('slack', search || null);
                 return {
                     success: true,
                     tools: result.items,
@@ -1176,7 +1180,8 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             }
 
             try {
-                const result = await executeComposioAction(toolSlug, account.id, input);
+                const composioService = container.resolve<IComposioService>('composioService');
+                const result = await composioService.executeAction(toolSlug, account.id, input);
                 return result;
             } catch (error) {
                 return {

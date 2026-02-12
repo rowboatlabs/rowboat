@@ -7,4 +7,5 @@ export * as mcp from './mcp.js';
 export * as agentSchedule from './agent-schedule.js';
 export * as agentScheduleState from './agent-schedule-state.js';
 export * as serviceEvents from './service-events.js';
+export * as executionProfile from './execution-profile.js';
 export { PrefixLogger };

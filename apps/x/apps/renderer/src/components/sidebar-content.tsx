@@ -449,30 +449,20 @@ export function SidebarContentPanel({
 
 async function transcribeWithDeepgram(audioBlob: Blob): Promise<string | null> {
   try {
-    const configResult = await window.ipc.invoke('workspace:readFile', {
-      path: 'config/deepgram.json',
-      encoding: 'utf8',
+    const arrayBuffer = await audioBlob.arrayBuffer()
+    const bytes = new Uint8Array(arrayBuffer)
+    let binary = ''
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]!)
+    }
+    const audioBase64 = btoa(binary)
+    const result = await window.ipc.invoke('stt:transcribe', {
+      audioBase64,
+      mimeType: audioBlob.type,
     })
-    const { apiKey } = JSON.parse(configResult.data) as { apiKey: string }
-    if (!apiKey) throw new Error('No apiKey in deepgram.json')
-
-    const response = await fetch(
-      'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Token ${apiKey}`,
-          'Content-Type': audioBlob.type,
-        },
-        body: audioBlob,
-      },
-    )
-
-    if (!response.ok) throw new Error(`Deepgram API error: ${response.status}`)
-    const result = await response.json()
-    return result.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? null
+    return result.transcript
   } catch (err) {
-    console.error('Deepgram transcription failed:', err)
+    console.error('STT transcription failed:', err)
     return null
   }
 }

@@ -12,8 +12,9 @@ import {
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
-import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
+import container from "@x/core/dist/di/container.js";
+import type { IGmailService } from "@x/core/dist/execution/gmail-service.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
@@ -157,7 +158,7 @@ app.whenReady().then(async () => {
   startServicesWatcher();
 
   // start gmail sync
-  initGmailSync();
+  container.resolve<IGmailService>('gmailService').init();
 
   // start calendar sync
   initCalendarSync();
