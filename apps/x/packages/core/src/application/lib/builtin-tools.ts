@@ -33,6 +33,7 @@ const BuiltinToolsSchema = z.record(z.string(), z.object({
         input: z.any(), // (input, ctx?) => Promise<any>
         output: z.promise(z.any()),
     }),
+    isAvailable: z.custom<() => Promise<boolean>>().optional(),
 }));
 
 type SlackToolHint = {
@@ -1263,6 +1264,104 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         }),
         execute: async ({ limit }: { limit?: number }) => {
             return executeSlackTool("listConversations", { types: "im", limit: limit ?? 50 });
+        },
+    },
+
+    // ============================================================================
+    // Web Search (Brave Search API)
+    // ============================================================================
+
+    'web-search': {
+        description: 'Search the web using Brave Search. Returns web results with titles, URLs, and descriptions.',
+        inputSchema: z.object({
+            query: z.string().describe('The search query'),
+            count: z.number().optional().describe('Number of results to return (default: 5, max: 20)'),
+            freshness: z.string().optional().describe('Filter by freshness: pd (past day), pw (past week), pm (past month), py (past year)'),
+        }),
+        isAvailable: async () => {
+            try {
+                const homedir = process.env.HOME || process.env.USERPROFILE || '';
+                const braveConfigPath = path.join(homedir, '.rowboat', 'config', 'brave-search.json');
+                const raw = await fs.readFile(braveConfigPath, 'utf8');
+                const config = JSON.parse(raw);
+                return !!config.apiKey;
+            } catch {
+                return false;
+            }
+        },
+        execute: async ({ query, count, freshness }: { query: string; count?: number; freshness?: string }) => {
+            try {
+                // Read API key from config
+                const homedir = process.env.HOME || process.env.USERPROFILE || '';
+                const braveConfigPath = path.join(homedir, '.rowboat', 'config', 'brave-search.json');
+
+                let apiKey: string;
+                try {
+                    const raw = await fs.readFile(braveConfigPath, 'utf8');
+                    const config = JSON.parse(raw);
+                    apiKey = config.apiKey;
+                } catch {
+                    return {
+                        success: false,
+                        error: 'Brave Search API key not configured. Create ~/.rowboat/config/brave-search.json with { "apiKey": "<your-key>" }',
+                    };
+                }
+
+                if (!apiKey) {
+                    return {
+                        success: false,
+                        error: 'Brave Search API key is empty. Set "apiKey" in ~/.rowboat/config/brave-search.json',
+                    };
+                }
+
+                // Build query params
+                const resultCount = Math.min(Math.max(count || 5, 1), 20);
+                const params = new URLSearchParams({
+                    q: query,
+                    count: String(resultCount),
+                });
+                if (freshness) {
+                    params.set('freshness', freshness);
+                }
+
+                const url = `https://api.search.brave.com/res/v1/web/search?${params.toString()}`;
+                const response = await fetch(url, {
+                    headers: {
+                        'X-Subscription-Token': apiKey,
+                        'Accept': 'application/json',
+                    },
+                });
+
+                if (!response.ok) {
+                    const body = await response.text();
+                    return {
+                        success: false,
+                        error: `Brave Search API error (${response.status}): ${body}`,
+                    };
+                }
+
+                const data = await response.json() as {
+                    web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
+                };
+
+                const results = (data.web?.results || []).map((r: { title?: string; url?: string; description?: string }) => ({
+                    title: r.title || '',
+                    url: r.url || '',
+                    description: r.description || '',
+                }));
+
+                return {
+                    success: true,
+                    query,
+                    results,
+                    count: results.length,
+                };
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                };
+            }
         },
     },
 };
