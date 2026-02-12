@@ -14,7 +14,7 @@
     <a href="https://www.rowboatlabs.com/" target="_blank" rel="noopener">
     <img alt="Website" src="https://img.shields.io/badge/Website-10b981?labelColor=10b981&logo=window&logoColor=white">
   </a>
-  <a href="https://discord.com/invite/htdKpBZF" target="_blank" rel="noopener">
+  <a href="https://discord.gg/wajrgmJQ6b" target="_blank" rel="noopener">
     <img alt="Discord" src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white&labelColor=5865F2">
   </a>
   <a href="https://x.com/intent/user?screen_name=rowboatlabshq" target="_blank" rel="noopener">
@@ -144,5 +144,5 @@ If you’re looking for Rowboat web Studio, start [here](https://docs.rowboatlab
 ---
 <div align="center">
 
-[Discord](https://discord.com/invite/htdKpBZF) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
+[Discord](https://discord.gg/wajrgmJQ6b) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
 </div>
