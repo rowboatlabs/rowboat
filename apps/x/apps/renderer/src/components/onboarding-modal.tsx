@@ -159,9 +159,9 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Preferred default models for each provider
   const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
-    openai: "gpt-5.2",
-    anthropic: "claude-opus-4-5-20251101",
-  }
+  openai: "gpt-5.2",
+  anthropic: "claude-opus-4-6-20260202",
+}
 
   // Initialize default models from catalog
   useEffect(() => {
