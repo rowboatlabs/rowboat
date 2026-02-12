@@ -36,6 +36,7 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
@@ -2203,6 +2204,18 @@ function App() {
     }
 
     if (isToolCall(item)) {
+      if (item.name === 'web-search') {
+        const input = normalizeToolInput(item.input) as Record<string, unknown> | undefined
+        const result = item.result as Record<string, unknown> | undefined
+        return (
+          <WebSearchResult
+            key={item.id}
+            query={(input?.query as string) || ''}
+            results={(result?.results as Array<{ title: string; url: string; description: string }>) || []}
+            status={item.status}
+          />
+        )
+      }
       const errorText = item.status === 'error' ? 'Tool error' : ''
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
