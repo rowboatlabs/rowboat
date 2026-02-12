@@ -125,6 +125,8 @@ const graphPalette = [
   { hue: 0, sat: 72, light: 52 },
 ]
 
+const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 12 + 12 * 3 + 8 * 2
+
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
 
@@ -461,32 +463,29 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   return true // both graph
 }
 
-/** Traffic light placeholders + toggle button + back/forward nav, fixed next to macOS traffic lights */
+/** Sidebar toggle + back/forward nav */
 function FixedSidebarToggle({
   onNavigateBack,
   onNavigateForward,
   canNavigateBack,
   canNavigateForward,
+  leftInsetPx,
 }: {
   onNavigateBack: () => void
   onNavigateForward: () => void
   canNavigateBack: boolean
   canNavigateForward: boolean
+  leftInsetPx: number
 }) {
   const { toggleSidebar } = useSidebar()
   return (
     <div className="fixed left-0 top-0 z-50 flex h-10 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-      {/* Placeholder dots that show through when traffic lights are hidden (window unfocused) */}
-      <div className="flex items-center gap-2 pl-[13px]">
-        <div className="h-3 w-3 rounded-full bg-border" />
-        <div className="h-3 w-3 rounded-full bg-border" />
-        <div className="h-3 w-3 rounded-full bg-border" />
-      </div>
+      <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
       {/* Sidebar toggle */}
       <button
         type="button"
         onClick={toggleSidebar}
-        className="ml-2.5 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        className="ml-3 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         aria-label="Toggle Sidebar"
       >
         <PanelLeftIcon className="size-4" />
@@ -603,6 +602,7 @@ function App() {
 
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false)
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
 
   // Background tasks state
   type BackgroundTaskItem = {
@@ -2447,6 +2447,7 @@ function App() {
               onNavigateForward={() => { void navigateForward() }}
               canNavigateBack={canNavigateBack}
               canNavigateForward={canNavigateForward}
+              leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
           </SidebarProvider>
 
