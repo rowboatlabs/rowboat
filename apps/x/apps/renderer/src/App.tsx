@@ -125,7 +125,7 @@ const graphPalette = [
   { hue: 0, sat: 72, light: 52 },
 ]
 
-const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 12 + 12 * 3 + 8 * 2
+const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 16 + 12 * 3 + 8 * 2
 const TITLEBAR_BUTTON_PX = 32
 const TITLEBAR_BUTTON_GAP_PX = 4
 const TITLEBAR_HEADER_GAP_PX = 8
