@@ -78,6 +78,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   // Granola state
   const [granolaEnabled, setGranolaEnabled] = useState(false)
   const [granolaLoading, setGranolaLoading] = useState(true)
+  const [showMoreProviders, setShowMoreProviders] = useState(false)
 
   // Composio/Slack state
   const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
@@ -158,9 +159,9 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Preferred default models for each provider
   const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
-    openai: "gpt-5.2",
-    anthropic: "claude-opus-4-5-20251101",
-  }
+  openai: "gpt-5.2",
+  anthropic: "claude-opus-4-6-20260202",
+}
 
   // Initialize default models from catalog
   useEffect(() => {
@@ -445,8 +446,8 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     startConnect('google', clientId)
   }, [startConnect])
 
-  // Step indicator component
-  const StepIndicator = () => (
+  // Step indicator
+  const renderStepIndicator = () => (
     <div className="flex gap-2 justify-center mb-6">
       {[0, 1, 2].map((step) => (
         <div
@@ -587,9 +588,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   */
 
   // Step 0: LLM Setup
-  const LlmSetupStep = () => {
-    const [showMoreProviders, setShowMoreProviders] = useState(false)
-
+  const renderLlmSetupStep = () => {
     const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
       { id: "openai", name: "OpenAI", description: "Use your OpenAI API key" },
       { id: "anthropic", name: "Anthropic", description: "Use your Anthropic API key" },
@@ -745,7 +744,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   }
 
   // Step 1: Connect Accounts
-  const AccountConnectionStep = () => (
+  const renderAccountConnectionStep = () => (
     <div className="flex flex-col">
       <DialogHeader className="text-center mb-6">
         <DialogTitle className="text-2xl">Connect Your Accounts</DialogTitle>
@@ -796,7 +795,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   )
 
   // Step 2: Completion
-  const CompletionStep = () => {
+  const renderCompletionStep = () => {
     const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackConnected
 
     return (
@@ -877,10 +876,10 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
       >
-        <StepIndicator />
-        {currentStep === 0 && <LlmSetupStep />}
-        {currentStep === 1 && <AccountConnectionStep />}
-        {currentStep === 2 && <CompletionStep />}
+        {renderStepIndicator()}
+        {currentStep === 0 && renderLlmSetupStep()}
+        {currentStep === 1 && renderAccountConnectionStep()}
+        {currentStep === 2 && renderCompletionStep()}
       </DialogContent>
     </Dialog>
     </>

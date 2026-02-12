@@ -39,11 +39,17 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
                 baseURL,
                 headers,
             });
-        case "ollama":
+        case "ollama": {
+            // ollama-ai-provider-v2 expects baseURL to include /api
+            let ollamaURL = baseURL;
+            if (ollamaURL && !ollamaURL.replace(/\/+$/, '').endsWith('/api')) {
+                ollamaURL = ollamaURL.replace(/\/+$/, '') + '/api';
+            }
             return createOllama({
-                baseURL,
+                baseURL: ollamaURL,
                 headers,
             });
+        }
         case "openai-compatible":
             return createOpenAICompatible({
                 name: "openai-compatible",
@@ -65,10 +71,12 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
 export async function testModelConnection(
     providerConfig: z.infer<typeof Provider>,
     model: string,
-    timeoutMs: number = 8000,
+    timeoutMs?: number,
 ): Promise<{ success: boolean; error?: string }> {
+    const isLocal = providerConfig.flavor === "ollama" || providerConfig.flavor === "openai-compatible";
+    const effectiveTimeout = timeoutMs ?? (isLocal ? 60000 : 8000);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), effectiveTimeout);
     try {
         const provider = createProvider(providerConfig);
         const languageModel = provider.languageModel(model);
