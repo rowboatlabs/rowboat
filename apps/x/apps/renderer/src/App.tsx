@@ -494,7 +494,8 @@ function FixedSidebarToggle({
       <button
         type="button"
         onClick={toggleSidebar}
-        className="ml-3 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
         aria-label="Toggle Sidebar"
       >
         <PanelLeftIcon className="size-5" />
@@ -502,7 +503,8 @@ function FixedSidebarToggle({
       <button
         type="button"
         onClick={onNewChat}
-        className="ml-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
         aria-label="New chat"
       >
         <SquarePen className="size-5" />
@@ -514,7 +516,8 @@ function FixedSidebarToggle({
             type="button"
             onClick={onNavigateBack}
             disabled={!canNavigateBack}
-            className="ml-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+            style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
             aria-label="Go back"
           >
             <ChevronLeftIcon className="size-5" />
