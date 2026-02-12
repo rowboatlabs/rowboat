@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Square, X, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Square, X, ChevronLeftIcon, ChevronRightIcon, SquarePen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
@@ -126,6 +126,12 @@ const graphPalette = [
 ]
 
 const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 12 + 12 * 3 + 8 * 2
+const TITLEBAR_BUTTON_PX = 32
+const TITLEBAR_BUTTON_GAP_PX = 4
+const TITLEBAR_HEADER_GAP_PX = 8
+const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
+const TITLEBAR_BUTTONS_COLLAPSED = 4
+const TITLEBAR_BUTTON_GAPS_COLLAPSED = 3
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -469,15 +475,18 @@ function FixedSidebarToggle({
   onNavigateForward,
   canNavigateBack,
   canNavigateForward,
+  onNewChat,
   leftInsetPx,
 }: {
   onNavigateBack: () => void
   onNavigateForward: () => void
   canNavigateBack: boolean
   canNavigateForward: boolean
+  onNewChat: () => void
   leftInsetPx: number
 }) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, state } = useSidebar()
+  const isCollapsed = state === "collapsed"
   return (
     <div className="fixed left-0 top-0 z-50 flex h-10 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
@@ -485,36 +494,62 @@ function FixedSidebarToggle({
       <button
         type="button"
         onClick={toggleSidebar}
-        className="ml-3 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        className="ml-3 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         aria-label="Toggle Sidebar"
       >
-        <PanelLeftIcon className="size-4" />
+        <PanelLeftIcon className="size-5" />
+      </button>
+      <button
+        type="button"
+        onClick={onNewChat}
+        className="ml-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        aria-label="New chat"
+      >
+        <SquarePen className="size-5" />
       </button>
       {/* Back / Forward navigation */}
-      <button
-        type="button"
-        onClick={onNavigateBack}
-        disabled={!canNavigateBack}
-        className="ml-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
-        aria-label="Go back"
-      >
-        <ChevronLeftIcon className="size-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onNavigateForward}
-        disabled={!canNavigateForward}
-        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
-        aria-label="Go forward"
-      >
-        <ChevronRightIcon className="size-4" />
-      </button>
+      {isCollapsed && (
+        <>
+          <button
+            type="button"
+            onClick={onNavigateBack}
+            disabled={!canNavigateBack}
+            className="ml-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+            aria-label="Go back"
+          >
+            <ChevronLeftIcon className="size-5" />
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateForward}
+            disabled={!canNavigateForward}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+            aria-label="Go forward"
+          >
+            <ChevronRightIcon className="size-5" />
+          </button>
+        </>
+      )}
     </div>
   )
 }
 
 /** Main content header that adjusts padding based on sidebar state */
-function ContentHeader({ children }: { children: React.ReactNode }) {
+function ContentHeader({
+  children,
+  onNavigateBack,
+  onNavigateForward,
+  canNavigateBack,
+  canNavigateForward,
+  collapsedLeftPaddingPx,
+}: {
+  children: React.ReactNode
+  onNavigateBack?: () => void
+  onNavigateForward?: () => void
+  canNavigateBack?: boolean
+  canNavigateForward?: boolean
+  collapsedLeftPaddingPx?: number
+}) {
   const { state } = useSidebar()
   const isCollapsed = state === "collapsed"
   return (
@@ -523,9 +558,35 @@ function ContentHeader({ children }: { children: React.ReactNode }) {
         "titlebar-drag-region flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 bg-sidebar transition-[padding] duration-200 ease-linear",
         // When the sidebar is collapsed the content area shifts left, so we need enough left padding
         // to avoid overlapping the fixed traffic-lights/toggle/back/forward controls.
-        isCollapsed && "pl-[168px]"
+        isCollapsed && !collapsedLeftPaddingPx && "pl-[168px]"
       )}
+      style={isCollapsed && collapsedLeftPaddingPx ? { paddingLeft: collapsedLeftPaddingPx } : undefined}
     >
+      {!isCollapsed && onNavigateBack && onNavigateForward ? (
+        <div className="titlebar-no-drag flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onNavigateBack}
+            disabled={!canNavigateBack}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+            aria-label="Go back"
+          >
+            <ChevronLeftIcon className="size-5" />
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateForward}
+            disabled={!canNavigateForward}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+            aria-label="Go forward"
+          >
+            <ChevronRightIcon className="size-5" />
+          </button>
+        </div>
+      ) : null}
+      {onNavigateBack && onNavigateForward ? (
+        <div className="titlebar-no-drag self-stretch w-px bg-border/70" aria-hidden="true" />
+      ) : null}
       {children}
     </header>
   )
@@ -549,6 +610,13 @@ function App() {
   const [graphStatus, setGraphStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [graphError, setGraphError] = useState<string | null>(null)
   const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(true)
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
+  const collapsedLeftPaddingPx =
+    (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) +
+    TITLEBAR_TOGGLE_MARGIN_LEFT_PX +
+    TITLEBAR_BUTTON_PX * TITLEBAR_BUTTONS_COLLAPSED +
+    TITLEBAR_BUTTON_GAP_PX * TITLEBAR_BUTTON_GAPS_COLLAPSED +
+    TITLEBAR_HEADER_GAP_PX
 
   // Keep the latest selected path in a ref (avoids stale async updates when switching rapidly)
   const selectedPathRef = useRef<string | null>(null)
@@ -602,7 +670,6 @@ function App() {
 
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false)
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
 
   // Background tasks state
   type BackgroundTaskItem = {
@@ -2216,7 +2283,13 @@ function App() {
             />
             <SidebarInset className="overflow-hidden! min-h-0">
               {/* Header - also serves as titlebar drag region, adjusts padding when sidebar collapsed */}
-              <ContentHeader>
+              <ContentHeader
+                onNavigateBack={() => { void navigateBack() }}
+                onNavigateForward={() => { void navigateForward() }}
+                canNavigateBack={canNavigateBack}
+                canNavigateForward={canNavigateForward}
+                collapsedLeftPaddingPx={collapsedLeftPaddingPx}
+              >
                 <span className="text-sm font-medium text-muted-foreground flex-1 min-w-0 truncate">
                   {headerTitle}
                 </span>
@@ -2249,20 +2322,20 @@ function App() {
                   <button
                     type="button"
                     onClick={handleCloseFullScreenChat}
-                    className="titlebar-no-drag flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                    className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                     aria-label="Return to file"
                   >
-                    <X className="size-4" />
+                    <X className="size-5" />
                   </button>
                 )}
                 {(selectedPath || isGraphOpen) && (
                   <button
                     type="button"
                     onClick={() => setIsChatSidebarOpen(!isChatSidebarOpen)}
-                    className="titlebar-no-drag flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1"
+                    className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1"
                     aria-label="Toggle Chat Sidebar"
                   >
-                    <PanelRightIcon className="size-4" />
+                    <PanelRightIcon className="size-5" />
                   </button>
                 )}
               </ContentHeader>
@@ -2447,6 +2520,7 @@ function App() {
               onNavigateForward={() => { void navigateForward() }}
               canNavigateBack={canNavigateBack}
               canNavigateForward={canNavigateForward}
+              onNewChat={handleNewChat}
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
           </SidebarProvider>

@@ -159,6 +159,25 @@ function formatEventTime(ts: string): string {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
 }
 
+function formatRunTime(ts: string): string {
+  const date = new Date(ts)
+  if (Number.isNaN(date.getTime())) return ""
+  const now = Date.now()
+  const diffMs = Math.max(0, now - date.getTime())
+  const diffMinutes = Math.floor(diffMs / (1000 * 60))
+  const diffHours = Math.floor(diffMinutes / 60)
+  const diffDays = Math.floor(diffHours / 24)
+  const diffWeeks = Math.floor(diffDays / 7)
+  const diffMonths = Math.floor(diffDays / 30)
+
+  if (diffMinutes < 1) return "just now"
+  if (diffMinutes < 60) return `${diffMinutes} m`
+  if (diffHours < 24) return `${diffHours} h`
+  if (diffDays < 7) return `${diffDays} d`
+  if (diffWeeks < 4) return `${diffWeeks} w`
+  return `${Math.max(1, diffMonths)} m`
+}
+
 function SyncStatusBar() {
   const { state, isMobile } = useSidebar()
   const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
@@ -1045,11 +1064,16 @@ function TasksSection({
                     isActive={currentRunId === run.id}
                     onClick={() => actions?.onSelectRun(run.id)}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full items-center gap-2 min-w-0">
                       {processingRunIds?.has(run.id) ? (
                         <span className="size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
                       ) : null}
-                      <span className="truncate text-sm">{run.title || '(Untitled chat)'}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
+                      {run.createdAt ? (
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {formatRunTime(run.createdAt)}
+                        </span>
+                      ) : null}
                     </div>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
