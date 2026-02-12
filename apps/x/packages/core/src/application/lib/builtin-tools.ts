@@ -33,6 +33,7 @@ const BuiltinToolsSchema = z.record(z.string(), z.object({
         input: z.any(), // (input, ctx?) => Promise<any>
         output: z.promise(z.any()),
     }),
+    isAvailable: z.custom<() => Promise<boolean>>().optional(),
 }));
 
 type SlackToolHint = {
@@ -1277,6 +1278,17 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             count: z.number().optional().describe('Number of results to return (default: 5, max: 20)'),
             freshness: z.string().optional().describe('Filter by freshness: pd (past day), pw (past week), pm (past month), py (past year)'),
         }),
+        isAvailable: async () => {
+            try {
+                const homedir = process.env.HOME || process.env.USERPROFILE || '';
+                const braveConfigPath = path.join(homedir, '.rowboat', 'config', 'brave-search.json');
+                const raw = await fs.readFile(braveConfigPath, 'utf8');
+                const config = JSON.parse(raw);
+                return !!config.apiKey;
+            } catch {
+                return false;
+            }
+        },
         execute: async ({ query, count, freshness }: { query: string; count?: number; freshness?: string }) => {
             try {
                 // Read API key from config

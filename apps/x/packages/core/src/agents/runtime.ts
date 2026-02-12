@@ -401,6 +401,13 @@ async function buildTools(agent: z.infer<typeof Agent>): Promise<ToolSet> {
     const tools: ToolSet = {};
     for (const [name, tool] of Object.entries(agent.tools ?? {})) {
         try {
+            // Skip builtin tools that declare themselves unavailable
+            if (tool.type === 'builtin') {
+                const builtin = BuiltinTools[tool.name];
+                if (builtin?.isAvailable && !(await builtin.isAvailable())) {
+                    continue;
+                }
+            }
             tools[name] = await mapAgentTool(tool);
         } catch (error) {
             console.error(`Error mapping tool ${name}:`, error);
