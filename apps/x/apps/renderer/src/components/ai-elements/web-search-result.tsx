@@ -30,7 +30,7 @@ export function WebSearchResult({ query, results, status }: WebSearchResultProps
   const isRunning = status === "pending" || status === "running";
 
   return (
-    <Collapsible className="not-prose mb-4 w-full rounded-md border">
+    <Collapsible defaultOpen className="not-prose mb-4 w-full rounded-md border">
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
         <div className="flex items-center gap-2">
           <GlobeIcon className="size-4 text-muted-foreground" />
