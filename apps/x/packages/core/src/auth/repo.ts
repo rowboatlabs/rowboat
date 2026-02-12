@@ -79,10 +79,9 @@ export class FSOAuthRepo implements IOAuthRepo {
     if (!tokens) {
       return false;
     }
-    
-    // Check if token is expired
-    const now = Math.floor(Date.now() / 1000);
-    return tokens.expires_at > now;
+
+    // Connected as long as we have a refresh token (access tokens can be refreshed on demand)
+    return tokens.refresh_token != null;
   }
 
   async getConnectedProviders(): Promise<string[]> {

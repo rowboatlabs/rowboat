@@ -213,11 +213,12 @@ export async function refreshTokens(
 }
 
 /**
- * Check if tokens are expired
+ * Check if tokens are expired (or will expire within the buffer period)
  */
+const EXPIRY_BUFFER_SECONDS = 5 * 60; // Refresh 5 minutes before expiry
 export function isTokenExpired(tokens: OAuthTokens): boolean {
   const now = Math.floor(Date.now() / 1000);
-  return tokens.expires_at <= now;
+  return tokens.expires_at <= now + EXPIRY_BUFFER_SECONDS;
 }
 
 /**
