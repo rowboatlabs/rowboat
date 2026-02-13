@@ -98,6 +98,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   )
 
   const activeConfig = providerConfigs[llmProvider]
+  const showApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "openrouter" || llmProvider === "aigateway" || llmProvider === "openai-compatible"
   const requiresApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "openrouter" || llmProvider === "aigateway"
   const requiresBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible"
   const showBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible" || llmProvider === "aigateway"
@@ -690,9 +691,11 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
             )}
           </div>
 
-          {requiresApiKey && (
+          {showApiKey && (
             <div className="space-y-2">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">API Key</span>
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                {llmProvider === "openai-compatible" ? "API Key (optional)" : "API Key"}
+              </span>
               <Input
                 type="password"
                 value={activeConfig.apiKey}
