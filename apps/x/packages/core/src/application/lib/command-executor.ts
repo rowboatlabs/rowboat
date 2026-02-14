@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import { getSecurityAllowList } from '../../config/security.js';
 
 const execPromise = promisify(exec);
-const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n)/;
+const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n|`|\$\(|\))/;
 const ENV_ASSIGNMENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
 const WRAPPER_COMMANDS = new Set(['sudo', 'env', 'time', 'command']);
 

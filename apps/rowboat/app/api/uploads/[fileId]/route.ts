@@ -17,7 +17,7 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ fileI
         return NextResponse.json({ error: 'Missing file ID' }, { status: 400 });
     }
 
-    const filePath = path.join(UPLOADS_DIR, fileId);
+    const filePath = path.join(UPLOADS_DIR, path.basename(fileId));
 
     try {
         const data = await request.arrayBuffer();
@@ -55,7 +55,11 @@ export async function GET(request: NextRequest, props: { params: Promise<{ fileI
 
     try {
         // strip uploads dir from path
-        const filePath = path.join(UPLOADS_DIR, doc.data.path.split('/api/uploads/')[1]);
+        const filePart = doc.data.path.split('/api/uploads/')[1];
+        if (!filePart) {
+            throw new Error('Invalid file path in database');
+        }
+        const filePath = path.join(UPLOADS_DIR, path.basename(filePart));
 
         // Check if file exists
         await fs.access(filePath);
