@@ -3,6 +3,7 @@ import type { IModelConfigRepo } from "../models/repo.js";
 import type { IMcpConfigRepo } from "../mcp/repo.js";
 import type { IAgentScheduleRepo } from "../agent-schedule/repo.js";
 import type { IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
+import type { IConfigRepo } from "./repo.js";
 import { ensureSecurityConfig } from "./security.js";
 
 /**
@@ -15,12 +16,14 @@ export async function initConfigs(): Promise<void> {
     const mcpConfigRepo = container.resolve<IMcpConfigRepo>("mcpConfigRepo");
     const agentScheduleRepo = container.resolve<IAgentScheduleRepo>("agentScheduleRepo");
     const agentScheduleStateRepo = container.resolve<IAgentScheduleStateRepo>("agentScheduleStateRepo");
+    const configRepo = container.resolve<IConfigRepo>("configRepo");
 
     await Promise.all([
         modelConfigRepo.ensureConfig(),
         mcpConfigRepo.ensureConfig(),
         agentScheduleRepo.ensureConfig(),
         agentScheduleStateRepo.ensureState(),
+        configRepo.ensureConfig(),
         ensureSecurityConfig(),
     ]);
 }
