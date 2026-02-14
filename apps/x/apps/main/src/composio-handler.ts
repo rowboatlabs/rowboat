@@ -1,6 +1,7 @@
 import { shell, BrowserWindow } from 'electron';
 import { createAuthServer } from './auth-server.js';
-import * as composioClient from '@x/core/dist/composio/client.js';
+import container from '@x/core/dist/di/container.js';
+import type { IComposioService } from '@x/core/dist/execution/composio-service.js';
 import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
 import type { LocalConnectedAccount } from '@x/core/dist/composio/types.js';
 
@@ -25,11 +26,15 @@ export function emitComposioEvent(event: { toolkitSlug: string; success: boolean
     }
 }
 
+function getComposioService(): IComposioService {
+    return container.resolve<IComposioService>('composioService');
+}
+
 /**
  * Check if Composio is configured with an API key
  */
 export function isConfigured(): { configured: boolean } {
-    return { configured: composioClient.isConfigured() };
+    return { configured: getComposioService().isConfigured() };
 }
 
 /**
@@ -37,7 +42,7 @@ export function isConfigured(): { configured: boolean } {
  */
 export function setApiKey(apiKey: string): { success: boolean; error?: string } {
     try {
-        composioClient.setApiKey(apiKey);
+        getComposioService().setApiKey(apiKey);
         return { success: true };
     } catch (error) {
         return {
@@ -65,7 +70,8 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         }
 
         // Get toolkit to check auth schemes
-        const toolkit = await composioClient.getToolkit(toolkitSlug);
+        const composioService = getComposioService();
+        const toolkit = await composioService.getToolkit(toolkitSlug);
 
         // Check for managed OAuth2
         if (!toolkit.composio_managed_auth_schemes.includes('OAUTH2')) {
@@ -76,7 +82,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         }
 
         // Find or create managed OAuth2 auth config
-        const authConfigs = await composioClient.listAuthConfigs(toolkitSlug, null, true);
+        const authConfigs = await composioService.listAuthConfigs(toolkitSlug, null, true);
         let authConfigId: string;
 
         const managedOauth2 = authConfigs.items.find(
@@ -87,7 +93,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
             authConfigId = managedOauth2.id;
         } else {
             // Create new managed auth config
-            const created = await composioClient.createAuthConfig({
+            const created = await composioService.createAuthConfig({
                 toolkit: { slug: toolkitSlug },
                 auth_config: {
                     type: 'use_composio_managed_auth',
@@ -99,7 +105,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
 
         // Create connected account with callback URL
         const callbackUrl = REDIRECT_URI;
-        const response = await composioClient.createConnectedAccount({
+        const response = await composioService.createConnectedAccount({
             auth_config: { id: authConfigId },
             connection: {
                 user_id: 'rowboat-user',
@@ -146,7 +152,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         const { server } = await createAuthServer(8081, async (_code, _state) => {
             // OAuth callback received - sync the account status
             try {
-                const accountStatus = await composioClient.getConnectedAccount(connectedAccountId);
+                const accountStatus = await getComposioService().getConnectedAccount(connectedAccountId);
                 composioAccountsRepo.updateAccountStatus(toolkitSlug, accountStatus.status);
 
                 if (accountStatus.status === 'ACTIVE') {
@@ -228,7 +234,7 @@ export async function syncConnection(
     connectedAccountId: string
 ): Promise<{ status: string }> {
     try {
-        const accountStatus = await composioClient.getConnectedAccount(connectedAccountId);
+        const accountStatus = await getComposioService().getConnectedAccount(connectedAccountId);
         composioAccountsRepo.updateAccountStatus(toolkitSlug, accountStatus.status);
         return { status: accountStatus.status };
     } catch (error) {
@@ -245,7 +251,7 @@ export async function disconnect(toolkitSlug: string): Promise<{ success: boolea
         const account = composioAccountsRepo.getAccount(toolkitSlug);
         if (account) {
             // Delete from Composio
-            await composioClient.deleteConnectedAccount(account.id);
+            await getComposioService().deleteConnectedAccount(account.id);
             // Delete local record
             composioAccountsRepo.deleteAccount(toolkitSlug);
         }
@@ -283,7 +289,7 @@ export async function executeAction(
             };
         }
 
-        const result = await composioClient.executeAction(actionSlug, account.id, input);
+        const result = await getComposioService().executeAction(actionSlug, account.id, input);
         return result;
     } catch (error) {
         console.error('[Composio] Action execution failed:', error);
