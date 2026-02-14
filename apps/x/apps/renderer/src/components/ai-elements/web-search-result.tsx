@@ -16,6 +16,7 @@ interface WebSearchResultProps {
   query: string;
   results: Array<{ title: string; url: string; description: string }>;
   status: "pending" | "running" | "completed" | "error";
+  title?: string;
 }
 
 function getDomain(url: string): string {
@@ -26,7 +27,7 @@ function getDomain(url: string): string {
   }
 }
 
-export function WebSearchResult({ query, results, status }: WebSearchResultProps) {
+export function WebSearchResult({ query, results, status, title = "Searched the web" }: WebSearchResultProps) {
   const isRunning = status === "pending" || status === "running";
 
   return (
@@ -34,7 +35,7 @@ export function WebSearchResult({ query, results, status }: WebSearchResultProps
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
         <div className="flex items-center gap-2">
           <GlobeIcon className="size-4 text-muted-foreground" />
-          <span className="font-medium text-sm">Searched the web</span>
+          <span className="font-medium text-sm">{title}</span>
         </div>
         <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
       </CollapsibleTrigger>

@@ -2216,6 +2216,27 @@ function App() {
           />
         )
       }
+      if (item.name === 'research-search') {
+        const input = normalizeToolInput(item.input) as Record<string, unknown> | undefined
+        const result = item.result as Record<string, unknown> | undefined
+        const rawResults = (result?.results as Array<{ title: string; url: string; highlights?: string[]; text?: string }>) || []
+        const mapped = rawResults.map(r => ({
+          title: r.title,
+          url: r.url,
+          description: r.highlights?.[0] || (r.text ? r.text.slice(0, 200) : ''),
+        }))
+        const category = input?.category as string | undefined
+        const cardTitle = category ? `${category.charAt(0).toUpperCase() + category.slice(1)} search` : 'Researched the web'
+        return (
+          <WebSearchResult
+            key={item.id}
+            query={(input?.query as string) || ''}
+            results={mapped}
+            status={item.status}
+            title={cardTitle}
+          />
+        )
+      }
       const errorText = item.status === 'error' ? 'Tool error' : ''
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)

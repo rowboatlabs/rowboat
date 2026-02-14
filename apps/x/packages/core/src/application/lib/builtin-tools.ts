@@ -1364,4 +1364,117 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             }
         },
     },
+
+    // ============================================================================
+    // Research Search (Exa Search API)
+    // ============================================================================
+
+    'research-search': {
+        description: 'Use this for finding articles, blog posts, papers, companies, people, or exploring a topic in depth. Best for discovery and research where you need quality sources, not a quick fact.',
+        inputSchema: z.object({
+            query: z.string().describe('The search query'),
+            numResults: z.number().optional().describe('Number of results to return (default: 5, max: 20)'),
+            category: z.enum(['company', 'research paper', 'news', 'tweet', 'personal site', 'financial report', 'people']).optional().describe('Filter results by category'),
+        }),
+        isAvailable: async () => {
+            try {
+                const homedir = process.env.HOME || process.env.USERPROFILE || '';
+                const exaConfigPath = path.join(homedir, '.rowboat', 'config', 'exa-search.json');
+                const raw = await fs.readFile(exaConfigPath, 'utf8');
+                const config = JSON.parse(raw);
+                return !!config.apiKey;
+            } catch {
+                return false;
+            }
+        },
+        execute: async ({ query, numResults, category }: { query: string; numResults?: number; category?: string }) => {
+            try {
+                const homedir = process.env.HOME || process.env.USERPROFILE || '';
+                const exaConfigPath = path.join(homedir, '.rowboat', 'config', 'exa-search.json');
+
+                let apiKey: string;
+                try {
+                    const raw = await fs.readFile(exaConfigPath, 'utf8');
+                    const config = JSON.parse(raw);
+                    apiKey = config.apiKey;
+                } catch {
+                    return {
+                        success: false,
+                        error: 'Exa Search API key not configured. Create ~/.rowboat/config/exa-search.json with { "apiKey": "<your-key>" }',
+                    };
+                }
+
+                if (!apiKey) {
+                    return {
+                        success: false,
+                        error: 'Exa Search API key is empty. Set "apiKey" in ~/.rowboat/config/exa-search.json',
+                    };
+                }
+
+                const resultCount = Math.min(Math.max(numResults || 5, 1), 20);
+
+                const body: Record<string, unknown> = {
+                    query,
+                    numResults: resultCount,
+                    type: 'auto',
+                    contents: {
+                        text: { maxCharacters: 1000 },
+                        highlights: true,
+                    },
+                };
+                if (category) {
+                    body.category = category;
+                }
+
+                const response = await fetch('https://api.exa.ai/search', {
+                    method: 'POST',
+                    headers: {
+                        'x-api-key': apiKey,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(body),
+                });
+
+                if (!response.ok) {
+                    const text = await response.text();
+                    return {
+                        success: false,
+                        error: `Exa Search API error (${response.status}): ${text}`,
+                    };
+                }
+
+                const data = await response.json() as {
+                    results?: Array<{
+                        title?: string;
+                        url?: string;
+                        publishedDate?: string;
+                        author?: string;
+                        highlights?: string[];
+                        text?: string;
+                    }>;
+                };
+
+                const results = (data.results || []).map((r) => ({
+                    title: r.title || '',
+                    url: r.url || '',
+                    publishedDate: r.publishedDate || '',
+                    author: r.author || '',
+                    highlights: r.highlights || [],
+                    text: r.text || '',
+                }));
+
+                return {
+                    success: true,
+                    query,
+                    results,
+                    count: results.length,
+                };
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                };
+            }
+        },
+    },
 };
