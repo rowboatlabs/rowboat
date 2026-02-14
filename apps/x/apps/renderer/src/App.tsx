@@ -33,7 +33,7 @@ import {
   usePromptInputController,
   type FileMention,
 } from '@/components/ai-elements/prompt-input';
-import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
+
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
@@ -81,20 +81,12 @@ interface ToolCall {
   timestamp: number;
 }
 
-interface ReasoningBlock {
-  id: string;
-  content: string;
-  timestamp: number;
-}
-
-type ConversationItem = ChatMessage | ToolCall | ReasoningBlock;
+type ConversationItem = ChatMessage | ToolCall;
 
 type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
 
 const isChatMessage = (item: ConversationItem): item is ChatMessage => 'role' in item
 const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
-const isReasoningBlock = (item: ConversationItem): item is ReasoningBlock =>
-  'content' in item && !('role' in item) && !('name' in item)
 
 const toToolState = (status: ToolCall['status']): ToolState => {
   switch (status) {
@@ -643,7 +635,6 @@ function App() {
   const [message, setMessage] = useState<string>('')
   const [conversation, setConversation] = useState<ConversationItem[]>([])
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>('')
-  const [currentReasoning, setCurrentReasoning] = useState<string>('')
   const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const runIdRef = useRef<string | null>(null)
@@ -651,7 +642,7 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingRunIds, setProcessingRunIds] = useState<Set<string>>(new Set())
   const processingRunIdsRef = useRef<Set<string>>(new Set())
-  const streamingBuffersRef = useRef<Map<string, { assistant: string; reasoning: string }>>(new Map())
+  const streamingBuffersRef = useRef<Map<string, { assistant: string }>>(new Map())
   const [isStopping, setIsStopping] = useState(false)
   const [stopClickedAt, setStopClickedAt] = useState<number | null>(null)
   const [agentId] = useState<string>('copilot')
@@ -723,7 +714,6 @@ function App() {
     if (!runId) {
       setIsProcessing(false)
       setCurrentAssistantMessage('')
-      setCurrentReasoning('')
       return
     }
     const isRunProcessing = processingRunIdsRef.current.has(runId)
@@ -731,10 +721,8 @@ function App() {
     if (isRunProcessing) {
       const buffer = streamingBuffersRef.current.get(runId)
       setCurrentAssistantMessage(buffer?.assistant ?? '')
-      setCurrentReasoning(buffer?.reasoning ?? '')
     } else {
       setCurrentAssistantMessage('')
-      setCurrentReasoning('')
       streamingBuffersRef.current.delete(runId)
     }
   }, [runId])
@@ -1183,15 +1171,15 @@ function App() {
   const getStreamingBuffer = (id: string) => {
     const existing = streamingBuffersRef.current.get(id)
     if (existing) return existing
-    const next = { assistant: '', reasoning: '' }
+    const next = { assistant: '' }
     streamingBuffersRef.current.set(id, next)
     return next
   }
 
-  const appendStreamingBuffer = (id: string, field: 'assistant' | 'reasoning', delta: string) => {
+  const appendStreamingBuffer = (id: string, delta: string) => {
     if (!delta) return
     const buffer = getStreamingBuffer(id)
-    buffer[field] += delta
+    buffer.assistant += delta
   }
 
   const clearStreamingBuffer = (id: string) => {
@@ -1232,7 +1220,6 @@ function App() {
       case 'start':
         if (!isActiveRun) return
         setCurrentAssistantMessage('')
-        setCurrentReasoning('')
         setModelUsage(null)
         break
 
@@ -1240,29 +1227,13 @@ function App() {
         {
           const llmEvent = event.event
           if (!isActiveRun) {
-            if (llmEvent.type === 'reasoning-delta' && llmEvent.delta) {
-              appendStreamingBuffer(event.runId, 'reasoning', llmEvent.delta)
-            } else if (llmEvent.type === 'text-delta' && llmEvent.delta) {
-              appendStreamingBuffer(event.runId, 'assistant', llmEvent.delta)
+            if (llmEvent.type === 'text-delta' && llmEvent.delta) {
+              appendStreamingBuffer(event.runId, llmEvent.delta)
             }
             return
           }
-          if (llmEvent.type === 'reasoning-delta' && llmEvent.delta) {
-            appendStreamingBuffer(event.runId, 'reasoning', llmEvent.delta)
-            setCurrentReasoning(prev => prev + llmEvent.delta)
-          } else if (llmEvent.type === 'reasoning-end') {
-            setCurrentReasoning(reasoning => {
-              if (reasoning) {
-                setConversation(prev => [...prev, {
-                  id: `reasoning-${Date.now()}`,
-                  content: reasoning,
-                  timestamp: Date.now(),
-                }])
-              }
-              return ''
-            })
-          } else if (llmEvent.type === 'text-delta' && llmEvent.delta) {
-            appendStreamingBuffer(event.runId, 'assistant', llmEvent.delta)
+          if (llmEvent.type === 'text-delta' && llmEvent.delta) {
+            appendStreamingBuffer(event.runId, llmEvent.delta)
             setCurrentAssistantMessage(prev => prev + llmEvent.delta)
           } else if (llmEvent.type === 'tool-call') {
             setConversation(prev => [...prev, {
@@ -1455,7 +1426,6 @@ function App() {
           }
           return ''
         })
-        setCurrentReasoning('')
         break
 
       case 'error':
@@ -1603,7 +1573,6 @@ function App() {
     loadRunRequestIdRef.current += 1
     setConversation([])
     setCurrentAssistantMessage('')
-    setCurrentReasoning('')
     setRunId(null)
     setMessage('')
     setModelUsage(null)
@@ -2257,19 +2226,10 @@ function App() {
       )
     }
 
-    if (isReasoningBlock(item)) {
-      return (
-        <Reasoning key={item.id}>
-          <ReasoningTrigger />
-          <ReasoningContent>{item.content}</ReasoningContent>
-        </Reasoning>
-      )
-    }
-
     return null
   }
 
-  const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
+  const hasConversation = conversation.length > 0 || currentAssistantMessage
   const conversationContentClassName = hasConversation
     ? "mx-auto w-full max-w-4xl pb-28"
     : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
@@ -2470,13 +2430,6 @@ function App() {
                           />
                         ))}
 
-                        {currentReasoning && (
-                          <Reasoning isStreaming>
-                            <ReasoningTrigger />
-                            <ReasoningContent>{currentReasoning}</ReasoningContent>
-                          </Reasoning>
-                        )}
-
                         {currentAssistantMessage && (
                           <Message from="assistant">
                             <MessageContent>
@@ -2485,7 +2438,7 @@ function App() {
                           </Message>
                         )}
 
-                        {isProcessing && !currentAssistantMessage && !currentReasoning && (
+                        {isProcessing && !currentAssistantMessage && (
                           <Message from="assistant">
                             <MessageContent>
                               <Shimmer duration={1}>Thinking...</Shimmer>
@@ -2531,7 +2484,6 @@ function App() {
                 onOpenFullScreen={navigateToFullScreenChat}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
-                currentReasoning={currentReasoning}
                 isProcessing={isProcessing}
                 isStopping={isStopping}
                 onStop={handleStop}
