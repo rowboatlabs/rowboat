@@ -5,6 +5,29 @@ export const skill = String.raw`
 
 Activate when the user wants to create presentations, slide decks, or pitch decks.
 
+## Theme Selection (Do This First)
+
+Before creating any slides, check if the user has specified a visual theme or style. If they have NOT provided theme preferences, present 3 options for them to choose from:
+
+**Option A: Dark Professional** — Deep navy/charcoal backgrounds, indigo (#6366f1) and violet (#8b5cf6) accents, white text. Best for: tech, SaaS, keynotes.
+
+**Option B: Light Editorial** — White/warm cream backgrounds, amber (#f59e0b) and stone accents, dark text with serif headings. Best for: reports, proposals, thought leadership.
+
+**Option C: Bold Vibrant** — Mixed dark and light slides, emerald (#10b981) and rose (#f43e5c) accents, high contrast. Best for: pitch decks, marketing, creative.
+
+Wait for the user to pick before proceeding. If the user describes a custom theme (colors, mood, brand), use that instead.
+
+## Visual Consistency Rules
+
+**Every presentation must have a unified color theme applied across ALL slides.** Do not mix unrelated color palettes between slides.
+
+1. **Define a theme palette upfront** — Pick one primary color, one accent color, and one neutral base (dark or light). Use these consistently across every slide.
+2. **Backgrounds** — Use at most 2-3 background variations (e.g. dark base, light base, and primary color). Alternate them for rhythm but keep them from the same palette.
+3. **Accent color** — Use the same accent color for all highlights: overlines, bullets, icons, chart fills, timeline dots, CTA buttons, divider lines.
+4. **Typography colors** — Headings, body text, and muted text should use the same tones on every slide. Don't switch between warm and cool grays mid-deck.
+5. **Charts and data** — Use shades/tints of the primary and accent colors for chart fills. Never introduce one-off colors that don't appear elsewhere in the deck.
+6. **Consistent fonts** — Pick one heading font and one body font. Use them on every slide. Don't mix different heading fonts across slides.
+
 ## Workflow
 
 1. Use workspace-readFile to check knowledge/ for relevant context about the company, product, team, etc.
@@ -36,11 +59,22 @@ const path = require('path');
 
 Replace <WORKSPACE_ROOT> with the actual absolute path returned by workspace-getRoot.
 
-6. Run it: 'node <WORKSPACE_ROOT>/tmp/convert.js'
-7. Tell the user: "Your presentation is ready at ~/Desktop/presentation.pdf"
+6. Perform the Post-Generation Validation (see below). Fix any issues before proceeding.
+7. Run it: 'node <WORKSPACE_ROOT>/tmp/convert.js'
+8. Tell the user: "Your presentation is ready at ~/Desktop/presentation.pdf"
 
 Do NOT show HTML code to the user. Do NOT explain how to export. Just create the PDF and deliver it.
 Use workspace-writeFile and workspace-readFile for ALL file operations. Do NOT use executeCommand to write or read files.
+
+## Post-Generation Validation (REQUIRED)
+
+After generating the slide HTML, perform these checks before converting to PDF:
+
+1. **Title overflow check**: For every slide, verify that the title text at its set font-size fits within the slide width (960px) minus padding. If title chars x ~0.6 x font-size > available-width, reduce font-size.
+2. **Content bounds check**: Verify no element extends beyond the 960x540 slide boundary. Look for: long titles, bullet lists with 5+ items, wide tables, long labels on charts.
+3. **Broken visuals check**: Confirm no <img> tags reference external URLs. All visuals must be CSS, SVG, or emoji only.
+4. **Font loading check**: Verify the Google Fonts <link> tag includes ALL font families used in the CSS. Missing fonts cause fallback rendering.
+5. **Fix before proceeding**: If any check fails, fix the HTML before PDF conversion. Do not proceed with known issues.
 
 ## PDF Export Rules
 
@@ -832,6 +866,462 @@ Below are 20 production-ready slide layout templates. Use these as reference whe
     border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
   }
 
+  /* ========== SLIDE 21: Big Stat Number ========== */
+  .slide-bigstat {
+    background: #fff;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+  }
+  .slide-bigstat::before {
+    content: ''; position: absolute;
+    width: 600px; height: 600px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(16,185,129,0.08), transparent 70%);
+    top: -200px; right: -100px;
+  }
+  .slide-bigstat .content { text-align: center; position: relative; z-index: 1; }
+  .slide-bigstat .stat-label {
+    font-family: 'Space Mono', monospace; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 3px; color: #10b981; margin-bottom: 12px;
+  }
+  .slide-bigstat .stat-number {
+    font-family: 'Outfit', sans-serif; font-size: 120px; font-weight: 800;
+    color: #064e3b; line-height: 1; margin-bottom: 8px;
+  }
+  .slide-bigstat .stat-unit {
+    font-family: 'Outfit', sans-serif; font-size: 28px; font-weight: 300;
+    color: #10b981; margin-bottom: 20px;
+  }
+  .slide-bigstat .stat-desc {
+    font-size: 16px; color: #6b7280; max-width: 460px; margin: 0 auto; line-height: 1.6;
+  }
+
+  /* ========== SLIDE 22: Stacked Bar Chart ========== */
+  .slide-stacked {
+    background: #1e1b4b; padding: 50px 60px;
+    display: flex; flex-direction: column;
+  }
+  .slide-stacked h2 {
+    font-family: 'Outfit'; font-size: 26px; font-weight: 700;
+    color: #fff; margin-bottom: 6px;
+  }
+  .slide-stacked .sub { font-size: 13px; color: #a5b4fc; margin-bottom: 24px; }
+  .slide-stacked .legend-row {
+    display: flex; gap: 20px; margin-bottom: 20px;
+  }
+  .slide-stacked .legend-row .leg {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; color: #c7d2fe;
+  }
+  .slide-stacked .legend-row .leg .dot {
+    width: 10px; height: 10px; border-radius: 3px;
+  }
+  .slide-stacked .bars { display: flex; flex-direction: column; gap: 14px; flex: 1; justify-content: center; }
+  .slide-stacked .bar-row {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .slide-stacked .bar-row .label {
+    width: 80px; font-size: 13px; color: #c7d2fe; text-align: right; flex-shrink: 0;
+  }
+  .slide-stacked .bar-row .bar-track {
+    flex: 1; height: 32px; border-radius: 6px; display: flex; overflow: hidden;
+  }
+  .slide-stacked .bar-row .seg { height: 100%; }
+
+  /* ========== SLIDE 23: Horizontal Bar Chart ========== */
+  .slide-hbar {
+    background: #fefce8; padding: 50px 60px;
+    display: flex; flex-direction: column;
+  }
+  .slide-hbar h2 {
+    font-family: 'Outfit'; font-size: 26px; font-weight: 700;
+    color: #1a1a1a; margin-bottom: 6px;
+  }
+  .slide-hbar .sub { font-size: 13px; color: #92400e; margin-bottom: 28px; }
+  .slide-hbar .rows { display: flex; flex-direction: column; gap: 16px; flex: 1; justify-content: center; }
+  .slide-hbar .hbar-row { display: flex; align-items: center; gap: 12px; }
+  .slide-hbar .hbar-row .label {
+    width: 140px; font-size: 14px; font-weight: 500; color: #78350f; text-align: right; flex-shrink: 0;
+  }
+  .slide-hbar .hbar-row .bar-fill {
+    height: 28px; border-radius: 6px;
+    background: linear-gradient(90deg, #f59e0b, #fbbf24);
+    display: flex; align-items: center; justify-content: flex-end; padding-right: 10px;
+    font-size: 12px; font-weight: 700; color: #78350f; min-width: 40px;
+  }
+
+  /* ========== SLIDE 24: Data Table ========== */
+  .slide-table {
+    background: #fff; padding: 50px 60px;
+    display: flex; flex-direction: column;
+  }
+  .slide-table h2 {
+    font-family: 'Outfit'; font-size: 26px; font-weight: 700;
+    color: #1e293b; margin-bottom: 6px;
+  }
+  .slide-table .sub { font-size: 13px; color: #94a3b8; margin-bottom: 24px; }
+  .slide-table table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  .slide-table thead th {
+    font-family: 'Outfit'; font-weight: 600; color: #fff; background: #1e1b4b;
+    padding: 12px 16px; text-align: left; font-size: 12px;
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  .slide-table thead th:first-child { border-radius: 8px 0 0 0; }
+  .slide-table thead th:last-child { border-radius: 0 8px 0 0; }
+  .slide-table tbody td {
+    padding: 11px 16px; color: #334155; border-bottom: 1px solid #f1f5f9;
+  }
+  .slide-table tbody tr:hover { background: #f8fafc; }
+  .slide-table .badge-sm {
+    display: inline-block; padding: 2px 10px; border-radius: 10px;
+    font-size: 11px; font-weight: 600;
+  }
+  .slide-table .badge-green { background: #dcfce7; color: #166534; }
+  .slide-table .badge-blue { background: #dbeafe; color: #1e40af; }
+  .slide-table .badge-amber { background: #fef3c7; color: #92400e; }
+
+  /* ========== SLIDE 25: Combo Chart ========== */
+  .slide-combo {
+    background: #0f172a; padding: 50px 60px;
+    display: flex; flex-direction: column;
+  }
+  .slide-combo h2 {
+    font-family: 'Outfit'; font-size: 26px; font-weight: 700;
+    color: #fff; margin-bottom: 6px;
+  }
+  .slide-combo .sub { font-size: 13px; color: #64748b; margin-bottom: 24px; }
+  .slide-combo .combo-legend {
+    display: flex; gap: 24px; margin-bottom: 16px;
+  }
+  .slide-combo .combo-legend .leg {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; color: #94a3b8;
+  }
+  .slide-combo .combo-legend .leg .swatch {
+    width: 20px; height: 10px; border-radius: 3px;
+  }
+  .slide-combo .combo-legend .leg .swatch-line {
+    width: 20px; height: 3px; border-radius: 2px;
+  }
+
+  /* ========== SLIDE 26: Pyramid Diagram ========== */
+  .slide-pyramid {
+    background: linear-gradient(160deg, #4a044e, #701a75);
+    padding: 50px 60px; display: flex; align-items: center;
+  }
+  .slide-pyramid .info { width: 35%; }
+  .slide-pyramid h2 {
+    font-family: 'Outfit'; font-size: 28px; font-weight: 700;
+    color: #fff; margin-bottom: 12px;
+  }
+  .slide-pyramid .desc { font-size: 14px; color: #f0abfc; line-height: 1.6; }
+  .slide-pyramid .pyramid-chart {
+    width: 65%; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .slide-pyramid .pyr-level {
+    display: flex; align-items: center; justify-content: center;
+    height: 56px; border-radius: 8px; color: #fff; text-align: center;
+    font-size: 14px; font-weight: 500; flex-direction: column;
+  }
+  .slide-pyramid .pyr-label {
+    font-family: 'Outfit'; font-weight: 700; font-size: 15px;
+  }
+  .slide-pyramid .pyr-sub { font-size: 11px; opacity: 0.8; }
+
+  /* ========== SLIDE 27: Cycle Diagram ========== */
+  .slide-cycle {
+    background: #f0fdf4; padding: 50px 60px;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .slide-cycle h2 {
+    font-family: 'Outfit'; font-size: 28px; font-weight: 700;
+    color: #14532d; margin-bottom: 36px;
+  }
+  .slide-cycle .cycle-ring {
+    width: 380px; height: 380px; position: relative;
+  }
+  .slide-cycle .cycle-node {
+    position: absolute; width: 120px; text-align: center;
+  }
+  .slide-cycle .cycle-node .node-icon {
+    width: 52px; height: 52px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; margin: 0 auto 8px;
+    border: 2px solid #bbf7d0; background: #fff;
+  }
+  .slide-cycle .cycle-node h4 {
+    font-family: 'Outfit'; font-size: 13px; font-weight: 600; color: #14532d;
+    margin-bottom: 3px;
+  }
+  .slide-cycle .cycle-node p { font-size: 10px; color: #6b7280; line-height: 1.4; }
+  .slide-cycle .cycle-center {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    text-align: center;
+  }
+  .slide-cycle .cycle-center .emoji { font-size: 32px; margin-bottom: 4px; }
+  .slide-cycle .cycle-center .label {
+    font-family: 'Outfit'; font-size: 14px; font-weight: 700; color: #166534;
+  }
+  .slide-cycle .cycle-arrow {
+    position: absolute; font-size: 18px; color: #86efac;
+  }
+
+  /* ========== SLIDE 28: Venn Diagram ========== */
+  .slide-venn {
+    background: #1e293b; padding: 50px 60px;
+    display: flex; align-items: center;
+  }
+  .slide-venn .info { width: 35%; }
+  .slide-venn h2 {
+    font-family: 'Outfit'; font-size: 28px; font-weight: 700;
+    color: #fff; margin-bottom: 12px;
+  }
+  .slide-venn .desc { font-size: 14px; color: #94a3b8; line-height: 1.6; }
+  .slide-venn .venn-area {
+    width: 65%; height: 360px; position: relative;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .slide-venn .venn-circle {
+    position: absolute; width: 200px; height: 200px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; font-size: 13px; font-weight: 600; color: #fff;
+  }
+  .slide-venn .venn-overlap {
+    position: absolute; text-align: center; z-index: 3;
+  }
+  .slide-venn .venn-overlap .overlap-text {
+    font-family: 'Outfit'; font-size: 13px; font-weight: 700; color: #fbbf24;
+  }
+
+  /* ========== SLIDE 29: 2x2 Matrix ========== */
+  .slide-matrix {
+    background: #fff; padding: 40px 60px;
+    display: flex; flex-direction: column;
+  }
+  .slide-matrix h2 {
+    font-family: 'Outfit'; font-size: 26px; font-weight: 700;
+    color: #1e1b4b; margin-bottom: 20px; text-align: center;
+  }
+  .slide-matrix .matrix-grid {
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+    gap: 12px; flex: 1;
+  }
+  .slide-matrix .matrix-cell {
+    border-radius: 12px; padding: 24px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .slide-matrix .matrix-cell h4 {
+    font-family: 'Outfit'; font-size: 18px; font-weight: 700; margin-bottom: 6px;
+  }
+  .slide-matrix .matrix-cell p { font-size: 12px; line-height: 1.5; }
+  .slide-matrix .matrix-cell.q1 { background: #ede9fe; }
+  .slide-matrix .matrix-cell.q1 h4 { color: #5b21b6; }
+  .slide-matrix .matrix-cell.q1 p { color: #6d28d9; }
+  .slide-matrix .matrix-cell.q2 { background: #dbeafe; }
+  .slide-matrix .matrix-cell.q2 h4 { color: #1e40af; }
+  .slide-matrix .matrix-cell.q2 p { color: #2563eb; }
+  .slide-matrix .matrix-cell.q3 { background: #fef3c7; }
+  .slide-matrix .matrix-cell.q3 h4 { color: #92400e; }
+  .slide-matrix .matrix-cell.q3 p { color: #b45309; }
+  .slide-matrix .matrix-cell.q4 { background: #dcfce7; }
+  .slide-matrix .matrix-cell.q4 h4 { color: #166534; }
+  .slide-matrix .matrix-cell.q4 p { color: #15803d; }
+  .slide-matrix .axis-labels {
+    display: flex; justify-content: space-between; margin-top: 8px;
+    font-family: 'Space Mono'; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 2px; color: #94a3b8;
+  }
+
+  /* ========== SLIDE 30: Image Gallery ========== */
+  .slide-gallery {
+    background: #18181b; padding: 50px 60px;
+    display: flex; flex-direction: column;
+  }
+  .slide-gallery h2 {
+    font-family: 'Outfit'; font-size: 26px; font-weight: 700;
+    color: #fff; margin-bottom: 24px;
+  }
+  .slide-gallery .grid-2x2 {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1;
+  }
+  .slide-gallery .gal-item {
+    border-radius: 12px; overflow: hidden; position: relative;
+    display: flex; align-items: flex-end;
+  }
+  .slide-gallery .gal-item .gal-visual {
+    position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center; font-size: 48px;
+  }
+  .slide-gallery .gal-item .gal-caption {
+    position: relative; z-index: 1; width: 100%;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    padding: 40px 16px 14px;
+  }
+  .slide-gallery .gal-item .gal-caption h4 {
+    font-family: 'Outfit'; font-size: 14px; font-weight: 600; color: #fff;
+  }
+  .slide-gallery .gal-item .gal-caption p {
+    font-size: 11px; color: #d4d4d8;
+  }
+
+  /* ========== SLIDE 31: Numbered List ========== */
+  .slide-numlist {
+    background: linear-gradient(160deg, #0c4a6e, #164e63);
+    padding: 50px 60px; display: flex;
+  }
+  .slide-numlist .left-info { width: 35%; padding-right: 30px; display: flex; flex-direction: column; justify-content: center; }
+  .slide-numlist h2 {
+    font-family: 'Outfit'; font-size: 28px; font-weight: 700;
+    color: #fff; margin-bottom: 10px;
+  }
+  .slide-numlist .left-info .desc { font-size: 14px; color: #7dd3fc; line-height: 1.6; }
+  .slide-numlist .list { width: 65%; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+  .slide-numlist .num-item {
+    display: flex; align-items: flex-start; gap: 16px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 16px 20px;
+  }
+  .slide-numlist .num-item .num {
+    font-family: 'Outfit'; font-size: 24px; font-weight: 800;
+    color: #38bdf8; flex-shrink: 0; width: 36px;
+  }
+  .slide-numlist .num-item h4 {
+    font-family: 'Outfit'; font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 2px;
+  }
+  .slide-numlist .num-item p { font-size: 12px; color: #7dd3fc; line-height: 1.4; }
+
+  /* ========== SLIDE 32: Pros & Cons ========== */
+  .slide-proscons {
+    background: #faf5ff; padding: 50px 60px;
+    display: flex; flex-direction: column;
+  }
+  .slide-proscons h2 {
+    font-family: 'Outfit'; font-size: 28px; font-weight: 700;
+    color: #1e1b4b; text-align: center; margin-bottom: 28px;
+  }
+  .slide-proscons .pc-cols { display: flex; gap: 24px; flex: 1; }
+  .slide-proscons .pc-col { flex: 1; }
+  .slide-proscons .pc-col .pc-header {
+    font-family: 'Outfit'; font-size: 18px; font-weight: 700;
+    padding: 10px 16px; border-radius: 8px 8px 0 0; text-align: center;
+  }
+  .slide-proscons .pc-col.pros .pc-header { background: #dcfce7; color: #166534; }
+  .slide-proscons .pc-col.cons .pc-header { background: #fef3c7; color: #92400e; }
+  .slide-proscons .pc-list { list-style: none; padding: 16px; }
+  .slide-proscons .pc-list li {
+    font-size: 14px; padding: 8px 0; padding-left: 24px;
+    position: relative; border-bottom: 1px solid #f3e8ff; line-height: 1.5;
+  }
+  .slide-proscons .pc-col.pros .pc-list li { color: #14532d; }
+  .slide-proscons .pc-col.cons .pc-list li { color: #78350f; }
+  .slide-proscons .pc-col.pros .pc-list li::before { content: '✓'; position: absolute; left: 0; color: #16a34a; font-weight: 700; }
+  .slide-proscons .pc-col.cons .pc-list li::before { content: '⚠'; position: absolute; left: 0; }
+
+  /* ========== SLIDE 33: Feature Matrix ========== */
+  .slide-featmatrix {
+    background: #0f172a; padding: 50px 60px;
+    display: flex; flex-direction: column;
+  }
+  .slide-featmatrix h2 {
+    font-family: 'Outfit'; font-size: 26px; font-weight: 700;
+    color: #fff; margin-bottom: 6px;
+  }
+  .slide-featmatrix .sub { font-size: 13px; color: #64748b; margin-bottom: 20px; }
+  .slide-featmatrix table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  .slide-featmatrix thead th {
+    font-family: 'Outfit'; font-weight: 600; color: #a5b4fc;
+    padding: 10px 14px; text-align: center; font-size: 13px;
+    border-bottom: 2px solid #334155;
+  }
+  .slide-featmatrix thead th:first-child { text-align: left; }
+  .slide-featmatrix tbody td {
+    padding: 10px 14px; color: #cbd5e1; border-bottom: 1px solid #1e293b;
+    text-align: center;
+  }
+  .slide-featmatrix tbody td:first-child { text-align: left; font-weight: 500; }
+  .slide-featmatrix .check { color: #34d399; font-size: 16px; }
+  .slide-featmatrix .cross { color: #475569; font-size: 16px; }
+
+  /* ========== SLIDE 34: Agenda / TOC ========== */
+  .slide-agenda {
+    background: #fff; padding: 50px 60px;
+    display: flex;
+  }
+  .slide-agenda .agenda-left {
+    width: 40%; display: flex; flex-direction: column; justify-content: center;
+    padding-right: 40px; border-right: 2px solid #e0e7ff;
+  }
+  .slide-agenda .agenda-left .tag {
+    font-family: 'Space Mono'; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 3px; color: #6366f1; margin-bottom: 12px;
+  }
+  .slide-agenda .agenda-left h2 {
+    font-family: 'Playfair Display', serif; font-size: 36px;
+    color: #1e1b4b;
+  }
+  .slide-agenda .agenda-right {
+    width: 60%; padding-left: 40px;
+    display: flex; flex-direction: column; justify-content: center; gap: 0;
+  }
+  .slide-agenda .agenda-item {
+    display: flex; align-items: center; padding: 16px 0;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .slide-agenda .agenda-item .a-num {
+    font-family: 'Outfit'; font-size: 28px; font-weight: 800;
+    color: #c7d2fe; width: 50px; flex-shrink: 0;
+  }
+  .slide-agenda .agenda-item .a-text h4 {
+    font-family: 'Outfit'; font-size: 16px; font-weight: 600; color: #1e1b4b;
+  }
+  .slide-agenda .agenda-item .a-text p {
+    font-size: 12px; color: #94a3b8;
+  }
+
+  /* ========== SLIDE 35: Full-Bleed Cinematic ========== */
+  .slide-cinematic {
+    background: linear-gradient(160deg, #0c0a1a 0%, #1a1145 40%, #312e81 100%);
+    display: flex; align-items: flex-end;
+    padding: 0; position: relative; overflow: hidden;
+  }
+  .slide-cinematic .bg-shapes {
+    position: absolute; inset: 0;
+  }
+  .slide-cinematic .bg-shapes .orb1 {
+    position: absolute; width: 400px; height: 400px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(99,102,241,0.15), transparent 70%);
+    top: -100px; right: -50px;
+  }
+  .slide-cinematic .bg-shapes .orb2 {
+    position: absolute; width: 300px; height: 300px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(168,85,247,0.1), transparent 70%);
+    bottom: -100px; left: 100px;
+  }
+  .slide-cinematic .bg-shapes .grid-lines {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(99,102,241,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(99,102,241,0.05) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+  .slide-cinematic .cine-content {
+    position: relative; z-index: 1; padding: 60px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.4));
+    width: 100%;
+  }
+  .slide-cinematic .cine-content .overline {
+    font-family: 'Space Mono'; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 4px; color: #a78bfa; margin-bottom: 16px;
+  }
+  .slide-cinematic .cine-content h2 {
+    font-family: 'Outfit'; font-size: 42px; font-weight: 800;
+    color: #fff; line-height: 1.15; max-width: 600px; margin-bottom: 12px;
+  }
+  .slide-cinematic .cine-content p {
+    font-size: 16px; color: #c7d2fe; max-width: 500px; line-height: 1.6;
+  }
+
   /* Responsive */
   @media (max-width: 700px) {
     :root { --scale: 0.38; }
@@ -848,7 +1338,7 @@ Below are 20 production-ready slide layout templates. Use these as reference whe
 <div class="page-header">
   <div class="badge">Slide Template Gallery</div>
   <h1>The Future of AI Coworkers</h1>
-  <p>20 production-ready slide templates across different layouts, chart types, and visual styles — all themed around the AI-powered workplace.</p>
+  <p>35 production-ready slide templates across different layouts, chart types, diagrams, and visual styles — all themed around the AI-powered workplace.</p>
 </div>
 
 <!-- ===== SLIDE 1: Title Slide — Dark Gradient ===== -->
@@ -1481,6 +1971,666 @@ Below are 20 production-ready slide layout templates. Use these as reference whe
         <div class="contact-item">📧 hello@aico.ai</div>
         <div class="contact-item">🌐 aico.ai</div>
         <div class="contact-item">🐦 @aico_ai</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 21: Big Stat Number ===== -->
+<div class="slide-section">
+  <div class="section-label">21 / Big Stat Number</div>
+  <div class="section-title">Hero Metric</div>
+  <div class="section-desc">Single dramatic number with context — ideal for impact statements</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-bigstat">
+      <div class="content">
+        <div class="stat-label">Global AI Coworker Impact</div>
+        <div class="stat-number">4.2M</div>
+        <div class="stat-unit">hours saved per day</div>
+        <div class="stat-desc">Across 12,000+ companies worldwide, AI coworkers are giving teams back the equivalent of 525,000 full workdays — every single day.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 22: Stacked Bar Chart ===== -->
+<div class="slide-section">
+  <div class="section-label">22 / Stacked Bar Chart</div>
+  <div class="section-title">Segmented Horizontal Bars</div>
+  <div class="section-desc">Dark indigo theme with color-coded segments showing composition</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-stacked">
+      <h2>AI Task Distribution by Department</h2>
+      <div class="sub">Breakdown of AI coworker usage across task categories</div>
+      <div class="legend-row">
+        <div class="leg"><div class="dot" style="background:#6366f1;"></div>Research</div>
+        <div class="leg"><div class="dot" style="background:#a78bfa;"></div>Drafting</div>
+        <div class="leg"><div class="dot" style="background:#c4b5fd;"></div>Automation</div>
+        <div class="leg"><div class="dot" style="background:#312e81;"></div>Analysis</div>
+      </div>
+      <div class="bars">
+        <div class="bar-row">
+          <div class="label">Sales</div>
+          <div class="bar-track">
+            <div class="seg" style="width:35%;background:#6366f1;"></div>
+            <div class="seg" style="width:30%;background:#a78bfa;"></div>
+            <div class="seg" style="width:20%;background:#c4b5fd;"></div>
+            <div class="seg" style="width:15%;background:#312e81;"></div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="label">Marketing</div>
+          <div class="bar-track">
+            <div class="seg" style="width:20%;background:#6366f1;"></div>
+            <div class="seg" style="width:45%;background:#a78bfa;"></div>
+            <div class="seg" style="width:25%;background:#c4b5fd;"></div>
+            <div class="seg" style="width:10%;background:#312e81;"></div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="label">Engineering</div>
+          <div class="bar-track">
+            <div class="seg" style="width:15%;background:#6366f1;"></div>
+            <div class="seg" style="width:20%;background:#a78bfa;"></div>
+            <div class="seg" style="width:40%;background:#c4b5fd;"></div>
+            <div class="seg" style="width:25%;background:#312e81;"></div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="label">Finance</div>
+          <div class="bar-track">
+            <div class="seg" style="width:25%;background:#6366f1;"></div>
+            <div class="seg" style="width:15%;background:#a78bfa;"></div>
+            <div class="seg" style="width:20%;background:#c4b5fd;"></div>
+            <div class="seg" style="width:40%;background:#312e81;"></div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="label">HR</div>
+          <div class="bar-track">
+            <div class="seg" style="width:30%;background:#6366f1;"></div>
+            <div class="seg" style="width:35%;background:#a78bfa;"></div>
+            <div class="seg" style="width:25%;background:#c4b5fd;"></div>
+            <div class="seg" style="width:10%;background:#312e81;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 23: Horizontal Bar Chart ===== -->
+<div class="slide-section">
+  <div class="section-label">23 / Horizontal Bar Chart</div>
+  <div class="section-title">Ranked Horizontal Bars</div>
+  <div class="section-desc">Warm amber theme — great for ranked lists with long labels</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-hbar">
+      <h2>Top AI Coworker Use Cases</h2>
+      <div class="sub">Ranked by weekly active usage across 5,000+ teams</div>
+      <div class="rows">
+        <div class="hbar-row">
+          <div class="label">Meeting summaries</div>
+          <div class="bar-fill" style="width:92%;">92%</div>
+        </div>
+        <div class="hbar-row">
+          <div class="label">Email drafting</div>
+          <div class="bar-fill" style="width:84%;">84%</div>
+        </div>
+        <div class="hbar-row">
+          <div class="label">Code review</div>
+          <div class="bar-fill" style="width:76%;">76%</div>
+        </div>
+        <div class="hbar-row">
+          <div class="label">Data analysis</div>
+          <div class="bar-fill" style="width:71%;">71%</div>
+        </div>
+        <div class="hbar-row">
+          <div class="label">Research synthesis</div>
+          <div class="bar-fill" style="width:65%;">65%</div>
+        </div>
+        <div class="hbar-row">
+          <div class="label">Report generation</div>
+          <div class="bar-fill" style="width:58%;">58%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 24: Data Table ===== -->
+<div class="slide-section">
+  <div class="section-label">24 / Data Table</div>
+  <div class="section-title">Styled Data Table</div>
+  <div class="section-desc">Clean white table with colored header and status badges</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-table">
+      <h2>AI Coworker Platform Comparison</h2>
+      <div class="sub">Feature and performance benchmarks across leading platforms</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Platform</th>
+            <th>Response Time</th>
+            <th>Memory</th>
+            <th>Integrations</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>AiCo Pro</strong></td>
+            <td>0.8s avg</td>
+            <td>Persistent</td>
+            <td>140+</td>
+            <td><span class="badge-sm badge-green">Leader</span></td>
+          </tr>
+          <tr>
+            <td><strong>WorkBot AI</strong></td>
+            <td>1.2s avg</td>
+            <td>Session only</td>
+            <td>85+</td>
+            <td><span class="badge-sm badge-blue">Growing</span></td>
+          </tr>
+          <tr>
+            <td><strong>TeamMind</strong></td>
+            <td>1.5s avg</td>
+            <td>7-day window</td>
+            <td>60+</td>
+            <td><span class="badge-sm badge-blue">Growing</span></td>
+          </tr>
+          <tr>
+            <td><strong>AssistIQ</strong></td>
+            <td>2.1s avg</td>
+            <td>Session only</td>
+            <td>35+</td>
+            <td><span class="badge-sm badge-amber">Emerging</span></td>
+          </tr>
+          <tr>
+            <td><strong>CoPilotX</strong></td>
+            <td>0.9s avg</td>
+            <td>30-day window</td>
+            <td>110+</td>
+            <td><span class="badge-sm badge-green">Leader</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 25: Combo Chart (Bar + Line SVG) ===== -->
+<div class="slide-section">
+  <div class="section-label">25 / Combo Chart</div>
+  <div class="section-title">Bar + Line Overlay</div>
+  <div class="section-desc">Dark theme SVG with bars for volume and line for growth rate</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-combo">
+      <h2>AI Coworker Revenue & Growth</h2>
+      <div class="sub">Quarterly revenue ($M) with year-over-year growth rate</div>
+      <div class="combo-legend">
+        <div class="leg"><div class="swatch" style="background:#6366f1;"></div>Revenue ($M)</div>
+        <div class="leg"><div class="swatch-line" style="background:#fbbf24;"></div>YoY Growth %</div>
+      </div>
+      <svg viewBox="0 0 840 280" style="flex:1;">
+        <!-- Grid -->
+        <line x1="60" y1="20" x2="60" y2="240" stroke="#1e293b" stroke-width="1"/>
+        <line x1="60" y1="240" x2="800" y2="240" stroke="#1e293b" stroke-width="1"/>
+        <line x1="60" y1="185" x2="800" y2="185" stroke="#1e293b" stroke-width="0.5" stroke-dasharray="4"/>
+        <line x1="60" y1="130" x2="800" y2="130" stroke="#1e293b" stroke-width="0.5" stroke-dasharray="4"/>
+        <line x1="60" y1="75" x2="800" y2="75" stroke="#1e293b" stroke-width="0.5" stroke-dasharray="4"/>
+        <!-- Bars -->
+        <rect x="95" y="200" width="50" height="40" rx="4" fill="#6366f1"/>
+        <rect x="220" y="175" width="50" height="65" rx="4" fill="#6366f1"/>
+        <rect x="345" y="140" width="50" height="100" rx="4" fill="#6366f1"/>
+        <rect x="470" y="110" width="50" height="130" rx="4" fill="#818cf8"/>
+        <rect x="595" y="70" width="50" height="170" rx="4" fill="#818cf8"/>
+        <rect x="720" y="35" width="50" height="205" rx="4" fill="#a78bfa"/>
+        <!-- Bar labels -->
+        <text x="120" y="195" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="700" font-family="DM Sans">$12M</text>
+        <text x="245" y="170" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="700" font-family="DM Sans">$19M</text>
+        <text x="370" y="135" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="700" font-family="DM Sans">$31M</text>
+        <text x="495" y="105" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="700" font-family="DM Sans">$48M</text>
+        <text x="620" y="65" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="700" font-family="DM Sans">$72M</text>
+        <text x="745" y="30" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="700" font-family="DM Sans">$105M</text>
+        <!-- Growth line -->
+        <polyline points="120,150 245,120 370,100 495,80 620,55 745,45" fill="none" stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="120" cy="150" r="4" fill="#fbbf24"/>
+        <circle cx="245" cy="120" r="4" fill="#fbbf24"/>
+        <circle cx="370" cy="100" r="4" fill="#fbbf24"/>
+        <circle cx="495" cy="80" r="4" fill="#fbbf24"/>
+        <circle cx="620" cy="55" r="4" fill="#fbbf24"/>
+        <circle cx="745" cy="45" r="5" fill="#0f172a" stroke="#fbbf24" stroke-width="2.5"/>
+        <!-- Growth labels -->
+        <text x="120" y="143" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="700" font-family="DM Sans">58%</text>
+        <text x="245" y="113" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="700" font-family="DM Sans">63%</text>
+        <text x="370" y="93" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="700" font-family="DM Sans">68%</text>
+        <text x="495" y="73" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="700" font-family="DM Sans">55%</text>
+        <text x="620" y="48" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="700" font-family="DM Sans">50%</text>
+        <text x="745" y="38" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="700" font-family="DM Sans">46%</text>
+        <!-- X labels -->
+        <text x="120" y="258" text-anchor="middle" fill="#64748b" font-size="11" font-family="DM Sans">Q1 '24</text>
+        <text x="245" y="258" text-anchor="middle" fill="#64748b" font-size="11" font-family="DM Sans">Q2 '24</text>
+        <text x="370" y="258" text-anchor="middle" fill="#64748b" font-size="11" font-family="DM Sans">Q3 '24</text>
+        <text x="495" y="258" text-anchor="middle" fill="#64748b" font-size="11" font-family="DM Sans">Q4 '24</text>
+        <text x="620" y="258" text-anchor="middle" fill="#64748b" font-size="11" font-family="DM Sans">Q1 '25</text>
+        <text x="745" y="258" text-anchor="middle" fill="#64748b" font-size="11" font-family="DM Sans">Q2 '25</text>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 26: Pyramid Diagram ===== -->
+<div class="slide-section">
+  <div class="section-label">26 / Pyramid Diagram</div>
+  <div class="section-title">Strategy Hierarchy</div>
+  <div class="section-desc">Magenta gradient with tiered pyramid showing priorities</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-pyramid">
+      <div class="info">
+        <h2>AI Coworker Maturity Model</h2>
+        <div class="desc">Organizations progress through five levels of AI integration, each building on the last.</div>
+      </div>
+      <div class="pyramid-chart">
+        <div class="pyr-level" style="width:30%;background:rgba(255,255,255,0.25);">
+          <div class="pyr-label">Autonomy</div>
+          <div class="pyr-sub">Self-directed workflows</div>
+        </div>
+        <div class="pyr-level" style="width:45%;background:rgba(255,255,255,0.18);">
+          <div class="pyr-label">Proactive Insights</div>
+          <div class="pyr-sub">AI surfaces opportunities</div>
+        </div>
+        <div class="pyr-level" style="width:60%;background:rgba(255,255,255,0.13);">
+          <div class="pyr-label">Contextual Assistance</div>
+          <div class="pyr-sub">Persistent memory + deep integrations</div>
+        </div>
+        <div class="pyr-level" style="width:75%;background:rgba(255,255,255,0.09);">
+          <div class="pyr-label">Task Automation</div>
+          <div class="pyr-sub">Repetitive work handled by AI</div>
+        </div>
+        <div class="pyr-level" style="width:90%;background:rgba(255,255,255,0.05);">
+          <div class="pyr-label">Basic Chat</div>
+          <div class="pyr-sub">Simple Q&A and information retrieval</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 27: Cycle Diagram ===== -->
+<div class="slide-section">
+  <div class="section-label">27 / Cycle Diagram</div>
+  <div class="section-title">Flywheel / Feedback Loop</div>
+  <div class="section-desc">Light green with circular node arrangement and center label</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-cycle">
+      <h2>The AI Coworker Flywheel</h2>
+      <div class="cycle-ring">
+        <!-- Top -->
+        <div class="cycle-node" style="top:0;left:50%;transform:translateX(-50%);">
+          <div class="node-icon">📥</div>
+          <h4>Ingest</h4>
+          <p>Connects to emails, docs, meetings, and tools</p>
+        </div>
+        <!-- Right -->
+        <div class="cycle-node" style="top:50%;right:0;transform:translateY(-50%);">
+          <div class="node-icon">🧠</div>
+          <h4>Learn</h4>
+          <p>Maps patterns, preferences, and relationships</p>
+        </div>
+        <!-- Bottom -->
+        <div class="cycle-node" style="bottom:0;left:50%;transform:translateX(-50%);">
+          <div class="node-icon">⚡</div>
+          <h4>Act</h4>
+          <p>Automates tasks and generates deliverables</p>
+        </div>
+        <!-- Left -->
+        <div class="cycle-node" style="top:50%;left:0;transform:translateY(-50%);">
+          <div class="node-icon">📈</div>
+          <h4>Improve</h4>
+          <p>Feedback refines accuracy and relevance</p>
+        </div>
+        <!-- Arrows -->
+        <div class="cycle-arrow" style="top:15%;right:18%;">↘</div>
+        <div class="cycle-arrow" style="bottom:15%;right:18%;">↗</div>
+        <div class="cycle-arrow" style="bottom:15%;left:18%;">↖</div>
+        <div class="cycle-arrow" style="top:15%;left:18%;">↙</div>
+        <!-- Center -->
+        <div class="cycle-center">
+          <div class="emoji">🔄</div>
+          <div class="label">Compounding<br>Intelligence</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 28: Venn Diagram ===== -->
+<div class="slide-section">
+  <div class="section-label">28 / Venn Diagram</div>
+  <div class="section-title">Overlapping Concepts</div>
+  <div class="section-desc">Dark slate with three translucent overlapping circles</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-venn">
+      <div class="info">
+        <h2>The AI Coworker Sweet Spot</h2>
+        <div class="desc">The most impactful AI coworkers sit at the intersection of three capabilities — understanding context, taking action, and learning continuously.</div>
+      </div>
+      <div class="venn-area">
+        <div class="venn-circle" style="background:rgba(99,102,241,0.25);border:2px solid rgba(99,102,241,0.4);left:50%;top:18%;transform:translateX(-50%);">
+          <span style="margin-top:-30px;">Context<br>Awareness</span>
+        </div>
+        <div class="venn-circle" style="background:rgba(16,185,129,0.2);border:2px solid rgba(16,185,129,0.4);bottom:18%;left:22%;transform:translateX(-50%);">
+          <span style="margin-bottom:-30px;margin-left:-20px;">Autonomous<br>Action</span>
+        </div>
+        <div class="venn-circle" style="background:rgba(244,63,94,0.2);border:2px solid rgba(244,63,94,0.4);bottom:18%;right:22%;transform:translateX(50%);">
+          <span style="margin-bottom:-30px;margin-right:-20px;">Continuous<br>Learning</span>
+        </div>
+        <div class="venn-overlap" style="top:52%;left:50%;transform:translate(-50%,-50%);">
+          <div class="overlap-text">⭐ AI<br>Coworker</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 29: 2×2 Matrix ===== -->
+<div class="slide-section">
+  <div class="section-label">29 / 2×2 Matrix</div>
+  <div class="section-title">Strategic Quadrant</div>
+  <div class="section-desc">Light layout with four color-coded quadrants and axis labels</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-matrix">
+      <h2>AI Coworker Task Prioritization Matrix</h2>
+      <div class="matrix-grid">
+        <div class="matrix-cell q1">
+          <h4>🚀 Automate Now</h4>
+          <p>High frequency, low complexity tasks like scheduling, data entry, meeting notes, and status updates.</p>
+        </div>
+        <div class="matrix-cell q2">
+          <h4>🤝 Augment & Assist</h4>
+          <p>High frequency, high complexity tasks like code review, research synthesis, and report drafting.</p>
+        </div>
+        <div class="matrix-cell q3">
+          <h4>📋 Batch & Template</h4>
+          <p>Low frequency, low complexity tasks like onboarding docs, expense reports, and form filling.</p>
+        </div>
+        <div class="matrix-cell q4">
+          <h4>🧠 Strategic Co-Pilot</h4>
+          <p>Low frequency, high complexity tasks like strategy planning, crisis response, and deal negotiation.</p>
+        </div>
+      </div>
+      <div class="axis-labels">
+        <span>← Low complexity</span>
+        <span>High complexity →</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 30: Image Gallery ===== -->
+<div class="slide-section">
+  <div class="section-label">30 / Image Gallery</div>
+  <div class="section-title">2×2 Visual Grid</div>
+  <div class="section-desc">Dark zinc with gradient-captioned cards — uses CSS backgrounds instead of images</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-gallery">
+      <h2>AI Coworkers in Action</h2>
+      <div class="grid-2x2">
+        <div class="gal-item" style="background:linear-gradient(135deg,#312e81,#6366f1);">
+          <div class="gal-visual">💬</div>
+          <div class="gal-caption">
+            <h4>Intelligent Chat</h4>
+            <p>Context-aware conversations with persistent memory</p>
+          </div>
+        </div>
+        <div class="gal-item" style="background:linear-gradient(135deg,#064e3b,#10b981);">
+          <div class="gal-visual">📊</div>
+          <div class="gal-caption">
+            <h4>Auto-Generated Reports</h4>
+            <p>Data pulled and visualized in seconds</p>
+          </div>
+        </div>
+        <div class="gal-item" style="background:linear-gradient(135deg,#78350f,#f59e0b);">
+          <div class="gal-visual">🔗</div>
+          <div class="gal-caption">
+            <h4>Seamless Integrations</h4>
+            <p>140+ tools connected out of the box</p>
+          </div>
+        </div>
+        <div class="gal-item" style="background:linear-gradient(135deg,#7f1d1d,#ef4444);">
+          <div class="gal-visual">🛡️</div>
+          <div class="gal-caption">
+            <h4>Enterprise Security</h4>
+            <p>SOC 2 compliant with full audit trails</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 31: Numbered List ===== -->
+<div class="slide-section">
+  <div class="section-label">31 / Numbered List</div>
+  <div class="section-title">Ordered Steps</div>
+  <div class="section-desc">Ocean teal with numbered cards — simpler than full process flow</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-numlist">
+      <div class="left-info">
+        <h2>5 Rules for AI Coworker Success</h2>
+        <div class="desc">The principles that separate teams who thrive with AI from those who struggle.</div>
+      </div>
+      <div class="list">
+        <div class="num-item">
+          <div class="num">01</div>
+          <div>
+            <h4>Start with High-Volume Tasks</h4>
+            <p>Deploy AI where repetition is highest — email, scheduling, summaries.</p>
+          </div>
+        </div>
+        <div class="num-item">
+          <div class="num">02</div>
+          <div>
+            <h4>Give Context Generously</h4>
+            <p>The more your AI knows about your work, the better it performs.</p>
+          </div>
+        </div>
+        <div class="num-item">
+          <div class="num">03</div>
+          <div>
+            <h4>Trust But Verify</h4>
+            <p>Review AI outputs initially, then gradually increase autonomy.</p>
+          </div>
+        </div>
+        <div class="num-item">
+          <div class="num">04</div>
+          <div>
+            <h4>Build Feedback Loops</h4>
+            <p>Correct mistakes — each correction makes the AI permanently smarter.</p>
+          </div>
+        </div>
+        <div class="num-item">
+          <div class="num">05</div>
+          <div>
+            <h4>Expand Gradually</h4>
+            <p>Once one workflow succeeds, replicate the pattern across the team.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 32: Pros & Cons ===== -->
+<div class="slide-section">
+  <div class="section-label">32 / Pros & Cons</div>
+  <div class="section-title">Advantages vs. Considerations</div>
+  <div class="section-desc">Light purple with check/warning icons — honest framing of tradeoffs</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-proscons">
+      <h2>AI Coworkers: Benefits & Considerations</h2>
+      <div class="pc-cols">
+        <div class="pc-col pros">
+          <div class="pc-header">✓ Advantages</div>
+          <ul class="pc-list">
+            <li>Instant access to organizational knowledge</li>
+            <li>24/7 availability across time zones</li>
+            <li>Consistent quality on repetitive tasks</li>
+            <li>Scales without proportional cost increase</li>
+            <li>Learns and improves over time</li>
+          </ul>
+        </div>
+        <div class="pc-col cons">
+          <div class="pc-header">⚠ Considerations</div>
+          <ul class="pc-list">
+            <li>Requires initial setup and training period</li>
+            <li>Data privacy policies must be established</li>
+            <li>Change management for team adoption</li>
+            <li>Best for structured, repeatable workflows</li>
+            <li>Human oversight still needed for critical decisions</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 33: Feature Matrix ===== -->
+<div class="slide-section">
+  <div class="section-label">33 / Feature Matrix</div>
+  <div class="section-title">Checkmark Comparison Table</div>
+  <div class="section-desc">Dark theme with features × tiers showing capability coverage</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-featmatrix">
+      <h2>Feature Availability by Plan</h2>
+      <div class="sub">What's included at each tier of AI coworker deployment</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>Starter</th>
+            <th>Team</th>
+            <th>Enterprise</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Chat-based assistant</td>
+            <td><span class="check">✓</span></td>
+            <td><span class="check">✓</span></td>
+            <td><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td>Persistent memory</td>
+            <td><span class="cross">—</span></td>
+            <td><span class="check">✓</span></td>
+            <td><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td>Knowledge graph</td>
+            <td><span class="cross">—</span></td>
+            <td><span class="check">✓</span></td>
+            <td><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td>Multi-agent orchestration</td>
+            <td><span class="cross">—</span></td>
+            <td><span class="cross">—</span></td>
+            <td><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td>Custom model training</td>
+            <td><span class="cross">—</span></td>
+            <td><span class="cross">—</span></td>
+            <td><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td>SSO & compliance</td>
+            <td><span class="cross">—</span></td>
+            <td><span class="cross">—</span></td>
+            <td><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td>API access</td>
+            <td><span class="cross">—</span></td>
+            <td><span class="check">✓</span></td>
+            <td><span class="check">✓</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 34: Agenda / TOC ===== -->
+<div class="slide-section">
+  <div class="section-label">34 / Agenda</div>
+  <div class="section-title">Table of Contents</div>
+  <div class="section-desc">Clean white with serif title and numbered agenda items</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-agenda">
+      <div class="agenda-left">
+        <div class="tag">Presentation Outline</div>
+        <h2>Today's Agenda</h2>
+      </div>
+      <div class="agenda-right">
+        <div class="agenda-item">
+          <div class="a-num">01</div>
+          <div class="a-text">
+            <h4>The Rise of AI Coworkers</h4>
+            <p>Market landscape and driving forces</p>
+          </div>
+        </div>
+        <div class="agenda-item">
+          <div class="a-num">02</div>
+          <div class="a-text">
+            <h4>Core Capabilities</h4>
+            <p>What makes an AI coworker different from a chatbot</p>
+          </div>
+        </div>
+        <div class="agenda-item">
+          <div class="a-num">03</div>
+          <div class="a-text">
+            <h4>Impact & Metrics</h4>
+            <p>Real-world results from early adopters</p>
+          </div>
+        </div>
+        <div class="agenda-item">
+          <div class="a-num">04</div>
+          <div class="a-text">
+            <h4>Implementation Roadmap</h4>
+            <p>How to get started in 90 days</p>
+          </div>
+        </div>
+        <div class="agenda-item">
+          <div class="a-num">05</div>
+          <div class="a-text">
+            <h4>Q&A and Next Steps</h4>
+            <p>Open discussion and action items</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SLIDE 35: Full-Bleed Cinematic ===== -->
+<div class="slide-section">
+  <div class="section-label">35 / Full-Bleed Cinematic</div>
+  <div class="section-title">Atmospheric Background Slide</div>
+  <div class="section-desc">Immersive dark slide with grid texture, orbs, and bottom-aligned content</div>
+  <div class="slide-wrapper">
+    <div class="slide-frame slide-cinematic">
+      <div class="bg-shapes">
+        <div class="orb1"></div>
+        <div class="orb2"></div>
+        <div class="grid-lines"></div>
+      </div>
+      <div class="cine-content">
+        <div class="overline">A New Era Begins</div>
+        <h2>Every Knowledge Worker Deserves an AI Teammate</h2>
+        <p>We're building toward a world where AI handles the busywork and humans do what they do best — think creatively, build relationships, and make decisions that matter.</p>
       </div>
     </div>
   </div>
