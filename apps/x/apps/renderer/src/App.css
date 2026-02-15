@@ -293,3 +293,27 @@
   pointer-events: none;
   user-select: none;
 }
+
+/* ─── Enhanced Progress Bar: Striped & Animated ────────── */
+@keyframes progress-stripes {
+  from { background-position: 1rem 0; }
+  to { background-position: 0 0; }
+}
+
+.progress-striped {
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.1) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.1) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 1rem 1rem;
+}
+
+.progress-striped-animated {
+  animation: progress-stripes 1s linear infinite;
+}

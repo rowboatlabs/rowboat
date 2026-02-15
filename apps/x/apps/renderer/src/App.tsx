@@ -39,6 +39,8 @@ import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/componen
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
+import { TypingIndicator } from '@/components/ai-elements/typing-indicator';
+import { KeyboardShortcut } from '@/components/ui/keyboard-shortcut';
 import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
@@ -368,7 +370,7 @@ function ChatInputInner({
   }, [controller])
 
   return (
-    <div className="flex items-center gap-2 bg-background border border-border rounded-lg shadow-none px-4 py-4">
+    <div className="flex items-center gap-2 bg-card/60 backdrop-blur-sm border border-border/50 rounded-2xl shadow-sm px-4 py-4 transition-all duration-200 focus-within:ring-2 focus-within:ring-primary/15 focus-within:border-primary/30 focus-within:shadow-md">
       <PromptInputTextarea
         placeholder="Type your message..."
         onKeyDown={handleKeyDown}
@@ -2396,8 +2398,18 @@ function App() {
                   <ConversationContent className={conversationContentClassName}>
                     {!hasConversation ? (
                       <ConversationEmptyState className="h-auto">
-                        <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
-                          What are we working on?
+                        <div className="animate-fade-in-up space-y-3 text-center">
+                          <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
+                            What are we working on?
+                          </div>
+                          <p className="text-sm text-muted-foreground/60 animate-fade-in-up" style={{ animationDelay: '150ms' }}>
+                            Ask anything, or pick a suggestion below
+                          </p>
+                          <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground/40 animate-fade-in-up" style={{ animationDelay: '300ms' }}>
+                            <span>Press</span>
+                            <KeyboardShortcut keys={["Enter"]} size="sm" />
+                            <span>to send</span>
+                          </div>
                         </div>
                       </ConversationEmptyState>
                     ) : (
@@ -2452,11 +2464,7 @@ function App() {
                         )}
 
                         {isProcessing && !currentAssistantMessage && !currentReasoning && (
-                          <Message from="assistant">
-                            <MessageContent>
-                              <Shimmer duration={1}>Thinking...</Shimmer>
-                            </MessageContent>
-                          </Message>
+                          <TypingIndicator label="Thinking" />
                         )}
                       </>
                     )}

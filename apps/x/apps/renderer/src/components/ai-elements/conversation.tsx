@@ -180,14 +180,14 @@ export const ConversationEmptyState = ({
 }: ConversationEmptyStateProps) => (
   <div
     className={cn(
-      "flex size-full flex-col items-center justify-center gap-3 p-8 text-center",
+      "flex size-full flex-col items-center justify-center gap-3 p-8 text-center animate-fade-in-up",
       className
     )}
     {...props}
   >
     {children ?? (
       <>
-        {icon && <div className="text-muted-foreground">{icon}</div>}
+        {icon && <div className="text-muted-foreground animate-fade-in-up" style={{ animationDelay: '100ms' }}>{icon}</div>}
         <div className="space-y-1">
           <h3 className="font-medium text-sm">{title}</h3>
           {description && (
@@ -216,6 +216,9 @@ export const ConversationScrollButton = ({
       <Button
         className={cn(
           "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full",
+          "shadow-lg backdrop-blur-sm bg-background/80 border-border/50",
+          "hover:bg-background hover:shadow-xl hover:border-primary/30",
+          "transition-all duration-200 animate-fade-in-up",
           className
         )}
         onClick={handleScrollToBottom}
