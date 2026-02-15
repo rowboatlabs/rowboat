@@ -46,42 +46,20 @@ interface EnhancedProgressProps extends Omit<React.ComponentProps<typeof Progres
   glow?: boolean
 }
 
-const sizeConfig: Record<ProgressSize, { track: string; text: string }> = {
+const sizes: Record<ProgressSize, { track: string; text: string }> = {
   sm: { track: "h-1.5", text: "text-xs" },
   md: { track: "h-2.5", text: "text-sm" },
   lg: { track: "h-4", text: "text-sm" },
 }
 
-const variantConfig: Record<ProgressVariant, {
-  indicator: string
-  track: string
-  glow: string
-}> = {
-  default: {
-    indicator: "bg-primary",
-    track: "bg-primary/15",
-    glow: "shadow-[0_0_8px_-2px] shadow-primary/40",
-  },
-  success: {
-    indicator: "bg-emerald-500",
-    track: "bg-emerald-500/15",
-    glow: "shadow-[0_0_8px_-2px] shadow-emerald-500/40",
-  },
-  warning: {
-    indicator: "bg-amber-500",
-    track: "bg-amber-500/15",
-    glow: "shadow-[0_0_8px_-2px] shadow-amber-500/40",
-  },
-  error: {
-    indicator: "bg-red-500",
-    track: "bg-red-500/15",
-    glow: "shadow-[0_0_8px_-2px] shadow-red-500/40",
-  },
-  gradient: {
-    indicator: "bg-gradient-to-r from-primary via-primary/80 to-primary/60",
-    track: "bg-primary/15",
-    glow: "shadow-[0_0_8px_-2px] shadow-primary/40",
-  },
+const glowShadow = (color: string) => `shadow-[0_0_8px_-2px] shadow-${color}/40`
+
+const variants: Record<ProgressVariant, { indicator: string; track: string; glow: string }> = {
+  default:  { indicator: "bg-primary",      track: "bg-primary/15",      glow: glowShadow("primary") },
+  success:  { indicator: "bg-emerald-500",  track: "bg-emerald-500/15",  glow: glowShadow("emerald-500") },
+  warning:  { indicator: "bg-amber-500",    track: "bg-amber-500/15",    glow: glowShadow("amber-500") },
+  error:    { indicator: "bg-red-500",      track: "bg-red-500/15",      glow: glowShadow("red-500") },
+  gradient: { indicator: "bg-gradient-to-r from-primary via-primary/80 to-primary/60", track: "bg-primary/15", glow: glowShadow("primary") },
 }
 
 function EnhancedProgress({
@@ -96,37 +74,22 @@ function EnhancedProgress({
   className,
   ...props
 }: EnhancedProgressProps) {
-  const sizes = sizeConfig[size]
-  const colors = variantConfig[variant]
+  const s = sizes[size]
+  const v = variants[variant]
   const pct = Math.round(Math.min(100, Math.max(0, value)))
 
   return (
     <div className={cn("w-full space-y-1.5", className)}>
-      {/* Label row */}
       {(label || showPercentage) && (
         <div className="flex items-center justify-between">
-          {label && (
-            <span className={cn("font-medium text-foreground/80", sizes.text)}>
-              {label}
-            </span>
-          )}
-          {showPercentage && (
-            <span className={cn("tabular-nums text-muted-foreground", sizes.text)}>
-              {pct}%
-            </span>
-          )}
+          {label && <span className={cn("font-medium text-foreground/80", s.text)}>{label}</span>}
+          {showPercentage && <span className={cn("tabular-nums text-muted-foreground", s.text)}>{pct}%</span>}
         </div>
       )}
 
-      {/* Track */}
       <ProgressPrimitive.Root
         data-slot="progress"
-        className={cn(
-          "relative w-full overflow-hidden rounded-full",
-          sizes.track,
-          colors.track,
-          glow && colors.glow
-        )}
+        className={cn("relative w-full overflow-hidden rounded-full", s.track, v.track, glow && v.glow)}
         value={value}
         {...props}
       >
@@ -134,7 +97,7 @@ function EnhancedProgress({
           data-slot="progress-indicator"
           className={cn(
             "h-full w-full flex-1 rounded-full transition-all duration-500 ease-out",
-            colors.indicator,
+            v.indicator,
             striped && "progress-striped",
             striped && animated && "progress-striped-animated"
           )}

@@ -20,7 +20,6 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
-import { Shimmer } from '@/components/ai-elements/shimmer'
 import { TypingIndicator } from '@/components/ai-elements/typing-indicator'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'

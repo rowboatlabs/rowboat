@@ -30,6 +30,7 @@ if (started) app.quit();
 
 // In dev mode, Electron sets process.defaultApp = true. This is more reliable
 // than app.isPackaged because the esbuild-bundled .cjs can confuse isPackaged.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Electron-specific property not in Node types
 const isDev = !!(process as any).defaultApp;
 
 // Path resolution differs between development and production:

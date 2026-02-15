@@ -34,13 +34,12 @@ import {
   type FileMention,
 } from '@/components/ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
-import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
 import { TypingIndicator } from '@/components/ai-elements/typing-indicator';
-import { KeyboardShortcut } from '@/components/ui/keyboard-shortcut';
+import { ShortcutHint } from '@/components/ui/keyboard-shortcut';
 import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
@@ -2397,20 +2396,14 @@ function App() {
                   <ScrollPositionPreserver />
                   <ConversationContent className={conversationContentClassName}>
                     {!hasConversation ? (
-                      <ConversationEmptyState className="h-auto">
-                        <div className="animate-fade-in-up space-y-3 text-center">
-                          <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
-                            What are we working on?
-                          </div>
-                          <p className="text-sm text-muted-foreground/60 animate-fade-in-up" style={{ animationDelay: '150ms' }}>
-                            Ask anything, or pick a suggestion below
-                          </p>
-                          <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground/40 animate-fade-in-up" style={{ animationDelay: '300ms' }}>
-                            <span>Press</span>
-                            <KeyboardShortcut keys={["Enter"]} size="sm" />
-                            <span>to send</span>
-                          </div>
-                        </div>
+                      <ConversationEmptyState className="h-auto space-y-3">
+                        <h2 className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
+                          What are we working on?
+                        </h2>
+                        <p className="text-sm text-muted-foreground/60">
+                          Ask anything, or pick a suggestion below
+                        </p>
+                        <ShortcutHint keys={["Enter"]} label="Press" size="sm" className="justify-center text-muted-foreground/40" />
                       </ConversationEmptyState>
                     ) : (
                       <>

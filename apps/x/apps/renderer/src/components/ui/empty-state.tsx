@@ -2,19 +2,6 @@ import { cn } from "@/lib/utils"
 import type { ComponentProps, ReactNode } from "react"
 import { Button } from "./button"
 
-/**
- * Reusable empty state component with icon/illustration slot,
- * title, description, and optional action button.
- *
- * Usage:
- *   <EmptyState
- *     icon={<InboxIcon className="size-10" />}
- *     title="No messages yet"
- *     description="Start a conversation to get going."
- *     action={{ label: "New Chat", onClick: handleNew }}
- *   />
- */
-
 interface EmptyStateAction {
   label: string
   onClick: () => void
@@ -43,6 +30,9 @@ export function EmptyState({
   children,
   ...props
 }: EmptyStateProps) {
+  const visual = illustration ?? icon
+  const showIconBadge = icon && !illustration
+
   return (
     <div
       className={cn(
@@ -52,69 +42,44 @@ export function EmptyState({
       )}
       {...props}
     >
-      {/* Icon / Illustration */}
-      {(icon || illustration) && (
+      {visual && (
         <div
           className={cn(
             "flex items-center justify-center",
-            icon && !illustration && cn(
-              "rounded-2xl bg-muted/50 border border-border/30",
-              "text-muted-foreground",
-              compact ? "size-12 p-2.5" : "size-16 p-3.5"
-            )
+            showIconBadge && "rounded-2xl bg-muted/50 border border-border/30 text-muted-foreground",
+            showIconBadge && (compact ? "size-12 p-2.5" : "size-16 p-3.5")
           )}
         >
-          {illustration ?? icon}
+          {visual}
         </div>
       )}
 
-      {/* Text */}
       <div className="space-y-1.5 max-w-sm">
-        <h3
-          className={cn(
-            "font-semibold text-foreground/80",
-            compact ? "text-sm" : "text-base"
-          )}
-        >
+        <h3 className={cn("font-semibold text-foreground/80", compact ? "text-sm" : "text-base")}>
           {title}
         </h3>
         {description && (
-          <p
-            className={cn(
-              "text-muted-foreground leading-relaxed",
-              compact ? "text-xs" : "text-sm"
-            )}
-          >
+          <p className={cn("text-muted-foreground leading-relaxed", compact ? "text-xs" : "text-sm")}>
             {description}
           </p>
         )}
       </div>
 
-      {/* Actions */}
       {(action || secondaryAction) && (
         <div className="flex items-center gap-2 mt-1">
-          {action && (
+          {[action, secondaryAction].filter(Boolean).map((act, i) => (
             <Button
-              variant={action.variant ?? "default"}
+              key={act!.label}
+              variant={act!.variant ?? (i === 0 ? "default" : "outline")}
               size={compact ? "sm" : "default"}
-              onClick={action.onClick}
+              onClick={act!.onClick}
             >
-              {action.label}
+              {act!.label}
             </Button>
-          )}
-          {secondaryAction && (
-            <Button
-              variant={secondaryAction.variant ?? "outline"}
-              size={compact ? "sm" : "default"}
-              onClick={secondaryAction.onClick}
-            >
-              {secondaryAction.label}
-            </Button>
-          )}
+          ))}
         </div>
       )}
 
-      {/* Custom content slot */}
       {children}
     </div>
   )
