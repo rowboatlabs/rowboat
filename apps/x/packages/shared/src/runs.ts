@@ -85,6 +85,12 @@ export const RunStoppedEvent = BaseRunEvent.extend({
     reason: z.enum(["user-requested", "force-stopped"]).optional(),
 });
 
+export const ParallelDispatchEvent = BaseRunEvent.extend({
+    type: z.literal("parallel-dispatch"),
+    toolCallIds: z.array(z.string()),
+    toolNames: z.array(z.string()),
+});
+
 export const RunEvent = z.union([
     RunProcessingStartEvent,
     RunProcessingEndEvent,
@@ -100,6 +106,7 @@ export const RunEvent = z.union([
     ToolPermissionResponseEvent,
     RunErrorEvent,
     RunStoppedEvent,
+    ParallelDispatchEvent,
 ]);
 
 export const ToolPermissionAuthorizePayload = ToolPermissionResponseEvent.pick({

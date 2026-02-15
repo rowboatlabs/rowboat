@@ -1236,6 +1236,11 @@ function App() {
         setModelUsage(null)
         break
 
+      case 'parallel-dispatch':
+        if (!isActiveRun) return
+        console.log(`[Parallel] Dispatching ${event.toolCallIds.length} tools in parallel:`, event.toolNames)
+        break
+
       case 'llm-stream-event':
         {
           const llmEvent = event.event
