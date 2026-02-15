@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Rowboat</title>
+    <title>OpenClaw</title>
     <style>
       /* Prevent flash of white background before CSS loads */
       html, body { margin: 0; padding: 0; }
@@ -14,7 +14,7 @@
     <script>
       // Apply theme class immediately before render
       (function() {
-        var stored = localStorage.getItem('rowboat-theme');
+        var stored = localStorage.getItem('openclaw-theme');
         var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         var theme = stored || 'system';
         var resolved = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;

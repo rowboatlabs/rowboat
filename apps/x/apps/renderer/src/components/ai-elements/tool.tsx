@@ -18,6 +18,9 @@ import {
 } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement } from "react";
+
+const sectionHeader = "font-medium text-muted-foreground text-xs uppercase tracking-wide";
+
 const formatToolValue = (value: unknown) => {
   if (typeof value === "string") return value;
   try {
@@ -135,9 +138,7 @@ export type ToolInputProps = ComponentProps<"div"> & {
 
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
   <div className={cn("space-y-2 overflow-hidden p-4", className)} {...props}>
-    <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-      Parameters
-    </h4>
+    <h4 className={sectionHeader}>Parameters</h4>
     <div className="rounded-md border bg-muted/50 p-4 text-foreground">
       <ToolCode code={formatToolValue(input ?? {})} />
     </div>
@@ -169,9 +170,7 @@ export const ToolOutput = ({
 
   return (
     <div className={cn("space-y-2 p-4", className)} {...props}>
-      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        {errorText ? "Error" : "Result"}
-      </h4>
+      <h4 className={sectionHeader}>{errorText ? "Error" : "Result"}</h4>
       <div
         className={cn(
           "overflow-x-auto rounded-md border p-4 text-xs [&_table]:w-full",
