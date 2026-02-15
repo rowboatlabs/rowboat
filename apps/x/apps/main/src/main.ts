@@ -28,15 +28,24 @@ const __dirname = dirname(__filename);
 // run this as early in the main process as possible
 if (started) app.quit();
 
+// Gracefully ignore EPIPE errors on stdout/stderr (broken pipe from dev tooling)
+process.stdout?.on?.("error", (err: NodeJS.ErrnoException) => { if (err.code !== "EPIPE") throw err; });
+process.stderr?.on?.("error", (err: NodeJS.ErrnoException) => { if (err.code !== "EPIPE") throw err; });
+
+// In dev mode, Electron sets process.defaultApp = true. This is more reliable
+// than app.isPackaged because the esbuild-bundled .cjs can confuse isPackaged.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Electron-specific property not in Node types
+const isDev = !!(process as any).defaultApp;
+
 // Path resolution differs between development and production:
-const preloadPath = app.isPackaged
-  ? path.join(__dirname, "../preload/dist/preload.js")
-  : path.join(__dirname, "../../../preload/dist/preload.js");
+const preloadPath = isDev
+  ? path.join(__dirname, "../../../preload/dist/preload.js")
+  : path.join(__dirname, "../preload/dist/preload.js");
 console.log("preloadPath", preloadPath);
 
-const rendererPath = app.isPackaged
-  ? path.join(__dirname, "../renderer/dist") // Production
-  : path.join(__dirname, "../../../renderer/dist"); // Development
+const rendererPath = isDev
+  ? path.join(__dirname, "../../../renderer/dist") // Development
+  : path.join(__dirname, "../renderer/dist"); // Production
 console.log("rendererPath", rendererPath);
 
 // Register custom protocol for serving built renderer files in production.
@@ -77,7 +86,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
-    show: false, // Don't show until ready
+    show: true, // Show immediately to prevent invisible window issues
     backgroundColor: "#252525", // Prevent white flash (matches dark mode)
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 12, y: 12 },
@@ -112,21 +121,21 @@ function createWindow() {
     }
   });
 
-  if (app.isPackaged) {
-    win.loadURL("app://-/index.html");
-  } else {
+  if (isDev) {
     win.loadURL("http://localhost:5173");
+  } else {
+    win.loadURL("app://-/index.html");
   }
 }
 
 app.whenReady().then(async () => {
   // Register custom protocol before creating window (for production builds)
-  if (app.isPackaged) {
+  if (!isDev) {
     registerAppProtocol();
   }
 
   // Initialize auto-updater (only in production)
-  if (app.isPackaged) {
+  if (!isDev) {
     updateElectronApp({
       updateSource: {
         type: UpdateSourceType.ElectronPublicUpdateService,

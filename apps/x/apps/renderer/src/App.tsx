@@ -34,11 +34,12 @@ import {
   type FileMention,
 } from '@/components/ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
-import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
+import { TypingIndicator } from '@/components/ai-elements/typing-indicator';
+import { ShortcutHint } from '@/components/ui/keyboard-shortcut';
 import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
@@ -368,7 +369,7 @@ function ChatInputInner({
   }, [controller])
 
   return (
-    <div className="flex items-center gap-2 bg-background border border-border rounded-lg shadow-none px-4 py-4">
+    <div className="flex items-center gap-2 bg-card/60 backdrop-blur-sm border border-border/50 rounded-2xl shadow-sm px-4 py-4 transition-all duration-200 focus-within:ring-2 focus-within:ring-primary/15 focus-within:border-primary/30 focus-within:shadow-md">
       <PromptInputTextarea
         placeholder="Type your message..."
         onKeyDown={handleKeyDown}
@@ -1233,6 +1234,11 @@ function App() {
         setCurrentAssistantMessage('')
         setCurrentReasoning('')
         setModelUsage(null)
+        break
+
+      case 'parallel-dispatch':
+        if (!isActiveRun) return
+        console.log(`[Parallel] Dispatching ${event.toolCallIds.length} tools in parallel:`, event.toolNames)
         break
 
       case 'llm-stream-event':
@@ -2395,10 +2401,14 @@ function App() {
                   <ScrollPositionPreserver />
                   <ConversationContent className={conversationContentClassName}>
                     {!hasConversation ? (
-                      <ConversationEmptyState className="h-auto">
-                        <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
+                      <ConversationEmptyState className="h-auto space-y-3">
+                        <h2 className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
                           What are we working on?
-                        </div>
+                        </h2>
+                        <p className="text-sm text-muted-foreground/60">
+                          Ask anything, or pick a suggestion below
+                        </p>
+                        <ShortcutHint keys={["Enter"]} label="Press" size="sm" className="justify-center text-muted-foreground/40" />
                       </ConversationEmptyState>
                     ) : (
                       <>
@@ -2452,11 +2462,7 @@ function App() {
                         )}
 
                         {isProcessing && !currentAssistantMessage && !currentReasoning && (
-                          <Message from="assistant">
-                            <MessageContent>
-                              <Shimmer duration={1}>Thinking...</Shimmer>
-                            </MessageContent>
-                          </Message>
+                          <TypingIndicator label="Thinking" />
                         )}
                       </>
                     )}

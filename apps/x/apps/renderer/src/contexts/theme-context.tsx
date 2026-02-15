@@ -12,7 +12,7 @@ type ThemeContextProps = {
 
 const ThemeContext = React.createContext<ThemeContextProps | null>(null)
 
-const STORAGE_KEY = "rowboat-theme"
+const STORAGE_KEY = "openclaw-theme"
 
 function getSystemTheme(): "light" | "dark" {
   if (typeof window === "undefined") return "light"

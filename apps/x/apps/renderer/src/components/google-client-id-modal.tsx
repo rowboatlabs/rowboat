@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 const GOOGLE_CLIENT_ID_SETUP_GUIDE_URL =
-  "https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md"
+  "https://github.com/openclaw-ai/openclaw/blob/main/google-setup.md"
 
 interface GoogleClientIdModalProps {
   open: boolean

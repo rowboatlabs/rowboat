@@ -852,7 +852,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         )}
 
         <Button onClick={handleComplete} size="lg" className="mt-8 w-full max-w-xs">
-          Start Using Rowboat
+          Start Using OpenClaw
         </Button>
       </div>
     )

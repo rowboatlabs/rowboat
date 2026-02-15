@@ -279,7 +279,7 @@ export class StreamStepMessageBuilder {
 }
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
-    if (id === "copilot" || id === "rowboatx") {
+    if (id === "copilot" || id === "openclaw" || id === "rowboatx") {
         return CopilotAgent;
     }
 
@@ -583,6 +583,36 @@ export class AgentState {
                 delete this.pendingAskHumanRequests[ogEvent.toolCallId];
                 break;
             }
+            // Informational events — no state mutation needed
+            case "parallel-dispatch":
+            case "run-processing-start":
+            case "run-processing-end":
+            case "llm-stream-event":
+            case "tool-invocation":
+            case "tool-result":
+            case "error":
+            case "run-stopped":
+                break;
+        }
+    }
+}
+
+/** Interleave events from multiple async generators, yielding values as they arrive. */
+async function* mergeAsyncGenerators<T>(generators: AsyncGenerator<T>[]): AsyncGenerator<T> {
+    if (generators.length === 0) return;
+    if (generators.length === 1) { yield* generators[0]; return; }
+
+    const pending = new Map<number, Promise<{ idx: number; result: IteratorResult<T> }>>();
+    for (let i = 0; i < generators.length; i++) {
+        pending.set(i, generators[i].next().then(result => ({ idx: i, result })));
+    }
+    while (pending.size > 0) {
+        const { idx, result } = await Promise.race(pending.values());
+        if (result.done) {
+            pending.delete(idx);
+        } else {
+            yield result.value;
+            pending.set(idx, generators[idx].next().then(r => ({ idx, result: r })));
         }
     }
 }
@@ -635,21 +665,19 @@ export async function* streamAgent({
         const loopLogger = logger.child(`iter-${loopCounter}`);
         loopLogger.log('starting loop iteration');
 
-        // execute any pending tool calls
+        // ── Execute pending tool calls (parallel when possible) ──
+        // Partition into: skipped (ask-human, denied, pending-permission) vs executable
+        const executableToolCalls: Array<{ id: string; toolCall: z.infer<typeof ToolCallPart> }> = [];
         for (const toolCallId of Object.keys(state.pendingToolCalls)) {
             const toolCall = state.toolCallIdMap[toolCallId];
             const _logger = loopLogger.child(`tc-${toolCallId}-${toolCall.toolName}`);
-            _logger.log('processing');
 
-            // if ask-human, skip
             if (toolCall.toolName === "ask-human") {
                 _logger.log('skipping, reason: ask-human');
                 continue;
             }
-
-            // if tool has been denied, deny
             if (state.deniedToolCallIds[toolCallId]) {
-                _logger.log('returning denied tool message, reason: tool has been denied');
+                _logger.log('returning denied tool message');
                 yield* processEvent({
                     runId,
                     messageId: await idGenerator.next(),
@@ -657,58 +685,117 @@ export async function* streamAgent({
                     message: {
                         role: "tool",
                         content: "Unable to execute this tool: Permission was denied.",
-                        toolCallId: toolCallId,
+                        toolCallId,
                         toolName: toolCall.toolName,
                     },
                     subflow: [],
                 });
                 continue;
             }
-
-            // if permission is pending on this tool call, skip execution
             if (state.pendingToolPermissionRequests[toolCallId]) {
                 _logger.log('skipping, reason: permission is pending');
                 continue;
             }
-
-            // execute approved tool
-            // Check abort before starting tool execution
             if (signal.aborted) {
                 _logger.log('skipping, reason: aborted');
                 break;
             }
-            _logger.log('executing tool');
+            executableToolCalls.push({ id: toolCallId, toolCall });
+        }
+
+        // Further partition executables into agent sub-flows vs regular tools
+        const agentCalls: typeof executableToolCalls = [];
+        const regularCalls: typeof executableToolCalls = [];
+        for (const entry of executableToolCalls) {
+            const toolDef = agent.tools![entry.toolCall.toolName];
+            if (toolDef.type === "agent") {
+                agentCalls.push(entry);
+            } else {
+                regularCalls.push(entry);
+            }
+        }
+
+        const isParallel = executableToolCalls.length > 1;
+        if (isParallel) {
+            loopLogger.log(`parallel dispatch: ${executableToolCalls.length} tools (${agentCalls.length} agents, ${regularCalls.length} regular)`);
+            yield* processEvent({
+                runId,
+                type: "parallel-dispatch",
+                toolCallIds: executableToolCalls.map(e => e.id),
+                toolNames: executableToolCalls.map(e => e.toolCall.toolName),
+                subflow: [],
+            });
+        }
+
+        // Emit tool-invocation events for all executable tools upfront
+        for (const { id, toolCall } of executableToolCalls) {
+            loopLogger.child(`tc-${id}-${toolCall.toolName}`).log('executing tool');
             yield* processEvent({
                 runId,
                 type: "tool-invocation",
-                toolCallId,
+                toolCallId: id,
                 toolName: toolCall.toolName,
                 input: JSON.stringify(toolCall.arguments ?? {}),
                 subflow: [],
             });
-            let result: unknown = null;
-            if (agent.tools![toolCall.toolName].type === "agent") {
-                const subflowState = state.subflowStates[toolCallId];
-                for await (const event of streamAgent({
-                    state: subflowState,
-                    idGenerator,
-                    runId,
-                    messageQueue,
-                    modelConfigRepo,
-                    signal,
-                    abortRegistry,
-                })) {
-                    yield* processEvent({
-                        ...event,
-                        subflow: [toolCallId, ...event.subflow],
-                    });
-                }
-                if (!subflowState.getPendingAskHumans().length && !subflowState.getPendingPermissions().length) {
-                    result = subflowState.finalResponse();
-                }
-            } else {
-                result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments, { runId, signal, abortRegistry });
+        }
+
+        // Execute regular (non-agent) tools in parallel
+        const regularResults = new Map<string, { toolCall: z.infer<typeof ToolCallPart>; result: unknown }>();
+        if (regularCalls.length > 0) {
+            const results = await Promise.all(
+                regularCalls.map(async ({ id, toolCall }) => {
+                    const result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments, { runId, signal, abortRegistry });
+                    return { id, toolCall, result };
+                })
+            );
+            for (const { id, toolCall, result } of results) {
+                regularResults.set(id, { toolCall, result });
             }
+        }
+
+        // Execute agent sub-flows in parallel via merged generators
+        const agentResults = new Map<string, { toolCall: z.infer<typeof ToolCallPart>; result: unknown }>();
+        if (agentCalls.length > 0) {
+            const generators = agentCalls.map(({ id }) => {
+                const subflowState = state.subflowStates[id];
+                // Wrap sub-agent generator to prefix subflow path
+                return (async function* () {
+                    for await (const event of streamAgent({
+                        state: subflowState,
+                        idGenerator,
+                        runId,
+                        messageQueue,
+                        modelConfigRepo,
+                        signal,
+                        abortRegistry,
+                    })) {
+                        yield { id, event };
+                    }
+                })();
+            });
+
+            for await (const { id, event } of mergeAsyncGenerators(generators)) {
+                yield* processEvent({
+                    ...event,
+                    subflow: [id, ...event.subflow],
+                });
+            }
+
+            // Collect results from completed sub-agents
+            for (const { id, toolCall } of agentCalls) {
+                const subflowState = state.subflowStates[id];
+                if (!subflowState.getPendingAskHumans().length && !subflowState.getPendingPermissions().length) {
+                    agentResults.set(id, { toolCall, result: subflowState.finalResponse() });
+                } else {
+                    agentResults.set(id, { toolCall, result: undefined });
+                }
+            }
+        }
+
+        // Emit tool-result and message events for all completed tools
+        const allResults = [...regularResults.entries(), ...agentResults.entries()];
+        for (const [, { toolCall, result }] of allResults) {
             const resultPayload = result === undefined ? null : result;
             const resultMsg: z.infer<typeof ToolMessage> = {
                 role: "tool",

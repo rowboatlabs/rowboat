@@ -20,7 +20,7 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
-import { Shimmer } from '@/components/ai-elements/shimmer'
+import { TypingIndicator } from '@/components/ai-elements/typing-indicator'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
@@ -551,11 +551,7 @@ export function ChatSidebar({
                 )}
 
                 {isProcessing && !currentAssistantMessage && !currentReasoning && (
-                  <Message from="assistant">
-                    <MessageContent>
-                      <Shimmer duration={1}>Thinking...</Shimmer>
-                    </MessageContent>
-                  </Message>
+                  <TypingIndicator label="Thinking" />
                 )}
               </>
             )}
@@ -574,7 +570,7 @@ export function ChatSidebar({
               className="mb-3"
             />
           )}
-          <div className="flex items-center gap-2 bg-background border border-border rounded-lg shadow-none px-4 py-2.5">
+          <div className="flex items-center gap-2 bg-card/60 backdrop-blur-sm border border-border/50 rounded-2xl shadow-sm px-4 py-2.5 transition-all duration-200 focus-within:ring-2 focus-within:ring-primary/15 focus-within:border-primary/30 focus-within:shadow-md">
             <div className="relative flex-1 min-w-0">
               {mentionHighlights.hasHighlights && (
                 <div
