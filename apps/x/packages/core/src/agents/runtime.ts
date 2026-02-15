@@ -279,7 +279,7 @@ export class StreamStepMessageBuilder {
 }
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
-    if (id === "copilot" || id === "rowboatx") {
+    if (id === "copilot" || id === "openclaw" || id === "rowboatx") {
         return CopilotAgent;
     }
 

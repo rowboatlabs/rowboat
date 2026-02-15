@@ -1,6 +1,6 @@
 {
-    "name": "rowboat",
-    "productName": "Rowboat",
+    "name": "openclaw",
+    "productName": "OpenClaw",
     "description": "AI coworker with memory",
     "type": "module",
     "version": "0.1.0",

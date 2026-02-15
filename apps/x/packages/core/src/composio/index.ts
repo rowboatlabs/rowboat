@@ -1,4 +1,4 @@
-// Composio integration for Rowboat X
+// Composio integration for OpenClaw
 
 export * from './types.js';
 export * from './client.js';

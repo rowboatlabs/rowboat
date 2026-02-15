@@ -97,7 +97,7 @@ export async function registerClient(
   issuerUrl: string,
   redirectUris: string[],
   scopes: string[],
-  clientName: string = 'RowboatX Desktop App'
+  clientName: string = 'OpenClaw Desktop App'
 ): Promise<{ config: client.Configuration; registration: ClientRegistrationResponse }> {
   console.log(`[OAuth] Registering client via DCR at ${issuerUrl}...`);
   const config = await client.dynamicClientRegistration(
