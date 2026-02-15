@@ -28,6 +28,7 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
                 headers,
             });
         case "anthropic":
+        case "anthropic-subscription":
             return createAnthropic({
                 apiKey,
                 baseURL,
