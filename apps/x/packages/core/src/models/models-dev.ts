@@ -110,12 +110,13 @@ function scoreProvider(flavor: string, id: string, name: string): number {
 
 function pickProvider(
   data: z.infer<typeof ModelsDevResponse>,
-  flavor: "openai" | "anthropic" | "google",
+  flavor: "openai" | "anthropic" | "google" | "anthropic-subscription",
 ): z.infer<typeof ModelsDevProvider> | null {
-  if (data[flavor]) return data[flavor];
+  const lookupFlavor = flavor === "anthropic-subscription" ? "anthropic" : flavor;
+  if (data[lookupFlavor]) return data[lookupFlavor];
   let best: { score: number; provider: z.infer<typeof ModelsDevProvider> } | null = null;
   for (const [id, provider] of Object.entries(data)) {
-    const s = scoreProvider(flavor, id, provider.name);
+    const s = scoreProvider(lookupFlavor, id, provider.name);
     if (s <= 0) continue;
     if (!best || s > best.score) {
       best = { score: s, provider };
@@ -158,14 +159,15 @@ function normalizeModels(models: Record<string, z.infer<typeof ModelsDevModel>>)
 export async function listOnboardingModels(): Promise<{ providers: ProviderSummary[]; lastUpdated?: string }> {
   const { data, fetchedAt } = await getModelsDevData();
   const providers: ProviderSummary[] = [];
-  const flavors: Array<"openai" | "anthropic" | "google"> = ["openai", "anthropic", "google"];
+  const flavors: Array<"openai" | "anthropic" | "google" | "anthropic-subscription"> = ["openai", "anthropic", "google", "anthropic-subscription"];
 
   for (const flavor of flavors) {
-    const provider = pickProvider(data, flavor);
+    const lookupFlavor = flavor === "anthropic-subscription" ? "anthropic" : flavor;
+    const provider = pickProvider(data, lookupFlavor);
     if (!provider) continue;
     providers.push({
       id: flavor,
-      name: provider.name,
+      name: flavor === "anthropic-subscription" ? "Claude Subscription" : provider.name,
       models: normalizeModels(provider.models),
     });
   }
