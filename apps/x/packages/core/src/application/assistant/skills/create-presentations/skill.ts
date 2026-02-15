@@ -1,25 +1,19 @@
 export const skill = String.raw`
-# PDF Presentation Generator Skill
+# PDF Presentation Skill
 
-## When to Use
+## Theme Selection
 
-Activate when the user wants to create presentations, slide decks, or pitch decks.
+If the user specifies a visual theme, colors, or brand guidelines, use those. If they do NOT specify a theme, **do not ask** — pick the best fit based on the topic and audience:
 
-## Theme Selection (Do This First)
+- **Dark Professional** — Deep navy/charcoal backgrounds, indigo (#6366f1) and violet (#8b5cf6) accents, white text. Best for: tech, SaaS, keynotes, engineering.
+- **Light Editorial** — White/warm cream backgrounds, amber (#f59e0b) and stone accents, dark text with serif headings. Best for: reports, proposals, thought leadership, research.
+- **Bold Vibrant** — Mixed dark and light slides, emerald (#10b981) and rose (#f43e5c) accents, high contrast. Best for: pitch decks, marketing, creative, fundraising.
 
-Before creating any slides, check if the user has specified a visual theme or style. If they have NOT provided theme preferences, present 3 options for them to choose from:
-
-**Option A: Dark Professional** — Deep navy/charcoal backgrounds, indigo (#6366f1) and violet (#8b5cf6) accents, white text. Best for: tech, SaaS, keynotes.
-
-**Option B: Light Editorial** — White/warm cream backgrounds, amber (#f59e0b) and stone accents, dark text with serif headings. Best for: reports, proposals, thought leadership.
-
-**Option C: Bold Vibrant** — Mixed dark and light slides, emerald (#10b981) and rose (#f43e5c) accents, high contrast. Best for: pitch decks, marketing, creative.
-
-Wait for the user to pick before proceeding. If the user describes a custom theme (colors, mood, brand), use that instead.
+Note the theme used at the end of delivery so the user can request a swap if they prefer a different look.
 
 ## Visual Consistency Rules
 
-**Every presentation must have a unified color theme applied across ALL slides.** Do not mix unrelated color palettes between slides.
+Every presentation must have a unified color theme applied across ALL slides. Do not mix unrelated color palettes between slides.
 
 1. **Define a theme palette upfront** — Pick one primary color, one accent color, and one neutral base (dark or light). Use these consistently across every slide.
 2. **Backgrounds** — Use at most 2-3 background variations (e.g. dark base, light base, and primary color). Alternate them for rhythm but keep them from the same palette.
@@ -28,67 +22,110 @@ Wait for the user to pick before proceeding. If the user describes a custom them
 5. **Charts and data** — Use shades/tints of the primary and accent colors for chart fills. Never introduce one-off colors that don't appear elsewhere in the deck.
 6. **Consistent fonts** — Pick one heading font and one body font. Use them on every slide. Don't mix different heading fonts across slides.
 
+## Critical: One Theme Per Deck
+
+The example layouts in this document each use different colors and styles for showcase purposes only. When building an actual presentation, pick ONE theme and apply it consistently to EVERY slide. Borrow layout structures and patterns from the examples, but replace all colors, fonts, and backgrounds with your chosen theme's palette. Never copy the example colors verbatim — adapt them to the unified theme.
+
+### Visual Consistency Rules
+
+Every presentation must have a unified color theme applied across ALL slides. This is the #1 most important design rule. A deck where every slide looks like it belongs together is always better than a deck with individually beautiful but visually inconsistent slides.
+
+#### Background Strategy (STRICT)
+Pick ONE dominant background tone and use it for 80%+ of slides. Add subtle variation within that tone — never alternate between dark and light backgrounds.
+
+##### For dark themes:
+
+Deep base (e.g. #0f172a) — use for title, section dividers, closing (primary background)
+Medium base (e.g. #1e293b or #111827) — use for content slides, charts, tables (secondary background)
+Accent pop (e.g. #6366f1) — use for 1-2 key stat or quote slides only (rare emphasis)
+NEVER use white or light backgrounds in a dark-themed deck. Data tables, team grids, and other content that "feels light" should still use the dark palette with adjusted contrast.
+
+##### For light themes:
+
+Light base (e.g. #fafaf9 or #ffffff) — use for most content slides (primary background)
+Warm tint (e.g. #fefce8 or #f8fafc) — use for alternation and visual rhythm (secondary background)
+Accent pop (e.g. the theme's primary color) — use for 1-2 key stat or quote slides only (rare emphasis)
+NEVER use dark/navy backgrounds in a light-themed deck.
+
+Never alternate between dark and light backgrounds. This creates a jarring strobe effect and breaks visual cohesion. The audience's eyes have to constantly readjust. Instead, create rhythm through subtle shade variation within the same tone family.
+Never use more than 3 background color values across the entire deck.
+
+#### Color & Typography Rules
+
+Define a theme palette upfront — Pick one primary color, one accent color, and one neutral base (dark or light). Use these consistently across every slide. Write these as CSS variables and reference them everywhere.
+Accent color — Use the SAME accent color for ALL highlights across the entire deck: overlines, bullets, icons, chart fills, timeline dots, CTA buttons, divider lines. Do not use different accent colors on different slides.
+Typography colors — Headings, body text, and muted text should use the same tones on every slide. Don't switch between warm and cool grays mid-deck.
+Charts and data — Use shades/tints of the primary and accent colors for chart fills. Never introduce one-off colors that don't appear elsewhere in the deck.
+Consistent fonts — Pick one heading font and one body font. Use them on every slide. Don't mix different heading fonts across slides.
+
+#### Title Slide Rules
+
+Title text must span the FULL slide width. Never place a decorative element beside the title that competes for horizontal space.
+Title slides should use a single-column, vertically-stacked layout: overline → title → subtitle → optional tags/pills. No side-by-side elements on title slides.
+If a decorative visual is needed, place it BEHIND the text (as a CSS background, gradient, or pseudo-element), never beside it.
+Title font-size must not exceed 64px. For titles longer than 5 words, use 48px max.
+
+## Content Planning (Do This Before Building)
+
+Before writing any HTML, plan the narrative arc:
+
+1. **Hook** — What's the opening statement or question that grabs attention?
+2. **Core argument** — What's the one thing the audience should remember?
+3. **Supporting evidence** — What data, examples, or frameworks back it up?
+4. **Call to action** — What should the audience do next?
+
+Map each point to a slide layout from the Available Layout Types below. For a typical presentation, generate **8-15 slides**: title + agenda (optional) + 6-10 content slides + closing. Don't pad with filler — every slide should earn its place. Use layout variety — never use the same layout for consecutive slides.
+
 ## Workflow
 
 1. Use workspace-readFile to check knowledge/ for relevant context about the company, product, team, etc.
-2. Ensure Playwright is installed: 'npm install playwright && npx playwright install chromium'
+2. Ensure Playwright is installed: \`npm install playwright && npx playwright install chromium\`
 3. Use workspace-getRoot to get the workspace root path.
-4. Use workspace-writeFile to create the HTML file at tmp/presentation.html (workspace-relative) with slides (1280x720px each).
-5. Use workspace-writeFile to create a Node.js conversion script at tmp/convert.js (workspace-relative):
+4. Plan the narrative arc and slide outline (see Content Planning above).
+5. Use workspace-writeFile to create the HTML file at tmp/presentation.html (workspace-relative) with slides (1280x720px each).
+6. **Perform the Post-Generation Validation (see below). Fix any issues before proceeding.**
+7. Use workspace-writeFile to create the conversion script at tmp/convert.js (workspace-relative) — see Playwright Export section.
+8. Run it: \`node <WORKSPACE_ROOT>/tmp/convert.js\`
+9. Tell the user: "Your presentation is ready at ~/Desktop/presentation.pdf" and note the theme used.
 
-~~~javascript
-// save as tmp/convert.js via workspace-writeFile
-const { chromium } = require('playwright');
-const path = require('path');
+**Critical**: Never show HTML code to the user. Never ask the user to run commands, install packages, or make technical decisions. The entire pipeline from content to PDF must be invisible to the user.
 
-(async () => {
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  // Use the workspace root path from workspace-getRoot
-  await page.goto('file://<WORKSPACE_ROOT>/tmp/presentation.html', { waitUntil: 'networkidle' });
-  await page.pdf({
-    path: path.join(process.env.HOME, 'Desktop', 'presentation.pdf'),
-    width: '1280px',
-    height: '720px',
-    printBackground: true,
-  });
-  await browser.close();
-  console.log('Done: ~/Desktop/presentation.pdf');
-})();
-~~~
-
-Replace <WORKSPACE_ROOT> with the actual absolute path returned by workspace-getRoot.
-
-6. Perform the Post-Generation Validation (see below). Fix any issues before proceeding.
-7. Run it: 'node <WORKSPACE_ROOT>/tmp/convert.js'
-8. Tell the user: "Your presentation is ready at ~/Desktop/presentation.pdf"
-
-Do NOT show HTML code to the user. Do NOT explain how to export. Just create the PDF and deliver it.
 Use workspace-writeFile and workspace-readFile for ALL file operations. Do NOT use executeCommand to write or read files.
 
 ## Post-Generation Validation (REQUIRED)
 
-After generating the slide HTML, perform these checks before converting to PDF:
+After generating the slide HTML, perform ALL of these checks before converting to PDF:
 
-1. **Title overflow check**: For every slide, verify that the title text at its set font-size fits within the slide width (960px) minus padding. If title chars x ~0.6 x font-size > available-width, reduce font-size.
-2. **Content bounds check**: Verify no element extends beyond the 960x540 slide boundary. Look for: long titles, bullet lists with 5+ items, wide tables, long labels on charts.
-3. **Broken visuals check**: Confirm no <img> tags reference external URLs. All visuals must be CSS, SVG, or emoji only.
-4. **Font loading check**: Verify the Google Fonts <link> tag includes ALL font families used in the CSS. Missing fonts cause fallback rendering.
-5. **Fix before proceeding**: If any check fails, fix the HTML before PDF conversion. Do not proceed with known issues.
+1. **Title overflow check**: For every slide, verify that the title text at its set font-size fits within the slide width (1280px) minus padding (120px total). If \`title_chars × 0.6 × font_size > 1160\`, reduce font-size. Use these max sizes:
+   - Short titles (1-3 words): 72px max
+   - Medium titles (4-6 words): 56px max
+   - Long titles (7+ words): 44px max
+   Apply \`word-wrap: break-word\` and \`overflow-wrap: break-word\` to all title elements. Never use \`white-space: nowrap\` on titles.
+
+2. **Content bounds check**: Verify no element extends beyond the 1280x720 slide boundary. Look for: long titles, bullet lists with 6+ items, wide tables, long labels on charts, text that wraps more lines than the available height allows.
+
+3. **Broken visuals check**: Confirm no \`<img>\` tags reference external URLs. All visuals must be CSS, SVG, or emoji only. Never use external images — they will fail in PDF rendering. Use CSS shapes, gradients, SVG, or emoji for all visual elements.
+
+4. **Font loading check**: Verify the Google Fonts \`<link>\` tag includes ALL font families used in the CSS. Missing fonts cause fallback rendering and broken typography.
+
+5. **Theme consistency check**: Confirm all slides use the same palette — no rogue colors in charts, backgrounds, or text that don't belong to the chosen theme.
+
+6. **Fix before proceeding**: If any check fails, fix the HTML before PDF conversion. Do not proceed with known issues.
 
 ## PDF Export Rules
 
-**These rules prevent rendering issues in PDF. Violating them causes overlapping rectangles and broken layouts.**
+These rules prevent rendering issues in PDF. Violating them causes overlapping rectangles and broken layouts.
 
-1. **No layered elements** - Never create separate elements for backgrounds or shadows. Style content elements directly.
-2. **No box-shadow** - Use borders instead: \`border: 1px solid #e5e7eb\`
-3. **Bullets via CSS only** - Use \`li::before\` pseudo-elements, not separate DOM elements
-4. **Content must fit** - Slides are 1280x720px with 60px padding. Safe area is 1160x600px. Use \`overflow: hidden\`.
-5. **No footers or headers** - Never add fixed/absolute-positioned footer or header elements to slides. They overlap with content in PDF rendering. If you need a slide number or title, include it as part of the normal content flow.
+1. **No layered elements** — Never create separate elements for backgrounds or shadows. Style content elements directly.
+2. **No box-shadow** — Use borders instead: \`border: 1px solid #e5e7eb\`
+3. **Bullets via CSS only** — Use \`li::before\` pseudo-elements, not separate DOM elements.
+4. **Content must fit** — Slides are 1280x720px with 60px padding. Safe content area is 1160x600px. Use \`overflow: hidden\`.
+5. **No footers or headers** — Never add fixed/absolute-positioned footer or header elements to slides. They overlap with content in PDF rendering. If you need a slide number or title, include it as part of the normal content flow.
+6. **No external images** — All visuals must be CSS, SVG, or emoji. External image URLs will render as broken white boxes in PDF.
 
 ## Required CSS
 
-~~~css
+\`\`\`css
 @page { size: 1280px 720px; margin: 0; }
 html { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 .slide {
@@ -100,61 +137,124 @@ html { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !
   page-break-inside: avoid;
 }
 .slide:last-child { page-break-after: auto; }
-~~~
+\`\`\`
 
 ## Playwright Export
 
-~~~typescript
-import { chromium } from 'playwright';
+\`\`\`javascript
+// save as tmp/convert.js via workspace-writeFile
+const { chromium } = require('playwright');
+const path = require('path');
 
-const browser = await chromium.launch();
-const page = await browser.newPage();
-await page.goto('file://' + htmlPath, { waitUntil: 'networkidle' });
-await page.pdf({
-  path: '~/Desktop/presentation.pdf',
-  width: '1280px',
-  height: '720px',
-  printBackground: true,
-});
-await browser.close();
-~~~
+(async () => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  // Replace <WORKSPACE_ROOT> with the actual absolute path from workspace-getRoot
+  await page.goto('file://<WORKSPACE_ROOT>/tmp/presentation.html', { waitUntil: 'networkidle' });
+  await page.pdf({
+    path: path.join(process.env.HOME, 'Desktop', 'presentation.pdf'),
+    width: '1280px',
+    height: '720px',
+    printBackground: true,
+  });
+  await browser.close();
+  console.log('Done: ~/Desktop/presentation.pdf');
+})();
+\`\`\`
 
-## Example Slide Layouts Reference
+Replace \`<WORKSPACE_ROOT>\` with the actual absolute path returned by workspace-getRoot.
 
-Below are 20 production-ready slide layout templates. Use these as reference when building presentations. Pick the appropriate layout for each slide based on the content type. Mix and match layouts for visual variety — never use the same layout for every slide.
+## Available Layout Types (35 Templates)
 
-### Available Layout Types
+Use these as reference when building presentations. Pick the appropriate layout for each slide based on the content type. Mix and match for visual variety.
 
+### Title & Structure Slides
 1. **Title Slide (Dark Gradient)** — Hero opening with gradient text and atmospheric glow
 2. **Title Slide (Light Editorial)** — Clean, warm serif typography with editorial feel
 3. **Section Divider** — Chapter break with oversized background number
-4. **Big Statement / Quote** — Full-color background with bold quote or key takeaway
-5. **Bullet List (Split Panel)** — Dark sidebar title + light content area with icon bullets
-6. **Two Columns** — Side-by-side content cards
-7. **Three Columns with Icons** — Feature cards with icon accents
-8. **Bar Chart** — Vertical bars with gradient fills and labels
-9. **Donut Chart** — CSS conic-gradient donut with legend
-10. **Line Chart (SVG)** — SVG polyline with area fill and data labels
-11. **Horizontal Timeline** — Connected milestone dots on a horizontal axis
-12. **Vertical Timeline** — Left-rail progression of milestones
-13. **Process Flow** — Step cards connected with arrows
-14. **KPI Dashboard** — Color-coded metric cards with change indicators
-15. **Comparison / Vs** — Split layout with contrasting colors for A vs B
-16. **Pricing Table** — Tiered cards with featured highlight
-17. **Team Grid** — Avatar circles with role descriptions
-18. **Image + Text** — Visual panel left, content + CTA right
-19. **Funnel Diagram** — Tapered width bars showing conversion stages
-20. **Thank You / CTA** — Atmospheric closing with contact details
+4. **Agenda / Table of Contents** — Serif title with numbered items and descriptions
+5. **Full-Bleed Cinematic** — Atmospheric background with grid texture, orbs, and bottom-aligned content
+
+### Content Slides
+6. **Big Statement / Quote** — Full-color background with bold quote or key takeaway
+7. **Big Stat Number** — Single dramatic metric with context text
+8. **Bullet List (Split Panel)** — Dark sidebar title + light content area with icon bullets
+9. **Numbered List** — Ordered steps in numbered cards
+10. **Two Columns** — Side-by-side content cards
+11. **Three Columns with Icons** — Feature cards with icon accents
+12. **Image + Text** — Visual panel left, content + CTA right
+13. **Image Gallery (2x2)** — Grid of captioned visual cards using CSS gradient backgrounds
+
+### Chart & Data Slides
+14. **Bar Chart (Vertical)** — Vertical bars with gradient fills and labels
+15. **Horizontal Bar Chart** — Ranked bars for lists with long labels
+16. **Stacked Bar Chart** — Segmented bars showing composition/breakdown
+17. **Combo Chart (Bar + Line)** — SVG bars for volume + line for growth rate
+18. **Donut Chart** — CSS conic-gradient donut with legend
+19. **Line Chart (SVG)** — SVG polyline with area fill and data labels
+20. **KPI Dashboard** — Color-coded metric cards with change indicators
+21. **Data Table** — Styled rows with colored header and status badges
+22. **Feature Matrix** — Checkmark comparison table (features x tiers)
+
+### Diagram Slides
+23. **Horizontal Timeline** — Connected milestone dots on a horizontal axis
+24. **Vertical Timeline** — Left-rail progression of milestones
+25. **Process Flow** — Step cards connected with arrows
+26. **Funnel Diagram** — Tapered width bars showing conversion stages
+27. **Pyramid Diagram** — Tiered hierarchy showing levels/priorities
+28. **Cycle Diagram** — Flywheel/feedback loop with circular node arrangement
+29. **Venn Diagram** — Three translucent overlapping circles
+30. **2x2 Matrix** — Four color-coded quadrants with axis labels
+
+### Comparison Slides
+31. **Comparison / Vs** — Split layout with contrasting colors for A vs B
+32. **Pros & Cons** — Checkmarks vs. warnings in two columns
+33. **Pricing Table** — Tiered cards with featured highlight
+
+### People & Closing Slides
+34. **Team Grid** — Avatar circles with role descriptions
+35. **Thank You / CTA** — Atmospheric closing with contact details
+
+### Layout Selection Heuristic
+
+For each slide, identify the content type and pick the matching layout:
+
+| Content Type | Best Layouts |
+|---|---|
+| Opening / hook | Title Slide, Full-Bleed Cinematic |
+| Agenda / overview | Agenda/TOC |
+| Key metric or stat | Big Stat Number, KPI Dashboard |
+| List of points | Bullet List, Numbered List |
+| Features or pillars | Three Columns, Two Columns |
+| Trend over time | Line Chart, Horizontal Timeline |
+| Composition / breakdown | Donut Chart, Stacked Bar, Pie |
+| Ranking | Horizontal Bar Chart |
+| Comparison | Vs Slide, Pros & Cons |
+| Process or steps | Process Flow, Vertical Timeline |
+| Hierarchy | Pyramid Diagram |
+| Feedback loop | Cycle Diagram |
+| Overlap / intersection | Venn Diagram |
+| Prioritization | 2x2 Matrix |
+| Data details | Data Table, Feature Matrix |
+| Pricing | Pricing Table |
+| Emotional / cinematic | Big Statement, Full-Bleed Cinematic |
+| Team intro | Team Grid |
+| Closing | Thank You / CTA |
+
+Never use the same layout for consecutive slides. Alternate between dark and light backgrounds for rhythm.
 
 ### Design Guidelines
 
-- Use Google Fonts (DM Sans, Outfit, Playfair Display, Space Mono, Sora, Crimson Pro) loaded via \`<link>\` tag
+- Use Google Fonts loaded via \`<link>\` tag. Recommended pairings:
+  - **Primary pair**: Outfit (headings) + DM Sans (body) — works for most decks
+  - **Editorial pair**: Playfair Display (headings) + DM Sans (body) — for reports/proposals
+  - **Accent fonts**: Space Mono (overlines, labels), Crimson Pro (quotes)
 - Dark slides: use subtle radial gradients for atmosphere, semi-transparent overlays for depth
 - Light slides: use warm neutrals, clean borders, and ample whitespace
-- Charts: use CSS (conic-gradient for donuts, inline styles for bar heights) or inline SVG for line charts
-- Color palette: indigo (#6366f1), violet (#8b5cf6), emerald (#10b981), amber (#fbbf24), rose (#f43e5c)
-- Typography hierarchy: monospace overlines for labels, sans-serif for headings, serif for editorial/quotes
+- Charts: use CSS (conic-gradient for donuts, inline styles for bar heights) or inline SVG for line/combo charts
+- Typography hierarchy: monospace overlines for labels -> sans-serif for headings -> serif for editorial/quotes
 - Cards: use \`border-radius: 12-16px\`, subtle borders (\`rgba(255,255,255,0.08)\` on dark), no box-shadow (PDF rule)
+- All visuals must be CSS, SVG, or emoji — no external images
 
 ### HTML Template Examples
 
