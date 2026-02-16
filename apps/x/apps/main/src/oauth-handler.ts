@@ -53,10 +53,15 @@ function cancelActiveFlow(reason: string = 'cancelled'): void {
 
   // Only emit event for user-visible cancellations
   if (reason !== 'new_flow_started') {
+    const provider = activeFlow.provider;
+    const error = (reason === 'timed_out' && provider === 'google')
+      ? 'Timed out waiting for Google OAuth to finish. If your browser showed “Error 401: invalid_client”, double-check that you entered the OAuth Client ID (it should end with .apps.googleusercontent.com) and that it was created as a Desktop app OAuth client. Setup guide: https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md'
+      : `OAuth flow ${reason}`;
+
     emitOAuthEvent({
-      provider: activeFlow.provider,
+      provider,
       success: false,
-      error: `OAuth flow ${reason}`
+      error,
     });
   }
 

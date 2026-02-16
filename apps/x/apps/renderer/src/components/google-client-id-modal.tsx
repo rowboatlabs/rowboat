@@ -49,7 +49,7 @@ export function GoogleClientIdModal({
         <DialogHeader>
           <DialogTitle>Enter Google Client ID</DialogTitle>
           <DialogDescription>
-            This app does not store the client ID. You will be prompted each session.
+            Paste the OAuth Client ID (it should end with .apps.googleusercontent.com). Do not paste the client secret. This app does not store it, so you will be prompted each session.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
