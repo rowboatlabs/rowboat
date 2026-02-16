@@ -20,7 +20,6 @@ import {
   LoaderIcon,
   Settings,
   Square,
-  SquarePen,
   Trash2,
 } from "lucide-react"
 
@@ -1009,17 +1008,6 @@ function TasksSection({
 }) {
   return (
     <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
-      {/* Sticky New Chat button - matches Knowledge section height */}
-      <div className="sticky top-0 z-10 bg-sidebar border-b border-sidebar-border py-0.5">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton onClick={actions?.onNewChat} className="gap-2">
-              <SquarePen className="size-4 shrink-0" />
-              <span className="text-sm">New chat</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </div>
       <SidebarGroupContent className="flex-1 overflow-y-auto">
         {/* Background Tasks Section */}
         {backgroundTasks.length > 0 && (
