@@ -114,25 +114,38 @@ Click **Create Credentials → OAuth Client ID**
 
 Select:
 
-**Universal Windows Platform (UWP)**
+**Desktop app**
 
 - Name it anything (e.g. `Rowboat Desktop`)
-- Store ID can be anything (e.g. `test` )
 - Click **Create**
 
-![Create OAuth Client ID (UWP)](https://raw.githubusercontent.com/rowboatlabs/rowboat/main/apps/docs/docs/img/google-setup/05-create-oauth-client-uwp.png)
+> Note: Rowboat Desktop uses a local redirect URI during OAuth:
+>
+> `http://localhost:8080/oauth/callback`
 
 ---
 
 ## 7️⃣ Copy the Client ID
 
-After creation, Google will show:
+After creation, Google will show a **Client ID** (and sometimes a **Client Secret**).
 
-- **Client ID**
-- **Client Secret**
-
-Copy the **Client ID** and paste it into Rowboat where prompted.
+Copy the **Client ID** and paste it into Rowboat where prompted. (Rowboat uses PKCE and does not require the client secret.)
 
 ![Copy Client ID](https://raw.githubusercontent.com/rowboatlabs/rowboat/main/apps/docs/docs/img/google-setup/06-copy-client-id.png)
+
+---
+
+## Troubleshooting
+
+### Error 401: invalid_client ("The OAuth client was not found")
+
+- Make sure you pasted the **Client ID** (not the client secret, API key, service account, or project ID).
+- A Google OAuth Client ID typically looks like:
+  `xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com`
+- Ensure the OAuth Client was created in the same Google Cloud project where you enabled the Gmail/Calendar/Drive APIs.
+
+### OAuth times out / never returns to Rowboat
+
+- Make sure nothing else is using port `8080` and that your firewall allows `http://localhost:8080` connections.
 
 ---
