@@ -1056,21 +1056,23 @@ function TasksSection({
                       ) : null}
                       <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
                       {run.createdAt ? (
-                        <span className="shrink-0 text-[10px] text-muted-foreground group-hover/chat-item:hidden">
+                        <span className={`shrink-0 text-[10px] text-muted-foreground${processingRunIds?.has(run.id) ? '' : ' group-hover/chat-item:hidden'}`}>
                           {formatRunTime(run.createdAt)}
                         </span>
                       ) : null}
-                      <button
-                        type="button"
-                        className="shrink-0 hidden group-hover/chat-item:flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          actions?.onDeleteRun(run.id)
-                        }}
-                        aria-label="Delete chat"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
+                      {!processingRunIds?.has(run.id) && (
+                        <button
+                          type="button"
+                          className="shrink-0 hidden group-hover/chat-item:flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            actions?.onDeleteRun(run.id)
+                          }}
+                          aria-label="Delete chat"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      )}
                     </div>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
