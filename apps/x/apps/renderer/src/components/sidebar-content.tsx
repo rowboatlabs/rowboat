@@ -27,6 +27,15 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -1004,6 +1013,8 @@ function TasksSection({
   backgroundTasks?: BackgroundTaskItem[]
   selectedBackgroundTask?: string | null
 }) {
+  const [pendingDeleteRunId, setPendingDeleteRunId] = useState<string | null>(null)
+
   return (
     <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
       <SidebarGroupContent className="flex-1 overflow-y-auto">
@@ -1064,7 +1075,7 @@ function TasksSection({
                           className="shrink-0 hidden group-hover/chat-item:flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
                           onClick={(e) => {
                             e.stopPropagation()
-                            actions?.onDeleteRun(run.id)
+                            setPendingDeleteRunId(run.id)
                           }}
                           aria-label="Delete chat"
                         >
@@ -1079,6 +1090,35 @@ function TasksSection({
           </>
         )}
       </SidebarGroupContent>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!pendingDeleteRunId} onOpenChange={(open) => { if (!open) setPendingDeleteRunId(null) }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete chat</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this chat?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setPendingDeleteRunId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (pendingDeleteRunId) {
+                  actions?.onDeleteRun(pendingDeleteRunId)
+                }
+                setPendingDeleteRunId(null)
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SidebarGroup>
   )
 }
