@@ -666,7 +666,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
               <Input
                 value={activeConfig.model}
                 onChange={(e) => updateProviderConfig(llmProvider, { model: e.target.value })}
-                placeholder="Enter model ID"
+                placeholder="Enter model"
               />
             ) : (
               <Select
