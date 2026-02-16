@@ -22,8 +22,9 @@ import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
-import { testModelConnection } from '@x/core/dist/models/models.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
+import type { ILlmService } from '@x/core/dist/execution/llm-service.js';
+import type { ISttService } from '@x/core/dist/execution/stt-service.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
@@ -356,7 +357,8 @@ export function setupIpcHandlers() {
       return await listOnboardingModels();
     },
     'models:test': async (_event, args) => {
-      return await testModelConnection(args.provider, args.model);
+      const llmService = container.resolve<ILlmService>('llmService');
+      return await llmService.testConnection(args.provider, args.model);
     },
     'models:saveConfig': async (_event, args) => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
@@ -472,6 +474,11 @@ export function setupIpcHandlers() {
       }
       const error = await shell.openPath(filePath);
       return { error: error || undefined };
+    },
+    'stt:transcribe': async (_event, args) => {
+      const sttService = container.resolve<ISttService>('sttService');
+      const transcript = await sttService.transcribe(args.audioBase64, args.mimeType);
+      return { transcript };
     },
     'shell:readFileBase64': async (_event, args) => {
       let filePath = args.path;

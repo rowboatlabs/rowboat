@@ -401,6 +401,10 @@ const ipcSchemas = {
     req: z.object({ path: z.string() }),
     res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
   },
+  'stt:transcribe': {
+    req: z.object({ audioBase64: z.string(), mimeType: z.string() }),
+    res: z.object({ transcript: z.string().nullable() }),
+  },
 } as const;
 
 // ============================================================================

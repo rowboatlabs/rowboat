@@ -13,8 +13,8 @@ import {
 import container from '@x/core/dist/di/container.js';
 import { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
-import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
+import type { IGmailService } from '@x/core/dist/execution/gmail-service.js';
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
 import { emitOAuthEvent } from './ipc.js';
 
@@ -220,7 +220,7 @@ export async function connectProvider(provider: string, clientId?: string): Prom
 
         // Trigger immediate sync for relevant providers
         if (provider === 'google') {
-          triggerGmailSync();
+          container.resolve<IGmailService>('gmailService').triggerSync();
           triggerCalendarSync();
         } else if (provider === 'fireflies-ai') {
           triggerFirefliesSync();
