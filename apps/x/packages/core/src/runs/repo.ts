@@ -12,6 +12,7 @@ export interface IRunsRepo {
     fetch(id: string): Promise<z.infer<typeof Run>>;
     list(cursor?: string): Promise<z.infer<typeof ListRunsResponse>>;
     appendEvents(runId: string, events: z.infer<typeof RunEvent>[]): Promise<void>;
+    delete(id: string): Promise<void>;
 }
 
 /**
@@ -235,5 +236,10 @@ export class FSRunsRepo implements IRunsRepo {
             runs,
             ...(nextCursor ? { nextCursor } : {}),
         };
+    }
+
+    async delete(id: string): Promise<void> {
+        const filePath = path.join(WorkDir, 'runs', `${id}.jsonl`);
+        await fsp.unlink(filePath);
     }
 }

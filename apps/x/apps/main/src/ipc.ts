@@ -348,6 +348,10 @@ export function setupIpcHandlers() {
     'runs:list': async (_event, args) => {
       return runsCore.listRuns(args.cursor);
     },
+    'runs:delete': async (_event, args) => {
+      await runsCore.deleteRun(args.runId);
+      return { success: true };
+    },
     'models:list': async () => {
       return await listOnboardingModels();
     },

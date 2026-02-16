@@ -374,7 +374,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
           <Input
             value={activeConfig.model}
             onChange={(e) => updateConfig(provider, { model: e.target.value })}
-            placeholder="Enter model ID"
+            placeholder="Enter model"
           />
         ) : (
           <Select

@@ -6,6 +6,7 @@ import { IRunsRepo } from "./repo.js";
 import { IAgentRuntime } from "../agents/runtime.js";
 import { IBus } from "../application/lib/bus.js";
 import { IAbortRegistry } from "./abort-registry.js";
+import { IRunsLock } from "./lock.js";
 import { forceCloseAllMcpClients } from "../mcp/mcp.js";
 
 export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {
@@ -63,6 +64,19 @@ export async function stop(runId: string, force: boolean = false): Promise<void>
     }
     // Note: The run-stopped event is emitted by AgentRuntime.trigger() when it detects the abort.
     // This avoids duplicate events and ensures proper sequencing.
+}
+
+export async function deleteRun(runId: string): Promise<void> {
+    const runsLock = container.resolve<IRunsLock>('runsLock');
+    if (!await runsLock.lock(runId)) {
+        throw new Error(`Cannot delete run ${runId}: run is currently active`);
+    }
+    try {
+        const repo = container.resolve<IRunsRepo>('runsRepo');
+        await repo.delete(runId);
+    } finally {
+        await runsLock.release(runId);
+    }
 }
 
 export async function fetchRun(runId: string): Promise<z.infer<typeof Run>> {
