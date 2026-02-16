@@ -19,7 +19,7 @@ import {
   MessageContent,
   MessageResponse,
 } from '@/components/ai-elements/message'
-import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
+
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
@@ -52,20 +52,20 @@ interface ToolCall {
   timestamp: number
 }
 
-interface ReasoningBlock {
+interface ErrorMessage {
   id: string
-  content: string
+  kind: 'error'
+  message: string
   timestamp: number
 }
 
-type ConversationItem = ChatMessage | ToolCall | ReasoningBlock
+type ConversationItem = ChatMessage | ToolCall | ErrorMessage
 
 type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error'
 
 const isChatMessage = (item: ConversationItem): item is ChatMessage => 'role' in item
 const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
-const isReasoningBlock = (item: ConversationItem): item is ReasoningBlock =>
-  'content' in item && !('role' in item) && !('name' in item)
+const isErrorMessage = (item: ConversationItem): item is ErrorMessage => 'kind' in item && item.kind === 'error'
 
 const toToolState = (status: ToolCall['status']): ToolState => {
   switch (status) {
@@ -118,7 +118,6 @@ interface ChatSidebarProps {
   onOpenFullScreen?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
-  currentReasoning: string
   isProcessing: boolean
   isStopping?: boolean
   onStop?: () => void
@@ -145,7 +144,6 @@ export function ChatSidebar({
   onOpenFullScreen,
   conversation,
   currentAssistantMessage,
-  currentReasoning,
   isProcessing,
   isStopping,
   onStop,
@@ -326,7 +324,7 @@ export function ChatSidebar({
     autoMentionRef.current = { path: selectedPath, displayName }
   }, [selectedPath, message, onMessageChange])
 
-  const hasConversation = conversation.length > 0 || currentAssistantMessage || currentReasoning
+  const hasConversation = conversation.length > 0 || currentAssistantMessage
   const canSubmit = Boolean(message.trim()) && !isProcessing
 
   const handleSubmit = () => {
@@ -427,12 +425,13 @@ export function ChatSidebar({
       )
     }
 
-    if (isReasoningBlock(item)) {
+    if (isErrorMessage(item)) {
       return (
-        <Reasoning key={item.id}>
-          <ReasoningTrigger />
-          <ReasoningContent>{item.content}</ReasoningContent>
-        </Reasoning>
+        <Message key={item.id} from="assistant">
+          <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
+            <pre className="whitespace-pre-wrap font-mono text-xs">{item.message}</pre>
+          </MessageContent>
+        </Message>
       )
     }
 
@@ -535,13 +534,6 @@ export function ChatSidebar({
                   />
                 ))}
 
-                {currentReasoning && (
-                  <Reasoning isStreaming>
-                    <ReasoningTrigger />
-                    <ReasoningContent>{currentReasoning}</ReasoningContent>
-                  </Reasoning>
-                )}
-
                 {currentAssistantMessage && (
                   <Message from="assistant">
                     <MessageContent>
@@ -550,7 +542,7 @@ export function ChatSidebar({
                   </Message>
                 )}
 
-                {isProcessing && !currentAssistantMessage && !currentReasoning && (
+                {isProcessing && !currentAssistantMessage && (
                   <Message from="assistant">
                     <MessageContent>
                       <Shimmer duration={1}>Thinking...</Shimmer>

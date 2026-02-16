@@ -10,6 +10,7 @@ import organizeFilesSkill from "./organize-files/skill.js";
 import slackSkill from "./slack/skill.js";
 import backgroundAgentsSkill from "./background-agents/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
+import webSearchSkill from "./web-search/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
@@ -81,6 +82,12 @@ const definitions: SkillDefinition[] = [
     title: "MCP Integration Guidance",
     summary: "Discovering, executing, and integrating MCP tools. Use this to check what external capabilities are available and execute MCP tools on behalf of users.",
     content: mcpIntegrationSkill,
+  },
+  {
+    id: "web-search",
+    title: "Web Search",
+    summary: "Searching the web or researching a topic. Guidance on when to use web-search vs research-search, and how many searches to do.",
+    content: webSearchSkill,
   },
   {
     id: "deletion-guardrails",

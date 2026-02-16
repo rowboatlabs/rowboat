@@ -265,6 +265,9 @@ export class StreamStepMessageBuilder {
             case "finish-step":
                 this.providerOptions = event.providerOptions;
                 break;
+            case "error":
+                this.flushBuffers();
+                break;
         }
     }
 
@@ -276,6 +279,30 @@ export class StreamStepMessageBuilder {
             providerOptions: this.providerOptions,
         };
     }
+}
+
+function formatLlmStreamError(rawError: unknown): string {
+    let name: string | undefined;
+    let responseBody: string | undefined;
+    if (rawError && typeof rawError === "object") {
+        const err = rawError as Record<string, unknown>;
+        const nested = (err.error && typeof err.error === "object") ? err.error as Record<string, unknown> : null;
+        const nameValue = err.name ?? nested?.name;
+        const responseBodyValue = err.responseBody ?? nested?.responseBody;
+        if (nameValue !== undefined) {
+            name = String(nameValue);
+        }
+        if (responseBodyValue !== undefined) {
+            responseBody = String(responseBodyValue);
+        }
+    } else if (typeof rawError === "string") {
+        responseBody = rawError;
+    }
+
+    const lines: string[] = [];
+    if (name) lines.push(`name: ${name}`);
+    if (responseBody) lines.push(`responseBody: ${responseBody}`);
+    return lines.length ? lines.join("\n") : "Model stream error";
 }
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
@@ -401,6 +428,13 @@ async function buildTools(agent: z.infer<typeof Agent>): Promise<ToolSet> {
     const tools: ToolSet = {};
     for (const [name, tool] of Object.entries(agent.tools ?? {})) {
         try {
+            // Skip builtin tools that declare themselves unavailable
+            if (tool.type === 'builtin') {
+                const builtin = BuiltinTools[tool.name];
+                if (builtin?.isAvailable && !(await builtin.isAvailable())) {
+                    continue;
+                }
+            }
             tools[name] = await mapAgentTool(tool);
         } catch (error) {
             console.error(`Error mapping tool ${name}:`, error);
@@ -785,6 +819,7 @@ export async function* streamAgent({
             timeZoneName: 'short'
         });
         const instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
+        let streamError: string | null = null;
         for await (const event of streamLlm(
             model,
             state.messages,
@@ -803,6 +838,16 @@ export async function* streamAgent({
                 event: event,
                 subflow: [],
             });
+            if (event.type === "error") {
+                streamError = event.error;
+                yield* processEvent({
+                    runId,
+                    type: "error",
+                    error: streamError,
+                    subflow: [],
+                });
+                break;
+            }
         }
 
         // build and emit final message from agent response
@@ -814,6 +859,10 @@ export async function* streamAgent({
             message,
             subflow: [],
         });
+
+        if (streamError) {
+            return;
+        }
 
         // if there were any ask-human calls, emit those events
         if (message.content instanceof Array) {
@@ -888,6 +937,12 @@ async function* streamLlm(
         signal?.throwIfAborted();
         // console.log("\n\n\t>>>>\t\tstream event", JSON.stringify(event));
         switch (event.type) {
+            case "error":
+                yield {
+                    type: "error",
+                    error: formatLlmStreamError((event as { error?: unknown }).error ?? event),
+                };
+                return;
             case "reasoning-start":
                 yield {
                     type: "reasoning-start",
@@ -938,7 +993,7 @@ async function* streamLlm(
                 };
                 break;
             default:
-                // console.warn("Unknown event type", event);
+                console.log('unknown stream event:', JSON.stringify(event));
                 continue;
         }
     }

@@ -66,7 +66,12 @@ To enable voice notes (optional), add a Deepgram API key in ~/.rowboat/config/de
   "apiKey": "<key>"
 }
 ```
+### Web search
+To use Brave web search (optional), add the Brave API key in ~/.rowboat/config/brave-search.json.
 
+To use Exa research search (optional), add the Exa API key in ~/.rowboat/config/exa-search.json.
+
+(same format as above)
 
 ## What it does
 
