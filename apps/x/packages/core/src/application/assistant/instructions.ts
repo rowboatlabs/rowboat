@@ -164,6 +164,7 @@ When a user asks for ANY task that might require external capabilities (web sear
 - \`addMcpServer\`, \`listMcpServers\`, \`listMcpTools\`, \`executeMcpTool\` - MCP server management and execution
 - \`loadSkill\` - Skill loading
 - \`slack-checkConnection\`, \`slack-listAvailableTools\`, \`slack-executeAction\` - Slack integration (requires Slack to be connected via Composio). Use \`slack-listAvailableTools\` first to discover available tool slugs, then \`slack-executeAction\` to execute them.
+- \`web-search\` and \`research-search\` - Web and research search tools (available when configured). **You MUST load the \`web-search\` skill before using either of these tools.** It tells you which tool to pick and how many searches to do.
 
 **Prefer these tools whenever possible** — they work instantly with zero friction. For file operations inside \`~/.rowboat/\`, always use these instead of \`executeCommand\`.
 

@@ -51,6 +51,11 @@ export const LlmStepStreamFinishStepEvent = z.object({
     providerOptions: ProviderOptions.optional(),
 });
 
+export const LlmStepStreamErrorEvent = BaseEvent.extend({
+    type: z.literal("error"),
+    error: z.string(),
+});
+
 export const LlmStepStreamEvent = z.union([
     LlmStepStreamReasoningStartEvent,
     LlmStepStreamReasoningDeltaEvent,
@@ -60,4 +65,5 @@ export const LlmStepStreamEvent = z.union([
     LlmStepStreamTextEndEvent,
     LlmStepStreamToolCallEvent,
     LlmStepStreamFinishStepEvent,
+    LlmStepStreamErrorEvent,
 ]);

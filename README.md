@@ -1,4 +1,6 @@
-<img width="1339" height="607" alt="rowboat-github-2" src="https://github.com/user-attachments/assets/fc463b99-01b3-401c-b4a4-044dad480901" />
+<a href="https://www.youtube.com/watch?v=5AWoGo-L16I" target="_blank" rel="noopener noreferrer">
+  <img width="1339" height="607" alt="rowboat-github-2" src="https://github.com/user-attachments/assets/fc463b99-01b3-401c-b4a4-044dad480901" />
+</a>
 
 <h5 align="center">
 
@@ -12,7 +14,7 @@
     <a href="https://www.rowboatlabs.com/" target="_blank" rel="noopener">
     <img alt="Website" src="https://img.shields.io/badge/Website-10b981?labelColor=10b981&logo=window&logoColor=white">
   </a>
-  <a href="https://discord.com/invite/htdKpBZF" target="_blank" rel="noopener">
+  <a href="https://discord.gg/wajrgmJQ6b" target="_blank" rel="noopener">
     <img alt="Discord" src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white&labelColor=5865F2">
   </a>
   <a href="https://x.com/intent/user?screen_name=rowboatlabshq" target="_blank" rel="noopener">
@@ -24,7 +26,7 @@
 </p>
 
 # Rowboat  
-**An open-source, local-first AI coworker with memory for everyday work**
+**Open-source AI coworker that turns work into a knowledge graph and acts on it**
 
 </h5>
 
@@ -36,7 +38,7 @@ You can do things like:
 - Visualize, edit, and update your knowledge graph anytime (it’s just Markdown)
 - Record voice memos that automatically capture and update key takeaways in the graph
 
-Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/)
+Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/downloads)
 
 
 ## Demo
@@ -50,9 +52,26 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/)
 
 ## Installation
 
-**Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/)
+**Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/downloads)
 
 **All release files:**   https://github.com/rowboatlabs/rowboat/releases/latest
+
+### Google setup
+To connect Google services (Gmail, Calendar, and Drive), follow [Google setup](https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md).
+
+### Voice notes
+To enable voice notes (optional), add a Deepgram API key in ~/.rowboat/config/deepgram.json:
+```
+{
+  "apiKey": "<key>"
+}
+```
+### Web search
+To use Brave web search (optional), add the Brave API key in ~/.rowboat/config/brave-search.json.
+
+To use Exa research search (optional), add the Exa API key in ~/.rowboat/config/exa-search.json.
+
+(same format as above)
 
 ## What it does
 
@@ -130,5 +149,5 @@ If you’re looking for Rowboat web Studio, start [here](https://docs.rowboatlab
 ---
 <div align="center">
 
-[Discord](https://discord.com/invite/htdKpBZF) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
+[Discord](https://discord.gg/wajrgmJQ6b) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
 </div>
