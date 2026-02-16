@@ -52,12 +52,20 @@ interface ToolCall {
   timestamp: number
 }
 
-type ConversationItem = ChatMessage | ToolCall
+interface ErrorMessage {
+  id: string
+  kind: 'error'
+  message: string
+  timestamp: number
+}
+
+type ConversationItem = ChatMessage | ToolCall | ErrorMessage
 
 type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error'
 
 const isChatMessage = (item: ConversationItem): item is ChatMessage => 'role' in item
 const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
+const isErrorMessage = (item: ConversationItem): item is ErrorMessage => 'kind' in item && item.kind === 'error'
 
 const toToolState = (status: ToolCall['status']): ToolState => {
   switch (status) {
@@ -414,6 +422,16 @@ export function ChatSidebar({
             ) : null}
           </ToolContent>
         </Tool>
+      )
+    }
+
+    if (isErrorMessage(item)) {
+      return (
+        <Message key={item.id} from="assistant">
+          <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
+            <pre className="whitespace-pre-wrap font-mono text-xs">{item.message}</pre>
+          </MessageContent>
+        </Message>
       )
     }
 

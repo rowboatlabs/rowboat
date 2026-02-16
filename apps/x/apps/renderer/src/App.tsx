@@ -55,6 +55,7 @@ import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
+import { toast } from "sonner"
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -81,12 +82,20 @@ interface ToolCall {
   timestamp: number;
 }
 
-type ConversationItem = ChatMessage | ToolCall;
+interface ErrorMessage {
+  id: string;
+  kind: 'error';
+  message: string;
+  timestamp: number;
+}
+
+type ConversationItem = ChatMessage | ToolCall | ErrorMessage;
 
 type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
 
 const isChatMessage = (item: ConversationItem): item is ChatMessage => 'role' in item
 const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
+const isErrorMessage = (item: ConversationItem): item is ErrorMessage => 'kind' in item && item.kind === 'error'
 
 const toToolState = (status: ToolCall['status']): ToolState => {
   switch (status) {
@@ -1102,6 +1111,15 @@ function App() {
             }
             break
           }
+          case 'error': {
+            items.push({
+              id: `error-${Date.now()}-${Math.random()}`,
+              kind: 'error',
+              message: event.error,
+              timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
+            })
+            break
+          }
           case 'llm-stream-event': {
             // We don't need to reconstruct streaming events for history
             // Reasoning is captured in the final message
@@ -1439,6 +1457,13 @@ function App() {
         setIsProcessing(false)
         setIsStopping(false)
         setStopClickedAt(null)
+        setConversation(prev => [...prev, {
+          id: `error-${Date.now()}`,
+          kind: 'error',
+          message: event.error,
+          timestamp: Date.now(),
+        }])
+        toast.error(event.error.split('\n')[0] || 'Model error')
         console.error('Run error:', event.error)
         break
     }
@@ -2223,6 +2248,16 @@ function App() {
             ) : null}
           </ToolContent>
         </Tool>
+      )
+    }
+
+    if (isErrorMessage(item)) {
+      return (
+        <Message key={item.id} from="assistant">
+          <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
+            <pre className="whitespace-pre-wrap font-mono text-xs">{item.message}</pre>
+          </MessageContent>
+        </Message>
       )
     }
 
