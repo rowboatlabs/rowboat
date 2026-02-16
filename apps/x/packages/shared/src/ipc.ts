@@ -173,6 +173,12 @@ const ipcSchemas = {
     }),
     res: ListRunsResponse,
   },
+  'runs:delete': {
+    req: z.object({
+      runId: z.string(),
+    }),
+    res: z.object({ success: z.boolean() }),
+  },
   'runs:events': {
     req: z.null(),
     res: z.null(),

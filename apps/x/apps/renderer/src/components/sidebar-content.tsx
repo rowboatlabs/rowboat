@@ -130,6 +130,7 @@ const SERVICE_LABELS: Record<string, string> = {
 type TasksActions = {
   onNewChat: () => void
   onSelectRun: (runId: string) => void
+  onDeleteRun: (runId: string) => void
   onSelectBackgroundTask?: (taskName: string) => void
 }
 
@@ -1056,7 +1057,7 @@ function TasksSection({
             </div>
             <SidebarMenu>
               {runs.map((run) => (
-                <SidebarMenuItem key={run.id}>
+                <SidebarMenuItem key={run.id} className="group/chat-item">
                   <SidebarMenuButton
                     isActive={currentRunId === run.id}
                     onClick={() => actions?.onSelectRun(run.id)}
@@ -1067,10 +1068,21 @@ function TasksSection({
                       ) : null}
                       <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
                       {run.createdAt ? (
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                        <span className="shrink-0 text-[10px] text-muted-foreground group-hover/chat-item:hidden">
                           {formatRunTime(run.createdAt)}
                         </span>
                       ) : null}
+                      <button
+                        type="button"
+                        className="shrink-0 hidden group-hover/chat-item:flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          actions?.onDeleteRun(run.id)
+                        }}
+                        aria-label="Delete chat"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
                     </div>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

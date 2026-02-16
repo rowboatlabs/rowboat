@@ -65,6 +65,11 @@ export async function stop(runId: string, force: boolean = false): Promise<void>
     // This avoids duplicate events and ensures proper sequencing.
 }
 
+export async function deleteRun(runId: string): Promise<void> {
+    const repo = container.resolve<IRunsRepo>('runsRepo');
+    await repo.delete(runId);
+}
+
 export async function fetchRun(runId: string): Promise<z.infer<typeof Run>> {
     const repo = container.resolve<IRunsRepo>('runsRepo');
     return repo.fetch(runId);

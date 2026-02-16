@@ -2277,6 +2277,17 @@ function App() {
                 onSelectRun: (runIdToLoad) => {
                   void navigateToView({ type: 'chat', runId: runIdToLoad })
                 },
+                onDeleteRun: async (runIdToDelete) => {
+                  try {
+                    await window.ipc.invoke('runs:delete', { runId: runIdToDelete })
+                    if (runId === runIdToDelete) {
+                      void navigateToView({ type: 'chat', runId: null })
+                    }
+                    await loadRuns()
+                  } catch (err) {
+                    console.error('Failed to delete run:', err)
+                  }
+                },
                 onSelectBackgroundTask: (taskName) => {
                   void navigateToView({ type: 'task', name: taskName })
                 },
