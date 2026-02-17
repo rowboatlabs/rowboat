@@ -1740,9 +1740,14 @@ function App() {
   }, [activeFileTabId])
 
   const handleNewChatTab = useCallback(() => {
-    // If current chat tab already has a run, open a new tab
-    const activeTab = chatTabs.find(t => t.id === activeChatTabId)
-    if (activeTab?.runId) {
+    // If there's already an empty "New chat" tab, switch to it
+    const emptyTab = chatTabs.find(t => !t.runId)
+    if (emptyTab) {
+      if (emptyTab.id !== activeChatTabId) {
+        setActiveChatTabId(emptyTab.id)
+      }
+    } else {
+      // Create a new tab
       const id = newChatTabId()
       setChatTabs(prev => [...prev, { id, runId: null }])
       setActiveChatTabId(id)
