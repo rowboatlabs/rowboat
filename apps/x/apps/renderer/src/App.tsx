@@ -2486,9 +2486,20 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                <span className="text-sm font-medium text-muted-foreground flex-1 min-w-0 truncate">
-                  {headerTitle}
-                </span>
+                {openTabs.length > 1 ? (
+                  <ChatTabBar
+                    tabs={openTabs}
+                    activeTabId={activeTabId}
+                    getTabTitle={getTabTitle}
+                    processingRunIds={processingRunIds}
+                    onSwitchTab={switchToTab}
+                    onCloseTab={closeTab}
+                  />
+                ) : (
+                  <span className="text-sm font-medium text-muted-foreground flex-1 min-w-0 truncate">
+                    {headerTitle}
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsSearchOpen(true)}
@@ -2592,14 +2603,6 @@ function App() {
               ) : (
               <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
-                <ChatTabBar
-                  tabs={openTabs}
-                  activeTabId={activeTabId}
-                  getTabTitle={getTabTitle}
-                  processingRunIds={processingRunIds}
-                  onSwitchTab={switchToTab}
-                  onCloseTab={closeTab}
-                />
                 <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
                   <ScrollPositionPreserver />
                   <ConversationContent className={conversationContentClassName}>

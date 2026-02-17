@@ -24,10 +24,8 @@ export function ChatTabBar({
   onSwitchTab,
   onCloseTab,
 }: ChatTabBarProps) {
-  if (tabs.length <= 1) return null
-
   return (
-    <div className="flex items-center gap-0 border-b border-border bg-sidebar overflow-x-auto px-1 shrink-0">
+    <div className="titlebar-no-drag flex flex-1 items-center gap-0 overflow-x-auto min-w-0">
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId
         const isProcessing = tab.runId ? processingRunIds.has(tab.runId) : false
@@ -39,7 +37,7 @@ export function ChatTabBar({
             type="button"
             onClick={() => onSwitchTab(tab.id)}
             className={cn(
-              "group/tab relative flex items-center gap-1.5 px-3 py-1.5 text-xs max-w-[180px] min-w-[80px] transition-colors",
+              "group/tab relative flex items-center gap-1.5 px-3 h-full text-xs max-w-[180px] min-w-[80px] transition-colors",
               isActive
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
