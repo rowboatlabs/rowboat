@@ -302,6 +302,8 @@ interface ChatInputInnerProps {
   presetMessage?: string
   onPresetMessageConsumed?: () => void
   runId?: string | null
+  initialDraft?: string
+  onDraftChange?: (text: string) => void
 }
 
 function ChatInputInner({
@@ -312,10 +314,25 @@ function ChatInputInner({
   presetMessage,
   onPresetMessageConsumed,
   runId,
+  initialDraft,
+  onDraftChange,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
   const canSubmit = Boolean(message.trim()) && !isProcessing
+
+  // Restore draft on mount
+  useEffect(() => {
+    if (initialDraft) {
+      controller.textInput.setInput(initialDraft)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // only on mount
+
+  // Save draft on every change
+  useEffect(() => {
+    onDraftChange?.(message)
+  }, [message, onDraftChange])
 
   // Handle preset message from suggestions
   useEffect(() => {
@@ -428,6 +445,8 @@ interface ChatInputWithMentionsProps {
   presetMessage?: string
   onPresetMessageConsumed?: () => void
   runId?: string | null
+  initialDraft?: string
+  onDraftChange?: (text: string) => void
 }
 
 function ChatInputWithMentions({
@@ -441,6 +460,8 @@ function ChatInputWithMentions({
   presetMessage,
   onPresetMessageConsumed,
   runId,
+  initialDraft,
+  onDraftChange,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -452,6 +473,8 @@ function ChatInputWithMentions({
         presetMessage={presetMessage}
         onPresetMessageConsumed={onPresetMessageConsumed}
         runId={runId}
+        initialDraft={initialDraft}
+        onDraftChange={onDraftChange}
       />
     </PromptInputProvider>
   )
@@ -668,6 +691,17 @@ function App() {
   const [activeChatTabId, setActiveChatTabId] = useState('default-chat-tab')
   const chatTabIdCounterRef = useRef(0)
   const newChatTabId = () => `chat-tab-${++chatTabIdCounterRef.current}`
+  const chatDraftsRef = useRef(new Map<string, string>())
+  const activeChatTabIdRef = useRef(activeChatTabId)
+  activeChatTabIdRef.current = activeChatTabId
+  const handleDraftChange = useCallback((text: string) => {
+    const tabId = activeChatTabIdRef.current
+    if (text) {
+      chatDraftsRef.current.set(tabId, text)
+    } else {
+      chatDraftsRef.current.delete(tabId)
+    }
+  }, [])
 
   const getChatTabTitle = useCallback((tab: ChatTab) => {
     if (!tab.runId) return 'New chat'
@@ -2726,6 +2760,7 @@ function App() {
                       <Suggestions onSelect={setPresetMessage} className="mb-3 justify-center" />
                     )}
                     <ChatInputWithMentions
+                      key={activeChatTabId}
                       knowledgeFiles={knowledgeFiles}
                       recentFiles={recentWikiFiles}
                       visibleFiles={visibleKnowledgeFiles}
@@ -2736,6 +2771,8 @@ function App() {
                       presetMessage={presetMessage}
                       onPresetMessageConsumed={() => setPresetMessage(undefined)}
                       runId={runId}
+                      initialDraft={chatDraftsRef.current.get(activeChatTabId)}
+                      onDraftChange={handleDraftChange}
                     />
                   </div>
                 </div>
