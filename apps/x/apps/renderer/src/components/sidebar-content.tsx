@@ -401,8 +401,7 @@ export function SidebarContentPanel({
   selectedBackgroundTask,
   ...props
 }: SidebarContentPanelProps) {
-  const { activeSection, setActiveSection } = useSidebarSection()
-  const [searchOpen, setSearchOpen] = useState(false)
+  const { activeSection, setActiveSection, searchOpen, setSearchOpen } = useSidebarSection()
   const [searchQuery, setSearchQuery] = useState("")
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -437,7 +436,7 @@ export function SidebarContentPanel({
       <SidebarHeader className="titlebar-drag-region">
         {/* Top spacer to clear the traffic lights + fixed toggle row */}
         <div className="h-8" />
-        {/* Tab switcher - centered below the traffic lights row */}
+        {/* Tab switcher */}
         <div className="flex items-center px-2 py-1.5">
           <div className="titlebar-no-drag flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
             {sectionTabs.map((tab) => (
@@ -456,6 +455,29 @@ export function SidebarContentPanel({
             ))}
           </div>
         </div>
+        {searchOpen && (
+          <div className="titlebar-no-drag flex items-center gap-1 rounded-md border border-sidebar-border bg-sidebar-accent/30 mx-2 mb-1.5 px-2 py-1">
+            <Search className="size-3.5 shrink-0 text-muted-foreground" />
+            <input
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setSearchOpen(false)
+              }}
+              placeholder={activeSection === "tasks" ? "Search chats..." : "Search files..."}
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="rounded p-0.5 text-muted-foreground hover:text-sidebar-foreground transition-colors"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+        )}
       </SidebarHeader>
       <SidebarContent>
         {activeSection === "knowledge" && (
@@ -466,11 +488,6 @@ export function SidebarContentPanel({
             onSelectFile={onSelectFile}
             actions={knowledgeActions}
             onVoiceNoteCreated={onVoiceNoteCreated}
-            searchOpen={searchOpen}
-            setSearchOpen={setSearchOpen}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            searchInputRef={searchInputRef}
           />
         )}
         {activeSection === "tasks" && (
@@ -481,11 +498,6 @@ export function SidebarContentPanel({
             actions={tasksActions}
             backgroundTasks={filteredBackgroundTasks}
             selectedBackgroundTask={selectedBackgroundTask}
-            searchOpen={searchOpen}
-            setSearchOpen={setSearchOpen}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            searchInputRef={searchInputRef}
           />
         )}
       </SidebarContent>
@@ -762,11 +774,6 @@ function KnowledgeSection({
   onSelectFile,
   actions,
   onVoiceNoteCreated,
-  searchOpen,
-  setSearchOpen,
-  searchQuery,
-  setSearchQuery,
-  searchInputRef,
 }: {
   tree: TreeNode[]
   selectedPath: string | null
@@ -774,11 +781,6 @@ function KnowledgeSection({
   onSelectFile: (path: string, kind: "file" | "dir") => void
   actions: KnowledgeActions
   onVoiceNoteCreated?: (path: string) => void
-  searchOpen: boolean
-  setSearchOpen: (open: boolean) => void
-  searchQuery: string
-  setSearchQuery: (query: string) => void
-  searchInputRef: React.RefObject<HTMLInputElement | null>
 }) {
   const isExpanded = expandedPaths.size > 0
 
@@ -792,79 +794,38 @@ function KnowledgeSection({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
-          <div className="sticky top-0 z-10 bg-sidebar border-b border-sidebar-border">
-            <div className="flex items-center justify-center gap-1 py-1">
-              {quickActions.map((action) => (
-                <Tooltip key={action.label}>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={action.action}
-                      className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
-                    >
-                      <action.icon className="size-4" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">{action.label}</TooltipContent>
-                </Tooltip>
-              ))}
-              <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
-              <Tooltip>
+          <div className="flex items-center justify-center gap-1 py-1 sticky top-0 z-10 bg-sidebar border-b border-sidebar-border">
+            {quickActions.map((action) => (
+              <Tooltip key={action.label}>
                 <TooltipTrigger asChild>
                   <button
-                    onClick={isExpanded ? actions.collapseAll : actions.expandAll}
+                    onClick={action.action}
                     className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
                   >
-                    {isExpanded ? (
-                      <ChevronsDownUp className="size-4" />
-                    ) : (
-                      <ChevronsUpDown className="size-4" />
-                    )}
+                    <action.icon className="size-4" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {isExpanded ? "Collapse All" : "Expand All"}
-                </TooltipContent>
+                <TooltipContent side="bottom">{action.label}</TooltipContent>
               </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => setSearchOpen(!searchOpen)}
-                    className={cn(
-                      "rounded p-1.5 transition-colors",
-                      searchOpen
-                        ? "text-sidebar-foreground bg-sidebar-accent"
-                        : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-                    )}
-                  >
-                    <Search className="size-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Search</TooltipContent>
-              </Tooltip>
-            </div>
-            {searchOpen && (
-              <div className="flex items-center gap-1 rounded-md border border-sidebar-border bg-sidebar-accent/30 mx-2 mb-1 px-2 py-1">
-                <Search className="size-3.5 shrink-0 text-muted-foreground" />
-                <input
-                  ref={searchInputRef}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") setSearchOpen(false)
-                  }}
-                  placeholder="Search files..."
-                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery("")}
-                    className="rounded p-0.5 text-muted-foreground hover:text-sidebar-foreground transition-colors"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                )}
-              </div>
-            )}
+            ))}
+            <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={isExpanded ? actions.collapseAll : actions.expandAll}
+                  className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+                >
+                  {isExpanded ? (
+                    <ChevronsDownUp className="size-4" />
+                  ) : (
+                    <ChevronsUpDown className="size-4" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {isExpanded ? "Collapse All" : "Expand All"}
+              </TooltipContent>
+            </Tooltip>
           </div>
           <SidebarGroupContent className="flex-1 overflow-y-auto">
             <SidebarMenu>
@@ -1118,11 +1079,6 @@ function TasksSection({
   actions,
   backgroundTasks = [],
   selectedBackgroundTask,
-  searchOpen,
-  setSearchOpen,
-  searchQuery,
-  setSearchQuery,
-  searchInputRef,
 }: {
   runs: RunListItem[]
   currentRunId?: string | null
@@ -1130,65 +1086,19 @@ function TasksSection({
   actions?: TasksActions
   backgroundTasks?: BackgroundTaskItem[]
   selectedBackgroundTask?: string | null
-  searchOpen: boolean
-  setSearchOpen: (open: boolean) => void
-  searchQuery: string
-  setSearchQuery: (query: string) => void
-  searchInputRef: React.RefObject<HTMLInputElement | null>
 }) {
   return (
     <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
-      {/* Sticky New Chat button + search */}
+      {/* Sticky New Chat button - matches Knowledge section height */}
       <div className="sticky top-0 z-10 bg-sidebar border-b border-sidebar-border py-0.5">
-        <div className="flex items-center gap-1 px-1">
-          <SidebarMenu className="flex-1">
-            <SidebarMenuItem>
-              <SidebarMenuButton onClick={actions?.onNewChat} className="gap-2">
-                <SquarePen className="size-4 shrink-0" />
-                <span className="text-sm">New chat</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setSearchOpen(!searchOpen)}
-                className={cn(
-                  "rounded p-1.5 transition-colors shrink-0",
-                  searchOpen
-                    ? "text-sidebar-foreground bg-sidebar-accent"
-                    : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-                )}
-              >
-                <Search className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Search</TooltipContent>
-          </Tooltip>
-        </div>
-        {searchOpen && (
-          <div className="flex items-center gap-1 rounded-md border border-sidebar-border bg-sidebar-accent/30 mx-2 mb-1 mt-0.5 px-2 py-1">
-            <Search className="size-3.5 shrink-0 text-muted-foreground" />
-            <input
-              ref={searchInputRef}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setSearchOpen(false)
-              }}
-              placeholder="Search chats..."
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="rounded p-0.5 text-muted-foreground hover:text-sidebar-foreground transition-colors"
-              >
-                <X className="size-3.5" />
-              </button>
-            )}
-          </div>
-        )}
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={actions?.onNewChat} className="gap-2">
+              <SquarePen className="size-4 shrink-0" />
+              <span className="text-sm">New chat</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </div>
       <SidebarGroupContent className="flex-1 overflow-y-auto">
         {/* Background Tasks Section */}

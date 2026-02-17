@@ -7,6 +7,8 @@ export type ActiveSection = "knowledge" | "tasks"
 type SidebarSectionContextProps = {
   activeSection: ActiveSection
   setActiveSection: (section: ActiveSection) => void
+  searchOpen: boolean
+  setSearchOpen: (open: boolean) => void
 }
 
 const SidebarSectionContext = React.createContext<SidebarSectionContextProps | null>(null)
@@ -29,6 +31,7 @@ export function SidebarSectionProvider({
   children: React.ReactNode
 }) {
   const [activeSection, setActiveSectionState] = React.useState<ActiveSection>(defaultSection)
+  const [searchOpen, setSearchOpen] = React.useState(false)
 
   const setActiveSection = React.useCallback((section: ActiveSection) => {
     setActiveSectionState(section)
@@ -39,8 +42,10 @@ export function SidebarSectionProvider({
     () => ({
       activeSection,
       setActiveSection,
+      searchOpen,
+      setSearchOpen,
     }),
-    [activeSection, setActiveSection]
+    [activeSection, setActiveSection, searchOpen]
   )
 
   return (

@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Square, X, ChevronLeftIcon, ChevronRightIcon, SquarePen } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Search, Square, X, ChevronLeftIcon, ChevronRightIcon, SquarePen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
@@ -14,7 +14,7 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
-import { SidebarSectionProvider, type ActiveSection } from '@/contexts/sidebar-context';
+import { SidebarSectionProvider, useSidebarSection, type ActiveSection } from '@/contexts/sidebar-context';
 import {
   Conversation,
   ConversationContent,
@@ -131,8 +131,8 @@ const TITLEBAR_BUTTON_PX = 32
 const TITLEBAR_BUTTON_GAP_PX = 4
 const TITLEBAR_HEADER_GAP_PX = 8
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
-const TITLEBAR_BUTTONS_COLLAPSED = 4
-const TITLEBAR_BUTTON_GAPS_COLLAPSED = 3
+const TITLEBAR_BUTTONS_COLLAPSED = 5
+const TITLEBAR_BUTTON_GAPS_COLLAPSED = 4
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -487,6 +487,7 @@ function FixedSidebarToggle({
   leftInsetPx: number
 }) {
   const { toggleSidebar, state } = useSidebar()
+  const { searchOpen, setSearchOpen } = useSidebarSection()
   const isCollapsed = state === "collapsed"
   return (
     <div className="fixed left-0 top-0 z-50 flex h-10 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
@@ -509,6 +510,20 @@ function FixedSidebarToggle({
         aria-label="New chat"
       >
         <SquarePen className="size-5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => setSearchOpen(!searchOpen)}
+        className={cn(
+          "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
+          searchOpen
+            ? "text-foreground bg-accent"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground"
+        )}
+        style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
+        aria-label="Search"
+      >
+        <Search className="size-5" />
       </button>
       {/* Back / Forward navigation */}
       {isCollapsed && (
