@@ -222,7 +222,19 @@ function getFolderType(filePath: string): string {
         return 'root';
     }
 
-    // Return the first folder name
+    const categoryFolders = new Set(['People', 'Organizations', 'Projects', 'Topics']);
+
+    // Standard layout: knowledge/<Category>/...
+    if (categoryFolders.has(parts[0])) {
+        return parts[0];
+    }
+
+    // Vault layout: knowledge/<VaultName>/<Category>/...
+    if (parts.length > 1 && categoryFolders.has(parts[1])) {
+        return parts[1];
+    }
+
+    // Return the first folder name for non-standard layouts
     return parts[0];
 }
 

@@ -5,6 +5,7 @@ import { workspace } from '@x/shared';
 import { z } from 'zod';
 import { RemoveOptions, WriteFileOptions, WriteFileResult } from 'packages/shared/dist/workspace.js';
 import { WorkDir } from '../config/config.js';
+import { getKnowledgeVaultMountPaths } from '../config/knowledge_vaults.js';
 
 // ============================================================================
 // Path Utilities
@@ -82,6 +83,15 @@ export function statToSchema(stats: Stats, kind: z.infer<typeof workspace.NodeKi
   };
 }
 
+function normalizeRelPath(relPath: string): string {
+  return relPath.split(path.sep).join('/');
+}
+
+function isAllowedVaultSymlink(relPath: string, vaultMounts: Set<string>): boolean {
+  const normalized = normalizeRelPath(relPath);
+  return vaultMounts.has(normalized);
+}
+
 /**
  * Ensure workspace root exists
  */
@@ -111,6 +121,17 @@ export async function exists(relPath: string): Promise<{ exists: boolean }> {
 export async function stat(relPath: string): Promise<z.infer<typeof workspace.Stat>> {
   const filePath = resolveWorkspacePath(relPath);
   const stats = await fs.lstat(filePath);
+  if (stats.isSymbolicLink()) {
+    const targetStats = await fs.stat(filePath);
+    const kind = targetStats.isDirectory() ? 'dir' : 'file';
+    return {
+      kind,
+      size: targetStats.size,
+      mtimeMs: targetStats.mtimeMs,
+      ctimeMs: targetStats.ctimeMs,
+      isSymlink: true,
+    };
+  }
   const kind = stats.isDirectory() ? 'dir' : 'file';
   return statToSchema(stats, kind);
 }
@@ -121,6 +142,8 @@ export async function readdir(
 ): Promise<Array<z.infer<typeof workspace.DirEntry>>> {
   const dirPath = resolveWorkspacePath(relPath);
   const entries: Array<z.infer<typeof workspace.DirEntry>> = [];
+  const vaultMounts = new Set(getKnowledgeVaultMountPaths());
+  const visitedRealPaths = new Set<string>();
 
   async function readDir(currentPath: string, currentRelPath: string): Promise<void> {
     const items = await fs.readdir(currentPath, { withFileTypes: true });
@@ -145,7 +168,42 @@ export async function readdir(
       let itemKind: z.infer<typeof workspace.NodeKind>;
       let itemStat: { size: number; mtimeMs: number } | undefined;
 
-      if (item.isDirectory()) {
+      if (item.isSymbolicLink()) {
+        if (!isAllowedVaultSymlink(itemRelPath, vaultMounts)) {
+          continue;
+        }
+        let targetStats: Stats;
+        try {
+          targetStats = await fs.stat(itemPath);
+        } catch {
+          continue;
+        }
+        const targetIsDir = targetStats.isDirectory();
+        const targetIsFile = targetStats.isFile();
+        if (!targetIsDir && !targetIsFile) {
+          continue;
+        }
+        if (targetIsFile && opts?.allowedExtensions && opts.allowedExtensions.length > 0) {
+          const ext = path.extname(item.name);
+          if (!opts.allowedExtensions.includes(ext)) {
+            continue;
+          }
+        }
+
+        if (opts?.includeStats) {
+          itemStat = { size: targetStats.size, mtimeMs: targetStats.mtimeMs };
+        }
+        itemKind = targetIsDir ? 'dir' : 'file';
+        entries.push({ name: item.name, path: itemRelPath, kind: itemKind, stat: itemStat });
+
+        if (targetIsDir && opts?.recursive) {
+          const realPath = await fs.realpath(itemPath).catch(() => null);
+          if (realPath && !visitedRealPaths.has(realPath)) {
+            visitedRealPaths.add(realPath);
+            await readDir(itemPath, itemRelPath);
+          }
+        }
+      } else if (item.isDirectory()) {
         itemKind = 'dir';
         if (opts?.includeStats) {
           const stats = await fs.lstat(itemPath);
@@ -187,6 +245,8 @@ export async function readFile(
 ): Promise<z.infer<typeof workspace.ReadFileResult>> {
   const filePath = resolveWorkspacePath(relPath);
   const stats = await fs.lstat(filePath);
+  const isSymlink = stats.isSymbolicLink();
+  const targetStats = isSymlink ? await fs.stat(filePath) : stats;
 
   let data: string;
   if (encoding === 'utf8') {
@@ -200,8 +260,14 @@ export async function readFile(
     data = buffer.toString('base64');
   }
 
-  const stat = statToSchema(stats, 'file');
-  const etag = computeEtag(stats.size, stats.mtimeMs);
+  const stat: z.infer<typeof workspace.Stat> = {
+    kind: 'file',
+    size: targetStats.size,
+    mtimeMs: targetStats.mtimeMs,
+    ctimeMs: targetStats.ctimeMs,
+    isSymlink: isSymlink ? true : undefined,
+  };
+  const etag = computeEtag(targetStats.size, targetStats.mtimeMs);
 
   return {
     path: relPath,

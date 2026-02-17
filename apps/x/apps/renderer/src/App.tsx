@@ -45,6 +45,15 @@ import {
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { OnboardingModal } from '@/components/onboarding-modal'
 import { SearchDialog } from '@/components/search-dialog'
@@ -356,6 +365,10 @@ function App() {
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
+  const [isAddVaultOpen, setIsAddVaultOpen] = useState(false)
+  const [pendingVaultPath, setPendingVaultPath] = useState<string | null>(null)
+  const [pendingVaultName, setPendingVaultName] = useState<string>('')
+  const [isAddingVault, setIsAddingVault] = useState(false)
   const [isGraphOpen, setIsGraphOpen] = useState(false)
   const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
@@ -2186,6 +2199,62 @@ function App() {
     setExpandedPaths(newExpanded)
   }
 
+  // Handle sidebar section changes - switch to chat view for tasks
+  const handleSectionChange = useCallback((section: ActiveSection) => {
+    if (section === 'tasks') {
+      if (selectedBackgroundTask) return
+      if (selectedPath || isGraphOpen) {
+        void navigateToView({ type: 'chat', runId })
+      }
+    }
+  }, [isGraphOpen, navigateToView, runId, selectedBackgroundTask, selectedPath])
+
+  const deriveVaultName = useCallback((vaultPath: string) => {
+    const trimmed = vaultPath.replace(/[\\/]+$/, '')
+    const parts = trimmed.split(/[/\\]/)
+    return parts[parts.length - 1] || 'Folder'
+  }, [])
+
+  const handleAddVault = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('knowledge:pickVaultDirectory', null)
+      if (!result.path) return
+      const defaultName = deriveVaultName(result.path)
+      setPendingVaultPath(result.path)
+      setPendingVaultName(defaultName)
+      setIsAddVaultOpen(true)
+    } catch (err) {
+      console.error('Failed to pick vault directory:', err)
+      toast('Failed to open folder picker')
+    }
+  }, [deriveVaultName])
+
+  const handleConfirmAddVault = useCallback(async () => {
+    if (!pendingVaultPath) return
+    const name = pendingVaultName.trim()
+    if (!name) {
+      toast('Folder name is required')
+      return
+    }
+    setIsAddingVault(true)
+    try {
+      await window.ipc.invoke('knowledge:addVault', {
+        path: pendingVaultPath,
+        name,
+        readOnly: false,
+      })
+      setIsAddVaultOpen(false)
+      setPendingVaultPath(null)
+      setPendingVaultName('')
+      loadDirectory().then(setTree)
+      toast(`Added knowledge folder "${name}"`)
+    } catch (err) {
+      console.error('Failed to add vault:', err)
+      toast('Failed to add knowledge folder')
+    } finally {
+      setIsAddingVault(false)
+    }
+  }, [loadDirectory, pendingVaultName, pendingVaultPath])
   // Knowledge quick actions
   const knowledgeFiles = React.useMemo(() => {
     const files = collectFilePaths(tree).filter((path) => path.endsWith('.md'))
@@ -2278,6 +2347,9 @@ function App() {
         throw err
       }
     },
+    addVault: () => {
+      void handleAddVault()
+    },
     createFolder: async (parentPath: string = 'knowledge') => {
       try {
         await window.ipc.invoke('workspace:mkdir', {
@@ -2286,6 +2358,17 @@ function App() {
         })
       } catch (err) {
         console.error('Failed to create folder:', err)
+        throw err
+      }
+    },
+    unlinkVault: async (mountPath: string) => {
+      try {
+        await window.ipc.invoke('knowledge:removeVault', { nameOrMountPath: mountPath })
+        if (selectedPath && (selectedPath === mountPath || selectedPath.startsWith(`${mountPath}/`))) {
+          setSelectedPath(null)
+        }
+      } catch (err) {
+        console.error('Failed to unlink knowledge folder:', err)
         throw err
       }
     },
@@ -2355,7 +2438,19 @@ function App() {
     onOpenInNewTab: (path: string) => {
       openFileInNewTab(path)
     },
-  }), [tree, selectedPath, workspaceRoot, navigateToFile, navigateToView, openFileInNewTab, fileTabs, closeFileTab, removeEditorCacheForPath])
+  }), [
+    tree,
+    selectedPath,
+    workspaceRoot,
+    collectDirPaths,
+    navigateToFile,
+    navigateToView,
+    handleAddVault,
+    openFileInNewTab,
+    fileTabs,
+    closeFileTab,
+    removeEditorCacheForPath,
+  ])
 
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
@@ -3089,6 +3184,50 @@ function App() {
           onSelectRun={(id) => { void navigateToView({ type: 'chat', runId: id }) }}
         />
       </SidebarSectionProvider>
+      <Dialog
+        open={isAddVaultOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsAddVaultOpen(false)
+            setPendingVaultPath(null)
+            setPendingVaultName('')
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Knowledge Folder</DialogTitle>
+            <DialogDescription>
+              Link an existing folder into knowledge.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="text-xs text-muted-foreground break-all">
+              {pendingVaultPath ?? 'No folder selected'}
+            </div>
+            <Input
+              value={pendingVaultName}
+              onChange={(event) => setPendingVaultName(event.target.value)}
+              placeholder="Folder name"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setIsAddVaultOpen(false)
+                setPendingVaultPath(null)
+                setPendingVaultName('')
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmAddVault} disabled={isAddingVault}>
+              {isAddingVault ? 'Adding...' : 'Add Folder'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Toaster />
       <OnboardingModal
         open={showOnboarding}

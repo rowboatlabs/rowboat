@@ -11,6 +11,14 @@ import { ServiceEvent } from './service-events.js';
 // Runtime Validation Schemas (Single Source of Truth)
 // ============================================================================
 
+const KnowledgeVault = z.object({
+  name: z.string(),
+  path: z.string(),
+  mountPath: z.string(),
+  readOnly: z.boolean(),
+  addedAt: z.string(),
+});
+
 const ipcSchemas = {
   'app:getVersions': {
     req: z.null(),
@@ -103,6 +111,36 @@ const ipcSchemas = {
   'workspace:didChange': {
     req: WorkspaceChangeEvent,
     res: z.null(),
+  },
+  'knowledge:listVaults': {
+    req: z.null(),
+    res: z.object({
+      vaults: z.array(KnowledgeVault),
+    }),
+  },
+  'knowledge:pickVaultDirectory': {
+    req: z.null(),
+    res: z.object({
+      path: z.string().nullable(),
+    }),
+  },
+  'knowledge:addVault': {
+    req: z.object({
+      path: z.string(),
+      name: z.string(),
+      readOnly: z.boolean().optional(),
+    }),
+    res: z.object({
+      vault: KnowledgeVault,
+    }),
+  },
+  'knowledge:removeVault': {
+    req: z.object({
+      nameOrMountPath: z.string(),
+    }),
+    res: z.object({
+      removed: KnowledgeVault.nullable(),
+    }),
   },
   'mcp:listTools': {
     req: z.object({

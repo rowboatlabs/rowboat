@@ -4,6 +4,7 @@ import type { IMcpConfigRepo } from "../mcp/repo.js";
 import type { IAgentScheduleRepo } from "../agent-schedule/repo.js";
 import type { IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
 import { ensureSecurityConfig } from "./security.js";
+import { ensureKnowledgeVaultsConfig } from "./knowledge_vaults.js";
 
 /**
  * Initialize all config files at app startup.
@@ -22,5 +23,6 @@ export async function initConfigs(): Promise<void> {
         agentScheduleRepo.ensureConfig(),
         agentScheduleStateRepo.ensureState(),
         ensureSecurityConfig(),
+        Promise.resolve(ensureKnowledgeVaultsConfig()),
     ]);
 }

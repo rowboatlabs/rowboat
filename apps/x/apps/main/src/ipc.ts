@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
@@ -26,6 +26,11 @@ import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
+import {
+  addKnowledgeVault,
+  listKnowledgeVaults,
+  removeKnowledgeVault,
+} from '@x/core/dist/config/knowledge_vaults.js';
 import * as composioHandler from './composio-handler.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
@@ -317,6 +322,30 @@ export function setupIpcHandlers() {
     },
     'workspace:remove': async (_event, args) => {
       return workspace.remove(args.path, args.opts);
+    },
+    'knowledge:listVaults': async () => {
+      return { vaults: listKnowledgeVaults() };
+    },
+    'knowledge:pickVaultDirectory': async () => {
+      const result = await dialog.showOpenDialog({
+        properties: ['openDirectory'],
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { path: null };
+      }
+      return { path: result.filePaths[0] };
+    },
+    'knowledge:addVault': async (_event, args) => {
+      const vault = addKnowledgeVault({
+        name: args.name,
+        path: args.path,
+        readOnly: args.readOnly,
+      });
+      return { vault };
+    },
+    'knowledge:removeVault': async (_event, args) => {
+      const removed = removeKnowledgeVault(args.nameOrMountPath);
+      return { removed };
     },
     'mcp:listTools': async (_event, args) => {
       return mcpCore.listTools(args.serverName, args.cursor);
