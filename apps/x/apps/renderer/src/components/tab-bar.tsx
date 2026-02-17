@@ -7,35 +7,43 @@ export type ChatTab = {
   runId: string | null
 }
 
-interface ChatTabBarProps {
-  tabs: ChatTab[]
+export type FileTab = {
+  id: string
+  path: string
+}
+
+interface TabBarProps<T> {
+  tabs: T[]
   activeTabId: string
-  getTabTitle: (tab: ChatTab) => string
-  processingRunIds: Set<string>
+  getTabTitle: (tab: T) => string
+  getTabId: (tab: T) => string
+  isProcessing?: (tab: T) => boolean
   onSwitchTab: (tabId: string) => void
   onCloseTab: (tabId: string) => void
 }
 
-export function ChatTabBar({
+export function TabBar<T>({
   tabs,
   activeTabId,
   getTabTitle,
-  processingRunIds,
+  getTabId,
+  isProcessing,
   onSwitchTab,
   onCloseTab,
-}: ChatTabBarProps) {
+}: TabBarProps<T>) {
   return (
     <div className="titlebar-no-drag flex flex-1 items-center gap-0 overflow-x-auto min-w-0">
       {tabs.map((tab) => {
-        const isActive = tab.id === activeTabId
-        const isProcessing = tab.runId ? processingRunIds.has(tab.runId) : false
+        const tabId = getTabId(tab)
+        const isActive = tabId === activeTabId
+        const processing = isProcessing?.(tab) ?? false
         const title = getTabTitle(tab)
 
         return (
           <button
-            key={tab.id}
+            key={tabId}
             type="button"
-            onClick={() => onSwitchTab(tab.id)}
+            onClick={() => onSwitchTab(tabId)}
             className={cn(
               "group/tab relative flex items-center gap-1.5 px-3 h-full text-xs max-w-[180px] min-w-[80px] transition-colors",
               isActive
@@ -43,7 +51,7 @@ export function ChatTabBar({
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
             )}
           >
-            {isProcessing && (
+            {processing && (
               <span className="size-1.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
             )}
             <span className="truncate flex-1 text-left">{title}</span>
@@ -55,7 +63,7 @@ export function ChatTabBar({
               )}
               onClick={(e) => {
                 e.stopPropagation()
-                onCloseTab(tab.id)
+                onCloseTab(tabId)
               }}
               aria-label="Close tab"
             >
