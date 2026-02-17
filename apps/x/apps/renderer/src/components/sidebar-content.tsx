@@ -8,6 +8,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Copy,
+  ExternalLink,
   FilePlus,
   FolderPlus,
   AlertTriangle,
@@ -149,6 +150,7 @@ type TasksActions = {
   onNewChat: () => void
   onSelectRun: (runId: string) => void
   onDeleteRun: (runId: string) => void
+  onOpenInNewTab?: (runId: string) => void
   onSelectBackgroundTask?: (taskName: string) => void
 }
 
@@ -1162,7 +1164,7 @@ function TasksSection({
             </div>
             <SidebarMenu>
               {runs.map((run) => (
-                <SidebarMenuItem key={run.id}>
+                <SidebarMenuItem key={run.id} className="group/chat-item">
                   <ContextMenu>
                     <ContextMenuTrigger asChild>
                       <SidebarMenuButton
@@ -1175,10 +1177,25 @@ function TasksSection({
                           ) : null}
                           <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
                           {run.createdAt ? (
-                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                            <span className={`shrink-0 text-[10px] text-muted-foreground${processingRunIds?.has(run.id) ? '' : ' group-hover/chat-item:hidden'}`}>
                               {formatRunTime(run.createdAt)}
                             </span>
                           ) : null}
+                          {!processingRunIds?.has(run.id) && actions?.onOpenInNewTab && (
+                            <div className="shrink-0 hidden group-hover/chat-item:flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                className="flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  actions.onOpenInNewTab!(run.id)
+                                }}
+                                aria-label="Open in new tab"
+                              >
+                                <ExternalLink className="size-3.5" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </SidebarMenuButton>
                     </ContextMenuTrigger>
