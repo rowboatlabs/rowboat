@@ -2408,11 +2408,10 @@ function App() {
                   handleNewChatTab()
                 },
                 onSelectRun: (runIdToLoad) => {
-                  // If run is already open in a tab, switch to that tab
-                  const existingTab = openTabs.find(t => t.runId === runIdToLoad)
-                  if (existingTab) {
-                    switchToTab(existingTab.id)
-                    // Also ensure we navigate to chat view
+                  // If it's already the active tab's run, do nothing
+                  const activeTab = openTabs.find(t => t.id === activeTabId)
+                  if (activeTab?.runId === runIdToLoad) {
+                    // Just ensure we're in chat view
                     if (selectedPath || isGraphOpen || selectedBackgroundTask) {
                       setSelectedPath(null)
                       setIsGraphOpen(false)
@@ -2421,9 +2420,26 @@ function App() {
                     }
                     return
                   }
-                  // Update current tab's runId
-                  setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, runId: runIdToLoad } : t))
-                  void navigateToView({ type: 'chat', runId: runIdToLoad })
+                  // If already open in another tab, switch to it
+                  const existingTab = openTabs.find(t => t.runId === runIdToLoad)
+                  if (existingTab) {
+                    switchToTab(existingTab.id)
+                    if (selectedPath || isGraphOpen || selectedBackgroundTask) {
+                      setSelectedPath(null)
+                      setIsGraphOpen(false)
+                      setExpandedFrom(null)
+                      setSelectedBackgroundTask(null)
+                    }
+                    return
+                  }
+                  // Open in a new tab
+                  openInNewTab(runIdToLoad)
+                  if (selectedPath || isGraphOpen || selectedBackgroundTask) {
+                    setSelectedPath(null)
+                    setIsGraphOpen(false)
+                    setExpandedFrom(null)
+                    setSelectedBackgroundTask(null)
+                  }
                 },
                 onDeleteRun: async (runIdToDelete) => {
                   try {
@@ -2444,16 +2460,6 @@ function App() {
                     await loadRuns()
                   } catch (err) {
                     console.error('Failed to delete run:', err)
-                  }
-                },
-                onOpenInNewTab: (targetRunId) => {
-                  openInNewTab(targetRunId)
-                  // Ensure we're in chat view
-                  if (selectedPath || isGraphOpen || selectedBackgroundTask) {
-                    setSelectedPath(null)
-                    setIsGraphOpen(false)
-                    setExpandedFrom(null)
-                    setSelectedBackgroundTask(null)
                   }
                 },
                 onSelectBackgroundTask: (taskName) => {
