@@ -616,6 +616,7 @@ function App() {
   const [graphStatus, setGraphStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [graphError, setGraphError] = useState<string | null>(null)
   const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(true)
+  const [activeSection, setActiveSection] = useState<ActiveSection>('tasks')
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
   const collapsedLeftPaddingPx =
     (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) +
@@ -2003,13 +2004,24 @@ function App() {
 
   // Handle sidebar section changes - switch to chat view for tasks
   const handleSectionChange = useCallback((section: ActiveSection) => {
+    setActiveSection(section)
     if (section === 'tasks') {
       if (selectedBackgroundTask) return
       if (selectedPath || isGraphOpen) {
         void navigateToView({ type: 'chat', runId })
       }
+    } else if (section === 'knowledge') {
+      // Restore the active file tab if one exists
+      const activeTab = fileTabs.find(t => t.id === activeFileTabId)
+      if (activeTab) {
+        void navigateToView({ type: 'file', path: activeTab.path })
+      } else if (fileTabs.length > 0) {
+        const tab = fileTabs[0]
+        setActiveFileTabId(tab.id)
+        void navigateToView({ type: 'file', path: tab.path })
+      }
     }
-  }, [isGraphOpen, navigateToView, runId, selectedBackgroundTask, selectedPath])
+  }, [isGraphOpen, navigateToView, runId, selectedBackgroundTask, selectedPath, fileTabs, activeFileTabId])
 
   // Knowledge quick actions
   const knowledgeFiles = React.useMemo(() => {
@@ -2520,7 +2532,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {selectedPath && fileTabs.length > 1 ? (
+                {activeSection === 'knowledge' && fileTabs.length > 1 ? (
                   <TabBar
                     tabs={fileTabs}
                     activeTabId={activeFileTabId ?? ''}
@@ -2529,7 +2541,7 @@ function App() {
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
                   />
-                ) : !selectedPath && !isGraphOpen && !selectedBackgroundTask && chatTabs.length > 1 ? (
+                ) : activeSection === 'tasks' && chatTabs.length > 1 ? (
                   <TabBar
                     tabs={chatTabs}
                     activeTabId={activeChatTabId}
