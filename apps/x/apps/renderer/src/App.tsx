@@ -1640,9 +1640,7 @@ function App() {
     setAllPermissionRequests(new Map())
     setPermissionResponses(new Map())
     setSelectedBackgroundTask(null)
-    // Update active chat tab's runId to null
-    setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: null } : t))
-  }, [activeChatTabId])
+  }, [])
 
   // Chat tab operations
   const applyChatTab = useCallback((tab: ChatTab) => {
