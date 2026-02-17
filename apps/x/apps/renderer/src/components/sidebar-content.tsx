@@ -10,6 +10,7 @@ import {
   Copy,
   FilePlus,
   FolderPlus,
+  AlertTriangle,
   HelpCircle,
   Mic,
   Network,
@@ -34,6 +35,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Sidebar,
@@ -379,6 +391,45 @@ export function SidebarContentPanel({
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
+  const [hasOauthError, setHasOauthError] = useState(false)
+  const [showOauthAlert, setShowOauthAlert] = useState(true)
+  const [connectorsOpen, setConnectorsOpen] = useState(false)
+  const [openConnectorsAfterClose, setOpenConnectorsAfterClose] = useState(false)
+  const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+
+    const refreshOauthError = async () => {
+      try {
+        const result = await window.ipc.invoke('oauth:getState', null)
+        const config = result.config || {}
+        const hasError = Object.values(config).some((entry) => Boolean(entry?.error))
+        if (mounted) {
+          setHasOauthError(hasError)
+          if (!hasError) {
+            setShowOauthAlert(true)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch OAuth state:', error)
+        if (mounted) {
+          setHasOauthError(false)
+          setShowOauthAlert(true)
+        }
+      }
+    }
+
+    refreshOauthError()
+    const cleanup = window.ipc.on('oauth:didConnect', () => {
+      refreshOauthError()
+    })
+
+    return () => {
+      mounted = false
+      cleanup()
+    }
+  }, [])
 
   return (
     <Sidebar className="border-r-0" {...props}>
@@ -430,12 +481,69 @@ export function SidebarContentPanel({
       {/* Bottom actions */}
       <div className="border-t border-sidebar-border px-2 py-2">
         <div className="flex flex-col gap-1">
-          <ConnectorsPopover>
-            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
-              <Plug className="size-4" />
-              <span>Connectors</span>
-            </button>
-          </ConnectorsPopover>
+          <div className="flex items-center gap-2">
+            <ConnectorsPopover open={connectorsOpen} onOpenChange={setConnectorsOpen}>
+              <button
+                ref={connectorsButtonRef}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+              >
+                <Plug className="size-4" />
+                <span>Connected accounts</span>
+              </button>
+            </ConnectorsPopover>
+            {hasOauthError && (
+              <AlertDialog
+                open={showOauthAlert}
+                onOpenChange={setShowOauthAlert}
+              >
+                <AlertDialogTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center"
+                    aria-label="OAuth connection issues"
+                  >
+                    <AlertTriangle className="size-3 text-amber-500/90 animate-pulse" />
+                  </button>
+                </AlertDialogTrigger>
+                <AlertDialogContent
+                  onCloseAutoFocus={(event) => {
+                    event.preventDefault()
+                    if (openConnectorsAfterClose) {
+                      setOpenConnectorsAfterClose(false)
+                      setConnectorsOpen(true)
+                    }
+                    connectorsButtonRef.current?.focus()
+                  }}
+                >
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Reconnect your accounts</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      One or more connected accounts need attention. Open Connected accounts
+                      to review the status and reconnect if needed.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel
+                      onClick={() => {
+                        setOpenConnectorsAfterClose(false)
+                        setShowOauthAlert(false)
+                      }}
+                    >
+                      Dismiss
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => {
+                        setOpenConnectorsAfterClose(true)
+                        setShowOauthAlert(false)
+                      }}
+                    >
+                      View connected accounts
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
           <SettingsDialog>
             <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
               <Settings className="size-4" />
