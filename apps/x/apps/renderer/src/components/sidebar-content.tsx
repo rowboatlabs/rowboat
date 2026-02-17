@@ -1054,36 +1054,37 @@ function TasksSection({
             </div>
             <SidebarMenu>
               {runs.map((run) => (
-                <SidebarMenuItem key={run.id} className="group/chat-item">
-                  <SidebarMenuButton
-                    isActive={currentRunId === run.id}
-                    onClick={() => actions?.onSelectRun(run.id)}
-                  >
-                    <div className="flex w-full items-center gap-2 min-w-0">
-                      {processingRunIds?.has(run.id) ? (
-                        <span className="size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
-                      ) : null}
-                      <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
-                      {run.createdAt ? (
-                        <span className={`shrink-0 text-[10px] text-muted-foreground${processingRunIds?.has(run.id) ? '' : ' group-hover/chat-item:hidden'}`}>
-                          {formatRunTime(run.createdAt)}
-                        </span>
-                      ) : null}
-                      {!processingRunIds?.has(run.id) && (
-                        <button
-                          type="button"
-                          className="shrink-0 hidden group-hover/chat-item:flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setPendingDeleteRunId(run.id)
-                          }}
-                          aria-label="Delete chat"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </SidebarMenuButton>
+                <SidebarMenuItem key={run.id}>
+                  <ContextMenu>
+                    <ContextMenuTrigger asChild>
+                      <SidebarMenuButton
+                        isActive={currentRunId === run.id}
+                        onClick={() => actions?.onSelectRun(run.id)}
+                      >
+                        <div className="flex w-full items-center gap-2 min-w-0">
+                          {processingRunIds?.has(run.id) ? (
+                            <span className="size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
+                          ) : null}
+                          <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
+                          {run.createdAt ? (
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              {formatRunTime(run.createdAt)}
+                            </span>
+                          ) : null}
+                        </div>
+                      </SidebarMenuButton>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48">
+                      <ContextMenuItem
+                        variant="destructive"
+                        disabled={processingRunIds?.has(run.id)}
+                        onClick={() => setPendingDeleteRunId(run.id)}
+                      >
+                        <Trash2 className="mr-2 size-4" />
+                        Delete
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>
