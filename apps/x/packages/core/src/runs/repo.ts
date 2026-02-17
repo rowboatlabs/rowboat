@@ -46,10 +46,18 @@ export class FSRunsRepo implements IRunsRepo {
                 const messageEvent = event as z.infer<typeof MessageEvent>;
                 if (messageEvent.message.role === 'user') {
                     const content = messageEvent.message.content;
-                    if (typeof content === 'string' && content.trim()) {
-                        // Clean attached-files XML and @mentions, then truncate to 100 chars
-                        const cleaned = cleanContentForTitle(content);
-                        if (!cleaned) continue; // Skip if only attached files/mentions
+                    let textContent: string | undefined;
+                    if (typeof content === 'string') {
+                        textContent = content;
+                    } else if (Array.isArray(content)) {
+                        textContent = content
+                            .filter((p: { type: string }) => p.type === 'text')
+                            .map((p: { type: string; text?: string }) => p.text || '')
+                            .join('');
+                    }
+                    if (textContent && textContent.trim()) {
+                        const cleaned = cleanContentForTitle(textContent);
+                        if (!cleaned) continue;
                         return cleaned.length > 100 ? cleaned.substring(0, 100) : cleaned;
                     }
                 }
@@ -90,9 +98,17 @@ export class FSRunsRepo implements IRunsRepo {
                             if (msg.role === 'user') {
                                 // Found first user message - use as title
                                 const content = msg.content;
-                                if (typeof content === 'string' && content.trim()) {
-                                    // Clean attached-files XML and @mentions, then truncate
-                                    const cleaned = cleanContentForTitle(content);
+                                let textContent: string | undefined;
+                                if (typeof content === 'string') {
+                                    textContent = content;
+                                } else if (Array.isArray(content)) {
+                                    textContent = content
+                                        .filter((p: { type: string }) => p.type === 'text')
+                                        .map((p: { type: string; text?: string }) => p.text || '')
+                                        .join('');
+                                }
+                                if (textContent && textContent.trim()) {
+                                    const cleaned = cleanContentForTitle(textContent);
                                     if (cleaned) {
                                         title = cleaned.length > 100 ? cleaned.substring(0, 100) : cleaned;
                                     }
@@ -241,5 +257,13 @@ export class FSRunsRepo implements IRunsRepo {
     async delete(id: string): Promise<void> {
         const filePath = path.join(WorkDir, 'runs', `${id}.jsonl`);
         await fsp.unlink(filePath);
+        // Clean up attachment sidecar directory if it exists
+        const attachmentsDir = path.join(WorkDir, 'runs', 'attachments', id);
+        try {
+            await fsp.rm(attachmentsDir, { recursive: true });
+        } catch (err: unknown) {
+            const e = err as { code?: string };
+            if (e.code !== 'ENOENT') throw err;
+        }
     }
 }

@@ -357,6 +357,12 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     return await repo.fetch(id);
 }
 
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
     const result: ModelMessage[] = [];
     for (const msg of messages) {
@@ -400,11 +406,41 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                 });
                 break;
             case "user":
-                result.push({
-                    role: "user",
-                    content: msg.content,
-                    providerOptions,
-                });
+                if (typeof msg.content === 'string') {
+                    // Legacy string — pass through unchanged
+                    result.push({
+                        role: "user",
+                        content: msg.content,
+                        providerOptions,
+                    });
+                } else {
+                    // New content parts array — collapse to text for LLM
+                    const textSegments: string[] = [];
+
+                    // Collect attachments into a header block
+                    const attachmentParts = msg.content.filter((p: { type: string }) => p.type === "attachment");
+                    if (attachmentParts.length > 0) {
+                        textSegments.push("User has attached the following files:");
+                        for (const part of attachmentParts) {
+                            const att = (part as { type: string; attachment: { filename: string; mediaType: string; size?: number; path: string } }).attachment;
+                            const sizeStr = att.size ? `, ${formatBytes(att.size)}` : '';
+                            textSegments.push(`- ${att.filename} (${att.mediaType}${sizeStr}) at ${att.path}`);
+                        }
+                        textSegments.push(""); // blank line separator
+                    }
+
+                    // Collect text parts
+                    const textParts = msg.content.filter((p: { type: string }) => p.type === "text");
+                    for (const part of textParts) {
+                        textSegments.push((part as { type: string; text: string }).text);
+                    }
+
+                    result.push({
+                        role: "user",
+                        content: textSegments.join("\n"),
+                        providerOptions,
+                    });
+                }
                 break;
             case "tool":
                 result.push({

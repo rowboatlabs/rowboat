@@ -28,9 +28,36 @@ export const AssistantContentPart = z.union([
     ToolCallPart,
 ]);
 
+// Metadata about an attached file or image
+export const Attachment = z.object({
+    type: z.enum(["file", "image"]),    // extensible — could add "url", "audio" later
+    path: z.string(),                    // absolute file path
+    filename: z.string(),                // display name ("photo.png")
+    mediaType: z.string(),               // MIME type ("image/png", "text/plain")
+    size: z.number().optional(),         // bytes
+});
+
+// A piece of user-typed text within a content array
+export const UserTextPart = z.object({
+    type: z.literal("text"),
+    text: z.string(),
+});
+
+// An attachment within a content array
+export const UserAttachmentPart = z.object({
+    type: z.literal("attachment"),
+    attachment: Attachment,
+});
+
+// Any single part of a user message (text or attachment)
+export const UserContentPart = z.union([UserTextPart, UserAttachmentPart]);
+
+// Named type for user message content — used everywhere instead of repeating the union
+export const UserMessageContent = z.union([z.string(), z.array(UserContentPart)]);
+
 export const UserMessage = z.object({
     role: z.literal("user"),
-    content: z.string(),
+    content: UserMessageContent,
     providerOptions: ProviderOptions.optional(),
 });
 
