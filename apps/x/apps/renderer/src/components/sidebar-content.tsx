@@ -1039,7 +1039,13 @@ function Tree({
           <SidebarMenuItem className="group/file-item">
             <SidebarMenuButton
               isActive={isSelected}
-              onClick={() => onSelect(item.path, item.kind)}
+              onClick={(e) => {
+                if (e.metaKey && actions.onOpenInNewTab) {
+                  actions.onOpenInNewTab(item.path)
+                } else {
+                  onSelect(item.path, item.kind)
+                }
+              }}
             >
               <div className="flex w-full items-center gap-1 min-w-0">
                 <span className="min-w-0 flex-1 truncate">{item.name}</span>
@@ -1183,7 +1189,13 @@ function TasksSection({
                 <SidebarMenuItem key={run.id} className="group/chat-item">
                   <SidebarMenuButton
                     isActive={currentRunId === run.id}
-                    onClick={() => actions?.onSelectRun(run.id)}
+                    onClick={(e) => {
+                      if (e.metaKey && actions?.onOpenInNewTab) {
+                        actions.onOpenInNewTab(run.id)
+                      } else {
+                        actions?.onSelectRun(run.id)
+                      }
+                    }}
                   >
                     <div className="flex w-full items-center gap-2 min-w-0">
                       {processingRunIds?.has(run.id) ? (
