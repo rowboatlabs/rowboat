@@ -8,7 +8,6 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Copy,
-  ExternalLink,
   FilePlus,
   FolderPlus,
   AlertTriangle,
@@ -1049,19 +1048,6 @@ function Tree({
             >
               <div className="flex w-full items-center gap-1 min-w-0">
                 <span className="min-w-0 flex-1 truncate">{item.name}</span>
-                {actions.onOpenInNewTab && (
-                  <button
-                    type="button"
-                    className="shrink-0 hidden group-hover/file-item:flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      actions.onOpenInNewTab!(item.path)
-                    }}
-                    aria-label="Open in new tab"
-                  >
-                    <ExternalLink className="size-3.5" />
-                  </button>
-                )}
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -1209,19 +1195,6 @@ function TasksSection({
                       ) : null}
                       {!processingRunIds?.has(run.id) && (
                         <div className="shrink-0 hidden group-hover/chat-item:flex items-center gap-0.5">
-                          {actions?.onOpenInNewTab && (
-                            <button
-                              type="button"
-                              className="flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                actions.onOpenInNewTab!(run.id)
-                              }}
-                              aria-label="Open in new tab"
-                            >
-                              <ExternalLink className="size-3.5" />
-                            </button>
-                          )}
                           <button
                             type="button"
                             className="flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
