@@ -2432,8 +2432,14 @@ function App() {
                     }
                     return
                   }
-                  // Open in a new tab
-                  openInNewTab(runIdToLoad)
+                  // If active tab is empty (new chat with no run), reuse it
+                  if (activeTab && !activeTab.runId) {
+                    setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, runId: runIdToLoad } : t))
+                    loadRun(runIdToLoad)
+                  } else {
+                    // Open in a new tab
+                    openInNewTab(runIdToLoad)
+                  }
                   if (selectedPath || isGraphOpen || selectedBackgroundTask) {
                     setSelectedPath(null)
                     setIsGraphOpen(false)
