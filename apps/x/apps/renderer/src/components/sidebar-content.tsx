@@ -8,6 +8,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Copy,
+  ExternalLink,
   FilePlus,
   FolderPlus,
   AlertTriangle,
@@ -149,6 +150,7 @@ type TasksActions = {
   onNewChat: () => void
   onSelectRun: (runId: string) => void
   onDeleteRun: (runId: string) => void
+  onOpenInNewTab?: (runId: string) => void
   onSelectBackgroundTask?: (taskName: string) => void
 }
 

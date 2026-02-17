@@ -2424,19 +2424,7 @@ function App() {
                   handleNewChatTab()
                 },
                 onSelectRun: (runIdToLoad) => {
-                  // If it's already the active tab's run, do nothing
-                  const activeTab = openTabs.find(t => t.id === activeTabId)
-                  if (activeTab?.runId === runIdToLoad) {
-                    // Just ensure we're in chat view
-                    if (selectedPath || isGraphOpen || selectedBackgroundTask) {
-                      setSelectedPath(null)
-                      setIsGraphOpen(false)
-                      setExpandedFrom(null)
-                      setSelectedBackgroundTask(null)
-                    }
-                    return
-                  }
-                  // If already open in another tab, switch to it
+                  // If already open in a tab, switch to that tab
                   const existingTab = openTabs.find(t => t.runId === runIdToLoad)
                   if (existingTab) {
                     switchToTab(existingTab.id)
@@ -2448,14 +2436,12 @@ function App() {
                     }
                     return
                   }
-                  // If active tab is empty (new chat with no run), reuse it
-                  if (activeTab && !activeTab.runId) {
-                    setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, runId: runIdToLoad } : t))
-                    loadRun(runIdToLoad)
-                  } else {
-                    // Open in a new tab
-                    openInNewTab(runIdToLoad)
-                  }
+                  // Navigate current tab to this run
+                  setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, runId: runIdToLoad } : t))
+                  void navigateToView({ type: 'chat', runId: runIdToLoad })
+                },
+                onOpenInNewTab: (targetRunId) => {
+                  openInNewTab(targetRunId)
                   if (selectedPath || isGraphOpen || selectedBackgroundTask) {
                     setSelectedPath(null)
                     setIsGraphOpen(false)
