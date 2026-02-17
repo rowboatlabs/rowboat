@@ -12,8 +12,9 @@ export function useOAuth(provider: string) {
   const checkConnection = useCallback(async () => {
     try {
       setIsLoading(true);
-      const result = await window.ipc.invoke('oauth:is-connected', { provider });
-      setIsConnected(result.isConnected);
+      const result = await window.ipc.invoke('oauth:getState', null);
+      const config = result.config || {};
+      setIsConnected(config[provider]?.connected ?? false);
     } catch (error) {
       console.error('Failed to check connection status:', error);
       setIsConnected(false);
@@ -107,8 +108,12 @@ export function useConnectedProviders() {
   const refresh = useCallback(async () => {
     try {
       setIsLoading(true);
-      const result = await window.ipc.invoke('oauth:get-connected-providers', null);
-      setProviders(result.providers);
+      const result = await window.ipc.invoke('oauth:getState', null);
+      const config = result.config || {};
+      const connected = Object.entries(config)
+        .filter(([, value]) => value?.connected)
+        .map(([key]) => key);
+      setProviders(connected);
     } catch (error) {
       console.error('Failed to get connected providers:', error);
       setProviders([]);
@@ -149,4 +154,3 @@ export function useAvailableProviders() {
 
   return { providers, isLoading };
 }
-

@@ -325,25 +325,26 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
     const newStates: Record<string, ProviderState> = {}
 
-    await Promise.all(
-      providers.map(async (provider) => {
-        try {
-          const result = await window.ipc.invoke('oauth:is-connected', { provider })
-          newStates[provider] = {
-            isConnected: result.isConnected,
-            isLoading: false,
-            isConnecting: false,
-          }
-        } catch (error) {
-          console.error(`Failed to check connection status for ${provider}:`, error)
-          newStates[provider] = {
-            isConnected: false,
-            isLoading: false,
-            isConnecting: false,
-          }
+    try {
+      const result = await window.ipc.invoke('oauth:getState', null)
+      const config = result.config || {}
+      for (const provider of providers) {
+        newStates[provider] = {
+          isConnected: config[provider]?.connected ?? false,
+          isLoading: false,
+          isConnecting: false,
         }
-      })
-    )
+      }
+    } catch (error) {
+      console.error('Failed to check connection status for providers:', error)
+      for (const provider of providers) {
+        newStates[provider] = {
+          isConnected: false,
+          isLoading: false,
+          isConnecting: false,
+        }
+      }
+    }
 
     setProviderStates(newStates)
   }, [providers, refreshGranolaConfig, refreshSlackStatus])

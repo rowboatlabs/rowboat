@@ -3,7 +3,6 @@ import container from '../di/container.js';
 import { IOAuthRepo } from '../auth/repo.js';
 import { IClientRegistrationRepo } from '../auth/client-repo.js';
 import { getProviderConfig } from '../auth/providers.js';
-import { getProviderClientIdOverride } from '../auth/provider-client-id.js';
 import * as oauthClient from '../auth/oauth-client.js';
 import type { Configuration } from '../auth/oauth-client.js';
 import { OAuthTokens } from '../auth/types.js';
@@ -26,12 +25,14 @@ export class GoogleClientFactory {
         clientId: null,
     };
 
-    private static resolveClientId(): string {
-        const override = getProviderClientIdOverride(this.PROVIDER_NAME);
-        if (!override) {
-            throw new Error('Google client ID not provided for this session.');
+    private static async resolveClientId(): Promise<string> {
+        const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
+        const clientId = await oauthRepo.getClientId(this.PROVIDER_NAME);
+        if (!clientId) {
+            await oauthRepo.setError(this.PROVIDER_NAME, 'Google client ID missing. Please reconnect.');
+            throw new Error('Google client ID missing. Please reconnect.');
         }
-        return override;
+        return clientId;
     }
 
     /**
@@ -63,6 +64,7 @@ export class GoogleClientFactory {
             // Token expired, try to refresh
             if (!tokens.refresh_token) {
                 console.log("[OAuth] Token expired and no refresh token available for Google.");
+                await oauthRepo.setError(this.PROVIDER_NAME, 'Missing refresh token. Please reconnect.');
                 this.clearCache();
                 return null;
             }
@@ -79,10 +81,15 @@ export class GoogleClientFactory {
 
                 // Update cached tokens and recreate client
                 this.cache.tokens = refreshedTokens;
-                this.cache.client = this.createClientFromTokens(refreshedTokens);
+                if (!this.cache.clientId) {
+                    this.cache.clientId = await this.resolveClientId();
+                }
+                this.cache.client = this.createClientFromTokens(refreshedTokens, this.cache.clientId);
                 console.log(`[OAuth] Token refreshed successfully`);
                 return this.cache.client;
             } catch (error) {
+                const message = error instanceof Error ? error.message : 'Failed to refresh token for Google';
+                await oauthRepo.setError(this.PROVIDER_NAME, message);
                 console.error("[OAuth] Failed to refresh token for Google:", error);
                 this.clearCache();
                 return null;
@@ -97,7 +104,10 @@ export class GoogleClientFactory {
         // Create new client with current tokens
         console.log(`[OAuth] Creating new OAuth2Client instance`);
         this.cache.tokens = tokens;
-        this.cache.client = this.createClientFromTokens(tokens);
+        if (!this.cache.clientId) {
+            this.cache.clientId = await this.resolveClientId();
+        }
+        this.cache.client = this.createClientFromTokens(tokens, this.cache.clientId);
         return this.cache.client;
     }
 
@@ -106,16 +116,6 @@ export class GoogleClientFactory {
      */
     static async hasValidCredentials(requiredScopes: string | string[]): Promise<boolean> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
-        const isConnected = await oauthRepo.isConnected(this.PROVIDER_NAME);
-
-        if (!isConnected) {
-            return false;
-        }
-
-        if (!getProviderClientIdOverride(this.PROVIDER_NAME)) {
-            return false;
-        }
-
         const tokens = await oauthRepo.getTokens(this.PROVIDER_NAME);
         if (!tokens) {
             return false;
@@ -144,7 +144,7 @@ export class GoogleClientFactory {
      * Initialize cached configuration (called once)
      */
     private static async initializeConfigCache(): Promise<void> {
-        const clientId = this.resolveClientId();
+        const clientId = await this.resolveClientId();
 
         if (this.cache.config && this.cache.clientId === clientId) {
             return; // Already initialized for this client ID
@@ -202,9 +202,7 @@ export class GoogleClientFactory {
     /**
      * Create OAuth2Client from OAuthTokens
      */
-    private static createClientFromTokens(tokens: OAuthTokens): OAuth2Client {
-        const clientId = this.resolveClientId();
-
+    private static createClientFromTokens(tokens: OAuthTokens, clientId: string): OAuth2Client {
         // Create OAuth2Client directly (PKCE flow doesn't use client secret)
         const client = new OAuth2Client(
             clientId,
