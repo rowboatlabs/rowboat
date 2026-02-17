@@ -53,6 +53,7 @@ import { OnboardingModal } from '@/components/onboarding-modal'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
+import { ChatTabBar, type ChatTab } from '@/components/chat-tab-bar'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
@@ -660,6 +661,17 @@ function App() {
   // Runs history state
   type RunListItem = { id: string; title?: string; createdAt: string; agentId: string }
   const [runs, setRuns] = useState<RunListItem[]>([])
+
+  // Tab state
+  const [openTabs, setOpenTabs] = useState<ChatTab[]>([{ id: 'default-tab', runId: null }])
+  const [activeTabId, setActiveTabId] = useState('default-tab')
+  const tabIdCounterRef = useRef(0)
+  const newTabId = () => `tab-${++tabIdCounterRef.current}`
+
+  const getTabTitle = useCallback((tab: ChatTab) => {
+    if (!tab.runId) return 'New chat'
+    return runs.find(r => r.id === tab.runId)?.title || '(Untitled chat)'
+  }, [runs])
 
   // Pending requests state
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<Map<string, z.infer<typeof ToolPermissionRequestEvent>>>(new Map())
@@ -1495,6 +1507,8 @@ function App() {
         })
         currentRunId = run.id
         setRunId(currentRunId)
+        // Update active tab's runId to the new run
+        setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, runId: currentRunId } : t))
         isNewRun = true
       }
 
@@ -1607,7 +1621,97 @@ function App() {
     setAllPermissionRequests(new Map())
     setPermissionResponses(new Map())
     setSelectedBackgroundTask(null)
-  }, [])
+    // Update active tab's runId to null
+    setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, runId: null } : t))
+  }, [activeTabId])
+
+  // Tab operations
+  const openInNewTab = useCallback((targetRunId: string) => {
+    // If already open in a tab, just switch to it
+    const existingTab = openTabs.find(t => t.runId === targetRunId)
+    if (existingTab) {
+      setActiveTabId(existingTab.id)
+      loadRun(targetRunId)
+      return
+    }
+    const id = newTabId()
+    setOpenTabs(prev => [...prev, { id, runId: targetRunId }])
+    setActiveTabId(id)
+    loadRun(targetRunId)
+  }, [openTabs, loadRun])
+
+  const switchToTab = useCallback((tabId: string) => {
+    const tab = openTabs.find(t => t.id === tabId)
+    if (!tab) return
+    setActiveTabId(tabId)
+    if (tab.runId) {
+      loadRun(tab.runId)
+    } else {
+      // Reset to new chat state
+      loadRunRequestIdRef.current += 1
+      setConversation([])
+      setCurrentAssistantMessage('')
+      setRunId(null)
+      setMessage('')
+      setModelUsage(null)
+      setIsProcessing(false)
+      setPendingPermissionRequests(new Map())
+      setPendingAskHumanRequests(new Map())
+      setAllPermissionRequests(new Map())
+      setPermissionResponses(new Map())
+    }
+  }, [openTabs, loadRun])
+
+  const closeTab = useCallback((tabId: string) => {
+    setOpenTabs(prev => {
+      if (prev.length <= 1) return prev
+      const idx = prev.findIndex(t => t.id === tabId)
+      const next = prev.filter(t => t.id !== tabId)
+      // If closing the active tab, switch to adjacent
+      if (tabId === activeTabId && next.length > 0) {
+        const newIdx = Math.min(idx, next.length - 1)
+        const newActiveTab = next[newIdx]
+        setActiveTabId(newActiveTab.id)
+        if (newActiveTab.runId) {
+          loadRun(newActiveTab.runId)
+        } else {
+          loadRunRequestIdRef.current += 1
+          setConversation([])
+          setCurrentAssistantMessage('')
+          setRunId(null)
+          setMessage('')
+          setModelUsage(null)
+          setIsProcessing(false)
+          setPendingPermissionRequests(new Map())
+          setPendingAskHumanRequests(new Map())
+          setAllPermissionRequests(new Map())
+          setPermissionResponses(new Map())
+        }
+      }
+      return next
+    })
+  }, [activeTabId, loadRun])
+
+  const handleNewChatTab = useCallback(() => {
+    // If current tab already has a run, open a new tab
+    const activeTab = openTabs.find(t => t.id === activeTabId)
+    if (activeTab?.runId) {
+      const id = newTabId()
+      setOpenTabs(prev => [...prev, { id, runId: null }])
+      setActiveTabId(id)
+      handleNewChat()
+    } else {
+      // Current tab is already blank, just focus it
+      handleNewChat()
+    }
+    // Ensure we're in chat view
+    if (selectedPath || isGraphOpen || selectedBackgroundTask) {
+      setSelectedPath(null)
+      setIsGraphOpen(false)
+      setExpandedFrom(null)
+      setSelectedBackgroundTask(null)
+    }
+  }, [openTabs, activeTabId, handleNewChat, selectedPath, isGraphOpen, selectedBackgroundTask])
 
   const handleChatInputSubmit = (text: string) => {
     setIsChatSidebarOpen(true)
@@ -2301,20 +2405,55 @@ function App() {
               processingRunIds={processingRunIds}
               tasksActions={{
                 onNewChat: () => {
-                  void navigateToView({ type: 'chat', runId: null })
+                  handleNewChatTab()
                 },
                 onSelectRun: (runIdToLoad) => {
+                  // If run is already open in a tab, switch to that tab
+                  const existingTab = openTabs.find(t => t.runId === runIdToLoad)
+                  if (existingTab) {
+                    switchToTab(existingTab.id)
+                    // Also ensure we navigate to chat view
+                    if (selectedPath || isGraphOpen || selectedBackgroundTask) {
+                      setSelectedPath(null)
+                      setIsGraphOpen(false)
+                      setExpandedFrom(null)
+                      setSelectedBackgroundTask(null)
+                    }
+                    return
+                  }
+                  // Update current tab's runId
+                  setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, runId: runIdToLoad } : t))
                   void navigateToView({ type: 'chat', runId: runIdToLoad })
                 },
                 onDeleteRun: async (runIdToDelete) => {
                   try {
                     await window.ipc.invoke('runs:delete', { runId: runIdToDelete })
-                    if (runId === runIdToDelete) {
+                    // Close any tab showing the deleted run
+                    const tabForRun = openTabs.find(t => t.runId === runIdToDelete)
+                    if (tabForRun) {
+                      if (openTabs.length > 1) {
+                        closeTab(tabForRun.id)
+                      } else {
+                        // Only one tab, reset it to new chat
+                        setOpenTabs([{ id: tabForRun.id, runId: null }])
+                        void navigateToView({ type: 'chat', runId: null })
+                      }
+                    } else if (runId === runIdToDelete) {
                       void navigateToView({ type: 'chat', runId: null })
                     }
                     await loadRuns()
                   } catch (err) {
                     console.error('Failed to delete run:', err)
+                  }
+                },
+                onOpenInNewTab: (targetRunId) => {
+                  openInNewTab(targetRunId)
+                  // Ensure we're in chat view
+                  if (selectedPath || isGraphOpen || selectedBackgroundTask) {
+                    setSelectedPath(null)
+                    setIsGraphOpen(false)
+                    setExpandedFrom(null)
+                    setSelectedBackgroundTask(null)
                   }
                 },
                 onSelectBackgroundTask: (taskName) => {
@@ -2431,6 +2570,14 @@ function App() {
               ) : (
               <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
+                <ChatTabBar
+                  tabs={openTabs}
+                  activeTabId={activeTabId}
+                  getTabTitle={getTabTitle}
+                  processingRunIds={processingRunIds}
+                  onSwitchTab={switchToTab}
+                  onCloseTab={closeTab}
+                />
                 <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
                   <ScrollPositionPreserver />
                   <ConversationContent className={conversationContentClassName}>
@@ -2555,7 +2702,7 @@ function App() {
               onNavigateForward={() => { void navigateForward() }}
               canNavigateBack={canNavigateBack}
               canNavigateForward={canNavigateForward}
-              onNewChat={handleNewChat}
+              onNewChat={handleNewChatTab}
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
           </SidebarProvider>

@@ -8,6 +8,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Copy,
+  ExternalLink,
   FilePlus,
   FolderPlus,
   AlertTriangle,
@@ -149,6 +150,7 @@ type TasksActions = {
   onNewChat: () => void
   onSelectRun: (runId: string) => void
   onDeleteRun: (runId: string) => void
+  onOpenInNewTab?: (runId: string) => void
   onSelectBackgroundTask?: (taskName: string) => void
 }
 
@@ -1178,17 +1180,32 @@ function TasksSection({
                         </span>
                       ) : null}
                       {!processingRunIds?.has(run.id) && (
-                        <button
-                          type="button"
-                          className="shrink-0 hidden group-hover/chat-item:flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setPendingDeleteRunId(run.id)
-                          }}
-                          aria-label="Delete chat"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
+                        <div className="shrink-0 hidden group-hover/chat-item:flex items-center gap-0.5">
+                          {actions?.onOpenInNewTab && (
+                            <button
+                              type="button"
+                              className="flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                actions.onOpenInNewTab!(run.id)
+                              }}
+                              aria-label="Open in new tab"
+                            >
+                              <ExternalLink className="size-3.5" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setPendingDeleteRunId(run.id)
+                            }}
+                            aria-label="Delete chat"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </SidebarMenuButton>
