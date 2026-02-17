@@ -19,6 +19,7 @@ interface GoogleClientIdModalProps {
   onOpenChange: (open: boolean) => void
   onSubmit: (clientId: string) => void
   isSubmitting?: boolean
+  description?: string
 }
 
 export function GoogleClientIdModal({
@@ -26,6 +27,7 @@ export function GoogleClientIdModal({
   onOpenChange,
   onSubmit,
   isSubmitting = false,
+  description,
 }: GoogleClientIdModalProps) {
   const [clientId, setClientId] = useState("")
 
@@ -49,7 +51,7 @@ export function GoogleClientIdModal({
         <DialogHeader>
           <DialogTitle>Enter Google Client ID</DialogTitle>
           <DialogDescription>
-            This app does not store the client ID. You will be prompted each session.
+            {description ?? "Enter the client ID for your Google OAuth app to continue."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">

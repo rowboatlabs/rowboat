@@ -5,8 +5,6 @@ import os from 'node:os';
 import {
   connectProvider,
   disconnectProvider,
-  isConnected,
-  getConnectedProviders,
   listProviders,
 } from './oauth-handler.js';
 import { watcher as watcherCore, workspace } from '@x/core';
@@ -24,6 +22,7 @@ import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection } from '@x/core/dist/models/models.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
+import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
@@ -364,19 +363,18 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'oauth:connect': async (_event, args) => {
-      return await connectProvider(args.provider, args.clientId);
+      return await connectProvider(args.provider, args.clientId?.trim());
     },
     'oauth:disconnect': async (_event, args) => {
       return await disconnectProvider(args.provider);
     },
-    'oauth:is-connected': async (_event, args) => {
-      return await isConnected(args.provider);
-    },
     'oauth:list-providers': async () => {
       return listProviders();
     },
-    'oauth:get-connected-providers': async () => {
-      return await getConnectedProviders();
+    'oauth:getState': async () => {
+      const repo = container.resolve<IOAuthRepo>('oauthRepo');
+      const config = await repo.getClientFacingConfig();
+      return { config };
     },
     'granola:getConfig': async () => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');

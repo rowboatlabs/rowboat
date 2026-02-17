@@ -49,6 +49,7 @@ export class FirefliesClientFactory {
             // Token expired, try to refresh
             if (!tokens.refresh_token) {
                 console.log("[Fireflies] Token expired and no refresh token available.");
+                await oauthRepo.setError(this.PROVIDER_NAME, 'Missing refresh token. Please reconnect.');
                 this.clearCache();
                 return null;
             }
@@ -75,6 +76,8 @@ export class FirefliesClientFactory {
                 console.log(`[Fireflies] Token refreshed successfully`);
                 return this.cache.client;
             } catch (error) {
+                const message = error instanceof Error ? error.message : 'Failed to refresh token for Fireflies';
+                await oauthRepo.setError(this.PROVIDER_NAME, message);
                 console.error("[Fireflies] Failed to refresh token:", error);
                 this.clearCache();
                 return null;
@@ -104,12 +107,6 @@ export class FirefliesClientFactory {
      */
     static async hasValidCredentials(): Promise<boolean> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
-        const isConnected = await oauthRepo.isConnected(this.PROVIDER_NAME);
-
-        if (!isConnected) {
-            return false;
-        }
-
         const tokens = await oauthRepo.getTokens(this.PROVIDER_NAME);
         return tokens !== null;
     }
@@ -215,4 +212,3 @@ export class FirefliesClientFactory {
         return client;
     }
 }
-

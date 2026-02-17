@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, Mic, Mail, MessageSquare } from "lucide-react"
+import { AlertTriangle, Loader2, Mic, Mail, MessageSquare } from "lucide-react"
 
 import {
   Popover,
@@ -28,17 +28,28 @@ interface ProviderState {
   isConnecting: boolean
 }
 
+interface ProviderStatus {
+  error?: string
+}
+
 interface ConnectorsPopoverProps {
   children: React.ReactNode
   tooltip?: string
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps) {
-  const [open, setOpen] = useState(false)
+export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenChange }: ConnectorsPopoverProps) {
+  const [openInternal, setOpenInternal] = useState(false)
+  const isControlled = typeof openProp === "boolean"
+  const open = isControlled ? openProp : openInternal
+  const setOpen = onOpenChange ?? setOpenInternal
   const [providers, setProviders] = useState<string[]>([])
   const [providersLoading, setProvidersLoading] = useState(true)
   const [providerStates, setProviderStates] = useState<Record<string, ProviderState>>({})
+  const [providerStatus, setProviderStatus] = useState<Record<string, ProviderStatus>>({})
   const [googleClientIdOpen, setGoogleClientIdOpen] = useState(false)
+  const [googleClientIdDescription, setGoogleClientIdDescription] = useState<string | undefined>(undefined)
 
   // Granola state
   const [granolaEnabled, setGranolaEnabled] = useState(false)
@@ -184,25 +195,35 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
 
     const newStates: Record<string, ProviderState> = {}
 
-    await Promise.all(
-      providers.map(async (provider) => {
-        try {
-          const result = await window.ipc.invoke('oauth:is-connected', { provider })
-          newStates[provider] = {
-            isConnected: result.isConnected,
-            isLoading: false,
-            isConnecting: false,
-          }
-        } catch (error) {
-          console.error(`Failed to check connection status for ${provider}:`, error)
-          newStates[provider] = {
-            isConnected: false,
-            isLoading: false,
-            isConnecting: false,
-          }
+    try {
+      const result = await window.ipc.invoke('oauth:getState', null)
+      const config = result.config || {}
+      const statusMap: Record<string, ProviderStatus> = {}
+
+      for (const provider of providers) {
+        const providerConfig = config[provider]
+        newStates[provider] = {
+          isConnected: providerConfig?.connected ?? false,
+          isLoading: false,
+          isConnecting: false,
         }
-      })
-    )
+        if (providerConfig?.error) {
+          statusMap[provider] = { error: providerConfig.error }
+        }
+      }
+
+      setProviderStatus(statusMap)
+    } catch (error) {
+      console.error('Failed to check connection statuses:', error)
+      for (const provider of providers) {
+        newStates[provider] = {
+          isConnected: false,
+          isLoading: false,
+          isConnecting: false,
+        }
+      }
+      setProviderStatus({})
+    }
 
     setProviderStates(newStates)
   }, [providers, refreshGranolaConfig, refreshSlackStatus])
@@ -302,6 +323,7 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
   // Connect to a provider
   const handleConnect = useCallback(async (provider: string) => {
     if (provider === 'google') {
+      setGoogleClientIdDescription(undefined)
       const existingClientId = getGoogleClientId()
       if (!existingClientId) {
         setGoogleClientIdOpen(true)
@@ -317,6 +339,7 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
   const handleGoogleClientIdSubmit = useCallback((clientId: string) => {
     setGoogleClientId(clientId)
     setGoogleClientIdOpen(false)
+    setGoogleClientIdDescription(undefined)
     startConnect('google', clientId)
   }, [startConnect])
 
@@ -361,6 +384,10 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
     }
   }, [])
 
+  const hasProviderError = Object.values(providerStatus).some(
+    (status) => Boolean(status?.error)
+  )
+
   // Helper to render an OAuth provider row
   const renderOAuthProvider = (provider: string, displayName: string, icon: React.ReactNode, description: string) => {
     const state = providerStates[provider] || {
@@ -368,6 +395,7 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
       isLoading: true,
       isConnecting: false,
     }
+    const needsReconnect = Boolean(providerStatus[provider]?.error)
 
     return (
       <div
@@ -382,6 +410,8 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
             <span className="text-sm font-medium truncate">{displayName}</span>
             {state.isLoading ? (
               <span className="text-xs text-muted-foreground">Checking...</span>
+            ) : needsReconnect ? (
+              <span className="text-xs text-amber-600">Needs reconnect</span>
             ) : (
               <span className="text-xs text-muted-foreground truncate">{description}</span>
             )}
@@ -390,6 +420,24 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
         <div className="shrink-0">
           {state.isLoading ? (
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          ) : needsReconnect ? (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => {
+                if (provider === 'google') {
+                  setGoogleClientIdDescription(
+                    "To keep your Google account connected, please re-enter your client ID. You only need to do this once."
+                  )
+                  setGoogleClientIdOpen(true)
+                  return
+                }
+                startConnect(provider)
+              }}
+              className="h-7 px-2 text-xs"
+            >
+              Reconnect
+            </Button>
           ) : state.isConnected ? (
             <Button
               variant="outline"
@@ -423,9 +471,15 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
     <>
     <GoogleClientIdModal
       open={googleClientIdOpen}
-      onOpenChange={setGoogleClientIdOpen}
+      onOpenChange={(nextOpen) => {
+        setGoogleClientIdOpen(nextOpen)
+        if (!nextOpen) {
+          setGoogleClientIdDescription(undefined)
+        }
+      }}
       onSubmit={handleGoogleClientIdSubmit}
       isSubmitting={providerStates.google?.isConnecting ?? false}
+      description={googleClientIdDescription}
     />
     <Popover open={open} onOpenChange={setOpen}>
       {tooltip ? (
@@ -451,7 +505,12 @@ export function ConnectorsPopover({ children, tooltip }: ConnectorsPopoverProps)
         className="w-80 p-0"
       >
         <div className="p-4 border-b">
-          <h4 className="font-semibold text-sm">Connectors</h4>
+          <h4 className="font-semibold text-sm flex items-center gap-1.5">
+            Connected accounts
+            {hasProviderError && (
+              <AlertTriangle className="size-3 text-amber-500/80 animate-pulse" />
+            )}
+          </h4>
           <p className="text-xs text-muted-foreground mt-1">
             Connect accounts to sync data
           </p>

@@ -233,24 +233,19 @@ const ipcSchemas = {
       success: z.boolean(),
     }),
   },
-  'oauth:is-connected': {
-    req: z.object({
-      provider: z.string(),
-    }),
-    res: z.object({
-      isConnected: z.boolean(),
-    }),
-  },
   'oauth:list-providers': {
     req: z.null(),
     res: z.object({
       providers: z.array(z.string()),
     }),
   },
-  'oauth:get-connected-providers': {
+  'oauth:getState': {
     req: z.null(),
     res: z.object({
-      providers: z.array(z.string()),
+      config: z.record(z.string(), z.object({
+        connected: z.boolean(),
+        error: z.string().optional(),
+      })),
     }),
   },
   'oauth:didConnect': {
