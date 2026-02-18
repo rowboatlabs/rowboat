@@ -396,6 +396,22 @@ const ipcSchemas = {
     req: z.object({ path: z.string() }),
     res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
   },
+  // Search channels
+  'search:query': {
+    req: z.object({
+      query: z.string(),
+      limit: z.number().optional(),
+      types: z.array(z.enum(['knowledge', 'chat'])).optional(),
+    }),
+    res: z.object({
+      results: z.array(z.object({
+        type: z.enum(['knowledge', 'chat']),
+        title: z.string(),
+        preview: z.string(),
+        path: z.string(),
+      })),
+    }),
+  },
 } as const;
 
 // ============================================================================

@@ -226,13 +226,14 @@ export class StreamStepMessageBuilder {
     private textBuffer: string = "";
     private reasoningBuffer: string = "";
     private providerOptions: z.infer<typeof ProviderOptions> | undefined = undefined;
+    private reasoningProviderOptions: z.infer<typeof ProviderOptions> | undefined = undefined;
 
     flushBuffers() {
-        // skip reasoning
-        // if (this.reasoningBuffer) {
-        //     this.parts.push({ type: "reasoning", text: this.reasoningBuffer });
-        //     this.reasoningBuffer = "";
-        // }
+        if (this.reasoningBuffer || this.reasoningProviderOptions) {
+            this.parts.push({ type: "reasoning", text: this.reasoningBuffer, providerOptions: this.reasoningProviderOptions });
+            this.reasoningBuffer = "";
+            this.reasoningProviderOptions = undefined;
+        }
         if (this.textBuffer) {
             this.parts.push({ type: "text", text: this.textBuffer });
             this.textBuffer = "";
@@ -242,7 +243,11 @@ export class StreamStepMessageBuilder {
     ingest(event: z.infer<typeof LlmStepStreamEvent>) {
         switch (event.type) {
             case "reasoning-start":
+                break;
             case "reasoning-end":
+                this.reasoningProviderOptions = event.providerOptions;
+                this.flushBuffers();
+                break;
             case "text-start":
             case "text-end":
                 this.flushBuffers();
@@ -827,10 +832,6 @@ export async function* streamAgent({
             tools,
             signal,
         )) {
-            // Only log significant events (not text-delta to reduce noise)
-            if (event.type !== 'text-delta') {
-                loopLogger.log('got llm-stream-event:', event.type);
-            }
             messageBuilder.ingest(event);
             yield* processEvent({
                 runId,
@@ -924,9 +925,11 @@ async function* streamLlm(
     tools: ToolSet,
     signal?: AbortSignal,
 ): AsyncGenerator<z.infer<typeof LlmStepStreamEvent>, void, unknown> {
+    const converted = convertFromMessages(messages);
+    console.log(`! SENDING payload to model: `, JSON.stringify(converted))
     const { fullStream } = streamText({
         model,
-        messages: convertFromMessages(messages),
+        messages: converted,
         system: instructions,
         tools,
         stopWhen: stepCountIs(1),
@@ -935,7 +938,7 @@ async function* streamLlm(
     for await (const event of fullStream) {
         // Check abort on every chunk for responsiveness
         signal?.throwIfAborted();
-        // console.log("\n\n\t>>>>\t\tstream event", JSON.stringify(event));
+        console.log("-> \t\tstream event", JSON.stringify(event));
         switch (event.type) {
             case "error":
                 yield {
@@ -965,6 +968,12 @@ async function* streamLlm(
             case "text-start":
                 yield {
                     type: "text-start",
+                    providerOptions: event.providerMetadata,
+                };
+                break;
+            case "text-end":
+                yield {
+                    type: "text-end",
                     providerOptions: event.providerMetadata,
                 };
                 break;
