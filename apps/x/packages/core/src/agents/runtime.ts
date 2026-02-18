@@ -226,13 +226,14 @@ export class StreamStepMessageBuilder {
     private textBuffer: string = "";
     private reasoningBuffer: string = "";
     private providerOptions: z.infer<typeof ProviderOptions> | undefined = undefined;
+    private reasoningProviderOptions: z.infer<typeof ProviderOptions> | undefined = undefined;
 
     flushBuffers() {
-        // skip reasoning
-        // if (this.reasoningBuffer) {
-        //     this.parts.push({ type: "reasoning", text: this.reasoningBuffer });
-        //     this.reasoningBuffer = "";
-        // }
+        if (this.reasoningBuffer || this.reasoningProviderOptions) {
+            this.parts.push({ type: "reasoning", text: this.reasoningBuffer, providerOptions: this.reasoningProviderOptions });
+            this.reasoningBuffer = "";
+            this.reasoningProviderOptions = undefined;
+        }
         if (this.textBuffer) {
             this.parts.push({ type: "text", text: this.textBuffer });
             this.textBuffer = "";
@@ -242,7 +243,11 @@ export class StreamStepMessageBuilder {
     ingest(event: z.infer<typeof LlmStepStreamEvent>) {
         switch (event.type) {
             case "reasoning-start":
+                break;
             case "reasoning-end":
+                this.reasoningProviderOptions = event.providerOptions;
+                this.flushBuffers();
+                break;
             case "text-start":
             case "text-end":
                 this.flushBuffers();
