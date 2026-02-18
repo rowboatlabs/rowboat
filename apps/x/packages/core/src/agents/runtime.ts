@@ -971,6 +971,12 @@ async function* streamLlm(
                     providerOptions: event.providerMetadata,
                 };
                 break;
+            case "text-end":
+                yield {
+                    type: "text-end",
+                    providerOptions: event.providerMetadata,
+                };
+                break;
             case "text-delta":
                 yield {
                     type: "text-delta",
