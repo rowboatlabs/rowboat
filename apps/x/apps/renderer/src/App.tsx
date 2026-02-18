@@ -585,7 +585,7 @@ function ContentHeader({
   return (
     <header
       className={cn(
-        "titlebar-drag-region flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 bg-sidebar transition-[padding] duration-200 ease-linear",
+        "titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border px-3 bg-sidebar transition-[padding] duration-200 ease-linear overflow-hidden",
         // When the sidebar is collapsed the content area shifts left, so we need enough left padding
         // to avoid overlapping the fixed traffic-lights/toggle/back/forward controls.
         isCollapsed && !collapsedLeftPaddingPx && "pl-[168px]"
@@ -593,7 +593,7 @@ function ContentHeader({
       style={isCollapsed && collapsedLeftPaddingPx ? { paddingLeft: collapsedLeftPaddingPx } : undefined}
     >
       {!isCollapsed && onNavigateBack && onNavigateForward ? (
-        <div className="titlebar-no-drag flex items-center gap-1">
+        <div className="titlebar-no-drag flex items-center gap-1 pr-2 shrink-0">
           <button
             type="button"
             onClick={onNavigateBack}
@@ -2040,6 +2040,61 @@ function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  // Keyboard shortcuts for tab management
+  useEffect(() => {
+    const handleTabKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+
+      // Cmd+W — close active tab
+      if (e.key === 'w') {
+        e.preventDefault()
+        if (activeSection === 'knowledge' && activeFileTabId) {
+          closeFileTab(activeFileTabId)
+        } else if (activeSection === 'tasks') {
+          closeChatTab(activeChatTabId)
+        }
+        return
+      }
+
+      // Cmd+1..9 — switch to tab N (Cmd+9 always goes to last tab)
+      if (/^[1-9]$/.test(e.key)) {
+        e.preventDefault()
+        const n = parseInt(e.key, 10)
+        if (activeSection === 'knowledge') {
+          const idx = e.key === '9' ? fileTabs.length - 1 : n - 1
+          const tab = fileTabs[idx]
+          if (tab) switchFileTab(tab.id)
+        } else if (activeSection === 'tasks') {
+          const idx = e.key === '9' ? chatTabs.length - 1 : n - 1
+          const tab = chatTabs[idx]
+          if (tab) switchChatTab(tab.id)
+        }
+        return
+      }
+
+      // Cmd+Shift+] — next tab, Cmd+Shift+[ — previous tab
+      if (e.shiftKey && (e.key === ']' || e.key === '[')) {
+        e.preventDefault()
+        const direction = e.key === ']' ? 1 : -1
+        if (activeSection === 'knowledge') {
+          const currentIdx = fileTabs.findIndex(t => t.id === activeFileTabId)
+          if (currentIdx === -1) return
+          const nextIdx = (currentIdx + direction + fileTabs.length) % fileTabs.length
+          switchFileTab(fileTabs[nextIdx].id)
+        } else if (activeSection === 'tasks') {
+          const currentIdx = chatTabs.findIndex(t => t.id === activeChatTabId)
+          if (currentIdx === -1) return
+          const nextIdx = (currentIdx + direction + chatTabs.length) % chatTabs.length
+          switchChatTab(chatTabs[nextIdx].id)
+        }
+        return
+      }
+    }
+    document.addEventListener('keydown', handleTabKeyDown)
+    return () => document.removeEventListener('keydown', handleTabKeyDown)
+  }, [activeSection, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
+
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
       navigateToFile(path)
@@ -2499,13 +2554,6 @@ function App() {
   const conversationContentClassName = hasConversation
     ? "mx-auto w-full max-w-4xl pb-28"
     : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
-  const headerTitle = selectedPath
-    ? getBaseName(selectedPath)
-    : isGraphOpen
-      ? 'Graph View'
-      : selectedBackgroundTask
-        ? `Background Task: ${selectedBackgroundTask}`
-        : 'Chat'
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
@@ -2585,7 +2633,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {activeSection === 'knowledge' && fileTabs.length > 1 ? (
+                {activeSection === 'knowledge' && fileTabs.length >= 1 ? (
                   <TabBar
                     tabs={fileTabs}
                     activeTabId={activeFileTabId ?? ''}
@@ -2594,7 +2642,7 @@ function App() {
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
                   />
-                ) : activeSection === 'tasks' && chatTabs.length > 1 ? (
+                ) : (
                   <TabBar
                     tabs={chatTabs}
                     activeTabId={activeChatTabId}
@@ -2604,10 +2652,6 @@ function App() {
                     onSwitchTab={switchChatTab}
                     onCloseTab={closeChatTab}
                   />
-                ) : (
-                  <span className="text-sm font-medium text-muted-foreground flex-1 min-w-0 truncate">
-                    {headerTitle}
-                  </span>
                 )}
                 <button
                   type="button"
@@ -2618,7 +2662,7 @@ function App() {
                   <SearchIcon className="size-4" />
                 </button>
                 {selectedPath && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground self-center shrink-0 pl-2">
                     {isSaving ? (
                       <>
                         <LoaderIcon className="h-3 w-3 animate-spin" />
@@ -2637,7 +2681,7 @@ function App() {
                     variant="ghost"
                     size="sm"
                     onClick={() => { void navigateToView({ type: 'chat', runId }) }}
-                    className="titlebar-no-drag text-foreground"
+                    className="titlebar-no-drag text-foreground self-center shrink-0"
                   >
                     Close Graph
                   </Button>
@@ -2646,7 +2690,7 @@ function App() {
                   <button
                     type="button"
                     onClick={handleCloseFullScreenChat}
-                    className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                    className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
                     aria-label="Return to file"
                   >
                     <X className="size-5" />
@@ -2656,7 +2700,7 @@ function App() {
                   <button
                     type="button"
                     onClick={() => setIsChatSidebarOpen(!isChatSidebarOpen)}
-                    className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1"
+                    className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1 self-center shrink-0"
                     aria-label="Toggle Chat Sidebar"
                   >
                     <PanelRightIcon className="size-5" />
