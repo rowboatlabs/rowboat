@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Square, X, ChevronLeftIcon, ChevronRightIcon, SquarePen } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ArrowUp, PanelLeftIcon, PanelRightIcon, Square, X, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatInputBar } from './components/chat-button';
@@ -50,6 +50,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { OnboardingModal } from '@/components/onboarding-modal'
+import { SearchDialog } from '@/components/search-dialog'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
@@ -674,6 +675,9 @@ function App() {
 
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false)
+
+  // Search state
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
 
   // Background tasks state
   type BackgroundTaskItem = {
@@ -1829,6 +1833,18 @@ function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [handleCloseFullScreenChat, isFullScreenChat, expandedFrom, navigateToFullScreenChat])
 
+  // Keyboard shortcut: Cmd+K / Ctrl+K to open search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault()
+        setIsSearchOpen(true)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
       navigateToFile(path)
@@ -2336,6 +2352,14 @@ function App() {
                 <span className="text-sm font-medium text-muted-foreground flex-1 min-w-0 truncate">
                   {headerTitle}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setIsSearchOpen(true)}
+                  className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  aria-label="Search"
+                >
+                  <SearchIcon className="size-4" />
+                </button>
                 {selectedPath && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     {isSaving ? (
@@ -2568,6 +2592,12 @@ function App() {
             />
           )}
         </div>
+        <SearchDialog
+          open={isSearchOpen}
+          onOpenChange={setIsSearchOpen}
+          onSelectFile={navigateToFile}
+          onSelectRun={(id) => { void navigateToView({ type: 'chat', runId: id }) }}
+        />
       </SidebarSectionProvider>
       <Toaster />
       <OnboardingModal
