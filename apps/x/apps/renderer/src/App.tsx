@@ -6,7 +6,7 @@ import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { Button } from './components/ui/button';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Expand, Minimize2, X, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Expand, Shrink, X, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -43,7 +43,7 @@ import {
   SidebarProvider,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { OnboardingModal } from '@/components/onboarding-modal'
@@ -1802,19 +1802,16 @@ function App() {
       setActiveChatTabId(id)
     }
     handleNewChat()
-    // In two-pane mode, keep the current knowledge/graph context and just reset chat.
+    // Left-pane "new chat" should always open full chat view.
     if (selectedPath || isGraphOpen) {
-      setIsChatSidebarOpen(true)
-      setIsRightPaneMaximized(false)
-      return
-    }
-
-    // Outside two-pane mode, leave task detail view and return to chat.
-    if (selectedBackgroundTask) {
+      setExpandedFrom({ path: selectedPath, graph: isGraphOpen })
+    } else {
       setExpandedFrom(null)
-      setSelectedBackgroundTask(null)
     }
-  }, [chatTabs, activeChatTabId, handleNewChat, selectedPath, isGraphOpen, selectedBackgroundTask])
+    setIsRightPaneMaximized(false)
+    setSelectedPath(null)
+    setIsGraphOpen(false)
+  }, [chatTabs, activeChatTabId, handleNewChat, selectedPath, isGraphOpen])
 
   // Sidebar variant: create/switch chat tab without leaving file/graph context.
   const handleNewChatTabInSidebar = useCallback(() => {
@@ -2657,15 +2654,7 @@ function App() {
               currentRunId={runId}
               processingRunIds={processingRunIds}
               tasksActions={{
-                onNewChat: () => {
-                  if (selectedPath || isGraphOpen) {
-                    handleNewChatTabInSidebar()
-                    setIsChatSidebarOpen(true)
-                    setIsRightPaneMaximized(false)
-                    return
-                  }
-                  handleNewChatTab()
-                },
+                onNewChat: handleNewChatTab,
                 onSelectRun: (runIdToLoad) => {
                   if (selectedPath || isGraphOpen) {
                     setIsChatSidebarOpen(true)
@@ -2803,19 +2792,25 @@ function App() {
                   </button>
                 )}
                 {(selectedPath || isGraphOpen) && (
-                  <button
-                    type="button"
-                    onClick={toggleKnowledgePane}
-                    className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1 self-center shrink-0"
-                    aria-label={isChatSidebarOpen
-                      ? (selectedPath ? "Maximize knowledge view" : "Maximize main view")
-                      : "Restore two-pane view"}
-                    title={isChatSidebarOpen
-                      ? (selectedPath ? "Maximize knowledge view" : "Maximize main view")
-                      : "Restore two-pane view"}
-                  >
-                    {isChatSidebarOpen ? <Expand className="size-5" /> : <Minimize2 className="size-5" />}
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={toggleKnowledgePane}
+                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1 self-center shrink-0"
+                        aria-label={isChatSidebarOpen
+                          ? (selectedPath ? "Maximize knowledge view" : "Maximize main view")
+                          : "Restore two-pane view"}
+                      >
+                        {isChatSidebarOpen ? <Expand className="size-5" /> : <Shrink className="size-5" />}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {isChatSidebarOpen
+                        ? (selectedPath ? "Maximize knowledge view" : "Maximize main view")
+                        : "Restore two-pane view"}
+                    </TooltipContent>
+                  </Tooltip>
                 )}
               </ContentHeader>
 

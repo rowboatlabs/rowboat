@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Expand, Minimize2, SquarePen } from 'lucide-react'
+import { Expand, Shrink, SquarePen } from 'lucide-react'
 import type { ToolUIPart } from 'ai'
 import z from 'zod'
 
@@ -419,7 +419,7 @@ export function ChatSidebar({
                     onClick={onOpenFullScreen}
                     className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
                   >
-                    {isMaximized ? <Minimize2 className="size-5" /> : <Expand className="size-5" />}
+                    {isMaximized ? <Shrink className="size-5" /> : <Expand className="size-5" />}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
