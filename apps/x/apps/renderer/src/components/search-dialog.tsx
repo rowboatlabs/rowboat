@@ -51,18 +51,7 @@ export function SearchDialog({ open, onOpenChange, onSelectFile, onSelectRun }: 
   }, [open, activeSection])
 
   const toggleType = useCallback((type: SearchType) => {
-    setActiveTypes(prev => {
-      const next = new Set(prev)
-      if (next.has(type)) {
-        // Don't allow deselecting all
-        if (next.size > 1) {
-          next.delete(type)
-        }
-      } else {
-        next.add(type)
-      }
-      return next
-    })
+    setActiveTypes(new Set([type]))
   }, [])
 
   useEffect(() => {
