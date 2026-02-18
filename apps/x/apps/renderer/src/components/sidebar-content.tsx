@@ -8,6 +8,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Copy,
+  ExternalLink,
   FilePlus,
   FolderPlus,
   AlertTriangle,
@@ -983,6 +984,15 @@ function Tree({
           <ContextMenuSeparator />
         </>
       )}
+      {!isDir && actions.onOpenInNewTab && (
+        <>
+          <ContextMenuItem onClick={() => actions.onOpenInNewTab!(item.path)}>
+            <ExternalLink className="mr-2 size-4" />
+            Open in new tab
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      )}
       <ContextMenuItem onClick={handleCopyPath}>
         <Copy className="mr-2 size-4" />
         Copy Path
@@ -1172,9 +1182,9 @@ function TasksSection({
             </div>
             <SidebarMenu>
               {runs.map((run) => (
-                <SidebarMenuItem key={run.id} className="group/chat-item">
-                  <ContextMenu>
-                    <ContextMenuTrigger asChild>
+                <ContextMenu key={run.id}>
+                  <ContextMenuTrigger asChild>
+                    <SidebarMenuItem className="group/chat-item">
                       <SidebarMenuButton
                         isActive={currentRunId === run.id}
                         onClick={(e) => {
@@ -1197,19 +1207,29 @@ function TasksSection({
                           ) : null}
                         </div>
                       </SidebarMenuButton>
-                    </ContextMenuTrigger>
-                    <ContextMenuContent className="w-48">
-                      <ContextMenuItem
-                        variant="destructive"
-                        disabled={processingRunIds?.has(run.id)}
-                        onClick={() => setPendingDeleteRunId(run.id)}
-                      >
-                        <Trash2 className="mr-2 size-4" />
-                        Delete
+                    </SidebarMenuItem>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48">
+                    {actions?.onOpenInNewTab && (
+                      <ContextMenuItem onClick={() => actions.onOpenInNewTab!(run.id)}>
+                        <ExternalLink className="mr-2 size-4" />
+                        Open in new tab
                       </ContextMenuItem>
-                    </ContextMenuContent>
-                  </ContextMenu>
-                </SidebarMenuItem>
+                    )}
+                    {!processingRunIds?.has(run.id) && (
+                      <>
+                        {actions?.onOpenInNewTab && <ContextMenuSeparator />}
+                        <ContextMenuItem
+                          variant="destructive"
+                          onClick={() => setPendingDeleteRunId(run.id)}
+                        >
+                          <Trash2 className="mr-2 size-4" />
+                          Delete
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>
               ))}
             </SidebarMenu>
           </>
