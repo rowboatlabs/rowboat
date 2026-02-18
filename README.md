@@ -141,11 +141,6 @@ Examples: Exa (web search), Twitter/X, ElevenLabs (voice), Slack, Linear/Jira, G
 - No proprietary formats or hosted lock-in
 - You can inspect, edit, back up, or delete everything at any time
 
-
-## Looking for Rowboat Web Studio?
-
-If you’re looking for Rowboat web Studio, start [here](https://docs.rowboatlabs.com/). 
-
 ---
 <div align="center">
 
