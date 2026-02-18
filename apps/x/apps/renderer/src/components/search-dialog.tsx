@@ -123,6 +123,7 @@ export function SearchDialog({ open, onOpenChange, onSelectFile, onSelectRun }: 
       title="Search"
       description="Search across knowledge and chats"
       showCloseButton={false}
+      className="top-[20%] translate-y-0"
     >
       <CommandInput
         placeholder="Search..."
