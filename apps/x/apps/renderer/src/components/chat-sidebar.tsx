@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Expand, Shrink, SquarePen } from 'lucide-react'
-import type { ToolUIPart } from 'ai'
-import z from 'zod'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -19,93 +17,30 @@ import {
 } from '@/components/ai-elements/message'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
+import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { Suggestions } from '@/components/ai-elements/suggestions'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
-import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { TabBar, type ChatTab } from '@/components/tab-bar'
 import { ChatInputWithMentions } from '@/components/chat-input-with-mentions'
-
-interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  timestamp: number
-}
-
-interface ToolCall {
-  id: string
-  name: string
-  input: ToolUIPart['input']
-  result?: ToolUIPart['output']
-  status: 'pending' | 'running' | 'completed' | 'error'
-  timestamp: number
-}
-
-interface ErrorMessage {
-  id: string
-  kind: 'error'
-  message: string
-  timestamp: number
-}
-
-type ConversationItem = ChatMessage | ToolCall | ErrorMessage
-
-type ChatTabViewState = {
-  runId: string | null
-  conversation: ConversationItem[]
-  currentAssistantMessage: string
-  pendingAskHumanRequests: Map<string, z.infer<typeof AskHumanRequestEvent>>
-  allPermissionRequests: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
-  permissionResponses: Map<string, 'approve' | 'deny'>
-}
-
-type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error'
-
-const isChatMessage = (item: ConversationItem): item is ChatMessage => 'role' in item
-const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
-const isErrorMessage = (item: ConversationItem): item is ErrorMessage => 'kind' in item && item.kind === 'error'
-
-const toToolState = (status: ToolCall['status']): ToolState => {
-  switch (status) {
-    case 'pending':
-      return 'input-streaming'
-    case 'running':
-      return 'input-available'
-    case 'completed':
-      return 'output-available'
-    case 'error':
-      return 'output-error'
-    default:
-      return 'input-available'
-  }
-}
-
-const normalizeToolInput = (input: ToolCall['input'] | string | undefined): ToolCall['input'] => {
-  if (input === undefined || input === null) return {}
-  if (typeof input === 'string') {
-    const trimmed = input.trim()
-    if (!trimmed) return {}
-    try {
-      return JSON.parse(trimmed)
-    } catch {
-      return input
-    }
-  }
-  return input
-}
-
-const normalizeToolOutput = (output: ToolCall['result'] | undefined, status: ToolCall['status']) => {
-  if (output === undefined || output === null) {
-    return status === 'completed' ? 'No output returned.' : null
-  }
-  if (output === '') return '(empty output)'
-  if (typeof output === 'boolean' || typeof output === 'number') return String(output)
-  return output
-}
+import { wikiLabel } from '@/lib/wiki-links'
+import {
+  type ChatTabViewState,
+  type ConversationItem,
+  type PermissionResponse,
+  createEmptyChatTabViewState,
+  getWebSearchCardData,
+  isChatMessage,
+  isErrorMessage,
+  isToolCall,
+  normalizeToolInput,
+  normalizeToolOutput,
+  parseAttachedFiles,
+  toToolState,
+} from '@/lib/chat-conversation'
 
 const streamdownComponents = { pre: MarkdownPreOverride }
 
@@ -163,10 +98,10 @@ interface ChatSidebarProps {
   onPresetMessageConsumed?: () => void
   getInitialDraft?: (tabId: string) => string | undefined
   onDraftChangeForTab?: (tabId: string, text: string) => void
-  pendingAskHumanRequests?: Map<string, z.infer<typeof AskHumanRequestEvent>>
-  allPermissionRequests?: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
-  permissionResponses?: Map<string, 'approve' | 'deny'>
-  onPermissionResponse?: (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => void
+  pendingAskHumanRequests?: ChatTabViewState['pendingAskHumanRequests']
+  allPermissionRequests?: ChatTabViewState['allPermissionRequests']
+  permissionResponses?: ChatTabViewState['permissionResponses']
+  onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse) => void
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
@@ -305,14 +240,7 @@ export function ChatSidebar({
     allPermissionRequests,
     permissionResponses,
   ])
-  const emptyTabState = useMemo<ChatTabViewState>(() => ({
-    runId: null,
-    conversation: [],
-    currentAssistantMessage: '',
-    pendingAskHumanRequests: new Map(),
-    allPermissionRequests: new Map(),
-    permissionResponses: new Map(),
-  }), [])
+  const emptyTabState = useMemo<ChatTabViewState>(() => createEmptyChatTabViewState(), [])
   const getTabState = useCallback((tabId: string): ChatTabViewState => {
     if (tabId === activeChatTabId) return activeTabState
     return chatTabStates[tabId] ?? emptyTabState
@@ -321,20 +249,50 @@ export function ChatSidebar({
 
   const renderConversationItem = (item: ConversationItem, tabId: string) => {
     if (isChatMessage(item)) {
+      if (item.role === 'user') {
+        const { message, files } = parseAttachedFiles(item.content)
+        return (
+          <Message key={item.id} from={item.role}>
+            <MessageContent>
+              {files.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {files.map((filePath, index) => (
+                    <span
+                      key={index}
+                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                    >
+                      @{wikiLabel(filePath)}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {message}
+            </MessageContent>
+          </Message>
+        )
+      }
       return (
         <Message key={item.id} from={item.role}>
           <MessageContent>
-            {item.role === 'assistant' ? (
-              <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
-            ) : (
-              item.content
-            )}
+            <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
           </MessageContent>
         </Message>
       )
     }
 
     if (isToolCall(item)) {
+      const webSearchData = getWebSearchCardData(item)
+      if (webSearchData) {
+        return (
+          <WebSearchResult
+            key={item.id}
+            query={webSearchData.query}
+            results={webSearchData.results}
+            status={item.status}
+            title={webSearchData.title}
+          />
+        )
+      }
       const errorText = item.status === 'error' ? 'Tool error' : ''
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)

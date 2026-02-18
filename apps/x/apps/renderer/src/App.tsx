@@ -52,6 +52,21 @@ import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
+import {
+  type ChatTabViewState,
+  type ConversationItem,
+  type ToolCall,
+  createEmptyChatTabViewState,
+  getWebSearchCardData,
+  inferRunTitleFromMessage,
+  isChatMessage,
+  isErrorMessage,
+  isToolCall,
+  normalizeToolInput,
+  normalizeToolOutput,
+  parseAttachedFiles,
+  toToolState,
+} from '@/lib/chat-conversation'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
@@ -63,70 +78,6 @@ type ListRunsResponseType = z.infer<typeof ListRunsResponse>
 interface TreeNode extends DirEntry {
   children?: TreeNode[]
   loaded?: boolean
-}
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-}
-
-interface ToolCall {
-  id: string;
-  name: string;
-  input: ToolUIPart['input'];
-  result?: ToolUIPart['output'];
-  status: 'pending' | 'running' | 'completed' | 'error';
-  timestamp: number;
-}
-
-interface ErrorMessage {
-  id: string;
-  kind: 'error';
-  message: string;
-  timestamp: number;
-}
-
-type ConversationItem = ChatMessage | ToolCall | ErrorMessage;
-
-type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
-
-type ChatTabViewState = {
-  runId: string | null
-  conversation: ConversationItem[]
-  currentAssistantMessage: string
-  pendingAskHumanRequests: Map<string, z.infer<typeof AskHumanRequestEvent>>
-  allPermissionRequests: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
-  permissionResponses: Map<string, 'approve' | 'deny'>
-}
-
-const createEmptyChatTabViewState = (): ChatTabViewState => ({
-  runId: null,
-  conversation: [],
-  currentAssistantMessage: '',
-  pendingAskHumanRequests: new Map(),
-  allPermissionRequests: new Map(),
-  permissionResponses: new Map(),
-})
-
-const isChatMessage = (item: ConversationItem): item is ChatMessage => 'role' in item
-const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
-const isErrorMessage = (item: ConversationItem): item is ErrorMessage => 'kind' in item && item.kind === 'error'
-
-const toToolState = (status: ToolCall['status']): ToolState => {
-  switch (status) {
-    case 'pending':
-      return 'input-streaming'
-    case 'running':
-      return 'input-available'
-    case 'completed':
-      return 'output-available'
-    case 'error':
-      return 'output-error'
-    default:
-      return 'input-available'
-  }
 }
 
 const streamdownComponents = { pre: MarkdownPreOverride }
@@ -154,48 +105,6 @@ const TITLEBAR_BUTTON_GAPS_COLLAPSED = 3
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
-
-// Parse attached files from message content and return clean message + file paths
-const parseAttachedFiles = (content: string): { message: string; files: string[] } => {
-  const attachedFilesRegex = /<attached-files>\s*([\s\S]*?)\s*<\/attached-files>/
-  const match = content.match(attachedFilesRegex)
-
-  if (!match) {
-    return { message: content, files: [] }
-  }
-
-  // Extract file paths from the XML
-  const filesXml = match[1]
-  const filePathRegex = /<file path="([^"]+)">/g
-  const files: string[] = []
-  let fileMatch
-  while ((fileMatch = filePathRegex.exec(filesXml)) !== null) {
-    files.push(fileMatch[1])
-  }
-
-  // Remove the attached-files block
-  let cleanMessage = content.replace(attachedFilesRegex, '').trim()
-
-  // Also remove @mentions for the attached files (they're shown as pills)
-  for (const filePath of files) {
-    // Get the display name (last part of path without extension)
-    const fileName = filePath.split('/').pop()?.replace(/\.md$/i, '') || ''
-    if (fileName) {
-      // Remove @filename pattern (with optional trailing space)
-      const mentionRegex = new RegExp(`@${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'gi')
-      cleanMessage = cleanMessage.replace(mentionRegex, '')
-    }
-  }
-
-  return { message: cleanMessage.trim(), files }
-}
-
-const inferRunTitleFromMessage = (content: string): string | undefined => {
-  const { message } = parseAttachedFiles(content)
-  const normalized = message.replace(/\s+/g, ' ').trim()
-  if (!normalized) return undefined
-  return normalized.length > 100 ? normalized.substring(0, 100) : normalized
-}
 
 const untitledBaseName = 'untitled'
 
@@ -240,29 +149,6 @@ const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageMod
     cachedInputTokens: usage.cachedInputTokens ?? 0,
     reasoningTokens,
   }
-}
-
-const normalizeToolInput = (input: ToolCall['input'] | string | undefined): ToolCall['input'] => {
-  if (input === undefined || input === null) return {}
-  if (typeof input === 'string') {
-    const trimmed = input.trim()
-    if (!trimmed) return {}
-    try {
-      return JSON.parse(trimmed)
-    } catch {
-      return input
-    }
-  }
-  return input
-}
-
-const normalizeToolOutput = (output: ToolCall['result'] | undefined, status: ToolCall['status']) => {
-  if (output === undefined || output === null) {
-    return status === 'completed' ? 'No output returned.' : null
-  }
-  if (output === '') return '(empty output)'
-  if (typeof output === 'boolean' || typeof output === 'number') return String(output)
-  return output
 }
 
 // Sort nodes (dirs first, then alphabetically)
@@ -498,6 +384,10 @@ function App() {
   // Global navigation history (back/forward) across views (chat/file/graph/task)
   const historyRef = useRef<{ back: ViewState[]; forward: ViewState[] }>({ back: [], forward: [] })
   const [viewHistory, setViewHistory] = useState(historyRef.current)
+  const setHistory = useCallback((next: { back: ViewState[]; forward: ViewState[] }) => {
+    historyRef.current = next
+    setViewHistory(next)
+  }, [])
 
   // Auto-save state
   const [isSaving, setIsSaving] = useState(false)
@@ -989,7 +879,7 @@ function App() {
       }
     }
     saveFile()
-  }, [debouncedContent])
+  }, [debouncedContent, setHistory])
 
   // Load runs list (all pages)
   const loadRuns = useCallback(async () => {
@@ -1222,34 +1112,25 @@ function App() {
     }
   }, [])
 
-  // Listen to run events
-  // Listen to run events - use ref to avoid stale closure issues
-  useEffect(() => {
-    const cleanup = window.ipc.on('runs:events', ((event: unknown) => {
-      handleRunEvent(event as RunEventType)
-    }) as (event: null) => void)
-    return cleanup
-  }, [])
-
-  const getStreamingBuffer = (id: string) => {
+  const getStreamingBuffer = useCallback((id: string) => {
     const existing = streamingBuffersRef.current.get(id)
     if (existing) return existing
     const next = { assistant: '' }
     streamingBuffersRef.current.set(id, next)
     return next
-  }
+  }, [])
 
-  const appendStreamingBuffer = (id: string, delta: string) => {
+  const appendStreamingBuffer = useCallback((id: string, delta: string) => {
     if (!delta) return
     const buffer = getStreamingBuffer(id)
     buffer.assistant += delta
-  }
+  }, [getStreamingBuffer])
 
-  const clearStreamingBuffer = (id: string) => {
+  const clearStreamingBuffer = useCallback((id: string) => {
     streamingBuffersRef.current.delete(id)
-  }
+  }, [])
 
-  const handleRunEvent = (event: RunEventType) => {
+  const handleRunEvent = useCallback((event: RunEventType) => {
     const activeRunId = runIdRef.current
     const isActiveRun = event.runId === activeRunId
 
@@ -1523,7 +1404,15 @@ function App() {
         console.error('Run error:', event.error)
         break
     }
-  }
+  }, [appendStreamingBuffer, clearStreamingBuffer, loadRuns])
+
+  // Listen to run events - use refs/callbacks to avoid stale closure issues.
+  useEffect(() => {
+    const cleanup = window.ipc.on('runs:events', ((event: unknown) => {
+      handleRunEvent(event as RunEventType)
+    }) as (event: null) => void)
+    return cleanup
+  }, [handleRunEvent])
 
   const handlePromptSubmit = async (message: PromptInputMessage, mentions?: FileMention[]) => {
     if (isProcessing) return
@@ -1984,11 +1873,6 @@ function App() {
       setIsRightPaneMaximized(false)
     }
   }, [expandedFrom])
-
-  const setHistory = useCallback((next: { back: ViewState[]; forward: ViewState[] }) => {
-    historyRef.current = next
-    setViewHistory(next)
-  }, [])
 
   const currentViewState = React.useMemo<ViewState>(() => {
     if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
@@ -2451,7 +2335,7 @@ function App() {
     onOpenInNewTab: (path: string) => {
       openFileInNewTab(path)
     },
-  }), [tree, selectedPath, workspaceRoot, collectDirPaths, navigateToFile, navigateToView, openFileInNewTab, fileTabs, closeFileTab, removeEditorCacheForPath])
+  }), [tree, selectedPath, workspaceRoot, navigateToFile, navigateToView, openFileInNewTab, fileTabs, closeFileTab, removeEditorCacheForPath])
 
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
@@ -2660,36 +2544,15 @@ function App() {
     }
 
     if (isToolCall(item)) {
-      if (item.name === 'web-search') {
-        const input = normalizeToolInput(item.input) as Record<string, unknown> | undefined
-        const result = item.result as Record<string, unknown> | undefined
+      const webSearchData = getWebSearchCardData(item)
+      if (webSearchData) {
         return (
           <WebSearchResult
             key={item.id}
-            query={(input?.query as string) || ''}
-            results={(result?.results as Array<{ title: string; url: string; description: string }>) || []}
+            query={webSearchData.query}
+            results={webSearchData.results}
             status={item.status}
-          />
-        )
-      }
-      if (item.name === 'research-search') {
-        const input = normalizeToolInput(item.input) as Record<string, unknown> | undefined
-        const result = item.result as Record<string, unknown> | undefined
-        const rawResults = (result?.results as Array<{ title: string; url: string; highlights?: string[]; text?: string }>) || []
-        const mapped = rawResults.map(r => ({
-          title: r.title,
-          url: r.url,
-          description: r.highlights?.[0] || (r.text ? r.text.slice(0, 200) : ''),
-        }))
-        const category = input?.category as string | undefined
-        const cardTitle = category ? `${category.charAt(0).toUpperCase() + category.slice(1)} search` : 'Researched the web'
-        return (
-          <WebSearchResult
-            key={item.id}
-            query={(input?.query as string) || ''}
-            results={mapped}
-            status={item.status}
-            title={cardTitle}
+            title={webSearchData.title}
           />
         )
       }
