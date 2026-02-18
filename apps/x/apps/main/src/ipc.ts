@@ -30,6 +30,7 @@ import * as composioHandler from './composio-handler.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
+import { search } from '@x/core/dist/search/search.js';
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -496,6 +497,10 @@ export function setupIpcHandlers() {
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
       return { data: buffer.toString('base64'), mimeType, size: stat.size };
+    },
+    // Search handler
+    'search:query': async (_event, args) => {
+      return search(args.query, args.limit, args.types);
     },
   });
 }
