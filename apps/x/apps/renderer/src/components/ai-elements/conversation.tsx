@@ -102,7 +102,7 @@ export const Conversation = ({ className, children, ...props }: ConversationProp
  * Must be used inside Conversation component.
  */
 export const ScrollPositionPreserver = () => {
-  const { isAtBottom } = useStickToBottomContext();
+  const { isAtBottom, scrollRef } = useStickToBottomContext();
   const preservationContext = useContext(ScrollPreservationContext);
   const containerFoundRef = useRef(false);
 
@@ -110,29 +110,13 @@ export const ScrollPositionPreserver = () => {
   useLayoutEffect(() => {
     if (containerFoundRef.current || !preservationContext) return;
 
-    // Find the scroll container (StickToBottom creates one)
-    // It's the first parent with overflow-y scroll/auto
-    const findScrollContainer = (): HTMLElement | null => {
-      const candidates = document.querySelectorAll('[role="log"]');
-      for (const candidate of candidates) {
-        // The scroll container is a direct child of the role="log" element
-        const children = candidate.children;
-        for (const child of children) {
-          const style = window.getComputedStyle(child);
-          if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
-            return child as HTMLElement;
-          }
-        }
-      }
-      return null;
-    };
-
-    const container = findScrollContainer();
+    // Use the local StickToBottom scroll container for this conversation instance.
+    const container = scrollRef.current;
     if (container) {
       preservationContext.registerScrollContainer(container);
       containerFoundRef.current = true;
     }
-  }, [preservationContext]);
+  }, [preservationContext, scrollRef]);
 
   // Track engagement based on scroll position
   useEffect(() => {

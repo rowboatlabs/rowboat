@@ -16,6 +16,7 @@ interface ChatInputInnerProps {
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean
+  isActive: boolean
   presetMessage?: string
   onPresetMessageConsumed?: () => void
   runId?: string | null
@@ -28,6 +29,7 @@ function ChatInputInner({
   onStop,
   isProcessing,
   isStopping,
+  isActive,
   presetMessage,
   onPresetMessageConsumed,
   runId,
@@ -72,6 +74,7 @@ function ChatInputInner({
   }, [handleSubmit])
 
   useEffect(() => {
+    if (!isActive) return
     const onDragOver = (e: DragEvent) => {
       if (e.dataTransfer?.types?.includes('Files')) {
         e.preventDefault()
@@ -100,15 +103,15 @@ function ChatInputInner({
       document.removeEventListener('dragover', onDragOver)
       document.removeEventListener('drop', onDrop)
     }
-  }, [controller])
+  }, [controller, isActive])
 
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-4 shadow-none">
       <PromptInputTextarea
         placeholder="Type your message..."
         onKeyDown={handleKeyDown}
-        autoFocus
-        focusTrigger={runId}
+        autoFocus={isActive}
+        focusTrigger={isActive ? runId : undefined}
         className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
       />
       {isProcessing ? (
@@ -156,6 +159,7 @@ export interface ChatInputWithMentionsProps {
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean
+  isActive?: boolean
   presetMessage?: string
   onPresetMessageConsumed?: () => void
   runId?: string | null
@@ -171,6 +175,7 @@ export function ChatInputWithMentions({
   onStop,
   isProcessing,
   isStopping,
+  isActive = true,
   presetMessage,
   onPresetMessageConsumed,
   runId,
@@ -184,6 +189,7 @@ export function ChatInputWithMentions({
         onStop={onStop}
         isProcessing={isProcessing}
         isStopping={isStopping}
+        isActive={isActive}
         presetMessage={presetMessage}
         onPresetMessageConsumed={onPresetMessageConsumed}
         runId={runId}

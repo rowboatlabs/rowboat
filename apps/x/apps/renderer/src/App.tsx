@@ -458,6 +458,8 @@ function ContentHeader({
 }
 
 function App() {
+  type ShortcutPane = 'left' | 'right'
+
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string>('')
@@ -478,6 +480,7 @@ function App() {
   const [graphError, setGraphError] = useState<string | null>(null)
   const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(true)
   const [isRightPaneMaximized, setIsRightPaneMaximized] = useState(false)
+  const [activeShortcutPane, setActiveShortcutPane] = useState<ShortcutPane>('left')
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
   const collapsedLeftPaddingPx =
     (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) +
@@ -534,16 +537,55 @@ function App() {
   const chatTabIdCounterRef = useRef(0)
   const newChatTabId = () => `chat-tab-${++chatTabIdCounterRef.current}`
   const chatDraftsRef = useRef(new Map<string, string>())
+  const chatScrollTopByTabRef = useRef(new Map<string, number>())
+  const [toolOpenByTab, setToolOpenByTab] = useState<Record<string, Record<string, boolean>>>({})
   const activeChatTabIdRef = useRef(activeChatTabId)
   activeChatTabIdRef.current = activeChatTabId
-  const handleDraftChange = useCallback((text: string) => {
-    const tabId = activeChatTabIdRef.current
+  const setChatDraftForTab = useCallback((tabId: string, text: string) => {
     if (text) {
       chatDraftsRef.current.set(tabId, text)
     } else {
       chatDraftsRef.current.delete(tabId)
     }
   }, [])
+  const isToolOpenForTab = useCallback((tabId: string, toolId: string): boolean => {
+    return toolOpenByTab[tabId]?.[toolId] ?? false
+  }, [toolOpenByTab])
+  const setToolOpenForTab = useCallback((tabId: string, toolId: string, open: boolean) => {
+    setToolOpenByTab((prev) => {
+      const prevForTab = prev[tabId] ?? {}
+      if (prevForTab[toolId] === open) return prev
+      return {
+        ...prev,
+        [tabId]: {
+          ...prevForTab,
+          [toolId]: open,
+        },
+      }
+    })
+  }, [])
+  const getChatScrollContainer = useCallback((tabId: string): HTMLElement | null => {
+    if (typeof document === 'undefined') return null
+    const panel = document.querySelector<HTMLElement>(
+      `[data-chat-tab-panel="${tabId}"][aria-hidden="false"]`
+    )
+    if (!panel) return null
+    const logRoot = panel.querySelector<HTMLElement>('[role="log"]')
+    if (!logRoot) return null
+    const children = Array.from(logRoot.children) as HTMLElement[]
+    for (const child of children) {
+      const style = window.getComputedStyle(child)
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+        return child
+      }
+    }
+    return null
+  }, [])
+  const saveChatScrollForTab = useCallback((tabId: string) => {
+    const container = getChatScrollContainer(tabId)
+    if (!container) return
+    chatScrollTopByTabRef.current.set(tabId, container.scrollTop)
+  }, [getChatScrollContainer])
 
   const getChatTabTitle = useCallback((tab: ChatTab) => {
     if (!tab.runId) return 'New chat'
@@ -1701,6 +1743,7 @@ function App() {
     const tab = chatTabs.find(t => t.id === tabId)
     if (!tab) return
     if (tabId === activeChatTabId) return
+    saveChatScrollForTab(activeChatTabId)
     setActiveChatTabId(tabId)
     const restored = restoreChatTabState(tabId, tab.runId)
     if (tab.runId && processingRunIdsRef.current.has(tab.runId)) {
@@ -1710,12 +1753,13 @@ function App() {
     if (!restored) {
       applyChatTab(tab)
     }
-  }, [chatTabs, activeChatTabId, applyChatTab, loadRun, restoreChatTabState])
+  }, [chatTabs, activeChatTabId, applyChatTab, loadRun, restoreChatTabState, saveChatScrollForTab])
 
   const closeChatTab = useCallback((tabId: string) => {
     if (chatTabs.length <= 1) return
     const idx = chatTabs.findIndex(t => t.id === tabId)
     if (idx === -1) return
+    saveChatScrollForTab(tabId)
     const nextTabs = chatTabs.filter(t => t.id !== tabId)
     setChatTabs(nextTabs)
     setChatViewStateByTab(prev => {
@@ -1725,6 +1769,13 @@ function App() {
       return next
     })
     chatDraftsRef.current.delete(tabId)
+    chatScrollTopByTabRef.current.delete(tabId)
+    setToolOpenByTab((prev) => {
+      if (!(tabId in prev)) return prev
+      const next = { ...prev }
+      delete next[tabId]
+      return next
+    })
 
     if (tabId === activeChatTabId && nextTabs.length > 0) {
       const newIdx = Math.min(idx, nextTabs.length - 1)
@@ -1737,7 +1788,81 @@ function App() {
         applyChatTab(newActiveTab)
       }
     }
-  }, [chatTabs, activeChatTabId, applyChatTab, loadRun, restoreChatTabState])
+  }, [chatTabs, activeChatTabId, applyChatTab, loadRun, restoreChatTabState, saveChatScrollForTab])
+
+  useEffect(() => {
+    let cleanupScrollListener: (() => void) | undefined
+    let pollRaf: number | undefined
+    let restoreRafA: number | undefined
+    let restoreRafB: number | undefined
+    let restoreTimeout: ReturnType<typeof setTimeout> | undefined
+    let cancelled = false
+
+    const restoreScrollTop = (container: HTMLElement, top: number) => {
+      const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight)
+      const clampedTop = clampNumber(top, 0, maxScroll)
+      container.scrollTop = clampedTop
+    }
+
+    const attach = (): boolean => {
+      if (cancelled) return true
+      const container = getChatScrollContainer(activeChatTabId)
+      if (!container) return false
+
+      const savedTop = chatScrollTopByTabRef.current.get(activeChatTabId)
+      if (savedTop !== undefined) {
+        // Reinforce restoration across a couple frames because stick-to-bottom
+        // may schedule scroll adjustments during mount/resize.
+        restoreScrollTop(container, savedTop)
+        restoreRafA = requestAnimationFrame(() => {
+          restoreScrollTop(container, savedTop)
+          restoreRafB = requestAnimationFrame(() => {
+            restoreScrollTop(container, savedTop)
+          })
+        })
+        restoreTimeout = setTimeout(() => {
+          restoreScrollTop(container, savedTop)
+        }, 220)
+      }
+
+      const onScroll = () => {
+        chatScrollTopByTabRef.current.set(activeChatTabId, container.scrollTop)
+      }
+      container.addEventListener('scroll', onScroll, { passive: true })
+      cleanupScrollListener = () => {
+        chatScrollTopByTabRef.current.set(activeChatTabId, container.scrollTop)
+        container.removeEventListener('scroll', onScroll)
+      }
+      return true
+    }
+
+    let attempts = 0
+    const maxAttempts = 60
+    const pollAttach = () => {
+      if (cancelled) return
+      if (attach()) return
+      if (attempts >= maxAttempts) return
+      attempts += 1
+      pollRaf = requestAnimationFrame(pollAttach)
+    }
+    pollAttach()
+
+    return () => {
+      cancelled = true
+      cleanupScrollListener?.()
+      if (pollRaf !== undefined) cancelAnimationFrame(pollRaf)
+      if (restoreRafA !== undefined) cancelAnimationFrame(restoreRafA)
+      if (restoreRafB !== undefined) cancelAnimationFrame(restoreRafB)
+      if (restoreTimeout !== undefined) clearTimeout(restoreTimeout)
+    }
+  }, [
+    activeChatTabId,
+    selectedPath,
+    isGraphOpen,
+    isChatSidebarOpen,
+    isRightPaneMaximized,
+    getChatScrollContainer,
+  ])
 
   // File tab operations
   const openFileInNewTab = useCallback((path: string) => {
@@ -2086,13 +2211,18 @@ function App() {
     const handleTabKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
-      const inFileView = Boolean(selectedPath)
+      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen) && isChatSidebarOpen)
+      const targetPane: ShortcutPane = rightPaneAvailable
+        ? (isRightPaneMaximized ? 'right' : activeShortcutPane)
+        : 'left'
+      const inFileView = targetPane === 'left' && Boolean(selectedPath)
+      const targetFileTabId = activeFileTabId ?? fileTabs.find((tab) => tab.path === selectedPath)?.id ?? null
 
       // Cmd+W — close active tab
       if (e.key === 'w') {
         e.preventDefault()
-        if (inFileView && activeFileTabId) {
-          closeFileTab(activeFileTabId)
+        if (inFileView && targetFileTabId) {
+          closeFileTab(targetFileTabId)
         } else {
           closeChatTab(activeChatTabId)
         }
@@ -2120,7 +2250,7 @@ function App() {
         e.preventDefault()
         const direction = e.key === ']' ? 1 : -1
         if (inFileView) {
-          const currentIdx = fileTabs.findIndex(t => t.id === activeFileTabId)
+          const currentIdx = fileTabs.findIndex(t => t.id === targetFileTabId)
           if (currentIdx === -1) return
           const nextIdx = (currentIdx + direction + fileTabs.length) % fileTabs.length
           switchFileTab(fileTabs[nextIdx].id)
@@ -2135,7 +2265,7 @@ function App() {
     }
     document.addEventListener('keydown', handleTabKeyDown)
     return () => document.removeEventListener('keydown', handleTabKeyDown)
-  }, [selectedPath, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
+  }, [selectedPath, isGraphOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
@@ -2496,7 +2626,7 @@ function App() {
     }
   }, [isGraphOpen, knowledgeFilePaths])
 
-  const renderConversationItem = (item: ConversationItem) => {
+  const renderConversationItem = (item: ConversationItem, tabId: string) => {
     if (isChatMessage(item)) {
       if (item.role === 'user') {
         const { message, files } = parseAttachedFiles(item.content)
@@ -2567,7 +2697,11 @@ function App() {
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
       return (
-        <Tool key={item.id}>
+        <Tool
+          key={item.id}
+          open={isToolOpenForTab(tabId, item.id)}
+          onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
+        >
           <ToolHeader
             title={item.name}
             type={`tool-${item.name}`}
@@ -2719,7 +2853,11 @@ function App() {
               selectedBackgroundTask={selectedBackgroundTask}
             />
             {!isRightPaneOnlyMode && (
-            <SidebarInset className="overflow-hidden! min-h-0 min-w-0">
+            <SidebarInset
+              className="overflow-hidden! min-h-0 min-w-0"
+              onMouseDownCapture={() => setActiveShortcutPane('left')}
+              onFocusCapture={() => setActiveShortcutPane('left')}
+            >
               {/* Header - also serves as titlebar drag region, adjusts padding when sidebar collapsed */}
               <ContentHeader
                 onNavigateBack={() => { void navigateBack() }}
@@ -2881,85 +3019,92 @@ function App() {
               ) : (
               <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
-                {chatTabs.map((tab) => {
-                  const isActive = tab.id === activeChatTabId
-                  const tabState = getChatTabStateForRender(tab.id)
-                  const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
-                  const tabConversationContentClassName = tabHasConversation
-                    ? "mx-auto w-full max-w-4xl pb-28"
-                    : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
-                  return (
-                    <div
-                      key={tab.id}
-                      className={cn('min-h-0 flex-1 flex-col', isActive ? 'flex' : 'hidden')}
-                      data-chat-tab-panel={tab.id}
-                      aria-hidden={!isActive}
-                    >
-                      <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-                        <ScrollPositionPreserver />
-                        <ConversationContent className={tabConversationContentClassName}>
-                          {!tabHasConversation ? (
-                            <ConversationEmptyState className="h-auto">
-                              <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
-                                What are we working on?
-                              </div>
-                            </ConversationEmptyState>
-                          ) : (
-                            <>
-                              {tabState.conversation.map(item => {
-                                const rendered = renderConversationItem(item)
-                                if (isToolCall(item)) {
-                                  const permRequest = tabState.allPermissionRequests.get(item.id)
-                                  if (permRequest) {
-                                    const response = tabState.permissionResponses.get(item.id) || null
-                                    return (
-                                      <React.Fragment key={item.id}>
-                                        {rendered}
-                                        <PermissionRequest
-                                          toolCall={permRequest.toolCall}
-                                          onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                          onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                          isProcessing={isActive && isProcessing}
-                                          response={response}
-                                        />
-                                      </React.Fragment>
-                                    )
+                <div className="relative min-h-0 flex-1">
+                  {chatTabs.map((tab) => {
+                    const isActive = tab.id === activeChatTabId
+                    const tabState = getChatTabStateForRender(tab.id)
+                    const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
+                    const tabConversationContentClassName = tabHasConversation
+                      ? "mx-auto w-full max-w-4xl pb-28"
+                      : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
+                    return (
+                      <div
+                        key={tab.id}
+                        className={cn(
+                          'min-h-0 h-full flex-col',
+                          isActive
+                            ? 'flex'
+                            : 'pointer-events-none invisible absolute inset-0 flex'
+                        )}
+                        data-chat-tab-panel={tab.id}
+                        aria-hidden={!isActive}
+                      >
+                        <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+                          <ScrollPositionPreserver />
+                          <ConversationContent className={tabConversationContentClassName}>
+                            {!tabHasConversation ? (
+                              <ConversationEmptyState className="h-auto">
+                                <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
+                                  What are we working on?
+                                </div>
+                              </ConversationEmptyState>
+                            ) : (
+                              <>
+                                {tabState.conversation.map(item => {
+                                  const rendered = renderConversationItem(item, tab.id)
+                                  if (isToolCall(item)) {
+                                    const permRequest = tabState.allPermissionRequests.get(item.id)
+                                    if (permRequest) {
+                                      const response = tabState.permissionResponses.get(item.id) || null
+                                      return (
+                                        <React.Fragment key={item.id}>
+                                          {rendered}
+                                          <PermissionRequest
+                                            toolCall={permRequest.toolCall}
+                                            onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                            onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                            isProcessing={isActive && isProcessing}
+                                            response={response}
+                                          />
+                                        </React.Fragment>
+                                      )
+                                    }
                                   }
-                                }
-                                return rendered
-                              })}
+                                  return rendered
+                                })}
 
-                              {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
-                                <AskHumanRequest
-                                  key={request.toolCallId}
-                                  query={request.query}
-                                  onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                  isProcessing={isActive && isProcessing}
-                                />
-                              ))}
+                                {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
+                                  <AskHumanRequest
+                                    key={request.toolCallId}
+                                    query={request.query}
+                                    onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
+                                    isProcessing={isActive && isProcessing}
+                                  />
+                                ))}
 
-                              {tabState.currentAssistantMessage && (
-                                <Message from="assistant">
-                                  <MessageContent>
-                                    <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
-                                  </MessageContent>
-                                </Message>
-                              )}
+                                {tabState.currentAssistantMessage && (
+                                  <Message from="assistant">
+                                    <MessageContent>
+                                      <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
+                                    </MessageContent>
+                                  </Message>
+                                )}
 
-                              {isActive && isProcessing && !tabState.currentAssistantMessage && (
-                                <Message from="assistant">
-                                  <MessageContent>
-                                    <Shimmer duration={1}>Thinking...</Shimmer>
-                                  </MessageContent>
-                                </Message>
-                              )}
-                            </>
-                          )}
-                        </ConversationContent>
-                      </Conversation>
-                    </div>
-                  )
-                })}
+                                {isActive && isProcessing && !tabState.currentAssistantMessage && (
+                                  <Message from="assistant">
+                                    <MessageContent>
+                                      <Shimmer duration={1}>Thinking...</Shimmer>
+                                    </MessageContent>
+                                  </Message>
+                                )}
+                              </>
+                            )}
+                          </ConversationContent>
+                        </Conversation>
+                      </div>
+                    )
+                  })}
+                </div>
 
                 <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
                   <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
@@ -2967,21 +3112,34 @@ function App() {
                     {!hasConversation && (
                       <Suggestions onSelect={setPresetMessage} className="mb-3 justify-center" />
                     )}
-                    <ChatInputWithMentions
-                      key={activeChatTabId}
-                      knowledgeFiles={knowledgeFiles}
-                      recentFiles={recentWikiFiles}
-                      visibleFiles={visibleKnowledgeFiles}
-                      onSubmit={handlePromptSubmit}
-                      onStop={handleStop}
-                      isProcessing={isProcessing}
-                      isStopping={isStopping}
-                      presetMessage={presetMessage}
-                      onPresetMessageConsumed={() => setPresetMessage(undefined)}
-                      runId={runId}
-                      initialDraft={chatDraftsRef.current.get(activeChatTabId)}
-                      onDraftChange={handleDraftChange}
-                    />
+                    {chatTabs.map((tab) => {
+                      const isActive = tab.id === activeChatTabId
+                      const tabState = getChatTabStateForRender(tab.id)
+                      return (
+                        <div
+                          key={tab.id}
+                          className={isActive ? 'block' : 'hidden'}
+                          data-chat-input-panel={tab.id}
+                          aria-hidden={!isActive}
+                        >
+                          <ChatInputWithMentions
+                            knowledgeFiles={knowledgeFiles}
+                            recentFiles={recentWikiFiles}
+                            visibleFiles={visibleKnowledgeFiles}
+                            onSubmit={handlePromptSubmit}
+                            onStop={handleStop}
+                            isProcessing={isActive && isProcessing}
+                            isStopping={isActive && isStopping}
+                            isActive={isActive}
+                            presetMessage={isActive ? presetMessage : undefined}
+                            onPresetMessageConsumed={isActive ? () => setPresetMessage(undefined) : undefined}
+                            runId={tabState.runId}
+                            initialDraft={chatDraftsRef.current.get(tab.id)}
+                            onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
+                          />
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </div>
@@ -3017,14 +3175,17 @@ function App() {
                 runId={runId}
                 presetMessage={presetMessage}
                 onPresetMessageConsumed={() => setPresetMessage(undefined)}
-                initialDraft={chatDraftsRef.current.get(activeChatTabId)}
-                onDraftChange={handleDraftChange}
+                getInitialDraft={(tabId) => chatDraftsRef.current.get(tabId)}
+                onDraftChangeForTab={setChatDraftForTab}
                 pendingAskHumanRequests={pendingAskHumanRequests}
                 allPermissionRequests={allPermissionRequests}
                 permissionResponses={permissionResponses}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
+                isToolOpenForTab={isToolOpenForTab}
+                onToolOpenChangeForTab={setToolOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
+                onActivate={() => setActiveShortcutPane('right')}
               />
             )}
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}

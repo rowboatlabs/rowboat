@@ -931,7 +931,13 @@ export const PromptInputTextarea = ({
     if (autoFocus || focusTrigger !== undefined) {
       // Small delay to ensure the element is fully mounted and visible
       const timer = setTimeout(() => {
-        textareaRef.current?.focus();
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        try {
+          textarea.focus({ preventScroll: true });
+        } catch {
+          textarea.focus();
+        }
       }, 50);
       return () => clearTimeout(timer);
     }
