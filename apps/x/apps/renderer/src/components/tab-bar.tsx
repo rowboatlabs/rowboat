@@ -20,6 +20,7 @@ interface TabBarProps<T> {
   isProcessing?: (tab: T) => boolean
   onSwitchTab: (tabId: string) => void
   onCloseTab: (tabId: string) => void
+  layout?: 'fill' | 'scroll'
 }
 
 export function TabBar<T>({
@@ -30,9 +31,17 @@ export function TabBar<T>({
   isProcessing,
   onSwitchTab,
   onCloseTab,
+  layout = 'fill',
 }: TabBarProps<T>) {
   return (
-    <div className="titlebar-no-drag flex flex-1 self-stretch min-w-0 overflow-hidden">
+    <div
+      className={cn(
+        'flex flex-1 self-stretch min-w-0',
+        layout === 'scroll'
+          ? 'overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+          : 'overflow-hidden'
+      )}
+    >
       {tabs.map((tab, index) => {
         const tabId = getTabId(tab)
         const isActive = tabId === activeTabId
@@ -48,12 +57,13 @@ export function TabBar<T>({
               type="button"
               onClick={() => onSwitchTab(tabId)}
               className={cn(
-                "group/tab relative flex items-center gap-1.5 px-3 self-stretch text-xs min-w-0 max-w-[220px] transition-colors",
+                'titlebar-no-drag group/tab relative flex items-center gap-1.5 px-3 self-stretch text-xs transition-colors',
+                layout === 'scroll' ? 'min-w-[140px] max-w-[240px]' : 'min-w-0 max-w-[220px]',
                 isActive
-                  ? "bg-background text-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                  ? 'bg-background text-foreground'
+                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
               )}
-              style={{ flex: '1 1 0px' }}
+              style={layout === 'scroll' ? { flex: '0 0 auto' } : { flex: '1 1 0px' }}
             >
               {processing && (
                 <span className="size-1.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" />

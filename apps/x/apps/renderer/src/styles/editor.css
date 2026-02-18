@@ -245,6 +245,16 @@
   align-self: center;
 }
 
+/* Keep knowledge text width readable while margins collapse on narrow panes. */
+.tiptap-editor .ProseMirror {
+  width: 100%;
+  max-width: min(56rem, calc(100% - clamp(0.5rem, 2.5vw, 2rem)));
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+  padding-left: clamp(0.5rem, 1.5vw, 1rem);
+  padding-right: clamp(0.5rem, 1.5vw, 1rem);
+}
 .wiki-link-anchor {
   position: absolute;
   height: 0;
