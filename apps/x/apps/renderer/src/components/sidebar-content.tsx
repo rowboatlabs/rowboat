@@ -8,6 +8,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Copy,
+  ExternalLink,
   FilePlus,
   FolderPlus,
   AlertTriangle,
@@ -105,6 +106,7 @@ type KnowledgeActions = {
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
   remove: (path: string) => Promise<void>
   copyPath: (path: string) => void
+  onOpenInNewTab?: (path: string) => void
 }
 
 type RunListItem = {
@@ -149,6 +151,7 @@ type TasksActions = {
   onNewChat: () => void
   onSelectRun: (runId: string) => void
   onDeleteRun: (runId: string) => void
+  onOpenInNewTab?: (runId: string) => void
   onSelectBackgroundTask?: (taskName: string) => void
 }
 
@@ -981,6 +984,15 @@ function Tree({
           <ContextMenuSeparator />
         </>
       )}
+      {!isDir && actions.onOpenInNewTab && (
+        <>
+          <ContextMenuItem onClick={() => actions.onOpenInNewTab!(item.path)}>
+            <ExternalLink className="mr-2 size-4" />
+            Open in new tab
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      )}
       <ContextMenuItem onClick={handleCopyPath}>
         <Copy className="mr-2 size-4" />
         Copy Path
@@ -1033,12 +1045,20 @@ function Tree({
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <SidebarMenuItem>
+          <SidebarMenuItem className="group/file-item">
             <SidebarMenuButton
               isActive={isSelected}
-              onClick={() => onSelect(item.path, item.kind)}
+              onClick={(e) => {
+                if (e.metaKey && actions.onOpenInNewTab) {
+                  actions.onOpenInNewTab(item.path)
+                } else {
+                  onSelect(item.path, item.kind)
+                }
+              }}
             >
-              <span>{item.name}</span>
+              <div className="flex w-full items-center gap-1 min-w-0">
+                <span className="min-w-0 flex-1 truncate">{item.name}</span>
+              </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </ContextMenuTrigger>
@@ -1162,12 +1182,18 @@ function TasksSection({
             </div>
             <SidebarMenu>
               {runs.map((run) => (
-                <SidebarMenuItem key={run.id}>
-                  <ContextMenu>
-                    <ContextMenuTrigger asChild>
+                <ContextMenu key={run.id}>
+                  <ContextMenuTrigger asChild>
+                    <SidebarMenuItem className="group/chat-item">
                       <SidebarMenuButton
                         isActive={currentRunId === run.id}
-                        onClick={() => actions?.onSelectRun(run.id)}
+                        onClick={(e) => {
+                          if (e.metaKey && actions?.onOpenInNewTab) {
+                            actions.onOpenInNewTab(run.id)
+                          } else {
+                            actions?.onSelectRun(run.id)
+                          }
+                        }}
                       >
                         <div className="flex w-full items-center gap-2 min-w-0">
                           {processingRunIds?.has(run.id) ? (
@@ -1181,19 +1207,29 @@ function TasksSection({
                           ) : null}
                         </div>
                       </SidebarMenuButton>
-                    </ContextMenuTrigger>
-                    <ContextMenuContent className="w-48">
-                      <ContextMenuItem
-                        variant="destructive"
-                        disabled={processingRunIds?.has(run.id)}
-                        onClick={() => setPendingDeleteRunId(run.id)}
-                      >
-                        <Trash2 className="mr-2 size-4" />
-                        Delete
+                    </SidebarMenuItem>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48">
+                    {actions?.onOpenInNewTab && (
+                      <ContextMenuItem onClick={() => actions.onOpenInNewTab!(run.id)}>
+                        <ExternalLink className="mr-2 size-4" />
+                        Open in new tab
                       </ContextMenuItem>
-                    </ContextMenuContent>
-                  </ContextMenu>
-                </SidebarMenuItem>
+                    )}
+                    {!processingRunIds?.has(run.id) && (
+                      <>
+                        {actions?.onOpenInNewTab && <ContextMenuSeparator />}
+                        <ContextMenuItem
+                          variant="destructive"
+                          onClick={() => setPendingDeleteRunId(run.id)}
+                        >
+                          <Trash2 className="mr-2 size-4" />
+                          Delete
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>
               ))}
             </SidebarMenu>
           </>
