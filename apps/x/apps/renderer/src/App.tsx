@@ -2500,7 +2500,7 @@ function App() {
     ? "mx-auto w-full max-w-4xl pb-28"
     : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
   const headerTitle = selectedPath
-    ? selectedPath
+    ? getBaseName(selectedPath)
     : isGraphOpen
       ? 'Graph View'
       : selectedBackgroundTask
