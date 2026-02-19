@@ -224,6 +224,7 @@ function FixedSidebarToggle({
   canNavigateBack,
   canNavigateForward,
   onNewChat,
+  onOpenSearch,
   leftInsetPx,
 }: {
   onNavigateBack: () => void
@@ -231,6 +232,7 @@ function FixedSidebarToggle({
   canNavigateBack: boolean
   canNavigateForward: boolean
   onNewChat: () => void
+  onOpenSearch: () => void
   leftInsetPx: number
 }) {
   const { toggleSidebar, state } = useSidebar()
@@ -256,6 +258,15 @@ function FixedSidebarToggle({
         aria-label="New chat"
       >
         <SquarePen className="size-5" />
+      </button>
+      <button
+        type="button"
+        onClick={onOpenSearch}
+        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
+        aria-label="Search"
+      >
+        <SearchIcon className="size-5" />
       </button>
       {/* Back / Forward navigation */}
       {isCollapsed && (
@@ -2769,14 +2780,6 @@ function App() {
                     onCloseTab={closeChatTab}
                   />
                 )}
-                <button
-                  type="button"
-                  onClick={() => setIsSearchOpen(true)}
-                  className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                  aria-label="Search"
-                >
-                  <SearchIcon className="size-4" />
-                </button>
                 {selectedPath && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground self-center shrink-0 pl-2">
                     {isSaving ? (
@@ -3078,6 +3081,7 @@ function App() {
               canNavigateBack={canNavigateBack}
               canNavigateForward={canNavigateForward}
               onNewChat={handleNewChatTab}
+              onOpenSearch={() => setIsSearchOpen(true)}
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
           </SidebarProvider>
