@@ -91,6 +91,17 @@ export function setStrictnessAndMarkConfigured(strictness: NoteCreationStrictnes
 }
 
 /**
+ * Reset strictness to default and mark as not configured,
+ * allowing auto-analysis to run again.
+ */
+export function resetStrictnessToAuto(): void {
+    const config = readConfig();
+    config.strictness = DEFAULT_STRICTNESS;
+    config.configured = false;
+    writeConfig(config);
+}
+
+/**
  * Get the agent file name suffix based on strictness.
  */
 export function getNoteCreationAgentSuffix(): string {

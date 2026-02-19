@@ -25,7 +25,8 @@ import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
-import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
+import { isOnboardingComplete, markOnboardingComplete, getNoteCreationStrictness, isStrictnessConfigured, setStrictnessAndMarkConfigured, resetStrictnessToAuto } from '@x/core/dist/config/note_creation_config.js';
+import { getLookbackDays, setLookbackDays } from '@x/core/dist/config/lookback_config.js';
 import * as composioHandler from './composio-handler.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
@@ -458,6 +459,28 @@ export function setupIpcHandlers() {
       const stateRepo = container.resolve<IAgentScheduleStateRepo>('agentScheduleStateRepo');
       await repo.delete(args.agentName);
       await stateRepo.deleteAgentState(args.agentName);
+      return { success: true };
+    },
+    // Config handlers
+    'config:getLookback': async () => {
+      return { days: getLookbackDays() };
+    },
+    'config:setLookback': async (_event, args) => {
+      setLookbackDays(args.days);
+      return { success: true };
+    },
+    'config:getNoteStrictness': async () => {
+      return {
+        strictness: getNoteCreationStrictness(),
+        configured: isStrictnessConfigured(),
+      };
+    },
+    'config:setNoteStrictness': async (_event, args) => {
+      setStrictnessAndMarkConfigured(args.strictness);
+      return { success: true };
+    },
+    'config:resetNoteStrictness': async () => {
+      resetStrictnessToAuto();
       return { success: true };
     },
     // Shell integration handlers

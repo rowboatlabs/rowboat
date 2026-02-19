@@ -4,6 +4,7 @@ import { google, gmail_v1 as gmail } from 'googleapis';
 import { NodeHtmlMarkdown } from 'node-html-markdown'
 import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
+import { getLookbackDays } from '../config/lookback_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
@@ -408,7 +409,7 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
 }
 
 async function performSync() {
-    const LOOKBACK_DAYS = 30; // Default to 1 month
+    const LOOKBACK_DAYS = getLookbackDays();
     const ATTACHMENTS_DIR = path.join(SYNC_DIR, 'attachments');
     const STATE_FILE = path.join(SYNC_DIR, 'sync_state.json');
 

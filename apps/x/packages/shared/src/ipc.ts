@@ -388,6 +388,41 @@ const ipcSchemas = {
     }),
   },
   // Shell integration channels
+  'config:getLookback': {
+    req: z.null(),
+    res: z.object({
+      days: z.union([z.literal(7), z.literal(30), z.literal(90)]),
+    }),
+  },
+  'config:setLookback': {
+    req: z.object({
+      days: z.union([z.literal(7), z.literal(30), z.literal(90)]),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  'config:getNoteStrictness': {
+    req: z.null(),
+    res: z.object({
+      strictness: z.enum(['low', 'medium', 'high']),
+      configured: z.boolean(),
+    }),
+  },
+  'config:setNoteStrictness': {
+    req: z.object({
+      strictness: z.enum(['low', 'medium', 'high']),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  'config:resetNoteStrictness': {
+    req: z.null(),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
   'shell:openPath': {
     req: z.object({ path: z.string() }),
     res: z.object({ error: z.string().optional() }),

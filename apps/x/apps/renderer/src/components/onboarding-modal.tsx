@@ -80,6 +80,12 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [granolaLoading, setGranolaLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
 
+  // Lookback period state
+  const [lookbackDays, setLookbackDays] = useState<7 | 30 | 90>(30)
+
+  // Note strictness state
+  const [noteStrictness, setNoteStrictness] = useState<"auto" | "high" | "medium" | "low">("auto")
+
   // Composio/Slack state
   const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
   const [slackConnected, setSlackConnected] = useState(false)
@@ -183,6 +189,50 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     })
   }, [modelsCatalog])
 
+  // Load lookback and note strictness config on mount
+  useEffect(() => {
+    if (!open) return
+    async function loadConfigs() {
+      try {
+        const lookback = await window.ipc.invoke('config:getLookback', null)
+        setLookbackDays(lookback.days)
+      } catch (error) {
+        console.error('Failed to load lookback config:', error)
+      }
+      // Note strictness always defaults to "Auto" in onboarding —
+      // the user makes their explicit choice here.
+    }
+    loadConfigs()
+  }, [open])
+
+  // Handle lookback period change
+  const handleLookbackChange = useCallback(async (value: string) => {
+    const days = Number(value) as 7 | 30 | 90
+    setLookbackDays(days)
+    try {
+      await window.ipc.invoke('config:setLookback', { days })
+    } catch (error) {
+      console.error('Failed to save lookback config:', error)
+      toast.error('Failed to save lookback period')
+    }
+  }, [])
+
+  // Handle note strictness change
+  const handleNoteStrictnessChange = useCallback(async (value: string) => {
+    const strictness = value as "auto" | "high" | "medium" | "low"
+    setNoteStrictness(strictness)
+    try {
+      if (strictness === "auto") {
+        await window.ipc.invoke('config:resetNoteStrictness', null)
+      } else {
+        await window.ipc.invoke('config:setNoteStrictness', { strictness })
+      }
+    } catch (error) {
+      console.error('Failed to save note strictness config:', error)
+      toast.error('Failed to save note strictness')
+    }
+  }, [])
+
   // Load Granola config
   const refreshGranolaConfig = useCallback(async () => {
     try {
@@ -270,7 +320,19 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
   }, [startSlackConnect])
 
-  const handleNext = () => {
+  const handleNext = async () => {
+    // Save preferences when leaving the connected accounts step
+    if (currentStep === 1) {
+      try {
+        if (noteStrictness === "auto") {
+          await window.ipc.invoke('config:resetNoteStrictness', null)
+        } else {
+          await window.ipc.invoke('config:setNoteStrictness', { strictness: noteStrictness })
+        }
+      } catch (error) {
+        console.error('Failed to save note strictness config:', error)
+      }
+    }
     if (currentStep < 2) {
       setCurrentStep((prev) => (prev + 1) as Step)
     }
@@ -781,6 +843,48 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
               </div>
               {renderGranolaRow()}
               {providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-5" />, 'AI meeting transcripts')}
+            </div>
+
+            {/* Preferences Section */}
+            <div className="space-y-3">
+              <div className="px-3">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Preferences</span>
+              </div>
+              <div className="px-3 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-sm font-medium">Lookback period</span>
+                    <span className="text-xs text-muted-foreground">How far back to sync emails and meetings</span>
+                  </div>
+                  <Select value={String(lookbackDays)} onValueChange={handleLookbackChange}>
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="7">1 week</SelectItem>
+                      <SelectItem value="30">1 month</SelectItem>
+                      <SelectItem value="90">3 months</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-sm font-medium">Note strictness</span>
+                    <span className="text-xs text-muted-foreground">Controls what qualifies for creating a note</span>
+                  </div>
+                  <Select value={noteStrictness} onValueChange={handleNoteStrictnessChange}>
+                    <SelectTrigger className="w-[160px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto" description="Let Rowboat decide">Auto</SelectItem>
+                      <SelectItem value="high" description="Conservative - fewer notes created">High</SelectItem>
+                      <SelectItem value="medium" description="Balance between precision and coverage">Medium</SelectItem>
+                      <SelectItem value="low" description="Lenient - more notes created">Low</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
 
           </>

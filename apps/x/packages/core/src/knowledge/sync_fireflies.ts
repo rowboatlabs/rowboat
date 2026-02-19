@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
+import { getLookbackDays } from '../config/lookback_config.js';
 import { FirefliesClientFactory } from './fireflies-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
@@ -9,7 +10,6 @@ import { limitEventItems } from './limit_event_items.js';
 const SYNC_DIR = path.join(WorkDir, 'fireflies_transcripts');
 const SYNC_INTERVAL_MS = 30 * 60 * 1000; // Check every 30 minutes (reduced from 1 minute)
 const STATE_FILE = path.join(SYNC_DIR, 'sync_state.json');
-const LOOKBACK_DAYS = 30; // Last 1 month
 const API_DELAY_MS = 2000; // 2 second delay between API calls
 const RATE_LIMIT_RETRY_DELAY_MS = 60 * 1000; // Wait 1 minute on rate limit
 const MAX_RETRIES = 3; // Maximum retries for rate-limited requests
@@ -406,10 +406,11 @@ async function syncMeetings() {
         }
     }
 
-    // Calculate date range (last 30 days)
+    // Calculate date range based on configured lookback
+    const lookbackDays = getLookbackDays();
     const toDate = new Date();
     const fromDate = new Date();
-    fromDate.setDate(fromDate.getDate() - LOOKBACK_DAYS);
+    fromDate.setDate(fromDate.getDate() - lookbackDays);
 
     const fromDateStr = fromDate.toISOString().split('T')[0]; // YYYY-MM-DD
     const toDateStr = toDate.toISOString().split('T')[0];
@@ -637,7 +638,7 @@ async function syncMeetings() {
 export async function init() {
     console.log('[Fireflies] Starting Fireflies Sync...');
     console.log(`[Fireflies] Will sync every ${SYNC_INTERVAL_MS / 1000} seconds.`);
-    console.log(`[Fireflies] Syncing transcripts from the last ${LOOKBACK_DAYS} days.`);
+    console.log(`[Fireflies] Syncing transcripts from the last ${getLookbackDays()} days.`);
 
     while (true) {
         try {
