@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Expand, Shrink, SquarePen } from 'lucide-react'
+import { Maximize2, Minimize2, SquarePen } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -394,7 +394,7 @@ export function ChatSidebar({
                     className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
                     aria-label={isMaximized ? 'Restore two-pane view' : 'Maximize chat view'}
                   >
-                    {isMaximized ? <Shrink className="size-5" /> : <Expand className="size-5" />}
+                    {isMaximized ? <Minimize2 className="size-5" /> : <Maximize2 className="size-5" />}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">

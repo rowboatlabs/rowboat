@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Expand, Shrink, X, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -1655,8 +1655,10 @@ function App() {
   const restoreChatTabState = useCallback((tabId: string, fallbackRunId: string | null): boolean => {
     const cached = chatViewStateByTabRef.current[tabId]
     if (!cached) return false
+    // Ignore stale cache snapshots that don't match the tab's current run binding.
+    if (cached.runId !== fallbackRunId) return false
 
-    const resolvedRunId = cached.runId ?? fallbackRunId
+    const resolvedRunId = fallbackRunId
     setRunId(resolvedRunId)
     setConversation(cached.conversation)
     setCurrentAssistantMessage(cached.currentAssistantMessage)
@@ -1678,6 +1680,8 @@ function App() {
   const openChatInNewTab = useCallback((targetRunId: string) => {
     const existingTab = chatTabs.find(t => t.runId === targetRunId)
     if (existingTab) {
+      // Cancel stale in-flight loads from previously focused tabs.
+      loadRunRequestIdRef.current += 1
       setActiveChatTabId(existingTab.id)
       const restored = restoreChatTabState(existingTab.id, existingTab.runId)
       if (processingRunIdsRef.current.has(targetRunId) || !restored) {
@@ -1696,6 +1700,8 @@ function App() {
     if (!tab) return
     if (tabId === activeChatTabId) return
     saveChatScrollForTab(activeChatTabId)
+    // Cancel stale in-flight loads from previously focused tabs.
+    loadRunRequestIdRef.current += 1
     setActiveChatTabId(tabId)
     const restored = restoreChatTabState(tabId, tab.runId)
     if (tab.runId && processingRunIdsRef.current.has(tab.runId)) {
@@ -1732,6 +1738,8 @@ function App() {
     if (tabId === activeChatTabId && nextTabs.length > 0) {
       const newIdx = Math.min(idx, nextTabs.length - 1)
       const newActiveTab = nextTabs[newIdx]
+      // Cancel stale in-flight loads from the closing tab.
+      loadRunRequestIdRef.current += 1
       setActiveChatTabId(newActiveTab.id)
       const restored = restoreChatTabState(newActiveTab.id, newActiveTab.runId)
       if (newActiveTab.runId && processingRunIdsRef.current.has(newActiveTab.runId)) {
@@ -2776,7 +2784,6 @@ function App() {
                 onSelectRun: (runIdToLoad) => {
                   if (selectedPath || isGraphOpen) {
                     setIsChatSidebarOpen(true)
-                    setIsRightPaneMaximized(false)
                   }
 
                   // If already open in a chat tab, switch to it
@@ -2886,15 +2893,35 @@ function App() {
                     ) : null}
                   </div>
                 )}
+                {!selectedPath && !isGraphOpen && !selectedTask && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={handleNewChatTab}
+                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
+                        aria-label="New chat tab"
+                      >
+                        <SquarePen className="size-5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">New chat tab</TooltipContent>
+                  </Tooltip>
+                )}
                 {!selectedPath && !isGraphOpen && expandedFrom && (
-                  <button
-                    type="button"
-                    onClick={handleCloseFullScreenChat}
-                    className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
-                    aria-label="Return to file"
-                  >
-                    <X className="size-5" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={handleCloseFullScreenChat}
+                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
+                        aria-label="Restore two-pane view"
+                      >
+                        <Minimize2 className="size-5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Restore two-pane view</TooltipContent>
+                  </Tooltip>
                 )}
                 {(selectedPath || isGraphOpen) && (
                   <Tooltip>
@@ -2905,7 +2932,7 @@ function App() {
                         className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1 self-center shrink-0"
                         aria-label={isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
                       >
-                        {isChatSidebarOpen ? <Expand className="size-5" /> : <Shrink className="size-5" />}
+                        {isChatSidebarOpen ? <Maximize2 className="size-5" /> : <Minimize2 className="size-5" />}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
