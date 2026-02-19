@@ -820,6 +820,36 @@ function KnowledgeSection({
   onVoiceNoteCreated?: (path: string) => void
 }) {
   const isExpanded = expandedPaths.size > 0
+  const treeContainerRef = React.useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!selectedPath) return
+
+    let cancelled = false
+    let rafId: number | null = null
+    let attempts = 0
+    const maxAttempts = 20
+
+    const revealActiveFile = () => {
+      if (cancelled) return
+      const container = treeContainerRef.current
+      if (!container) return
+      const activeRow = container.querySelector<HTMLElement>('[data-knowledge-active="true"]')
+      if (activeRow) {
+        activeRow.scrollIntoView({ block: "nearest", inline: "nearest" })
+        return
+      }
+      if (attempts >= maxAttempts) return
+      attempts += 1
+      rafId = requestAnimationFrame(revealActiveFile)
+    }
+
+    rafId = requestAnimationFrame(revealActiveFile)
+    return () => {
+      cancelled = true
+      if (rafId !== null) cancelAnimationFrame(rafId)
+    }
+  }, [selectedPath, expandedPaths, tree])
 
   const quickActions = [
     { icon: FilePlus, label: "New Note", action: () => actions.createNote() },
@@ -865,18 +895,20 @@ function KnowledgeSection({
             </Tooltip>
           </div>
           <SidebarGroupContent className="flex-1 overflow-y-auto">
-            <SidebarMenu>
-              {tree.map((item, index) => (
-                <Tree
-                  key={index}
-                  item={item}
-                  selectedPath={selectedPath}
-                  expandedPaths={expandedPaths}
-                  onSelect={onSelectFile}
-                  actions={actions}
-                />
-              ))}
-            </SidebarMenu>
+            <div ref={treeContainerRef}>
+              <SidebarMenu>
+                {tree.map((item, index) => (
+                  <Tree
+                    key={index}
+                    item={item}
+                    selectedPath={selectedPath}
+                    expandedPaths={expandedPaths}
+                    onSelect={onSelectFile}
+                    actions={actions}
+                  />
+                ))}
+              </SidebarMenu>
+            </div>
           </SidebarGroupContent>
         </SidebarGroup>
       </ContextMenuTrigger>
@@ -935,7 +967,7 @@ function Tree({
       try {
         await actions.rename(item.path, trimmedName, isDir)
         toast('Renamed successfully', 'success')
-      } catch (err) {
+      } catch {
         toast('Failed to rename', 'error')
       }
     }
@@ -950,7 +982,7 @@ function Tree({
     try {
       await actions.remove(item.path)
       toast('Moved to trash', 'success')
-    } catch (err) {
+    } catch {
       toast('Failed to delete', 'error')
     }
   }
@@ -1045,7 +1077,11 @@ function Tree({
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <SidebarMenuItem className="group/file-item">
+          <SidebarMenuItem
+            className="group/file-item"
+            data-knowledge-file-path={item.path}
+            data-knowledge-active={isSelected ? "true" : "false"}
+          >
             <SidebarMenuButton
               isActive={isSelected}
               onClick={(e) => {

@@ -134,6 +134,16 @@ const getBaseName = (path: string) => {
   return file.replace(/\.md$/i, '')
 }
 
+const getAncestorDirectoryPaths = (path: string): string[] => {
+  const parts = path.split('/').filter(Boolean)
+  if (parts.length <= 2) return []
+  const ancestors: string[] = []
+  for (let i = 1; i < parts.length - 1; i++) {
+    ancestors.push(parts.slice(0, i + 1).join('/'))
+  }
+  return ancestors
+}
+
 const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
@@ -595,6 +605,25 @@ function App() {
     if (!selectedPath) {
       editorPathRef.current = null
     }
+  }, [selectedPath])
+
+  // Keep active file visible in the Knowledge tree by auto-expanding its ancestor folders.
+  useEffect(() => {
+    if (!selectedPath) return
+    const ancestorDirs = getAncestorDirectoryPaths(selectedPath)
+    if (ancestorDirs.length === 0) return
+
+    setExpandedPaths((prev) => {
+      let changed = false
+      const next = new Set(prev)
+      for (const dirPath of ancestorDirs) {
+        if (!next.has(dirPath)) {
+          next.add(dirPath)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
   }, [selectedPath])
 
   // Keep runIdRef in sync with runId state (for use in event handlers to avoid stale closures)
