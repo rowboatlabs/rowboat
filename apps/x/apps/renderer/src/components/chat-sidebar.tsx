@@ -154,6 +154,8 @@ export function ChatSidebar({
   const paneRef = useRef<HTMLDivElement>(null)
   const startXRef = useRef(0)
   const startWidthRef = useRef(0)
+  const prevIsMaximizedRef = useRef(isMaximized)
+  const justToggledMaximize = prevIsMaximizedRef.current !== isMaximized
 
   const getMaxAllowedWidth = useCallback(() => {
     if (typeof window === 'undefined') return MAX_WIDTH
@@ -182,6 +184,10 @@ export function ChatSidebar({
     }
     setShowContent(false)
   }, [isOpen])
+
+  useEffect(() => {
+    prevIsMaximizedRef.current = isMaximized
+  }, [isMaximized])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -343,7 +349,7 @@ export function ChatSidebar({
       onFocusCapture={onActivate}
       className={cn(
         'relative flex min-w-0 flex-col overflow-hidden border-l border-border bg-background',
-        !isResizing && 'transition-[width] duration-200 ease-linear'
+        !isResizing && !justToggledMaximize && 'transition-[width] duration-200 ease-linear'
       )}
       style={paneStyle}
     >

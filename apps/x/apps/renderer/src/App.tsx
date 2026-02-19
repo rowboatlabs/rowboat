@@ -2748,6 +2748,7 @@ function App() {
     : null
   const isRightPaneContext = Boolean(selectedPath || isGraphOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
+  const shouldCollapseLeftPane = isRightPaneOnlyMode
   const openMarkdownTabs = React.useMemo(() => {
     const markdownTabs = fileTabs.filter(tab => tab.path.endsWith('.md'))
     if (selectedPath?.endsWith('.md')) {
@@ -2843,9 +2844,13 @@ function App() {
               backgroundTasks={backgroundTasks}
               selectedBackgroundTask={selectedBackgroundTask}
             />
-            {!isRightPaneOnlyMode && (
             <SidebarInset
-              className="overflow-hidden! min-h-0 min-w-0"
+              className={cn(
+                "overflow-hidden! min-h-0 min-w-0 transition-[max-width] duration-200 ease-linear",
+                shouldCollapseLeftPane && "pointer-events-none select-none"
+              )}
+              style={shouldCollapseLeftPane ? { maxWidth: 0 } : { maxWidth: '100%' }}
+              aria-hidden={shouldCollapseLeftPane}
               onMouseDownCapture={() => setActiveShortcutPane('left')}
               onFocusCapture={() => setActiveShortcutPane('left')}
             >
@@ -3136,7 +3141,6 @@ function App() {
               </FileCardProvider>
               )}
             </SidebarInset>
-            )}
 
             {/* Chat sidebar - shown when viewing files/graph */}
             {isRightPaneContext && (
