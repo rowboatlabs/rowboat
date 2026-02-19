@@ -3,17 +3,78 @@ import { promisify } from 'util';
 import { getSecurityAllowList } from '../../config/security.js';
 
 const execPromise = promisify(exec);
-const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n)/;
 const ENV_ASSIGNMENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
 const WRAPPER_COMMANDS = new Set(['sudo', 'env', 'time', 'command']);
 
 function sanitizeToken(token: string): string {
-  return token.trim().replace(/^['"]+|['"]+$/g, '');
+  return token.trim().replace(/^['"()]+|['"()]+$/g, '');
 }
 
-function extractCommandNames(command: string): string[] {
+/**
+ * Split a shell command string on command separators (||, &&, ;, |, \n)
+ * while respecting single and double quotes.
+ */
+function splitCommandSegments(command: string): string[] {
+  const segments: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      current += ch;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      current += ch;
+      continue;
+    }
+
+    if (inSingle || inDouble) {
+      current += ch;
+      continue;
+    }
+
+    // Outside quotes — check for separators
+    if (ch === '\n' || ch === ';') {
+      segments.push(current);
+      current = '';
+      continue;
+    }
+    if (ch === '|') {
+      if (command[i + 1] === '|') {
+        // ||
+        segments.push(current);
+        current = '';
+        i++; // skip second |
+      } else {
+        // single pipe
+        segments.push(current);
+        current = '';
+      }
+      continue;
+    }
+    if (ch === '&' && command[i + 1] === '&') {
+      segments.push(current);
+      current = '';
+      i++; // skip second &
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (current) segments.push(current);
+  return segments;
+}
+
+export function extractCommandNames(command: string): string[] {
   const discovered = new Set<string>();
-  const segments = command.split(COMMAND_SPLIT_REGEX);
+  const segments = splitCommandSegments(command);
 
   for (const segment of segments) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);

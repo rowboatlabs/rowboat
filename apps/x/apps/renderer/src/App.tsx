@@ -1527,9 +1527,15 @@ function App() {
     }
   }, [runId, isStopping, stopClickedAt])
 
-  const handlePermissionResponse = useCallback(async (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => {
+  const handlePermissionResponse = useCallback(async (
+    toolCallId: string,
+    subflow: string[],
+    response: 'approve' | 'deny',
+    scope?: 'once' | 'session' | 'always',
+    command?: string,
+  ) => {
     if (!runId) return
-    
+
     // Optimistically update the UI immediately
     setPermissionResponses(prev => {
       const next = new Map(prev)
@@ -1541,11 +1547,11 @@ function App() {
       next.delete(toolCallId)
       return next
     })
-    
+
     try {
       await window.ipc.invoke('runs:authorizePermission', {
         runId,
-        authorization: { subflow, toolCallId, response }
+        authorization: { subflow, toolCallId, response, scope, command }
       })
     } catch (error) {
       console.error('Failed to authorize permission:', error)
@@ -2945,6 +2951,14 @@ function App() {
                                           <PermissionRequest
                                             toolCall={permRequest.toolCall}
                                             onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                            onApproveSession={() => {
+                                              const cmd = permRequest.toolCall.toolName === 'executeCommand' && typeof permRequest.toolCall.arguments === 'object' && permRequest.toolCall.arguments !== null && 'command' in permRequest.toolCall.arguments ? String(permRequest.toolCall.arguments.command) : undefined
+                                              handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session', cmd)
+                                            }}
+                                            onApproveAlways={() => {
+                                              const cmd = permRequest.toolCall.toolName === 'executeCommand' && typeof permRequest.toolCall.arguments === 'object' && permRequest.toolCall.arguments !== null && 'command' in permRequest.toolCall.arguments ? String(permRequest.toolCall.arguments.command) : undefined
+                                              handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always', cmd)
+                                            }}
                                             onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
                                             isProcessing={isActive && isProcessing}
                                             response={response}

@@ -106,6 +106,9 @@ export const ToolPermissionAuthorizePayload = ToolPermissionResponseEvent.pick({
     subflow: true,
     toolCallId: true,
     response: true,
+}).extend({
+    scope: z.enum(["once", "session", "always"]).optional(),
+    command: z.string().optional(),
 });
 
 export const AskHumanResponsePayload = AskHumanResponseEvent.pick({

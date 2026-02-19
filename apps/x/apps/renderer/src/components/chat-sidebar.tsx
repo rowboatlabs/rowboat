@@ -101,7 +101,7 @@ interface ChatSidebarProps {
   pendingAskHumanRequests?: ChatTabViewState['pendingAskHumanRequests']
   allPermissionRequests?: ChatTabViewState['allPermissionRequests']
   permissionResponses?: ChatTabViewState['permissionResponses']
-  onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse) => void
+  onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse, scope?: 'once' | 'session' | 'always', command?: string) => void
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
@@ -444,6 +444,14 @@ export function ChatSidebar({
                                         <PermissionRequest
                                           toolCall={permRequest.toolCall}
                                           onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                          onApproveSession={() => {
+                                            const cmd = permRequest.toolCall.toolName === 'executeCommand' && typeof permRequest.toolCall.arguments === 'object' && permRequest.toolCall.arguments !== null && 'command' in permRequest.toolCall.arguments ? String(permRequest.toolCall.arguments.command) : undefined
+                                            onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session', cmd)
+                                          }}
+                                          onApproveAlways={() => {
+                                            const cmd = permRequest.toolCall.toolName === 'executeCommand' && typeof permRequest.toolCall.arguments === 'object' && permRequest.toolCall.arguments !== null && 'command' in permRequest.toolCall.arguments ? String(permRequest.toolCall.arguments.command) : undefined
+                                            onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always', cmd)
+                                          }}
                                           onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
                                           isProcessing={isActive && isProcessing}
                                           response={response}
