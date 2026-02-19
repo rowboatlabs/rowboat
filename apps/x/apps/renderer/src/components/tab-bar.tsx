@@ -21,6 +21,7 @@ interface TabBarProps<T> {
   onSwitchTab: (tabId: string) => void
   onCloseTab: (tabId: string) => void
   layout?: 'fill' | 'scroll'
+  allowSingleTabClose?: boolean
 }
 
 export function TabBar<T>({
@@ -32,6 +33,7 @@ export function TabBar<T>({
   onSwitchTab,
   onCloseTab,
   layout = 'fill',
+  allowSingleTabClose = false,
 }: TabBarProps<T>) {
   return (
     <div
@@ -69,7 +71,7 @@ export function TabBar<T>({
                 <span className="size-1.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
               )}
               <span className="truncate flex-1 text-left">{title}</span>
-              {tabs.length > 1 && (
+              {(allowSingleTabClose || tabs.length > 1) && (
                 <span
                   role="button"
                   className="shrink-0 flex items-center justify-center rounded-sm p-0.5 opacity-0 group-hover/tab:opacity-60 hover:opacity-100! hover:bg-foreground/10 transition-all"

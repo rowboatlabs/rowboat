@@ -5,7 +5,6 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { Button } from './components/ui/button';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, Expand, Shrink, X, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
@@ -102,6 +101,7 @@ const TITLEBAR_HEADER_GAP_PX = 8
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 const TITLEBAR_BUTTONS_COLLAPSED = 5
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 4
+const GRAPH_TAB_PATH = '__rowboat_graph_view__'
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -133,6 +133,8 @@ const getBaseName = (path: string) => {
   const file = path.split('/').pop() ?? ''
   return file.replace(/\.md$/i, '')
 }
+
+const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
@@ -504,6 +506,7 @@ function App() {
   const newFileTabId = () => `file-tab-${++fileTabIdCounterRef.current}`
 
   const getFileTabTitle = useCallback((tab: FileTab) => {
+    if (isGraphTabPath(tab.path)) return 'Graph View'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
   }, [])
 
@@ -1789,12 +1792,14 @@ function App() {
     const existingTab = fileTabs.find(t => t.path === path)
     if (existingTab) {
       setActiveFileTabId(existingTab.id)
+      setIsGraphOpen(false)
       setSelectedPath(path)
       return
     }
     const id = newFileTabId()
     setFileTabs(prev => [...prev, { id, path }])
     setActiveFileTabId(id)
+    setIsGraphOpen(false)
     setSelectedPath(path)
   }, [fileTabs])
 
@@ -1802,12 +1807,24 @@ function App() {
     const tab = fileTabs.find(t => t.id === tabId)
     if (!tab) return
     setActiveFileTabId(tabId)
+    setSelectedBackgroundTask(null)
+    setExpandedFrom(null)
+    // If chat-only maximize is active, drop back to a visible knowledge layout.
+    if (isRightPaneMaximized) {
+      setIsRightPaneMaximized(false)
+    }
+    if (isGraphTabPath(tab.path)) {
+      setSelectedPath(null)
+      setIsGraphOpen(true)
+      return
+    }
+    setIsGraphOpen(false)
     setSelectedPath(tab.path)
-  }, [fileTabs])
+  }, [fileTabs, isRightPaneMaximized])
 
   const closeFileTab = useCallback((tabId: string) => {
     const closingTab = fileTabs.find(t => t.id === tabId)
-    if (closingTab) {
+    if (closingTab && !isGraphTabPath(closingTab.path)) {
       removeEditorCacheForPath(closingTab.path)
       initialContentByPathRef.current.delete(closingTab.path)
       if (editorPathRef.current === closingTab.path) {
@@ -1819,15 +1836,23 @@ function App() {
         // Last file tab - close it and go back to chat
         setActiveFileTabId(null)
         setSelectedPath(null)
+        setIsGraphOpen(false)
         return []
       }
       const idx = prev.findIndex(t => t.id === tabId)
+      if (idx === -1) return prev
       const next = prev.filter(t => t.id !== tabId)
       if (tabId === activeFileTabId && next.length > 0) {
         const newIdx = Math.min(idx, next.length - 1)
         const newActiveTab = next[newIdx]
         setActiveFileTabId(newActiveTab.id)
-        setSelectedPath(newActiveTab.path)
+        if (isGraphTabPath(newActiveTab.path)) {
+          setSelectedPath(null)
+          setIsGraphOpen(true)
+        } else {
+          setIsGraphOpen(false)
+          setSelectedPath(newActiveTab.path)
+        }
       }
       return next
     })
@@ -1918,22 +1943,62 @@ function App() {
     return [...stack, entry]
   }, [])
 
+  const ensureFileTabForPath = useCallback((path: string) => {
+    const existingTab = fileTabs.find((tab) => tab.path === path)
+    if (existingTab) {
+      setActiveFileTabId(existingTab.id)
+      return
+    }
+
+    if (activeFileTabId) {
+      const activeTab = fileTabs.find((tab) => tab.id === activeFileTabId)
+      if (activeTab && !isGraphTabPath(activeTab.path)) {
+        setFileTabs((prev) => prev.map((tab) => (
+          tab.id === activeFileTabId ? { ...tab, path } : tab
+        )))
+        return
+      }
+    }
+
+    const id = newFileTabId()
+    setFileTabs((prev) => [...prev, { id, path }])
+    setActiveFileTabId(id)
+  }, [fileTabs, activeFileTabId])
+
+  const ensureGraphFileTab = useCallback(() => {
+    const existingGraphTab = fileTabs.find((tab) => isGraphTabPath(tab.path))
+    if (existingGraphTab) {
+      setActiveFileTabId(existingGraphTab.id)
+      return
+    }
+    const id = newFileTabId()
+    setFileTabs((prev) => [...prev, { id, path: GRAPH_TAB_PATH }])
+    setActiveFileTabId(id)
+  }, [fileTabs])
+
   const applyViewState = useCallback(async (view: ViewState) => {
     switch (view.type) {
       case 'file':
         setSelectedBackgroundTask(null)
         setIsGraphOpen(false)
         setExpandedFrom(null)
-        setIsChatSidebarOpen(true)
-        setIsRightPaneMaximized(false)
+        // Preserve split vs knowledge-max mode when navigating knowledge files.
+        // Only exit chat-only maximize, because that would hide the selected file.
+        if (isRightPaneMaximized) {
+          setIsRightPaneMaximized(false)
+        }
         setSelectedPath(view.path)
+        ensureFileTabForPath(view.path)
         return
       case 'graph':
         setSelectedBackgroundTask(null)
         setSelectedPath(null)
         setExpandedFrom(null)
         setIsGraphOpen(true)
-        setIsRightPaneMaximized(false)
+        ensureGraphFileTab()
+        if (isRightPaneMaximized) {
+          setIsRightPaneMaximized(false)
+        }
         return
       case 'task':
         setSelectedPath(null)
@@ -1955,7 +2020,7 @@ function App() {
         }
         return
     }
-  }, [handleNewChat, loadRun])
+  }, [ensureFileTabForPath, ensureGraphFileTab, handleNewChat, isRightPaneMaximized, loadRun])
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState
@@ -2024,22 +2089,8 @@ function App() {
   }, [viewHistory.forward, currentViewState])
 
   const navigateToFile = useCallback((path: string) => {
-    // If already open in a file tab, switch to it
-    const existingTab = fileTabs.find(t => t.path === path)
-    if (existingTab) {
-      switchFileTab(existingTab.id)
-      return
-    }
-    // Update current file tab or create one if none exists
-    if (activeFileTabId) {
-      setFileTabs(prev => prev.map(t => t.id === activeFileTabId ? { ...t, path } : t))
-    } else {
-      const id = newFileTabId()
-      setFileTabs(prev => [...prev, { id, path }])
-      setActiveFileTabId(id)
-    }
     void navigateToView({ type: 'file', path })
-  }, [navigateToView, fileTabs, activeFileTabId, switchFileTab])
+  }, [navigateToView])
 
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view
@@ -2130,8 +2181,13 @@ function App() {
       const targetPane: ShortcutPane = rightPaneAvailable
         ? (isRightPaneMaximized ? 'right' : activeShortcutPane)
         : 'left'
-      const inFileView = targetPane === 'left' && Boolean(selectedPath)
-      const targetFileTabId = activeFileTabId ?? fileTabs.find((tab) => tab.path === selectedPath)?.id ?? null
+      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen)
+      const selectedKnowledgePath = isGraphOpen ? GRAPH_TAB_PATH : selectedPath
+      const targetFileTabId = activeFileTabId ?? (
+        selectedKnowledgePath
+          ? (fileTabs.find((tab) => tab.path === selectedKnowledgePath)?.id ?? null)
+          : null
+      )
 
       // Cmd+W — close active tab
       if (e.key === 'w') {
@@ -2760,7 +2816,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {selectedPath && fileTabs.length >= 1 ? (
+                {(selectedPath || isGraphOpen) && fileTabs.length >= 1 ? (
                   <TabBar
                     tabs={fileTabs}
                     activeTabId={activeFileTabId ?? ''}
@@ -2768,6 +2824,7 @@ function App() {
                     getTabId={(t) => t.id}
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
+                    allowSingleTabClose={fileTabs.length === 1 && isGraphOpen}
                   />
                 ) : (
                   <TabBar
@@ -2795,16 +2852,6 @@ function App() {
                     ) : null}
                   </div>
                 )}
-                {!selectedPath && isGraphOpen && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => { void navigateToView({ type: 'chat', runId }) }}
-                    className="titlebar-no-drag text-foreground self-center shrink-0"
-                  >
-                    Close Graph
-                  </Button>
-                )}
                 {!selectedPath && !isGraphOpen && expandedFrom && (
                   <button
                     type="button"
@@ -2822,17 +2869,13 @@ function App() {
                         type="button"
                         onClick={toggleKnowledgePane}
                         className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1 self-center shrink-0"
-                        aria-label={isChatSidebarOpen
-                          ? (selectedPath ? "Maximize knowledge view" : "Maximize main view")
-                          : "Restore two-pane view"}
+                        aria-label={isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
                       >
                         {isChatSidebarOpen ? <Expand className="size-5" /> : <Shrink className="size-5" />}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
-                      {isChatSidebarOpen
-                        ? (selectedPath ? "Maximize knowledge view" : "Maximize main view")
-                        : "Restore two-pane view"}
+                      {isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
                     </TooltipContent>
                   </Tooltip>
                 )}
