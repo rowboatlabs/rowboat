@@ -624,23 +624,28 @@ function App() {
     processingRunIdsRef.current = processingRunIds
   }, [processingRunIds])
 
-  // Sync active run streaming UI with background tracking
+  // Sync active run streaming UI with background processing tracking.
+  // Depend on both runId and processingRunIds so we don't miss late/early event ordering.
   useEffect(() => {
     if (!runId) {
       setIsProcessing(false)
+      setIsStopping(false)
+      setStopClickedAt(null)
       setCurrentAssistantMessage('')
       return
     }
-    const isRunProcessing = processingRunIdsRef.current.has(runId)
+    const isRunProcessing = processingRunIds.has(runId)
     setIsProcessing(isRunProcessing)
     if (isRunProcessing) {
       const buffer = streamingBuffersRef.current.get(runId)
       setCurrentAssistantMessage(buffer?.assistant ?? '')
     } else {
+      setIsStopping(false)
+      setStopClickedAt(null)
       setCurrentAssistantMessage('')
       streamingBuffersRef.current.delete(runId)
     }
-  }, [runId])
+  }, [runId, processingRunIds])
 
   // Load directory tree
   const loadDirectory = useCallback(async () => {
@@ -1163,7 +1168,14 @@ function App() {
         break
 
       case 'start':
+        setProcessingRunIds(prev => {
+          if (prev.has(event.runId)) return prev
+          const next = new Set(prev)
+          next.add(event.runId)
+          return next
+        })
         if (!isActiveRun) return
+        setIsProcessing(true)
         setCurrentAssistantMessage('')
         setModelUsage(null)
         break
@@ -1171,12 +1183,20 @@ function App() {
       case 'llm-stream-event':
         {
           const llmEvent = event.event
+          // Fallback: if processing-start is missed/out-of-order, stream activity still means run is active.
+          setProcessingRunIds(prev => {
+            if (prev.has(event.runId)) return prev
+            const next = new Set(prev)
+            next.add(event.runId)
+            return next
+          })
           if (!isActiveRun) {
             if (llmEvent.type === 'text-delta' && llmEvent.delta) {
               appendStreamingBuffer(event.runId, llmEvent.delta)
             }
             return
           }
+          setIsProcessing(true)
           if (llmEvent.type === 'text-delta' && llmEvent.delta) {
             appendStreamingBuffer(event.runId, llmEvent.delta)
             setCurrentAssistantMessage(prev => prev + llmEvent.delta)
