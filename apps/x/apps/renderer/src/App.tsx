@@ -100,8 +100,8 @@ const TITLEBAR_BUTTON_PX = 32
 const TITLEBAR_BUTTON_GAP_PX = 4
 const TITLEBAR_HEADER_GAP_PX = 8
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
-const TITLEBAR_BUTTONS_COLLAPSED = 4
-const TITLEBAR_BUTTON_GAPS_COLLAPSED = 3
+const TITLEBAR_BUTTONS_COLLAPSED = 5
+const TITLEBAR_BUTTON_GAPS_COLLAPSED = 4
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -320,7 +320,7 @@ function ContentHeader({
         "titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border px-3 bg-sidebar transition-[padding] duration-200 ease-linear overflow-hidden",
         // When the sidebar is collapsed the content area shifts left, so we need enough left padding
         // to avoid overlapping the fixed traffic-lights/toggle/back/forward controls.
-        isCollapsed && !collapsedLeftPaddingPx && "pl-[168px]"
+        isCollapsed && !collapsedLeftPaddingPx && "pl-[196px]"
       )}
       style={isCollapsed && collapsedLeftPaddingPx ? { paddingLeft: collapsedLeftPaddingPx } : undefined}
     >
