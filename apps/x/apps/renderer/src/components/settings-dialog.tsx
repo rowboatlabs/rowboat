@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2 } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, SlidersHorizontal } from "lucide-react"
 
 import {
   Dialog,
@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 
-type ConfigTab = "models" | "mcp" | "security" | "appearance"
+type ConfigTab = "models" | "mcp" | "security" | "preferences" | "appearance"
 
 interface TabConfig {
   id: ConfigTab
@@ -53,6 +53,12 @@ const tabs: TabConfig[] = [
     icon: Shield,
     path: "config/security.json",
     description: "Configure allowed shell commands",
+  },
+  {
+    id: "preferences",
+    label: "Knowledge Graph",
+    icon: SlidersHorizontal,
+    description: "Configure sync and note creation behavior",
   },
   {
     id: "appearance",
@@ -127,6 +133,114 @@ function AppearanceSettings() {
             onClick={() => setTheme("system")}
           />
         </div>
+      </div>
+    </div>
+  )
+}
+
+// --- Preferences Settings UI ---
+
+function PreferencesSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  const [lookbackDays, setLookbackDays] = useState<7 | 30 | 90>(30)
+  const [noteStrictness, setNoteStrictness] = useState<"auto" | "high" | "medium" | "low">("auto")
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    async function load() {
+      setLoading(true)
+      try {
+        const lookback = await window.ipc.invoke('config:getLookback', null)
+        setLookbackDays(lookback.days)
+      } catch (error) {
+        console.error('Failed to load lookback config:', error)
+      }
+      try {
+        const strictness = await window.ipc.invoke('config:getNoteStrictness', null)
+        if (strictness.configured) {
+          setNoteStrictness(strictness.strictness)
+        } else {
+          setNoteStrictness("auto")
+        }
+      } catch (error) {
+        console.error('Failed to load note strictness config:', error)
+      }
+      setLoading(false)
+    }
+    load()
+  }, [dialogOpen])
+
+  const handleLookbackChange = useCallback(async (value: string) => {
+    const days = Number(value) as 7 | 30 | 90
+    setLookbackDays(days)
+    try {
+      await window.ipc.invoke('config:setLookback', { days })
+      toast.success('Lookback period updated')
+    } catch (error) {
+      console.error('Failed to save lookback config:', error)
+      toast.error('Failed to save lookback period')
+    }
+  }, [])
+
+  const handleNoteStrictnessChange = useCallback(async (value: string) => {
+    const strictness = value as "auto" | "high" | "medium" | "low"
+    setNoteStrictness(strictness)
+    try {
+      if (strictness === "auto") {
+        await window.ipc.invoke('config:resetNoteStrictness', null)
+      } else {
+        await window.ipc.invoke('config:setNoteStrictness', { strictness })
+      }
+      toast.success('Note strictness updated')
+    } catch (error) {
+      console.error('Failed to save note strictness config:', error)
+      toast.error('Failed to save note strictness')
+    }
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+        <Loader2 className="size-4 animate-spin mr-2" />
+        Loading...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h4 className="text-sm font-medium">Lookback period</h4>
+        <p className="text-xs text-muted-foreground">
+          How far back to sync emails and meetings
+        </p>
+        <Select value={String(lookbackDays)} onValueChange={handleLookbackChange}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="7">1 week</SelectItem>
+            <SelectItem value="30">1 month</SelectItem>
+            <SelectItem value="90">3 months</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <h4 className="text-sm font-medium">Note strictness</h4>
+        <p className="text-xs text-muted-foreground">
+          Controls what qualifies for creating a note
+        </p>
+        <Select value={noteStrictness} onValueChange={handleNoteStrictnessChange}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto" description="Let Rowboat decide">Auto</SelectItem>
+            <SelectItem value="high" description="Conservative - fewer notes created">High</SelectItem>
+            <SelectItem value="medium" description="Balance between precision and coverage">Medium</SelectItem>
+            <SelectItem value="low" description="Lenient - more notes created">Low</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
     </div>
   )
@@ -473,6 +587,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
 
   const activeTabConfig = tabs.find((t) => t.id === activeTab)!
   const isJsonTab = activeTab === "mcp" || activeTab === "security"
+  const isCustomTab = activeTab === "models" || activeTab === "appearance" || activeTab === "preferences"
 
   const formatJson = (jsonString: string): string => {
     try {
@@ -483,7 +598,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models") return
+    if (tab === "appearance" || tab === "models" || tab === "preferences") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -589,9 +704,11 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", activeTab === "models" ? "overflow-y-auto" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", isCustomTab ? "overflow-y-auto" : "overflow-hidden")}>
               {activeTab === "models" ? (
                 <ModelSettings dialogOpen={open} />
+              ) : activeTab === "preferences" ? (
+                <PreferencesSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
               ) : loading ? (
