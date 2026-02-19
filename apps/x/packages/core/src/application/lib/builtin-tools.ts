@@ -582,6 +582,8 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         execute: async ({ pattern, cwd }: { pattern: string; cwd?: string }) => {
             try {
                 const searchDir = cwd ? path.join(WorkDir, cwd) : WorkDir;
+                const normalizedCwd = (cwd ?? '').split(path.sep).join('/');
+                const followSymlinks = normalizedCwd === 'knowledge' || normalizedCwd.startsWith('knowledge/');
 
                 // Ensure search directory is within workspace
                 const resolvedSearchDir = path.resolve(searchDir);
@@ -593,6 +595,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     cwd: searchDir,
                     nodir: true,
                     ignore: ['node_modules/**', '.git/**'],
+                    follow: followSymlinks,
                 });
 
                 return {
@@ -630,6 +633,8 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             maxResults?: number;
         }) => {
             try {
+                const normalizedSearchPath = (searchPath ?? '').split(path.sep).join('/');
+                const followSymlinks = normalizedSearchPath === 'knowledge' || normalizedSearchPath.startsWith('knowledge/');
                 const targetPath = searchPath ? path.join(WorkDir, searchPath) : WorkDir;
 
                 // Ensure target path is within workspace
@@ -641,6 +646,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 // Try ripgrep first
                 try {
                     const rgArgs = [
+                        followSymlinks ? '--follow' : '',
                         '--json',
                         '-e', JSON.stringify(pattern),
                         contextLines > 0 ? `-C ${contextLines}` : '',
@@ -679,7 +685,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 } catch (rgError) {
                     // Fallback to basic grep if ripgrep not available or failed
                     const grepArgs = [
-                        '-rn',
+                        followSymlinks ? '-Rn' : '-rn',
                         fileGlob ? `--include=${JSON.stringify(fileGlob)}` : '',
                         JSON.stringify(pattern),
                         JSON.stringify(resolvedTargetPath),

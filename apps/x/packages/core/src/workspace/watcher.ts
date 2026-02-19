@@ -23,6 +23,7 @@ export async function createWorkspaceWatcher(
 
   const watcher = chokidar.watch(WorkDir, {
     ignoreInitial: true,
+    followSymlinks: true,
     awaitWriteFinish: {
       stabilityThreshold: 150,
       pollInterval: 50,
@@ -74,4 +75,3 @@ export async function createWorkspaceWatcher(
 
   return watcher;
 }
-

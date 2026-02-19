@@ -180,6 +180,7 @@ async function createNotesFromBatch(
     message += `- Use the KNOWLEDGE BASE INDEX below to resolve entities - DO NOT grep/search for existing notes\n`;
     message += `- Extract entities (people, organizations, projects, topics) from ALL files below\n`;
     message += `- Create or update notes in "knowledge" directory (workspace-relative paths like "knowledge/People/Name.md")\n`;
+    message += `- For NEW notes, always write to the base knowledge folders (knowledge/People, knowledge/Organizations, knowledge/Projects, knowledge/Topics), not mounted vaults\n`;
     message += `- If the same entity appears in multiple files, merge the information into a single note\n`;
     message += `- Use workspace tools to read existing notes (when you need full content) and write updates\n`;
     message += `- Follow the note templates and guidelines in your instructions\n\n`;
