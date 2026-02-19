@@ -2357,6 +2357,11 @@ function App() {
       }
     },
     openGraph: () => {
+      // From chat-only landing state, open graph directly in full knowledge view.
+      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
+        setIsChatSidebarOpen(false)
+        setIsRightPaneMaximized(false)
+      }
       void navigateToView({ type: 'graph' })
     },
     expandAll: () => setExpandedPaths(new Set(collectDirPaths(tree))),
@@ -2422,7 +2427,7 @@ function App() {
     onOpenInNewTab: (path: string) => {
       openFileInNewTab(path)
     },
-  }), [tree, selectedPath, workspaceRoot, navigateToFile, navigateToView, openFileInNewTab, fileTabs, closeFileTab, removeEditorCacheForPath])
+  }), [tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, openFileInNewTab, fileTabs, closeFileTab, removeEditorCacheForPath])
 
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
