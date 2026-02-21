@@ -13,7 +13,7 @@ function getOAuthRepo(): IOAuthRepo {
     return container.resolve<IOAuthRepo>('oauthRepo');
 }
 
-export async function handleChatGPTDeviceAuth(): Promise<{ success: boolean; error?: string }> {
+export async function handleChatGPTDeviceAuth(): Promise<{ success: boolean; deviceCode?: string; verificationUri?: string; error?: string }> {
     try {
         const { deviceData, url } = await ChatGPTAuth.initiateDeviceAuth();
 
@@ -22,15 +22,25 @@ export async function handleChatGPTDeviceAuth(): Promise<{ success: boolean; err
         // so it ideally auto-fills, otherwise they must paste it.
         shell.openExternal(`${url}?user_code=${deviceData.user_code}`);
 
-        // Begin polling the auth.openai.com endpoint
-        const tokens = await ChatGPTAuth.pollForTokens(deviceData);
+        // Begin polling the auth.openai.com endpoint asynchronously so we can
+        // return the device code to the UI immediately
+        ChatGPTAuth.pollForTokens(deviceData).then(async (tokens) => {
+            const oauthRepo = getOAuthRepo();
+            await oauthRepo.upsert('chatgpt', { tokens: tokens as any });
+            await oauthRepo.upsert('chatgpt', { error: null });
 
-        const oauthRepo = getOAuthRepo();
-        await oauthRepo.upsert('chatgpt', { tokens: tokens as any });
-        await oauthRepo.upsert('chatgpt', { error: null });
+            emitOAuthEvent({ provider: 'chatgpt', success: true });
+        }).catch((error) => {
+            console.error('ChatGPT device auth polling failed:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            emitOAuthEvent({ provider: 'chatgpt', success: false, error: errorMessage });
+        });
 
-        emitOAuthEvent({ provider: 'chatgpt', success: true });
-        return { success: true };
+        return {
+            success: true,
+            deviceCode: deviceData.user_code,
+            verificationUri: url
+        };
     } catch (error) {
         console.error('ChatGPT device auth failed:', error);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';

@@ -69,6 +69,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({
     status: "idle",
   })
+  const [deviceCodeData, setDeviceCodeData] = useState<{ provider: string, code: string } | null>(null)
   // OAuth provider states
   const [providers, setProviders] = useState<string[]>([])
   const [providersLoading, setProvidersLoading] = useState(true)
@@ -712,13 +713,29 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                     onClick={async () => {
                       setTestState({ status: "testing" });
                       try {
-                        const result = await window.ipc.invoke(llmProvider === 'openai' ? 'oauth:chatgpt' : 'oauth:anthropic', null);
-                        if (result.success) {
-                          toast.success(`Successfully connected ${llmProvider === 'openai' ? 'ChatGPT Plus' : 'Claude Pro'}!`);
-                          setTestState({ status: "success" });
-                        } else {
-                          toast.error(result.error || "Failed to connect via OAuth");
-                          setTestState({ status: "error", error: result.error });
+                        if (llmProvider === 'openai') {
+                          const result = await window.ipc.invoke('oauth:chatgpt', null);
+                          if (result.success) {
+                            if (result.deviceCode) {
+                              setDeviceCodeData({ provider: llmProvider, code: result.deviceCode });
+                              toast.info(`Please enter your device code in the browser window.`);
+                            } else {
+                              toast.success(`Successfully connected ChatGPT Plus!`);
+                              setTestState({ status: "success" });
+                            }
+                          } else {
+                            toast.error(result.error || "Failed to connect via OAuth");
+                            setTestState({ status: "error", error: result.error });
+                          }
+                        } else if (llmProvider === 'anthropic') {
+                          const result = await window.ipc.invoke('oauth:anthropic', null);
+                          if (result.success) {
+                            toast.success(`Successfully connected Claude Pro!`);
+                            setTestState({ status: "success" });
+                          } else {
+                            toast.error(result.error || "Failed to connect via OAuth");
+                            setTestState({ status: "error", error: result.error });
+                          }
                         }
                       } catch (e: any) {
                         toast.error("An error occurred during OAuth");
@@ -728,6 +745,21 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                   >
                     Sign in to {llmProvider === 'openai' ? 'ChatGPT Plus' : 'Claude Pro'}
                   </Button>
+                </div>
+              )}
+
+              {deviceCodeData && deviceCodeData.provider === llmProvider && (
+                <div className="mt-4 p-3 border rounded-md bg-muted/50 text-sm space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold text-foreground">Device Code:</span>
+                    <span className="font-mono bg-background px-2 py-1 rounded border tracking-wider text-base">{deviceCodeData.code}</span>
+                  </div>
+                  {llmProvider === 'openai' && (
+                    <div className="text-muted-foreground text-xs mt-2 border-t pt-2">
+                      <span className="font-semibold text-destructive">⚠️ Security Setting Required!</span><br />
+                      Be sure to go to your <a href="https://chatgpt.com/#settings/Security" target="_blank" rel="noreferrer" className="underline text-foreground">ChatGPT Security Settings</a> and turn on <b>Enable device code authorization</b> before entering this code in the browser.
+                    </div>
+                  )}
                 </div>
               )}
             </div>

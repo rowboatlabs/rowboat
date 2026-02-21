@@ -229,6 +229,8 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({
       success: z.boolean(),
+      deviceCode: z.string().optional(),
+      verificationUri: z.string().optional(),
       error: z.string().optional(),
     }),
   },
