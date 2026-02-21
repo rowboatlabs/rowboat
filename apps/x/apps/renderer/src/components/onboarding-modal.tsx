@@ -160,9 +160,9 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Preferred default models for each provider
   const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
-  openai: "gpt-5.2",
-  anthropic: "claude-opus-4-6-20260202",
-}
+    openai: "gpt-5.2",
+    anthropic: "claude-opus-4-6-20260202",
+  }
 
   // Initialize default models from catalog
   useEffect(() => {
@@ -703,6 +703,33 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                 onChange={(e) => updateProviderConfig(llmProvider, { apiKey: e.target.value })}
                 placeholder="Paste your API key"
               />
+              {(llmProvider === 'openai' || llmProvider === 'anthropic') && (
+                <div className="flex items-center gap-4 mt-2">
+                  <span className="text-xs text-muted-foreground">— OR —</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      setTestState({ status: "testing" });
+                      try {
+                        const result = await window.ipc.invoke(llmProvider === 'openai' ? 'oauth:chatgpt' : 'oauth:anthropic', null);
+                        if (result.success) {
+                          toast.success(`Successfully connected ${llmProvider === 'openai' ? 'ChatGPT Plus' : 'Claude Pro'}!`);
+                          setTestState({ status: "success" });
+                        } else {
+                          toast.error(result.error || "Failed to connect via OAuth");
+                          setTestState({ status: "error", error: result.error });
+                        }
+                      } catch (e: any) {
+                        toast.error("An error occurred during OAuth");
+                        setTestState({ status: "error", error: e.message });
+                      }
+                    }}
+                  >
+                    Sign in to {llmProvider === 'openai' ? 'ChatGPT Plus' : 'Claude Pro'}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
@@ -861,31 +888,31 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   return (
     <>
-    <GoogleClientIdModal
-      open={googleClientIdOpen}
-      onOpenChange={setGoogleClientIdOpen}
-      onSubmit={handleGoogleClientIdSubmit}
-      isSubmitting={providerStates.google?.isConnecting ?? false}
-    />
-    <ComposioApiKeyModal
-      open={composioApiKeyOpen}
-      onOpenChange={setComposioApiKeyOpen}
-      onSubmit={handleComposioApiKeySubmit}
-      isSubmitting={slackConnecting}
-    />
-    <Dialog open={open} onOpenChange={() => {}}>
-      <DialogContent
-        className="w-[60vw] max-w-3xl max-h-[80vh] overflow-y-auto"
-        showCloseButton={false}
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
-      >
-        {renderStepIndicator()}
-        {currentStep === 0 && renderLlmSetupStep()}
-        {currentStep === 1 && renderAccountConnectionStep()}
-        {currentStep === 2 && renderCompletionStep()}
-      </DialogContent>
-    </Dialog>
+      <GoogleClientIdModal
+        open={googleClientIdOpen}
+        onOpenChange={setGoogleClientIdOpen}
+        onSubmit={handleGoogleClientIdSubmit}
+        isSubmitting={providerStates.google?.isConnecting ?? false}
+      />
+      <ComposioApiKeyModal
+        open={composioApiKeyOpen}
+        onOpenChange={setComposioApiKeyOpen}
+        onSubmit={handleComposioApiKeySubmit}
+        isSubmitting={slackConnecting}
+      />
+      <Dialog open={open} onOpenChange={() => { }}>
+        <DialogContent
+          className="w-[60vw] max-w-3xl max-h-[80vh] overflow-y-auto"
+          showCloseButton={false}
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          {renderStepIndicator()}
+          {currentStep === 0 && renderLlmSetupStep()}
+          {currentStep === 1 && renderAccountConnectionStep()}
+          {currentStep === 2 && renderCompletionStep()}
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

@@ -13,7 +13,7 @@ export function useOAuth(provider: string) {
     try {
       setIsLoading(true);
       const result = await window.ipc.invoke('oauth:getState', null);
-      const config = result.config || {};
+      const config = (result.config || {}) as Record<string, { connected?: boolean, error?: string }>;
       setIsConnected(config[provider]?.connected ?? false);
     } catch (error) {
       console.error('Failed to check connection status:', error);
@@ -23,33 +23,33 @@ export function useOAuth(provider: string) {
     }
   }, [provider]);
 
-    // Check connection status on mount and when provider changes
-    useEffect(() => {
-      checkConnection();
-    }, [provider, checkConnection]);
-  
-    // Listen for OAuth completion events
-    useEffect(() => {
-      const cleanup = window.ipc.on('oauth:didConnect', (event) => {
-        if (event.provider !== provider) {
-          return; // Ignore events for other providers
-        }
-  
-        setIsConnected(event.success);
-        setIsConnecting(false);
-        setIsLoading(false);
-  
-        if (event.success) {
-          toast(`Successfully connected to ${provider}`, 'success');
-          // Refresh connection status to ensure consistency
-          checkConnection();
-        } else {
-          toast(event.error || `Failed to connect to ${provider}`, 'error');
-        }
-      });
-  
-      return cleanup;
-    }, [provider, checkConnection]);
+  // Check connection status on mount and when provider changes
+  useEffect(() => {
+    checkConnection();
+  }, [provider, checkConnection]);
+
+  // Listen for OAuth completion events
+  useEffect(() => {
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      if (event.provider !== provider) {
+        return; // Ignore events for other providers
+      }
+
+      setIsConnected(event.success);
+      setIsConnecting(false);
+      setIsLoading(false);
+
+      if (event.success) {
+        toast(`Successfully connected to ${provider}`, 'success');
+        // Refresh connection status to ensure consistency
+        checkConnection();
+      } else {
+        toast(event.error || `Failed to connect to ${provider}`, 'error');
+      }
+    });
+
+    return cleanup;
+  }, [provider, checkConnection]);
 
   const connect = useCallback(async (clientId?: string) => {
     try {
@@ -109,7 +109,7 @@ export function useConnectedProviders() {
     try {
       setIsLoading(true);
       const result = await window.ipc.invoke('oauth:getState', null);
-      const config = result.config || {};
+      const config = (result.config || {}) as Record<string, { connected?: boolean, error?: string }>;
       const connected = Object.entries(config)
         .filter(([, value]) => value?.connected)
         .map(([key]) => key);

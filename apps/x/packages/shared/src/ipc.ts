@@ -225,6 +225,20 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  'oauth:chatgpt': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'oauth:anthropic': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
   'oauth:disconnect': {
     req: z.object({
       provider: z.string(),
@@ -431,7 +445,7 @@ export type IPCChannels = {
  */
 export type InvokeChannels = {
   [K in keyof IPCChannels]:
-    IPCChannels[K]['res'] extends null ? never : K
+  IPCChannels[K]['res'] extends null ? never : K
 }[keyof IPCChannels];
 
 /**
@@ -440,7 +454,7 @@ export type InvokeChannels = {
  */
 export type SendChannels = {
   [K in keyof IPCChannels]:
-    IPCChannels[K]['res'] extends null ? K : never
+  IPCChannels[K]['res'] extends null ? K : never
 }[keyof IPCChannels];
 
 // ============================================================================

@@ -410,6 +410,33 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             onChange={(e) => updateConfig(provider, { apiKey: e.target.value })}
             placeholder="Paste your API key"
           />
+          {(provider === 'openai' || provider === 'anthropic') && (
+            <div className="flex items-center gap-4 mt-2">
+              <span className="text-xs text-muted-foreground">— OR —</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  setTestState({ status: "testing" });
+                  try {
+                    const result = await window.ipc.invoke(provider === 'openai' ? 'oauth:chatgpt' : 'oauth:anthropic', null);
+                    if (result.success) {
+                      toast.success(`Successfully connected ${provider === 'openai' ? 'ChatGPT Plus' : 'Claude Pro'}!`);
+                      setTestState({ status: "success" });
+                    } else {
+                      toast.error(result.error || "Failed to connect via OAuth");
+                      setTestState({ status: "error", error: result.error });
+                    }
+                  } catch (e: any) {
+                    toast.error("An error occurred during OAuth");
+                    setTestState({ status: "error", error: e.message });
+                  }
+                }}
+              >
+                Sign in to {provider === 'openai' ? 'ChatGPT Plus' : 'Claude Pro'}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
