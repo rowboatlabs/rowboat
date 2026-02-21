@@ -5,9 +5,9 @@ import { OAuthTokens } from './types.js';
 import z from 'zod';
 
 const ProviderConnectionSchema = z.object({
-  tokens: OAuthTokens,
-  clientId: z.string().optional(),
-  error: z.string().optional(),
+  tokens: OAuthTokens.nullable().optional(),
+  clientId: z.string().nullable().optional(),
+  error: z.string().nullable().optional(),
 });
 
 const OAuthConfigSchema = z.object({
@@ -17,7 +17,7 @@ const OAuthConfigSchema = z.object({
 
 const ClientFacingConfigSchema = z.record(z.string(), z.object({
   connected: z.boolean(),
-  error: z.string().optional(),
+  error: z.string().nullable().optional(),
 }));
 
 const LegacyOauthConfigSchema = z.record(z.string(), OAuthTokens);
@@ -28,13 +28,9 @@ const DEFAULT_CONFIG: z.infer<typeof OAuthConfigSchema> = {
 };
 
 export interface IOAuthRepo {
-  getTokens(provider: string): Promise<OAuthTokens | null>;
-  saveTokens(provider: string, tokens: OAuthTokens): Promise<void>;
-  clearTokens(provider: string): Promise<void>;
-  getClientId(provider: string): Promise<string | null>;
-  setClientId(provider: string, clientId: string): Promise<void>;
-  setError(provider: string, errorMessage: string): Promise<void>;
-  clearError(provider: string): Promise<void>;
+  read(provider: string): Promise<z.infer<typeof ProviderConnectionSchema>>;
+  upsert(provider: string, connection: Partial<z.infer<typeof ProviderConnectionSchema>>): Promise<void>;
+  delete(provider: string): Promise<void>;
   getClientFacingConfig(): Promise<z.infer<typeof ClientFacingConfigSchema>>;
 }
 
@@ -92,68 +88,19 @@ export class FSOAuthRepo implements IOAuthRepo {
     await fs.writeFile(this.configPath, JSON.stringify(config, null, 2));
   }
 
-  async getTokens(provider: string): Promise<OAuthTokens | null> {
+  async read(provider: string): Promise<z.infer<typeof ProviderConnectionSchema>> {
     const config = await this.readConfig();
-    const tokens = config.providers[provider]?.tokens;
-    return tokens ?? null;
+    return config.providers[provider] ?? {};
   }
-
-  async saveTokens(provider: string, tokens: OAuthTokens): Promise<void> {
+  async upsert(provider: string, connection: Partial<z.infer<typeof ProviderConnectionSchema>>): Promise<void> {
     const config = await this.readConfig();
-    if (config.providers[provider]) {
-      delete config.providers[provider];
-    }
-    config.providers[provider] = {
-      tokens,
-    };
+    config.providers[provider] = { ...config.providers[provider] ?? {}, ...connection };
     await this.writeConfig(config);
   }
 
-  async clearTokens(provider: string): Promise<void> {
+  async delete(provider: string): Promise<void> {
     const config = await this.readConfig();
     delete config.providers[provider];
-    await this.writeConfig(config);
-  }
-
-  async getClientId(provider: string): Promise<string | null> {
-    const config = await this.readConfig();
-    const clientId = config.providers[provider]?.clientId;
-    return clientId ?? null;
-  }
-
-  async setClientId(provider: string, clientId: string): Promise<void> {
-    const config = await this.readConfig();
-    if (!config.providers[provider]) {
-      throw new Error(`Provider ${provider} not found`);
-    }
-    config.providers[provider].clientId = clientId;
-    await this.writeConfig(config);
-  }
-
-  async clearClientId(provider: string): Promise<void> {
-    const config = await this.readConfig();
-    if (!config.providers[provider]) {
-      throw new Error(`Provider ${provider} not found`);
-    }
-    delete config.providers[provider].clientId;
-    await this.writeConfig(config);
-  }
-
-  async setError(provider: string, errorMessage: string): Promise<void> {
-    const config = await this.readConfig();
-    if (!config.providers[provider]) {
-      throw new Error(`Provider ${provider} not found`);
-    }
-    config.providers[provider].error = errorMessage;
-    await this.writeConfig(config);
-  }
-
-  async clearError(provider: string): Promise<void> {
-    const config = await this.readConfig();
-    if (!config.providers[provider]) {
-      throw new Error(`Provider ${provider} not found`);
-    }
-    delete config.providers[provider].error;
     await this.writeConfig(config);
   }
 
