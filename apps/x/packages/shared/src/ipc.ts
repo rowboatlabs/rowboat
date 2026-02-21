@@ -244,7 +244,7 @@ const ipcSchemas = {
     res: z.object({
       config: z.record(z.string(), z.object({
         connected: z.boolean(),
-        error: z.string().optional(),
+        error: z.string().nullable().optional(),
       })),
     }),
   },

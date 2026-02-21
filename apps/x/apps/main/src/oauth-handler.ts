@@ -84,7 +84,7 @@ async function getProviderConfiguration(provider: string, clientIdOverride?: str
       return clientIdOverride;
     }
     const oauthRepo = getOAuthRepo();
-    const clientId = await oauthRepo.getClientId(provider);
+    const { clientId } = await oauthRepo.read(provider);
     if (clientId) {
       return clientId;
     }
@@ -179,9 +179,9 @@ export async function connectProvider(provider: string, clientId?: string): Prom
 
     // Build authorization URL
     const authUrl = oauthClient.buildAuthorizationUrl(config, {
-      redirectUri: REDIRECT_URI,
+      redirect_uri: REDIRECT_URI,
       scope: scopes.join(' '),
-      codeChallenge,
+      code_challenge: codeChallenge,
       state,
     });
 
@@ -212,11 +212,11 @@ export async function connectProvider(provider: string, clientId?: string): Prom
 
         // Save tokens
         console.log(`[OAuth] Token exchange successful for ${provider}`);
-        await oauthRepo.saveTokens(provider, tokens);
+        await oauthRepo.upsert(provider, { tokens });
         if (provider === 'google' && clientId) {
-          await oauthRepo.setClientId(provider, clientId);
+          await oauthRepo.upsert(provider, { clientId });
         }
-        await oauthRepo.clearError(provider);
+        await oauthRepo.upsert(provider, { error: null });
 
         // Trigger immediate sync for relevant providers
         if (provider === 'google') {
@@ -281,7 +281,7 @@ export async function connectProvider(provider: string, clientId?: string): Prom
 export async function disconnectProvider(provider: string): Promise<{ success: boolean }> {
   try {
     const oauthRepo = getOAuthRepo();
-    await oauthRepo.clearTokens(provider);
+    await oauthRepo.delete(provider);
     return { success: true };
   } catch (error) {
     console.error('OAuth disconnect failed:', error);
@@ -297,7 +297,7 @@ export async function getAccessToken(provider: string): Promise<string | null> {
   try {
     const oauthRepo = getOAuthRepo();
     
-    let tokens = await oauthRepo.getTokens(provider);
+    const { tokens } = await oauthRepo.read(provider);
     if (!tokens) {
       return null;
     }
@@ -306,7 +306,7 @@ export async function getAccessToken(provider: string): Promise<string | null> {
     if (oauthClient.isTokenExpired(tokens)) {
       if (!tokens.refresh_token) {
         // No refresh token, need to reconnect
-        await oauthRepo.setError(provider, 'Missing refresh token. Please reconnect.');
+        await oauthRepo.upsert(provider, { error: 'Missing refresh token. Please reconnect.' });
         return null;
       }
 
@@ -316,11 +316,11 @@ export async function getAccessToken(provider: string): Promise<string | null> {
         
         // Refresh token, preserving existing scopes
         const existingScopes = tokens.scopes;
-        tokens = await oauthClient.refreshTokens(config, tokens.refresh_token, existingScopes);
-        await oauthRepo.saveTokens(provider, tokens);
+        const refreshedTokens = await oauthClient.refreshTokens(config, tokens.refresh_token, existingScopes);
+        await oauthRepo.upsert(provider, { tokens });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Token refresh failed';
-        await oauthRepo.setError(provider, message);
+        await oauthRepo.upsert(provider, { error: message });
         console.error('Token refresh failed:', error);
         return null;
       }

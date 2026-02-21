@@ -152,19 +152,11 @@ export function generateState(): string {
  */
 export function buildAuthorizationUrl(
   config: client.Configuration,
-  params: {
-    redirectUri: string;
-    scope: string;
-    codeChallenge: string;
-    state: string;
-  }
+  params: Record<string, string>
 ): URL {
   return client.buildAuthorizationUrl(config, {
-    redirect_uri: params.redirectUri,
-    scope: params.scope,
-    code_challenge: params.codeChallenge,
     code_challenge_method: 'S256',
-    state: params.state,
+    ...params,
   });
 }
 
@@ -206,6 +198,11 @@ export async function refreshTokens(
   // Preserve existing scopes if server didn't return them
   if (!tokens.scopes && existingScopes) {
     tokens.scopes = existingScopes;
+  }
+
+  // Preserve existing refresh token if server didn't return it
+  if (!tokens.refresh_token) {
+    tokens.refresh_token = refreshToken;
   }
 
   console.log(`[OAuth] Token refresh successful`);
