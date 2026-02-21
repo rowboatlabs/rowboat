@@ -152,19 +152,11 @@ export function generateState(): string {
  */
 export function buildAuthorizationUrl(
   config: client.Configuration,
-  params: {
-    redirectUri: string;
-    scope: string;
-    codeChallenge: string;
-    state: string;
-  }
+  params: Record<string, string>
 ): URL {
   return client.buildAuthorizationUrl(config, {
-    redirect_uri: params.redirectUri,
-    scope: params.scope,
-    code_challenge: params.codeChallenge,
     code_challenge_method: 'S256',
-    state: params.state,
+    ...params,
   });
 }
 

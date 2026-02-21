@@ -179,9 +179,9 @@ export async function connectProvider(provider: string, clientId?: string): Prom
 
     // Build authorization URL
     const authUrl = oauthClient.buildAuthorizationUrl(config, {
-      redirectUri: REDIRECT_URI,
+      redirect_uri: REDIRECT_URI,
       scope: scopes.join(' '),
-      codeChallenge,
+      code_challenge: codeChallenge,
       state,
     });
 
