@@ -5,6 +5,7 @@ import { Workflow, WorkflowTool } from "@/app/lib/types/workflow_types";
 import { CopilotChatContext, CopilotMessage, DataSourceSchemaForCopilot, TriggerSchemaForCopilot } from "../../../entities/models/copilot";
 import { PrefixLogger } from "@/app/lib/utils";
 import zodToJsonSchema from "zod-to-json-schema";
+import { getProvider } from "./agents-runtime/agents.js";
 import { COPILOT_INSTRUCTIONS_EDIT_AGENT } from "./copilot_edit_agent";
 import { COPILOT_INSTRUCTIONS_MULTI_AGENT_WITH_DOCS as COPILOT_INSTRUCTIONS_MULTI_AGENT } from "./copilot_multi_agent";
 import { COPILOT_MULTI_AGENT_EXAMPLE_1 } from "./example_multi_agent_1";
@@ -29,12 +30,6 @@ const SYSTEM_PROMPT = [
     .join('\n\n')
     .replace('{agent_model}', AGENT_MODEL)
     .replace('{workflow_schema}', WORKFLOW_SCHEMA);
-
-const openai = createOpenAI({
-    apiKey: PROVIDER_API_KEY,
-    baseURL: PROVIDER_BASE_URL,
-    compatibility: "strict",
-});
 
 const composioToolSearchResponseSchema = z.object({
     results: z.array(z.object({
@@ -114,7 +109,7 @@ function getTriggersPrompt(triggers: z.infer<typeof TriggerSchemaForCopilot>[]):
         } else if (trigger.type === 'recurring') {
             return {
                 id: trigger.id,
-                type: 'recurring', 
+                type: 'recurring',
                 name: trigger.name,
                 cron: trigger.cron,
                 nextRunAt: trigger.nextRunAt,
@@ -144,7 +139,7 @@ ${JSON.stringify(simplifiedTriggers)}
 async function searchRelevantTools(usageTracker: UsageTracker, query: string): Promise<string> {
     const logger = new PrefixLogger("copilot-search-tools");
     console.log("🔧 TOOL CALL: searchRelevantTools", { query });
-    
+
     if (!USE_COMPOSIO_TOOLS) {
         logger.log("dynamic tool search is disabled");
         console.log("❌ TOOL CALL SKIPPED: searchRelevantTools - Composio tools disabled");
@@ -178,21 +173,21 @@ async function searchRelevantTools(usageTracker: UsageTracker, query: string): P
         logger.log(`tool search response is invalid: ${JSON.stringify(result.error)}`);
         return 'No tools found!';
     }
-    
+
     // Extract tool slugs from results[].primary_tool_slugs[]
     const toolSlugs = (result.data.results || [])
         .flatMap((item: any) => item.primary_tool_slugs || [])
         .filter((slug: string) => slug);
-    
+
     if (!toolSlugs.length) {
         logger.log(`tool search yielded no results`);
         return 'No tools found!';
     }
-    
+
     logger.log(`found tool slugs: ${toolSlugs.join(', ')}`);
-    console.log("✅ TOOL CALL SUCCESS: COMPOSIO_SEARCH_TOOLS", { 
-        toolSlugs, 
-        resultCount: toolSlugs.length 
+    console.log("✅ TOOL CALL SUCCESS: COMPOSIO_SEARCH_TOOLS", {
+        toolSlugs,
+        resultCount: toolSlugs.length
     });
 
     // Enrich tools with full details
@@ -200,17 +195,17 @@ async function searchRelevantTools(usageTracker: UsageTracker, query: string): P
     const composioToolsResults = await Promise.allSettled(
         toolSlugs.map(slug => getTool(slug))
     );
-    
+
     // Filter out failed tool fetches
     const composioTools = composioToolsResults
         .filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled')
         .map(result => result.value);
-    
+
     if (composioTools.length === 0) {
         logger.log('all tool fetches failed');
         return 'No tools found!';
     }
-    
+
     const workflowTools: z.infer<typeof WorkflowTool>[] = composioTools.map(tool => ({
         name: tool.name,
         description: tool.description,
@@ -230,13 +225,13 @@ async function searchRelevantTools(usageTracker: UsageTracker, query: string): P
     }));
 
     // Format the response
-    const toolConfigs = workflowTools.map(tool => 
+    const toolConfigs = workflowTools.map(tool =>
         `**${tool.name}**:\n\`\`\`json\n${JSON.stringify(tool, null, 2)}\n\`\`\``
     ).join('\n\n');
 
     const response = `The following tools were found:\n\n${toolConfigs}`;
     logger.log('returning response', response);
-    console.log("✅ TOOL CALL COMPLETED: searchRelevantTools", { 
+    console.log("✅ TOOL CALL COMPLETED: searchRelevantTools", {
         toolsFound: workflowTools.length,
         toolNames: workflowTools.map(t => t.name)
     });
@@ -380,8 +375,9 @@ export async function getEditAgentInstructionsResponse(
         system: COPILOT_INSTRUCTIONS_EDIT_AGENT,
         messages: messages,
     }));
+    const createProvider = await getProvider(COPILOT_MODEL);
     const { object, usage } = await generateObject({
-        model: openai(COPILOT_MODEL),
+        model: createProvider(COPILOT_MODEL),
         messages: [
             {
                 role: 'system',
@@ -419,11 +415,11 @@ export async function* streamMultiAgentResponse(
     logger.log('context', context);
     logger.log('projectId', projectId);
 
-    console.log("🚀 COPILOT STREAM STARTED", { 
-        projectId, 
-        contextType: context?.type, 
+    console.log("🚀 COPILOT STREAM STARTED", {
+        projectId,
+        contextType: context?.type,
         contextName: context && 'name' in context ? context.name : undefined,
-        messageCount: messages.length 
+        messageCount: messages.length
     });
 
     // set the current workflow prompt
@@ -450,9 +446,11 @@ export async function* streamMultiAgentResponse(
         maxSteps: 20,
         availableTools: ["search_relevant_tools", "search_relevant_triggers"]
     });
-    
+
+    const createProvider = await getProvider(COPILOT_MODEL);
+
     const { fullStream } = streamText({
-        model: openai(COPILOT_MODEL),
+        model: createProvider(COPILOT_MODEL),
         maxSteps: 10,
         tools: {
             "search_relevant_tools": tool({
@@ -463,9 +461,9 @@ export async function* streamMultiAgentResponse(
                 execute: async ({ query }: { query: string }) => {
                     console.log("🎯 AI TOOL CALL: search_relevant_tools", { query });
                     const result = await searchRelevantTools(usageTracker, query);
-                    console.log("✅ AI TOOL CALL COMPLETED: search_relevant_tools", { 
-                        query, 
-                        resultLength: result.length 
+                    console.log("✅ AI TOOL CALL COMPLETED: search_relevant_tools", {
+                        query,
+                        resultLength: result.length
                     });
                     return result;
                 },
@@ -504,7 +502,7 @@ export async function* streamMultiAgentResponse(
         if (chunkCount === 1) {
             console.log("📤 FIRST RESPONSE CHUNK SENT");
         }
-        
+
         if (event.type === "text-delta") {
             yield {
                 content: event.textDelta,
@@ -517,7 +515,7 @@ export async function* streamMultiAgentResponse(
                 args: event.args,
                 query: event.args.query || undefined,
             };
-        } else if (event.type === "tool-result") { 
+        } else if (event.type === "tool-result") {
             yield {
                 type: 'tool-result',
                 toolCallId: event.toolCallId,
@@ -535,8 +533,8 @@ export async function* streamMultiAgentResponse(
         }
     }
 
-    console.log("✅ COPILOT STREAM COMPLETED", { 
-        projectId, 
-        totalChunks: chunkCount 
+    console.log("✅ COPILOT STREAM COMPLETED", {
+        projectId,
+        totalChunks: chunkCount
     });
 }
