@@ -32,7 +32,9 @@ export class ChatGPTAuth {
     });
 
     if (!deviceResponse.ok) {
-        throw new Error('Failed to initiate device authorization');
+      const errorText = await deviceResponse.text();
+      console.error('ChatGPT Device Auth Error Response:', deviceResponse.status, errorText);
+      throw new Error(`Failed to initiate device authorization: ${deviceResponse.status} ${errorText}`);
     }
 
     const deviceData = (await deviceResponse.json()) as DeviceAuthResponse;
@@ -49,7 +51,7 @@ export class ChatGPTAuth {
    */
   static async pollForTokens(deviceData: DeviceAuthResponse): Promise<TokenResponse> {
     const interval = Math.max(parseInt(deviceData.interval) || 5, 1) * 1000;
-    
+
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const response = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {

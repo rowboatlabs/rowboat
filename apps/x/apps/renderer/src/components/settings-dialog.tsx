@@ -286,6 +286,26 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     })
   }, [modelsCatalog])
 
+  // Listen for out-of-band OAuth completion events (Device Code flows)
+  useEffect(() => {
+    if (!dialogOpen) return
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      const { provider: eventProvider, success, error } = event
+
+      if ((eventProvider === 'chatgpt' && provider === 'openai') || (eventProvider === 'anthropic' && provider === 'anthropic')) {
+        if (success) {
+          toast.success(`Connected to ${eventProvider}`)
+          setTestState({ status: 'success' })
+        } else {
+          toast.error(error || `Failed to connect to ${eventProvider}`)
+          setTestState({ status: 'error', error })
+        }
+      }
+    })
+
+    return cleanup
+  }, [dialogOpen, provider])
+
   const handleTestAndSave = useCallback(async () => {
     if (!canTest) return
     setTestState({ status: "testing" })

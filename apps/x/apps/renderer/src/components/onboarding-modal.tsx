@@ -374,13 +374,22 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       if (success) {
         const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
         toast.success(`Connected to ${displayName}`)
+
+        // Unblock loading state if the current LLM provider completes its out-of-band flow
+        if ((provider === 'chatgpt' && llmProvider === 'openai') || (provider === 'anthropic' && llmProvider === 'anthropic')) {
+          setTestState({ status: "success" })
+        }
       } else {
         toast.error(error || `Failed to connect to ${provider}`)
+
+        if ((provider === 'chatgpt' && llmProvider === 'openai') || (provider === 'anthropic' && llmProvider === 'anthropic')) {
+          setTestState({ status: "error", error })
+        }
       }
     })
 
     return cleanup
-  }, [])
+  }, [llmProvider])
 
   // Listen for Composio connection events
   useEffect(() => {
