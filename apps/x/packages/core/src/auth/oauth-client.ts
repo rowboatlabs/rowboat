@@ -200,6 +200,11 @@ export async function refreshTokens(
     tokens.scopes = existingScopes;
   }
 
+  // Preserve existing refresh token if server didn't return it
+  if (!tokens.refresh_token) {
+    tokens.refresh_token = refreshToken;
+  }
+
   console.log(`[OAuth] Token refresh successful`);
   return tokens;
 }
