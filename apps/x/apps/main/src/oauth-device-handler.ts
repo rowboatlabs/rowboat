@@ -13,6 +13,20 @@ function getOAuthRepo(): IOAuthRepo {
     return container.resolve<IOAuthRepo>('oauthRepo');
 }
 
+/**
+ * Normalizes vendor-specific token responses to our OAuthTokens schema.
+ */
+function normalizeOAuthTokens(tokens: any): any {
+    const expiresIn = tokens.expires_in || 3600;
+    return {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token || null,
+        expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+        token_type: 'Bearer',
+        scopes: tokens.scopes || tokens.scope?.split(' ') || []
+    };
+}
+
 export async function handleChatGPTDeviceAuth(): Promise<{ success: boolean; deviceCode?: string; verificationUri?: string; error?: string }> {
     try {
         const { deviceData, url } = await ChatGPTAuth.initiateDeviceAuth();
@@ -26,8 +40,8 @@ export async function handleChatGPTDeviceAuth(): Promise<{ success: boolean; dev
         // return the device code to the UI immediately
         ChatGPTAuth.pollForTokens(deviceData).then(async (tokens) => {
             const oauthRepo = getOAuthRepo();
-            await oauthRepo.upsert('chatgpt', { tokens: tokens as any });
-            await oauthRepo.upsert('chatgpt', { error: null });
+            const normalized = normalizeOAuthTokens(tokens);
+            await oauthRepo.upsert('chatgpt', { tokens: normalized, error: null });
 
             emitOAuthEvent({ provider: 'chatgpt', success: true });
         }).catch((error) => {
@@ -65,8 +79,8 @@ export async function handleAnthropicBrowserAuth(): Promise<{ success: boolean; 
                     const tokens = await AnthropicAuth.exchangeCodeForTokens(code, pkce.verifier, REDIRECT_URI);
 
                     const oauthRepo = getOAuthRepo();
-                    await oauthRepo.upsert('anthropic-native', { tokens: tokens as any });
-                    await oauthRepo.upsert('anthropic-native', { error: null });
+                    const normalized = normalizeOAuthTokens(tokens);
+                    await oauthRepo.upsert('anthropic-native', { tokens: normalized, error: null });
 
                     emitOAuthEvent({ provider: 'anthropic-native', success: true });
                     resolve({ success: true });
@@ -108,9 +122,8 @@ export async function handleAntigravityBrowserAuth(): Promise<{ success: boolean
                     const tokens = await AntigravityAuth.exchangeCodeForTokens(code, pkce.verifier, REDIRECT_URI);
 
                     const oauthRepo = getOAuthRepo();
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    await oauthRepo.upsert('antigravity', { tokens: tokens as any });
-                    await oauthRepo.upsert('antigravity', { error: null });
+                    const normalized = normalizeOAuthTokens(tokens);
+                    await oauthRepo.upsert('antigravity', { tokens: normalized, error: null });
 
                     emitOAuthEvent({ provider: 'antigravity', success: true });
                     resolve({ success: true });
