@@ -374,6 +374,10 @@ export function setupIpcHandlers() {
       const { handleAnthropicBrowserAuth } = await import('./oauth-device-handler.js');
       return await handleAnthropicBrowserAuth();
     },
+    'oauth:antigravity': async () => {
+      const { handleAntigravityBrowserAuth } = await import('./oauth-device-handler.js');
+      return await handleAntigravityBrowserAuth();
+    },
     'oauth:disconnect': async (_event, args) => {
       return await disconnectProvider(args.provider);
     },

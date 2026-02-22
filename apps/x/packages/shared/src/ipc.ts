@@ -241,6 +241,13 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  'oauth:antigravity': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
   'oauth:disconnect': {
     req: z.object({
       provider: z.string(),

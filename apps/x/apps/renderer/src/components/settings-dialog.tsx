@@ -292,7 +292,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     const cleanup = window.ipc.on('oauth:didConnect', (event) => {
       const { provider: eventProvider, success, error } = event
 
-      if ((eventProvider === 'chatgpt' && provider === 'openai') || (eventProvider === 'anthropic' && provider === 'anthropic')) {
+      if ((eventProvider === 'chatgpt' && provider === 'openai') || (eventProvider === 'anthropic' && provider === 'anthropic') || (eventProvider === 'antigravity' && provider === 'antigravity')) {
         if (success) {
           toast.success(`Connected to ${eventProvider}`)
           setTestState({ status: 'success' })
@@ -307,7 +307,8 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   }, [dialogOpen, provider])
 
   const handleTestAndSave = useCallback(async () => {
-    if (!canTest) return
+    if (!canTest && testState.status !== "success") return
+    const isAlreadySuccess = testState.status === "success";
     setTestState({ status: "testing" })
     try {
       const providerConfig = {
@@ -318,6 +319,14 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         },
         model: activeConfig.model.trim(),
       }
+
+      if (isAlreadySuccess) {
+        await window.ipc.invoke("models:saveConfig", providerConfig)
+        setTestState({ status: "success" })
+        toast.success("Model configuration saved")
+        return
+      }
+
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
         await window.ipc.invoke("models:saveConfig", providerConfig)
@@ -431,7 +440,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             onChange={(e) => updateConfig(provider, { apiKey: e.target.value })}
             placeholder="Paste your API key"
           />
-          {(provider === 'openai' || provider === 'anthropic') && (
+          {(provider === 'openai' || provider === 'anthropic' || provider === 'antigravity') && (
             <div className="flex items-center gap-4 mt-2">
               <span className="text-xs text-muted-foreground">— OR —</span>
               <Button
@@ -463,6 +472,15 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                         toast.error(result.error || "Failed to connect via OAuth");
                         setTestState({ status: "error", error: result.error });
                       }
+                    } else if (provider === 'antigravity') {
+                      const result = await window.ipc.invoke('oauth:antigravity', null);
+                      if (result.success) {
+                        toast.success(`Successfully connected Antigravity!`);
+                        setTestState({ status: "success" });
+                      } else {
+                        toast.error(result.error || "Failed to connect via OAuth");
+                        setTestState({ status: "error", error: result.error });
+                      }
                     }
                   } catch (e: any) {
                     toast.error("An error occurred during OAuth");
@@ -470,7 +488,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                   }
                 }}
               >
-                Sign in to {provider === 'openai' ? 'ChatGPT Plus' : 'Claude Pro'}
+                Sign in to {provider === 'openai' ? 'ChatGPT Plus' : provider === 'anthropic' ? 'Claude Pro' : 'Antigravity'}
               </Button>
             </div>
           )}
@@ -526,7 +544,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       {/* Test & Save button */}
       <Button
         onClick={handleTestAndSave}
-        disabled={!canTest || testState.status === "testing"}
+        disabled={(!canTest && testState.status !== "success") || testState.status === "testing"}
         className="w-full"
       >
         {testState.status === "testing" ? (

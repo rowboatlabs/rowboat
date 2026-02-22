@@ -282,20 +282,28 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   }
 
   const handleTestAndSaveLlmConfig = useCallback(async () => {
-    if (!canTest) return
+    if (!canTest && testState.status !== "success") return
+    const isAlreadySuccess = testState.status === "success";
     setTestState({ status: "testing" })
     try {
       const apiKey = activeConfig.apiKey.trim() || undefined
       const baseURL = activeConfig.baseURL.trim() || undefined
-      const model = activeConfig.model.trim()
       const providerConfig = {
         provider: {
           flavor: llmProvider,
           apiKey,
           baseURL,
         },
-        model,
+        model: activeConfig.model.trim(),
       }
+
+      if (isAlreadySuccess) {
+        await window.ipc.invoke("models:saveConfig", providerConfig)
+        setTestState({ status: "success" })
+        handleNext()
+        return
+      }
+
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
         setTestState({ status: "success" })
@@ -376,13 +384,13 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         toast.success(`Connected to ${displayName}`)
 
         // Unblock loading state if the current LLM provider completes its out-of-band flow
-        if ((provider === 'chatgpt' && llmProvider === 'openai') || (provider === 'anthropic' && llmProvider === 'anthropic')) {
+        if ((provider === 'chatgpt' && llmProvider === 'openai') || (provider === 'anthropic' && llmProvider === 'anthropic') || (provider === 'antigravity' && llmProvider === 'antigravity')) {
           setTestState({ status: "success" })
         }
       } else {
         toast.error(error || `Failed to connect to ${provider}`)
 
-        if ((provider === 'chatgpt' && llmProvider === 'openai') || (provider === 'anthropic' && llmProvider === 'anthropic')) {
+        if ((provider === 'chatgpt' && llmProvider === 'openai') || (provider === 'anthropic' && llmProvider === 'anthropic') || (provider === 'antigravity' && llmProvider === 'antigravity')) {
           setTestState({ status: "error", error })
         }
       }
@@ -713,7 +721,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                 onChange={(e) => updateProviderConfig(llmProvider, { apiKey: e.target.value })}
                 placeholder="Paste your API key"
               />
-              {(llmProvider === 'openai' || llmProvider === 'anthropic') && (
+              {(llmProvider === 'openai' || llmProvider === 'anthropic' || llmProvider === 'antigravity') && (
                 <div className="flex items-center gap-4 mt-2">
                   <span className="text-xs text-muted-foreground">— OR —</span>
                   <Button
@@ -745,6 +753,15 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                             toast.error(result.error || "Failed to connect via OAuth");
                             setTestState({ status: "error", error: result.error });
                           }
+                        } else if (llmProvider === 'antigravity') {
+                          const result = await window.ipc.invoke('oauth:antigravity', null);
+                          if (result.success) {
+                            toast.success(`Successfully connected Antigravity!`);
+                            setTestState({ status: "success" });
+                          } else {
+                            toast.error(result.error || "Failed to connect via OAuth");
+                            setTestState({ status: "error", error: result.error });
+                          }
                         }
                       } catch (e: any) {
                         toast.error("An error occurred during OAuth");
@@ -752,7 +769,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                       }
                     }}
                   >
-                    Sign in to {llmProvider === 'openai' ? 'ChatGPT Plus' : 'Claude Pro'}
+                    Sign in to {llmProvider === 'openai' ? 'ChatGPT Plus' : llmProvider === 'anthropic' ? 'Claude Pro' : 'Antigravity'}
                   </Button>
                 </div>
               )}
@@ -802,7 +819,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           <Button
             onClick={handleTestAndSaveLlmConfig}
             size="lg"
-            disabled={!canTest || testState.status === "testing"}
+            disabled={(!canTest && testState.status !== "success") || testState.status === "testing"}
           >
             {testState.status === "testing" ? (
               <><Loader2 className="size-4 animate-spin mr-2" />Testing connection...</>

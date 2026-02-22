@@ -82,16 +82,25 @@ const getProviderDetailsAsync = async (model: string) => {
     let baseURL = PROVIDER_BASE_URL;
     let apiKey = PROVIDER_API_KEY;
 
-    // Determine if it's anthropic or openai
-    const provider = model.toLowerCase().includes('claude') ? 'anthropic-native' : 'chatgpt';
+    // Determine if it's anthropic, openai, or antigravity
+    let provider = 'chatgpt';
+    if (model.toLowerCase().includes('claude')) {
+        provider = 'anthropic-native';
+    } else if (model.toLowerCase().includes('gemini') || model.toLowerCase().includes('antigravity')) {
+        provider = 'antigravity';
+    }
 
     try {
         const token = await getAccessToken(provider);
         if (token) {
             apiKey = token;
-            baseURL = provider === 'chatgpt'
-                ? 'https://chatgpt.com/backend-api/codex'
-                : 'https://api.anthropic.com/v1'; // Or whatever Anthropic uses, adjust if needed
+            if (provider === 'chatgpt') {
+                baseURL = 'https://chatgpt.com/backend-api/codex';
+            } else if (provider === 'anthropic-native') {
+                baseURL = 'https://api.anthropic.com/v1'; // Or whatever Anthropic uses, adjust if needed
+            } else if (provider === 'antigravity') {
+                baseURL = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
+            }
         }
     } catch (e) { /* ignore */ }
 
