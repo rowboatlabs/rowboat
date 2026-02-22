@@ -41,7 +41,7 @@ interface OnboardingModalProps {
 
 type Step = 0 | 1 | 2
 
-type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type LlmProviderFlavor = "openai" | "anthropic" | "google" | "antigravity" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
 interface LlmModelOption {
   id: string
@@ -61,6 +61,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     openai: { apiKey: "", baseURL: "", model: "" },
     anthropic: { apiKey: "", baseURL: "", model: "" },
     google: { apiKey: "", baseURL: "", model: "" },
+    antigravity: { apiKey: "", baseURL: "", model: "" },
     openrouter: { apiKey: "", baseURL: "", model: "" },
     aigateway: { apiKey: "", baseURL: "", model: "" },
     ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "" },
@@ -69,6 +70,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({
     status: "idle",
   })
+  const [deviceCodeData, setDeviceCodeData] = useState<{ provider: string, code: string } | null>(null)
   // OAuth provider states
   const [providers, setProviders] = useState<string[]>([])
   const [providersLoading, setProvidersLoading] = useState(true)
@@ -160,9 +162,9 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Preferred default models for each provider
   const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
-  openai: "gpt-5.2",
-  anthropic: "claude-opus-4-6-20260202",
-}
+    openai: "gpt-5.2",
+    anthropic: "claude-opus-4-6-20260202",
+  }
 
   // Initialize default models from catalog
   useEffect(() => {
@@ -281,20 +283,28 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   }
 
   const handleTestAndSaveLlmConfig = useCallback(async () => {
-    if (!canTest) return
+    if (!canTest && testState.status !== "success") return
+    const isAlreadySuccess = testState.status === "success";
     setTestState({ status: "testing" })
     try {
       const apiKey = activeConfig.apiKey.trim() || undefined
       const baseURL = activeConfig.baseURL.trim() || undefined
-      const model = activeConfig.model.trim()
       const providerConfig = {
         provider: {
           flavor: llmProvider,
           apiKey,
           baseURL,
         },
-        model,
+        model: activeConfig.model.trim(),
       }
+
+      if (isAlreadySuccess) {
+        await window.ipc.invoke("models:saveConfig", providerConfig)
+        setTestState({ status: "success" })
+        handleNext()
+        return
+      }
+
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
         setTestState({ status: "success" })
@@ -373,13 +383,22 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       if (success) {
         const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
         toast.success(`Connected to ${displayName}`)
+
+        // Unblock loading state if the current LLM provider completes its out-of-band flow
+        if ((provider === 'chatgpt' && llmProvider === 'openai') || (provider === 'anthropic' && llmProvider === 'anthropic') || (provider === 'antigravity' && (llmProvider as string) === 'antigravity')) {
+          setTestState({ status: "success" })
+        }
       } else {
         toast.error(error || `Failed to connect to ${provider}`)
+
+        if ((provider === 'chatgpt' && llmProvider === 'openai') || (provider === 'anthropic' && llmProvider === 'anthropic') || (provider === 'antigravity' && (llmProvider as string) === 'antigravity')) {
+          setTestState({ status: "error", error })
+        }
       }
     })
 
     return cleanup
-  }, [])
+  }, [llmProvider])
 
   // Listen for Composio connection events
   useEffect(() => {
@@ -703,6 +722,73 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                 onChange={(e) => updateProviderConfig(llmProvider, { apiKey: e.target.value })}
                 placeholder="Paste your API key"
               />
+              {((llmProvider as string) === 'openai' || (llmProvider as string) === 'anthropic' || (llmProvider as string) === 'antigravity') && (
+                <div className="flex items-center gap-4 mt-2">
+                  <span className="text-xs text-muted-foreground">— OR —</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      setTestState({ status: "testing" });
+                      try {
+                        if (llmProvider === 'openai') {
+                          const result = await window.ipc.invoke('oauth:chatgpt', null);
+                          if (result.success) {
+                            if (result.deviceCode) {
+                              setDeviceCodeData({ provider: llmProvider, code: result.deviceCode });
+                              toast.info(`Please enter your device code in the browser window.`);
+                            } else {
+                              toast.success(`Successfully connected ChatGPT Plus!`);
+                              setTestState({ status: "success" });
+                            }
+                          } else {
+                            toast.error(result.error || "Failed to connect via OAuth");
+                            setTestState({ status: "error", error: result.error });
+                          }
+                        } else if (llmProvider === 'anthropic') {
+                          const result = await window.ipc.invoke('oauth:anthropic', null);
+                          if (result.success) {
+                            toast.success(`Successfully connected Claude Pro!`);
+                            setTestState({ status: "success" });
+                          } else {
+                            toast.error(result.error || "Failed to connect via OAuth");
+                            setTestState({ status: "error", error: result.error });
+                          }
+                        } else if ((llmProvider as string) === 'antigravity') {
+                          const result = await window.ipc.invoke('oauth:antigravity', null);
+                          if (result.success) {
+                            toast.success(`Successfully connected Antigravity!`);
+                            setTestState({ status: "success" });
+                          } else {
+                            toast.error(result.error || "Failed to connect via OAuth");
+                            setTestState({ status: "error", error: result.error });
+                          }
+                        }
+                      } catch (e: any) {
+                        toast.error("An error occurred during OAuth");
+                        setTestState({ status: "error", error: e.message });
+                      }
+                    }}
+                  >
+                    Sign in to {llmProvider === 'openai' ? 'ChatGPT Plus' : llmProvider === 'anthropic' ? 'Claude Pro' : 'Antigravity'}
+                  </Button>
+                </div>
+              )}
+
+              {deviceCodeData && deviceCodeData.provider === llmProvider && (
+                <div className="mt-4 p-3 border rounded-md bg-muted/50 text-sm space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold text-foreground">Device Code:</span>
+                    <span className="font-mono bg-background px-2 py-1 rounded border tracking-wider text-base">{deviceCodeData.code}</span>
+                  </div>
+                  {llmProvider === 'openai' && (
+                    <div className="text-muted-foreground text-xs mt-2 border-t pt-2">
+                      <span className="font-semibold text-destructive">⚠️ Security Setting Required!</span><br />
+                      Be sure to go to your <a href="https://chatgpt.com/#settings/Security" target="_blank" rel="noreferrer" className="underline text-foreground">ChatGPT Security Settings</a> and turn on <b>Enable device code authorization</b> before entering this code in the browser.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -734,7 +820,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           <Button
             onClick={handleTestAndSaveLlmConfig}
             size="lg"
-            disabled={!canTest || testState.status === "testing"}
+            disabled={(!canTest && testState.status !== "success") || testState.status === "testing"}
           >
             {testState.status === "testing" ? (
               <><Loader2 className="size-4 animate-spin mr-2" />Testing connection...</>
@@ -861,31 +947,31 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   return (
     <>
-    <GoogleClientIdModal
-      open={googleClientIdOpen}
-      onOpenChange={setGoogleClientIdOpen}
-      onSubmit={handleGoogleClientIdSubmit}
-      isSubmitting={providerStates.google?.isConnecting ?? false}
-    />
-    <ComposioApiKeyModal
-      open={composioApiKeyOpen}
-      onOpenChange={setComposioApiKeyOpen}
-      onSubmit={handleComposioApiKeySubmit}
-      isSubmitting={slackConnecting}
-    />
-    <Dialog open={open} onOpenChange={() => {}}>
-      <DialogContent
-        className="w-[60vw] max-w-3xl max-h-[80vh] overflow-y-auto"
-        showCloseButton={false}
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
-      >
-        {renderStepIndicator()}
-        {currentStep === 0 && renderLlmSetupStep()}
-        {currentStep === 1 && renderAccountConnectionStep()}
-        {currentStep === 2 && renderCompletionStep()}
-      </DialogContent>
-    </Dialog>
+      <GoogleClientIdModal
+        open={googleClientIdOpen}
+        onOpenChange={setGoogleClientIdOpen}
+        onSubmit={handleGoogleClientIdSubmit}
+        isSubmitting={providerStates.google?.isConnecting ?? false}
+      />
+      <ComposioApiKeyModal
+        open={composioApiKeyOpen}
+        onOpenChange={setComposioApiKeyOpen}
+        onSubmit={handleComposioApiKeySubmit}
+        isSubmitting={slackConnecting}
+      />
+      <Dialog open={open} onOpenChange={() => { }}>
+        <DialogContent
+          className="w-[60vw] max-w-3xl max-h-[80vh] overflow-y-auto"
+          showCloseButton={false}
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          {renderStepIndicator()}
+          {currentStep === 0 && renderLlmSetupStep()}
+          {currentStep === 1 && renderAccountConnectionStep()}
+          {currentStep === 2 && renderCompletionStep()}
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

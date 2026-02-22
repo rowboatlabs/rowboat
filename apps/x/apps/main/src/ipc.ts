@@ -68,10 +68,10 @@ export function registerIpcHandlers(handlers: InvokeHandlers) {
     ipcMain.handle(channel, async (event, rawArgs) => {
       // Validate request payload
       const args = ipc.validateRequest(channel, rawArgs);
-      
+
       // Call handler
       const result = await handler(event, args);
-      
+
       // Validate response payload
       return ipc.validateResponse(channel, result);
     });
@@ -365,6 +365,18 @@ export function setupIpcHandlers() {
     },
     'oauth:connect': async (_event, args) => {
       return await connectProvider(args.provider, args.clientId?.trim());
+    },
+    'oauth:chatgpt': async () => {
+      const { handleChatGPTDeviceAuth } = await import('./oauth-device-handler.js');
+      return await handleChatGPTDeviceAuth();
+    },
+    'oauth:anthropic': async () => {
+      const { handleAnthropicBrowserAuth } = await import('./oauth-device-handler.js');
+      return await handleAnthropicBrowserAuth();
+    },
+    'oauth:antigravity': async () => {
+      const { handleAntigravityBrowserAuth } = await import('./oauth-device-handler.js');
+      return await handleAntigravityBrowserAuth();
     },
     'oauth:disconnect': async (_event, args) => {
       return await disconnectProvider(args.provider);

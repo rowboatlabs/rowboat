@@ -134,7 +134,7 @@ function AppearanceSettings() {
 
 // --- Model Settings UI ---
 
-type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type LlmProviderFlavor = "openai" | "anthropic" | "google" | "antigravity" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
 interface LlmModelOption {
   id: string
@@ -171,6 +171,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     openai: { apiKey: "", baseURL: "", model: "" },
     anthropic: { apiKey: "", baseURL: "", model: "" },
     google: { apiKey: "", baseURL: "", model: "" },
+    antigravity: { apiKey: "", baseURL: "", model: "" },
     openrouter: { apiKey: "", baseURL: "", model: "" },
     aigateway: { apiKey: "", baseURL: "", model: "" },
     ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "" },
@@ -182,10 +183,11 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({ status: "idle" })
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
+  const [deviceCodeData, setDeviceCodeData] = useState<{ provider: string, code: string } | null>(null)
 
   const activeConfig = providerConfigs[provider]
-  const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
-  const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway"
+  const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible" || provider === "antigravity"
+  const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "antigravity"
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
   const requiresBaseURL = provider === "ollama" || provider === "openai-compatible"
   const isLocalProvider = provider === "ollama" || provider === "openai-compatible"
@@ -285,8 +287,29 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     })
   }, [modelsCatalog])
 
+  // Listen for out-of-band OAuth completion events (Device Code flows)
+  useEffect(() => {
+    if (!dialogOpen) return
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      const { provider: eventProvider, success, error } = event
+
+      if ((eventProvider === 'chatgpt' && provider === 'openai') || (eventProvider === 'anthropic' && provider === 'anthropic') || (eventProvider === 'antigravity' && provider === 'antigravity')) {
+        if (success) {
+          toast.success(`Connected to ${eventProvider}`)
+          setTestState({ status: 'success' })
+        } else {
+          toast.error(error || `Failed to connect to ${eventProvider}`)
+          setTestState({ status: 'error', error })
+        }
+      }
+    })
+
+    return cleanup
+  }, [dialogOpen, provider])
+
   const handleTestAndSave = useCallback(async () => {
-    if (!canTest) return
+    if (!canTest && testState.status !== "success") return
+    const isAlreadySuccess = testState.status === "success";
     setTestState({ status: "testing" })
     try {
       const providerConfig = {
@@ -297,9 +320,19 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         },
         model: activeConfig.model.trim(),
       }
+
+      if (isAlreadySuccess) {
+        await window.ipc.invoke("models:saveConfig", providerConfig)
+        window.dispatchEvent(new Event('models-changed'))
+        setTestState({ status: "success" })
+        toast.success("Model configuration saved")
+        return
+      }
+
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
         await window.ipc.invoke("models:saveConfig", providerConfig)
+        window.dispatchEvent(new Event('models-changed'))
         setTestState({ status: "success" })
         toast.success("Model configuration saved")
       } else {
@@ -377,21 +410,31 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             placeholder="Enter model"
           />
         ) : (
-          <Select
-            value={activeConfig.model}
-            onValueChange={(value) => updateConfig(provider, { model: value })}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select a model" />
-            </SelectTrigger>
-            <SelectContent>
-              {modelsForProvider.map((model) => (
-                <SelectItem key={model.id} value={model.id}>
-                  {model.name || model.id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1 max-h-[350px] overflow-y-auto pr-1 pb-1">
+            {modelsForProvider.map((model) => {
+              const isActive = activeConfig.model === model.id
+              return (
+                <button
+                  key={model.id}
+                  onClick={() => {
+                    updateConfig(provider, { model: model.id })
+                  }}
+                  className={cn(
+                    "flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left transition-all",
+                    isActive
+                      ? "border-primary bg-primary/5 shadow-sm"
+                      : "hover:bg-muted/60"
+                  )}
+                  type="button"
+                >
+                  <div className="text-[13px] font-medium leading-none">{model.name || model.id}</div>
+                  <div className="text-[11px] text-muted-foreground mt-1 truncate w-full">
+                    {model.id}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
         )}
         {modelsError && (
           <div className="text-xs text-destructive">{modelsError}</div>
@@ -410,6 +453,73 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             onChange={(e) => updateConfig(provider, { apiKey: e.target.value })}
             placeholder="Paste your API key"
           />
+          {(provider === 'openai' || provider === 'anthropic' || provider === 'antigravity') && (
+            <div className="flex items-center gap-4 mt-2">
+              <span className="text-xs text-muted-foreground">— OR —</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  setTestState({ status: "testing" });
+                  try {
+                    if (provider === 'openai') {
+                      const result = await window.ipc.invoke('oauth:chatgpt', null);
+                      if (result.success) {
+                        if (result.deviceCode) {
+                          setDeviceCodeData({ provider, code: result.deviceCode });
+                          toast.info(`Please enter your device code in the browser window.`);
+                        } else {
+                          toast.success(`Successfully connected ChatGPT Plus!`);
+                          setTestState({ status: "success" });
+                        }
+                      } else {
+                        toast.error(result.error || "Failed to connect via OAuth");
+                        setTestState({ status: "error", error: result.error });
+                      }
+                    } else if (provider === 'anthropic') {
+                      const result = await window.ipc.invoke('oauth:anthropic', null);
+                      if (result.success) {
+                        toast.success(`Successfully connected Claude Pro!`);
+                        setTestState({ status: "success" });
+                      } else {
+                        toast.error(result.error || "Failed to connect via OAuth");
+                        setTestState({ status: "error", error: result.error });
+                      }
+                    } else if (provider === 'antigravity') {
+                      const result = await window.ipc.invoke('oauth:antigravity', null);
+                      if (result.success) {
+                        toast.success(`Successfully connected Antigravity!`);
+                        setTestState({ status: "success" });
+                      } else {
+                        toast.error(result.error || "Failed to connect via OAuth");
+                        setTestState({ status: "error", error: result.error });
+                      }
+                    }
+                  } catch (e: any) {
+                    toast.error("An error occurred during OAuth");
+                    setTestState({ status: "error", error: e.message });
+                  }
+                }}
+              >
+                Sign in to {provider === 'openai' ? 'ChatGPT Plus' : provider === 'anthropic' ? 'Claude Pro' : 'Antigravity'}
+              </Button>
+            </div>
+          )}
+
+          {deviceCodeData && deviceCodeData.provider === provider && (
+            <div className="mt-4 p-3 border rounded-md bg-muted/50 text-sm space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-foreground">Device Code:</span>
+                <span className="font-mono bg-background px-2 py-1 rounded border tracking-wider text-base">{deviceCodeData.code}</span>
+              </div>
+              {provider === 'openai' && (
+                <div className="text-muted-foreground text-xs mt-2 border-t pt-2">
+                  <span className="font-semibold text-destructive">⚠️ Security Setting Required!</span><br />
+                  Be sure to go to your <a href="https://chatgpt.com/#settings/Security" target="_blank" rel="noreferrer" className="underline text-foreground">ChatGPT Security Settings</a> and turn on <b>Enable device code authorization</b> before entering this code in the browser.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -447,7 +557,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       {/* Test & Save button */}
       <Button
         onClick={handleTestAndSave}
-        disabled={!canTest || testState.status === "testing"}
+        disabled={(!canTest && testState.status !== "success") || testState.status === "testing"}
         className="w-full"
       >
         {testState.status === "testing" ? (

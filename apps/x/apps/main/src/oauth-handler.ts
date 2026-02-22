@@ -105,7 +105,7 @@ async function getProviderConfiguration(provider: string, clientIdOverride?: str
       console.log(`[OAuth] ${provider}: Discovery from issuer with DCR`);
       const clientRepo = getClientRegistrationRepo();
       const existingRegistration = await clientRepo.getClientRegistration(provider);
-      
+
       if (existingRegistration) {
         console.log(`[OAuth] ${provider}: Using existing DCR registration`);
         return await oauthClient.discoverConfiguration(
@@ -121,11 +121,11 @@ async function getProviderConfiguration(provider: string, clientIdOverride?: str
         [REDIRECT_URI],
         scopes
       );
-      
+
       // Save registration for future use
       await clientRepo.saveClientRegistration(provider, registration);
       console.log(`[OAuth] ${provider}: DCR registration saved`);
-      
+
       return oauthConfig;
     }
   } else {
@@ -133,7 +133,7 @@ async function getProviderConfiguration(provider: string, clientIdOverride?: str
     if (config.client.mode !== 'static') {
       throw new Error('DCR requires discovery mode "issuer", not "static"');
     }
-    
+
     console.log(`[OAuth] ${provider}: Using static endpoints (no discovery)`);
     const clientId = await resolveClientId();
     return oauthClient.createStaticConfiguration(
@@ -296,7 +296,7 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
 export async function getAccessToken(provider: string): Promise<string | null> {
   try {
     const oauthRepo = getOAuthRepo();
-    
+
     const { tokens } = await oauthRepo.read(provider);
     if (!tokens) {
       return null;
@@ -313,11 +313,11 @@ export async function getAccessToken(provider: string): Promise<string | null> {
       try {
         // Get configuration for refresh
         const config = await getProviderConfiguration(provider);
-        
+
         // Refresh token, preserving existing scopes
         const existingScopes = tokens.scopes;
         const refreshedTokens = await oauthClient.refreshTokens(config, tokens.refresh_token, existingScopes);
-        await oauthRepo.upsert(provider, { tokens });
+        await oauthRepo.upsert(provider, { tokens: refreshedTokens });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Token refresh failed';
         await oauthRepo.upsert(provider, { error: message });

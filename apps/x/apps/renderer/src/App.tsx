@@ -51,6 +51,7 @@ import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
+import { QuickModelSelector } from '@/components/model-selector'
 import {
   type ChatTabViewState,
   type ConversationItem,
@@ -773,49 +774,49 @@ function App() {
     const requestId = (fileLoadRequestIdRef.current += 1)
     const pathToLoad = selectedPath
     let cancelled = false
-    ;(async () => {
-      try {
-        const stat = await window.ipc.invoke('workspace:stat', { path: pathToLoad })
-        if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
-        if (stat.kind === 'file') {
-          const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
+      ; (async () => {
+        try {
+          const stat = await window.ipc.invoke('workspace:stat', { path: pathToLoad })
           if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
-          setFileContent(result.data)
-          const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
-          const isSameEditorFile = editorPathRef.current === pathToLoad
-          const wouldClobberActiveEdits =
-            isSameEditorFile
-            && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(result.data)
-          if (!wouldClobberActiveEdits) {
-            setEditorContent(result.data)
-            if (pathToLoad.endsWith('.md')) {
-              setEditorCacheForPath(pathToLoad, result.data)
+          if (stat.kind === 'file') {
+            const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
+            if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
+            setFileContent(result.data)
+            const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
+            const isSameEditorFile = editorPathRef.current === pathToLoad
+            const wouldClobberActiveEdits =
+              isSameEditorFile
+              && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(result.data)
+            if (!wouldClobberActiveEdits) {
+              setEditorContent(result.data)
+              if (pathToLoad.endsWith('.md')) {
+                setEditorCacheForPath(pathToLoad, result.data)
+              }
+              editorContentRef.current = result.data
+              editorPathRef.current = pathToLoad
+              initialContentByPathRef.current.set(pathToLoad, result.data)
+              initialContentRef.current = result.data
+              setLastSaved(null)
+            } else {
+              // Still update the editor's path so subsequent autosaves write to the correct file.
+              editorPathRef.current = pathToLoad
             }
-            editorContentRef.current = result.data
-            editorPathRef.current = pathToLoad
-            initialContentByPathRef.current.set(pathToLoad, result.data)
-            initialContentRef.current = result.data
-            setLastSaved(null)
           } else {
-            // Still update the editor's path so subsequent autosaves write to the correct file.
-            editorPathRef.current = pathToLoad
+            setFileContent('')
+            setEditorContent('')
+            editorContentRef.current = ''
+            initialContentRef.current = ''
           }
-        } else {
-          setFileContent('')
-          setEditorContent('')
-          editorContentRef.current = ''
-          initialContentRef.current = ''
+        } catch (err) {
+          console.error('Failed to load file:', err)
+          if (!cancelled && fileLoadRequestIdRef.current === requestId && selectedPathRef.current === pathToLoad) {
+            setFileContent('')
+            setEditorContent('')
+            editorContentRef.current = ''
+            initialContentRef.current = ''
+          }
         }
-      } catch (err) {
-        console.error('Failed to load file:', err)
-        if (!cancelled && fileLoadRequestIdRef.current === requestId && selectedPathRef.current === pathToLoad) {
-          setFileContent('')
-          setEditorContent('')
-          editorContentRef.current = ''
-          initialContentRef.current = ''
-        }
-      }
-    })()
+      })()
     return () => {
       cancelled = true
     }
@@ -840,17 +841,17 @@ function App() {
     if (debouncedContent === baseline) return
     if (!debouncedContent) return
 
-	    const saveFile = async () => {
-	      const wasActiveAtStart = selectedPathRef.current === pathAtStart
-	      if (wasActiveAtStart) setIsSaving(true)
-	      let pathToSave = pathAtStart
-	      let renamedFrom: string | null = null
-	      let renamedTo: string | null = null
-	      try {
-	        // Only rename the currently active file (avoids renaming/jumping while user switches rapidly)
-	        if (
-	          wasActiveAtStart &&
-	          selectedPathRef.current === pathAtStart &&
+    const saveFile = async () => {
+      const wasActiveAtStart = selectedPathRef.current === pathAtStart
+      if (wasActiveAtStart) setIsSaving(true)
+      let pathToSave = pathAtStart
+      let renamedFrom: string | null = null
+      let renamedTo: string | null = null
+      try {
+        // Only rename the currently active file (avoids renaming/jumping while user switches rapidly)
+        if (
+          wasActiveAtStart &&
+          selectedPathRef.current === pathAtStart &&
           !renameInProgressRef.current &&
           pathAtStart.startsWith('knowledge/')
         ) {
@@ -862,59 +863,59 @@ function App() {
             const targetPath = `${parentDir}/${desiredName}.md`
             if (targetPath !== pathAtStart) {
               const exists = await window.ipc.invoke('workspace:exists', { path: targetPath })
-		              if (!exists.exists) {
-		                renameInProgressRef.current = true
-		                await window.ipc.invoke('workspace:rename', { from: pathAtStart, to: targetPath })
-		                pathToSave = targetPath
-		                renamedFrom = pathAtStart
-		                renamedTo = targetPath
-		                editorPathRef.current = targetPath
-		                setFileTabs(prev => prev.map(tab => (tab.path === pathAtStart ? { ...tab, path: targetPath } : tab)))
-		                initialContentByPathRef.current.delete(pathAtStart)
-		                const cachedContent = editorContentByPathRef.current.get(pathAtStart)
-		                if (cachedContent !== undefined) {
-		                  editorContentByPathRef.current.delete(pathAtStart)
-		                  editorContentByPathRef.current.set(targetPath, cachedContent)
-		                  setEditorContentByPath((prev) => {
-		                    const oldContent = prev[pathAtStart]
-		                    if (oldContent === undefined) return prev
-		                    const next = { ...prev }
-		                    delete next[pathAtStart]
-		                    next[targetPath] = oldContent
-		                    return next
-		                  })
-		                }
-		              }
-		            }
-		          }
-		        }
-	        await window.ipc.invoke('workspace:writeFile', {
-	          path: pathToSave,
-	          data: debouncedContent,
-	          opts: { encoding: 'utf8' }
-	        })
-	        initialContentByPathRef.current.set(pathToSave, debouncedContent)
+              if (!exists.exists) {
+                renameInProgressRef.current = true
+                await window.ipc.invoke('workspace:rename', { from: pathAtStart, to: targetPath })
+                pathToSave = targetPath
+                renamedFrom = pathAtStart
+                renamedTo = targetPath
+                editorPathRef.current = targetPath
+                setFileTabs(prev => prev.map(tab => (tab.path === pathAtStart ? { ...tab, path: targetPath } : tab)))
+                initialContentByPathRef.current.delete(pathAtStart)
+                const cachedContent = editorContentByPathRef.current.get(pathAtStart)
+                if (cachedContent !== undefined) {
+                  editorContentByPathRef.current.delete(pathAtStart)
+                  editorContentByPathRef.current.set(targetPath, cachedContent)
+                  setEditorContentByPath((prev) => {
+                    const oldContent = prev[pathAtStart]
+                    if (oldContent === undefined) return prev
+                    const next = { ...prev }
+                    delete next[pathAtStart]
+                    next[targetPath] = oldContent
+                    return next
+                  })
+                }
+              }
+            }
+          }
+        }
+        await window.ipc.invoke('workspace:writeFile', {
+          path: pathToSave,
+          data: debouncedContent,
+          opts: { encoding: 'utf8' }
+        })
+        initialContentByPathRef.current.set(pathToSave, debouncedContent)
 
-	        // If we renamed the active file, update state/history AFTER the write completes so the editor
-	        // doesn't reload stale on-disk content mid-typing (which can drop the latest character).
-	        if (renamedFrom && renamedTo) {
-	          const fromPath = renamedFrom
-	          const toPath = renamedTo
-	          const replaceRenamedPath = (stack: ViewState[]) =>
-	            stack.map((v) => (v.type === 'file' && v.path === fromPath ? ({ type: 'file', path: toPath } satisfies ViewState) : v))
-	          setHistory({
-	            back: replaceRenamedPath(historyRef.current.back),
-	            forward: replaceRenamedPath(historyRef.current.forward),
-	          })
+        // If we renamed the active file, update state/history AFTER the write completes so the editor
+        // doesn't reload stale on-disk content mid-typing (which can drop the latest character).
+        if (renamedFrom && renamedTo) {
+          const fromPath = renamedFrom
+          const toPath = renamedTo
+          const replaceRenamedPath = (stack: ViewState[]) =>
+            stack.map((v) => (v.type === 'file' && v.path === fromPath ? ({ type: 'file', path: toPath } satisfies ViewState) : v))
+          setHistory({
+            back: replaceRenamedPath(historyRef.current.back),
+            forward: replaceRenamedPath(historyRef.current.forward),
+          })
 
-	          if (selectedPathRef.current === fromPath) {
-	            setSelectedPath(toPath)
-	          }
-	        }
+          if (selectedPathRef.current === fromPath) {
+            setSelectedPath(toPath)
+          }
+        }
 
-	        // Only update "current file" UI state if we're still on this file
-	        if (selectedPathRef.current === pathAtStart || selectedPathRef.current === pathToSave) {
-	          initialContentRef.current = debouncedContent
+        // Only update "current file" UI state if we're still on this file
+        if (selectedPathRef.current === pathAtStart || selectedPathRef.current === pathToSave) {
+          initialContentRef.current = debouncedContent
           setLastSaved(new Date())
         }
       } catch (err) {
@@ -1038,7 +1039,7 @@ function App() {
                   .filter((part: { type: string }) => part.type === 'text')
                   .map((part: { type: string; text?: string }) => part.text || '')
                   .join('')
-                
+
                 // Also extract tool-call parts from assistant messages
                 if (msg.role === 'assistant') {
                   for (const part of msg.content) {
@@ -1572,7 +1573,7 @@ function App() {
 
   const handlePermissionResponse = useCallback(async (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => {
     if (!runId) return
-    
+
     // Optimistically update the UI immediately
     setPermissionResponses(prev => {
       const next = new Map(prev)
@@ -1584,7 +1585,7 @@ function App() {
       next.delete(toolCallId)
       return next
     })
-    
+
     try {
       await window.ipc.invoke('runs:authorizePermission', {
         runId,
@@ -2899,19 +2900,22 @@ function App() {
                   </div>
                 )}
                 {!selectedPath && !isGraphOpen && !selectedTask && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={handleNewChatTab}
-                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
-                        aria-label="New chat tab"
-                      >
-                        <SquarePen className="size-5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">New chat tab</TooltipContent>
-                  </Tooltip>
+                  <div className="flex items-center gap-2 self-center shrink-0 pr-2">
+                    <QuickModelSelector />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={handleNewChatTab}
+                          className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                          aria-label="New chat tab"
+                        >
+                          <SquarePen className="size-5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">New chat tab</TooltipContent>
+                    </Tooltip>
+                  </div>
                 )}
                 {!selectedPath && !isGraphOpen && expandedFrom && (
                   <Tooltip>
@@ -3012,133 +3016,133 @@ function App() {
                   />
                 </div>
               ) : (
-              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
-              <div className="flex min-h-0 flex-1 flex-col">
-                <div className="relative min-h-0 flex-1">
-                  {chatTabs.map((tab) => {
-                    const isActive = tab.id === activeChatTabId
-                    const tabState = getChatTabStateForRender(tab.id)
-                    const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
-                    const tabConversationContentClassName = tabHasConversation
-                      ? "mx-auto w-full max-w-4xl pb-28"
-                      : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
-                    return (
-                      <div
-                        key={tab.id}
-                        className={cn(
-                          'min-h-0 h-full flex-col',
-                          isActive
-                            ? 'flex'
-                            : 'pointer-events-none invisible absolute inset-0 flex'
-                        )}
-                        data-chat-tab-panel={tab.id}
-                        aria-hidden={!isActive}
-                      >
-                        <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-                          <ScrollPositionPreserver />
-                          <ConversationContent className={tabConversationContentClassName}>
-                            {!tabHasConversation ? (
-                              <ConversationEmptyState className="h-auto">
-                                <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
-                                  What are we working on?
-                                </div>
-                              </ConversationEmptyState>
-                            ) : (
-                              <>
-                                {tabState.conversation.map(item => {
-                                  const rendered = renderConversationItem(item, tab.id)
-                                  if (isToolCall(item)) {
-                                    const permRequest = tabState.allPermissionRequests.get(item.id)
-                                    if (permRequest) {
-                                      const response = tabState.permissionResponses.get(item.id) || null
-                                      return (
-                                        <React.Fragment key={item.id}>
-                                          {rendered}
-                                          <PermissionRequest
-                                            toolCall={permRequest.toolCall}
-                                            onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                            onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            isProcessing={isActive && isProcessing}
-                                            response={response}
-                                          />
-                                        </React.Fragment>
-                                      )
-                                    }
-                                  }
-                                  return rendered
-                                })}
-
-                                {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
-                                  <AskHumanRequest
-                                    key={request.toolCallId}
-                                    query={request.query}
-                                    onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                    isProcessing={isActive && isProcessing}
-                                  />
-                                ))}
-
-                                {tabState.currentAssistantMessage && (
-                                  <Message from="assistant">
-                                    <MessageContent>
-                                      <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
-                                    </MessageContent>
-                                  </Message>
-                                )}
-
-                                {isActive && isProcessing && !tabState.currentAssistantMessage && (
-                                  <Message from="assistant">
-                                    <MessageContent>
-                                      <Shimmer duration={1}>Thinking...</Shimmer>
-                                    </MessageContent>
-                                  </Message>
-                                )}
-                              </>
+                <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="relative min-h-0 flex-1">
+                      {chatTabs.map((tab) => {
+                        const isActive = tab.id === activeChatTabId
+                        const tabState = getChatTabStateForRender(tab.id)
+                        const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
+                        const tabConversationContentClassName = tabHasConversation
+                          ? "mx-auto w-full max-w-4xl pb-28"
+                          : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
+                        return (
+                          <div
+                            key={tab.id}
+                            className={cn(
+                              'min-h-0 h-full flex-col',
+                              isActive
+                                ? 'flex'
+                                : 'pointer-events-none invisible absolute inset-0 flex'
                             )}
-                          </ConversationContent>
-                        </Conversation>
-                      </div>
-                    )
-                  })}
-                </div>
+                            data-chat-tab-panel={tab.id}
+                            aria-hidden={!isActive}
+                          >
+                            <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+                              <ScrollPositionPreserver />
+                              <ConversationContent className={tabConversationContentClassName}>
+                                {!tabHasConversation ? (
+                                  <ConversationEmptyState className="h-auto">
+                                    <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
+                                      What are we working on?
+                                    </div>
+                                  </ConversationEmptyState>
+                                ) : (
+                                  <>
+                                    {tabState.conversation.map(item => {
+                                      const rendered = renderConversationItem(item, tab.id)
+                                      if (isToolCall(item)) {
+                                        const permRequest = tabState.allPermissionRequests.get(item.id)
+                                        if (permRequest) {
+                                          const response = tabState.permissionResponses.get(item.id) || null
+                                          return (
+                                            <React.Fragment key={item.id}>
+                                              {rendered}
+                                              <PermissionRequest
+                                                toolCall={permRequest.toolCall}
+                                                onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                                onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                                isProcessing={isActive && isProcessing}
+                                                response={response}
+                                              />
+                                            </React.Fragment>
+                                          )
+                                        }
+                                      }
+                                      return rendered
+                                    })}
 
-                <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
-                  <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
-                  <div className="mx-auto w-full max-w-4xl px-4">
-                    {!hasConversation && (
-                      <Suggestions onSelect={setPresetMessage} className="mb-3 justify-center" />
-                    )}
-                    {chatTabs.map((tab) => {
-                      const isActive = tab.id === activeChatTabId
-                      const tabState = getChatTabStateForRender(tab.id)
-                      return (
-                        <div
-                          key={tab.id}
-                          className={isActive ? 'block' : 'hidden'}
-                          data-chat-input-panel={tab.id}
-                          aria-hidden={!isActive}
-                        >
-                          <ChatInputWithMentions
-                            knowledgeFiles={knowledgeFiles}
-                            recentFiles={recentWikiFiles}
-                            visibleFiles={visibleKnowledgeFiles}
-                            onSubmit={handlePromptSubmit}
-                            onStop={handleStop}
-                            isProcessing={isActive && isProcessing}
-                            isStopping={isActive && isStopping}
-                            isActive={isActive}
-                            presetMessage={isActive ? presetMessage : undefined}
-                            onPresetMessageConsumed={isActive ? () => setPresetMessage(undefined) : undefined}
-                            runId={tabState.runId}
-                            initialDraft={chatDraftsRef.current.get(tab.id)}
-                            onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
-                          />
-                        </div>
-                      )
-                    })}
+                                    {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
+                                      <AskHumanRequest
+                                        key={request.toolCallId}
+                                        query={request.query}
+                                        onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
+                                        isProcessing={isActive && isProcessing}
+                                      />
+                                    ))}
+
+                                    {tabState.currentAssistantMessage && (
+                                      <Message from="assistant">
+                                        <MessageContent>
+                                          <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
+                                        </MessageContent>
+                                      </Message>
+                                    )}
+
+                                    {isActive && isProcessing && !tabState.currentAssistantMessage && (
+                                      <Message from="assistant">
+                                        <MessageContent>
+                                          <Shimmer duration={1}>Thinking...</Shimmer>
+                                        </MessageContent>
+                                      </Message>
+                                    )}
+                                  </>
+                                )}
+                              </ConversationContent>
+                            </Conversation>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
+                      <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
+                      <div className="mx-auto w-full max-w-4xl px-4">
+                        {!hasConversation && (
+                          <Suggestions onSelect={setPresetMessage} className="mb-3 justify-center" />
+                        )}
+                        {chatTabs.map((tab) => {
+                          const isActive = tab.id === activeChatTabId
+                          const tabState = getChatTabStateForRender(tab.id)
+                          return (
+                            <div
+                              key={tab.id}
+                              className={isActive ? 'block' : 'hidden'}
+                              data-chat-input-panel={tab.id}
+                              aria-hidden={!isActive}
+                            >
+                              <ChatInputWithMentions
+                                knowledgeFiles={knowledgeFiles}
+                                recentFiles={recentWikiFiles}
+                                visibleFiles={visibleKnowledgeFiles}
+                                onSubmit={handlePromptSubmit}
+                                onStop={handleStop}
+                                isProcessing={isActive && isProcessing}
+                                isStopping={isActive && isStopping}
+                                isActive={isActive}
+                                presetMessage={isActive ? presetMessage : undefined}
+                                onPresetMessageConsumed={isActive ? () => setPresetMessage(undefined) : undefined}
+                                runId={tabState.runId}
+                                initialDraft={chatDraftsRef.current.get(tab.id)}
+                                onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
+                              />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              </FileCardProvider>
+                </FileCardProvider>
               )}
             </SidebarInset>
 

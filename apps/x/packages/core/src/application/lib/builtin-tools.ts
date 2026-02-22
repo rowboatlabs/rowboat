@@ -28,7 +28,7 @@ const _importDynamic = new Function('mod', 'return import(mod)') as (mod: string
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const BuiltinToolsSchema = z.record(z.string(), z.object({
     description: z.string(),
-	inputSchema: z.custom<ZodType>(),
+    inputSchema: z.custom<ZodType>(),
     execute: z.function({
         input: z.any(), // (input, ctx?) => Promise<any>
         output: z.promise(z.any()),
@@ -362,13 +362,13 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             includeHidden: z.boolean().optional().describe('Include hidden files starting with . (default: false)'),
             allowedExtensions: z.array(z.string()).optional().describe('Filter by file extensions (e.g., [".json", ".ts"])'),
         }),
-        execute: async ({ 
-            path: relPath, 
-            recursive, 
-            includeStats, 
-            includeHidden, 
-            allowedExtensions 
-        }: { 
+        execute: async ({
+            path: relPath,
+            recursive,
+            includeStats,
+            includeHidden,
+            allowedExtensions
+        }: {
             path: string;
             recursive?: boolean;
             includeStats?: boolean;
@@ -861,7 +861,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 // Resolve model config from DI container
                 const modelConfigRepo = container.resolve<IModelConfigRepo>('modelConfigRepo');
                 const modelConfig = await modelConfigRepo.getConfig();
-                const provider = createProvider(modelConfig.provider);
+                const provider = await createProvider(modelConfig.provider);
                 const model = provider.languageModel(modelConfig.model);
 
                 const userPrompt = prompt || 'Convert this file to well-structured markdown.';
@@ -905,7 +905,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             const repo = container.resolve<IAgentsRepo>('agentsRepo');
             try {
                 const agent = await repo.fetch(agentName);
-                
+
                 // Extract key information
                 const toolsList = agent.tools ? Object.keys(agent.tools) : [];
                 const agentTools = agent.tools ? Object.entries(agent.tools).map(([key, tool]) => ({
@@ -913,7 +913,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     type: tool.type,
                     name: tool.name,
                 })) : [];
-                
+
                 const analysis = {
                     name: agent.name,
                     description: agent.description || 'No description',
@@ -923,7 +923,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     hasOtherAgents: agentTools.some(t => t.type === 'agent'),
                     structure: agent,
                 };
-                
+
                 return {
                     success: true,
                     analysis,
@@ -936,14 +936,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             }
         },
     },
-    
+
     addMcpServer: {
         description: 'Add or update an MCP server in the configuration with validation. This ensures the server definition is valid before saving.',
         inputSchema: z.object({
             serverName: z.string().describe('Name/alias for the MCP server'),
             config: McpServerDefinition,
         }),
-        execute: async ({ serverName, config }: { 
+        execute: async ({ serverName, config }: {
             serverName: string;
             config: z.infer<typeof McpServerDefinition>;
         }) => {
@@ -960,7 +960,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
                 const repo = container.resolve<IMcpConfigRepo>('mcpConfigRepo');
                 await repo.upsert(serverName, config);
-                
+
                 return {
                     success: true,
                     serverName,
@@ -972,14 +972,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             }
         },
     },
-    
+
     listMcpServers: {
         description: 'List all available MCP servers from the configuration',
         inputSchema: z.object({}),
         execute: async () => {
             try {
                 const result = await listServers();
-                
+
                 return {
                     result,
                     count: Object.keys(result.mcpServers).length,
@@ -991,7 +991,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             }
         },
     },
-    
+
     listMcpTools: {
         description: 'List all available tools from a specific MCP server',
         inputSchema: z.object({
@@ -1013,7 +1013,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             }
         },
     },
-    
+
     executeMcpTool: {
         description: 'Execute a specific tool from an MCP server. Use this to run MCP tools on behalf of the user. IMPORTANT: Always use listMcpTools first to get the tool\'s inputSchema, then match the required parameters exactly in the arguments field.',
         inputSchema: z.object({
@@ -1040,7 +1040,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             }
         },
     },
-    
+
     executeCommand: {
         description: 'Execute a shell command and return the output. Use this to run bash/shell commands.',
         inputSchema: z.object({

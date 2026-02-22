@@ -662,7 +662,7 @@ export async function* streamAgent({
     const tools = await buildTools(agent);
 
     // set up provider + model
-    const provider = createProvider(modelConfig.provider);
+    const provider = await createProvider(modelConfig.provider);
     const model = provider.languageModel(modelConfig.model);
 
     let loopCounter = 0;
@@ -926,7 +926,8 @@ async function* streamLlm(
     signal?: AbortSignal,
 ): AsyncGenerator<z.infer<typeof LlmStepStreamEvent>, void, unknown> {
     const converted = convertFromMessages(messages);
-    console.log(`! SENDING payload to model: `, JSON.stringify(converted))
+    console.log(`! SENDING system prompt: `, instructions);
+    console.log(`! SENDING messages: `, JSON.stringify(converted));
     const { fullStream } = streamText({
         model,
         messages: converted,
