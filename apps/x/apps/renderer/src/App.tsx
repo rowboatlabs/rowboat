@@ -51,6 +51,7 @@ import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
+import { QuickModelSelector } from '@/components/model-selector'
 import {
   type ChatTabViewState,
   type ConversationItem,
