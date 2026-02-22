@@ -85,6 +85,7 @@ import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-contex
 import { ConnectorsPopover } from "@/components/connectors-popover"
 import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
+import { useActiveModel } from "@/hooks/useActiveModel"
 import { toast } from "@/lib/toast"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
@@ -398,6 +399,8 @@ export function SidebarContentPanel({
   const [showOauthAlert, setShowOauthAlert] = useState(true)
   const [connectorsOpen, setConnectorsOpen] = useState(false)
   const [openConnectorsAfterClose, setOpenConnectorsAfterClose] = useState(false)
+
+  const { modelName } = useActiveModel()
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
@@ -548,9 +551,16 @@ export function SidebarContentPanel({
             )}
           </div>
           <SettingsDialog>
-            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
-              <Settings className="size-4" />
-              <span>Settings</span>
+            <button className="group flex w-full items-center justify-between rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+              <div className="flex items-center gap-2">
+                <Settings className="size-4" />
+                <span>Settings</span>
+              </div>
+              {modelName && (
+                <span className="max-w-[100px] truncate text-[10px] text-muted-foreground opacity-60 group-hover:opacity-100 transition-opacity" title={modelName}>
+                  {modelName}
+                </span>
+              )}
             </button>
           </SettingsDialog>
           <HelpPopover>

@@ -322,6 +322,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
       if (isAlreadySuccess) {
         await window.ipc.invoke("models:saveConfig", providerConfig)
+        window.dispatchEvent(new Event('models-changed'))
         setTestState({ status: "success" })
         toast.success("Model configuration saved")
         return
@@ -330,6 +331,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
         await window.ipc.invoke("models:saveConfig", providerConfig)
+        window.dispatchEvent(new Event('models-changed'))
         setTestState({ status: "success" })
         toast.success("Model configuration saved")
       } else {
