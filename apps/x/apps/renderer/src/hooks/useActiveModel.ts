@@ -27,5 +27,5 @@ export function useActiveModel() {
         return () => window.removeEventListener('models-changed', handleModelChange);
     }, [fetchModel]);
 
-    return { modelName, flavor };
+    return { modelName, flavor, refresh: fetchModel };
 }

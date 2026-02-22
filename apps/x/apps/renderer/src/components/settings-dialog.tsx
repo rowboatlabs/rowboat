@@ -134,7 +134,7 @@ function AppearanceSettings() {
 
 // --- Model Settings UI ---
 
-type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type LlmProviderFlavor = "openai" | "anthropic" | "google" | "antigravity" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
 interface LlmModelOption {
   id: string
@@ -171,6 +171,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     openai: { apiKey: "", baseURL: "", model: "" },
     anthropic: { apiKey: "", baseURL: "", model: "" },
     google: { apiKey: "", baseURL: "", model: "" },
+    antigravity: { apiKey: "", baseURL: "", model: "" },
     openrouter: { apiKey: "", baseURL: "", model: "" },
     aigateway: { apiKey: "", baseURL: "", model: "" },
     ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "" },
@@ -185,8 +186,8 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [deviceCodeData, setDeviceCodeData] = useState<{ provider: string, code: string } | null>(null)
 
   const activeConfig = providerConfigs[provider]
-  const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
-  const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway"
+  const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible" || provider === "antigravity"
+  const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "antigravity"
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
   const requiresBaseURL = provider === "ollama" || provider === "openai-compatible"
   const isLocalProvider = provider === "ollama" || provider === "openai-compatible"
@@ -408,7 +409,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             onChange={(e) => updateConfig(provider, { model: e.target.value })}
             placeholder="Enter model"
           />
-        ) : (
+        ) : modelsForProvider.length > 5 ? (
           <Select
             value={activeConfig.model}
             onValueChange={(value) => updateConfig(provider, { model: value })}
@@ -424,6 +425,32 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
               ))}
             </SelectContent>
           </Select>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+            {modelsForProvider.map((model) => {
+              const isActive = activeConfig.model === model.id
+              return (
+                <button
+                  key={model.id}
+                  onClick={() => {
+                    updateConfig(provider, { model: model.id })
+                  }}
+                  className={cn(
+                    "flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left transition-all",
+                    isActive
+                      ? "border-primary bg-primary/5 shadow-sm"
+                      : "hover:bg-muted/60"
+                  )}
+                  type="button"
+                >
+                  <div className="text-[13px] font-medium leading-none">{model.name || model.id}</div>
+                  <div className="text-[11px] text-muted-foreground mt-1 truncate w-full">
+                    {model.id}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
         )}
         {modelsError && (
           <div className="text-xs text-destructive">{modelsError}</div>
