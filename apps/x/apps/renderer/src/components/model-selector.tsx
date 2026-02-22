@@ -49,7 +49,7 @@ export function QuickModelSelector() {
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors max-w-[150px]">
+                <button className="titlebar-no-drag flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors max-w-[150px]">
                     <Cpu className="size-3.5" />
                     <span className="truncate">{modelName || "Select Model"}</span>
                     <ChevronDown className="size-3 opacity-50" />

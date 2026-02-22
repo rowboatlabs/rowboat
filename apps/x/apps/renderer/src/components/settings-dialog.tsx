@@ -409,24 +409,8 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             onChange={(e) => updateConfig(provider, { model: e.target.value })}
             placeholder="Enter model"
           />
-        ) : modelsForProvider.length > 5 ? (
-          <Select
-            value={activeConfig.model}
-            onValueChange={(value) => updateConfig(provider, { model: value })}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select a model" />
-            </SelectTrigger>
-            <SelectContent>
-              {modelsForProvider.map((model) => (
-                <SelectItem key={model.id} value={model.id}>
-                  {model.name || model.id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1 max-h-[350px] overflow-y-auto pr-1 pb-1">
             {modelsForProvider.map((model) => {
               const isActive = activeConfig.model === model.id
               return (
