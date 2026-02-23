@@ -164,6 +164,7 @@ function getMarkdownWithBlankLines(editor: Editor): string {
   return result
 }
 import { EditorToolbar } from './editor-toolbar'
+import { FindReplaceBar } from './find-replace-bar'
 import { WikiLink } from '@/extensions/wiki-link'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command'
@@ -273,6 +274,7 @@ export function MarkdownEditor({
   const [anchorPosition, setAnchorPosition] = useState<{ left: number; top: number } | null>(null)
   const [selectionHighlight, setSelectionHighlight] = useState<SelectionHighlightRange>(null)
   const selectionHighlightRef = useRef<SelectionHighlightRange>(null)
+  const [showFindReplace, setShowFindReplace] = useState(false)
   const [wikiCommandValue, setWikiCommandValue] = useState<string>('')
   const wikiKeyStateRef = useRef<{ open: boolean; options: string[]; value: string }>({ open: false, options: [], value: '' })
   const handleSelectWikiLinkRef = useRef<(path: string) => void>(() => {})
@@ -568,6 +570,10 @@ export function MarkdownEditor({
       event.preventDefault()
       // The parent component handles saving via onChange
     }
+    if (event.key === 'f' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      setShowFindReplace(true)
+    }
   }, [])
 
   // Create image upload handler that shows placeholder
@@ -583,6 +589,9 @@ export function MarkdownEditor({
         onSelectionHighlight={setSelectionHighlight}
         onImageUpload={handleImageUploadWithPlaceholder}
       />
+      {showFindReplace && editor && (
+        <FindReplaceBar editor={editor} onClose={() => setShowFindReplace(false)} />
+      )}
       <div className="editor-content-wrapper" ref={wrapperRef} onScroll={handleScroll}>
         <EditorContent editor={editor} />
         {wikiLinks ? (
