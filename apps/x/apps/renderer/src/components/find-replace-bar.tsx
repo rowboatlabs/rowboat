@@ -8,7 +8,7 @@ import {
   ChevronUpIcon,
   ChevronDownIcon,
   XIcon,
-  ReplaceIcon,
+  Repeat2Icon,
 } from 'lucide-react'
 
 const findHighlightKey = new PluginKey('findHighlight')
@@ -231,7 +231,7 @@ export function FindReplaceBar({ editor, onClose }: FindReplaceBarProps) {
           title="Toggle replace"
           data-active={showReplace || undefined}
         >
-          <ReplaceIcon className="h-4 w-4" />
+          <Repeat2Icon className="h-4 w-4" />
         </Button>
         <Button
           variant="ghost"
