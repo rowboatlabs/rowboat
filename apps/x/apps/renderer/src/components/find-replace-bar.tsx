@@ -108,7 +108,23 @@ export function FindReplaceBar({ editor, onClose }: FindReplaceBarProps) {
     if (currentIndex >= 0 && currentIndex < matches.length) {
       const match = matches[currentIndex]
       editor.commands.setTextSelection(match)
-      editor.commands.scrollIntoView()
+      // Use coordsAtPos to get the screen position, then scroll the
+      // .editor-content-wrapper container so the match is visible.
+      try {
+        const coords = editor.view.coordsAtPos(match.from)
+        const wrapper = editor.view.dom.closest('.editor-content-wrapper')
+        if (wrapper) {
+          const rect = wrapper.getBoundingClientRect()
+          const relativeTop = coords.top - rect.top
+          // If the match is outside the visible area, scroll to center it
+          if (relativeTop < 0 || relativeTop > rect.height - 40) {
+            wrapper.scrollTop += relativeTop - rect.height / 3
+          }
+        }
+      } catch {
+        // Fallback to ProseMirror's built-in scroll
+        editor.commands.scrollIntoView()
+      }
     }
   }, [currentIndex, matches, editor])
 
