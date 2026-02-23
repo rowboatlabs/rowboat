@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Maximize2, Minimize2, Paperclip, SquarePen } from 'lucide-react'
+import { Maximize2, Minimize2, SquarePen } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { isImageMime } from '@/lib/file-utils'
 import {
   Conversation,
   ConversationContent,
@@ -27,6 +26,7 @@ import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { TabBar, type ChatTab } from '@/components/tab-bar'
 import { ChatInputWithMentions, type StagedAttachment } from '@/components/chat-input-with-mentions'
+import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { wikiLabel } from '@/lib/wiki-links'
 import {
   type ChatTabViewState,
@@ -260,24 +260,12 @@ export function ChatSidebar({
         if (item.attachments && item.attachments.length > 0) {
           return (
             <Message key={item.id} from={item.role}>
-              <MessageContent>
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  {item.attachments.map((attachment, index) => (
-                    <span
-                      key={index}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
-                    >
-                      {isImageMime(attachment.mediaType) ? (
-                        <span className="size-3 rounded bg-primary/20" />
-                      ) : (
-                        <Paperclip className="size-3" />
-                      )}
-                      {attachment.filename}
-                    </span>
-                  ))}
-                </div>
-                {item.content}
+              <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
+                <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
+              {item.content && (
+                <MessageContent>{item.content}</MessageContent>
+              )}
             </Message>
           )
         }

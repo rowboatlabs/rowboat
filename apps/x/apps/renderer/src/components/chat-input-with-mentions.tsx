@@ -1,7 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUp, LoaderIcon, Paperclip, Plus, Square, X } from 'lucide-react'
+import {
+  ArrowUp,
+  AudioLines,
+  FileArchive,
+  FileCode2,
+  FileIcon,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
+  LoaderIcon,
+  Plus,
+  Square,
+  X,
+} from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import {
+  type AttachmentIconKind,
+  getAttachmentDisplayName,
+  getAttachmentIconKind,
+  getAttachmentToneClass,
+  getAttachmentTypeLabel,
+} from '@/lib/attachment-presentation'
 import { getExtension, getFileDisplayName, getMimeFromExtension, isImageMime } from '@/lib/file-utils'
 import { cn } from '@/lib/utils'
 import {
@@ -24,6 +44,25 @@ export type StagedAttachment = {
 }
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024 // 10MB
+
+function getAttachmentIcon(kind: AttachmentIconKind) {
+  switch (kind) {
+    case 'audio':
+      return AudioLines
+    case 'video':
+      return FileVideo
+    case 'spreadsheet':
+      return FileSpreadsheet
+    case 'archive':
+      return FileArchive
+    case 'code':
+      return FileCode2
+    case 'text':
+      return FileText
+    default:
+      return FileIcon
+  }
+}
 
 interface ChatInputInnerProps {
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[]) => void
@@ -53,6 +92,7 @@ function ChatInputInner({
   const controller = usePromptInputController()
   const message = controller.textInput.value
   const [attachments, setAttachments] = useState<StagedAttachment[]>([])
+  const [focusNonce, setFocusNonce] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canSubmit = (Boolean(message.trim()) || attachments.length > 0) && !isProcessing
 
@@ -102,6 +142,7 @@ function ChatInputInner({
     }
     if (newAttachments.length > 0) {
       setAttachments((prev) => [...prev, ...newAttachments])
+      setFocusNonce((value) => value + 1)
     }
   }, [])
 
@@ -157,27 +198,45 @@ function ChatInputInner({
   return (
     <div className="rounded-lg border border-border bg-background shadow-none">
       {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-4 pb-1 pt-3">
-          {attachments.map((attachment) => (
-            <span
-              key={attachment.id}
-              className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
-            >
-              {attachment.isImage && attachment.thumbnailUrl ? (
-                <img src={attachment.thumbnailUrl} alt="" className="size-4 rounded object-cover" />
-              ) : (
-                <Paperclip className="size-3" />
-              )}
-              <span className="max-w-[120px] truncate">{attachment.filename}</span>
-              <button
-                type="button"
-                onClick={() => removeAttachment(attachment.id)}
-                className="transition-colors hover:text-foreground"
+        <div className="flex flex-wrap gap-2 px-4 pb-1 pt-3">
+          {attachments.map((attachment) => {
+            const attachmentType = getAttachmentTypeLabel(attachment)
+            const attachmentName = getAttachmentDisplayName(attachment)
+            const Icon = getAttachmentIcon(getAttachmentIconKind(attachment))
+
+            return (
+              <span
+                key={attachment.id}
+                className="group relative inline-flex min-w-[230px] max-w-[320px] items-center gap-2 rounded-xl border border-border/50 bg-muted/80 px-2.5 py-2"
               >
-                <X className="size-3" />
-              </button>
-            </span>
-          ))}
+                <span
+                  className={cn(
+                    'flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg',
+                    attachment.isImage && attachment.thumbnailUrl
+                      ? 'bg-muted'
+                      : getAttachmentToneClass(attachmentType)
+                  )}
+                >
+                  {attachment.isImage && attachment.thumbnailUrl ? (
+                    <img src={attachment.thumbnailUrl} alt="" className="size-full object-cover" />
+                  ) : (
+                    <Icon className="size-5" />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm leading-tight font-medium">{attachmentName}</span>
+                  <span className="block pt-0.5 text-xs leading-tight text-muted-foreground">{attachmentType}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(attachment.id)}
+                  className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full border border-border/70 bg-background/70 text-muted-foreground opacity-0 transition-[opacity,color] duration-150 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </span>
+            )
+          })}
         </div>
       )}
       <div className="flex items-center gap-2 px-4 py-4">
@@ -210,7 +269,7 @@ function ChatInputInner({
           placeholder="Type your message..."
           onKeyDown={handleKeyDown}
           autoFocus={isActive}
-          focusTrigger={isActive ? runId : undefined}
+          focusTrigger={isActive ? `${runId ?? 'new'}:${focusNonce}` : undefined}
           className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
         />
         {isProcessing ? (

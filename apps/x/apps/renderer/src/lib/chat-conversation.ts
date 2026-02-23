@@ -8,6 +8,7 @@ export interface MessageAttachment {
   filename: string
   mediaType: string
   size?: number
+  thumbnailUrl?: string
 }
 
 export interface ChatMessage {

@@ -41,3 +41,21 @@ export function getExtension(filePath: string): string {
     const dotIndex = name.lastIndexOf('.');
     return dotIndex > 0 ? name.slice(dotIndex + 1).toLowerCase() : '';
 }
+
+export function toFileUrl(filePath: string): string {
+    if (!filePath) return filePath;
+    if (
+        filePath.startsWith('data:') ||
+        filePath.startsWith('file://') ||
+        filePath.startsWith('http://') ||
+        filePath.startsWith('https://')
+    ) {
+        return filePath;
+    }
+    const normalized = filePath.replace(/\\/g, '/');
+    const encoded = encodeURI(normalized);
+    if (/^[A-Za-z]:\//.test(normalized)) {
+        return `file:///${encoded}`;
+    }
+    return `file://${encoded}`;
+}

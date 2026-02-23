@@ -5,12 +5,12 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, Paperclip, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon } from 'lucide-react';
-import { isImageMime } from '@/lib/file-utils'
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
 import { ChatInputWithMentions, type StagedAttachment } from './components/chat-input-with-mentions';
+import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
@@ -1659,6 +1659,7 @@ function App() {
           filename: attachment.filename,
           mediaType: attachment.mediaType,
           size: attachment.size,
+          thumbnailUrl: attachment.thumbnailUrl,
         }))
       : undefined
     setConversation((prev) => [...prev, {
@@ -2951,24 +2952,12 @@ function App() {
         if (item.attachments && item.attachments.length > 0) {
           return (
             <Message key={item.id} from={item.role}>
-              <MessageContent>
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {item.attachments.map((attachment, index) => (
-                    <span
-                      key={index}
-                      className="inline-flex items-center gap-1.5 text-xs bg-muted text-muted-foreground px-2 py-1 rounded-md"
-                    >
-                      {isImageMime(attachment.mediaType) ? (
-                        <span className="size-3 rounded bg-primary/20" />
-                      ) : (
-                        <Paperclip className="size-3" />
-                      )}
-                      {attachment.filename}
-                    </span>
-                  ))}
-                </div>
-                {item.content}
+              <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
+                <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
+              {item.content && (
+                <MessageContent>{item.content}</MessageContent>
+              )}
             </Message>
           )
         }
