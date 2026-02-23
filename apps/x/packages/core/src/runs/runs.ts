@@ -1,7 +1,7 @@
 import z from "zod";
 import container from "../di/container.js";
 import { IMessageQueue } from "../application/lib/message-queue.js";
-import { AskHumanResponseEvent, ToolPermissionResponseEvent, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload, AskHumanResponsePayload } from "@x/shared/dist/runs.js";
+import { AskHumanResponseEvent, ToolPermissionRequestEvent, ToolPermissionResponseEvent, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload, AskHumanResponsePayload } from "@x/shared/dist/runs.js";
 import { IRunsRepo } from "./repo.js";
 import { IAgentRuntime } from "../agents/runtime.js";
 import { IBus } from "../application/lib/bus.js";
@@ -9,7 +9,7 @@ import { IAbortRegistry } from "./abort-registry.js";
 import { IRunsLock } from "./lock.js";
 import { forceCloseAllMcpClients } from "../mcp/mcp.js";
 import { extractCommandNames } from "../application/lib/command-executor.js";
-import { addToSessionAllowList, addToSecurityConfig } from "../config/security.js";
+import { addToSecurityConfig } from "../config/security.js";
 
 export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {
     const repo = container.resolve<IRunsRepo>('runsRepo');
@@ -28,15 +28,21 @@ export async function createMessage(runId: string, message: string): Promise<str
 }
 
 export async function authorizePermission(runId: string, ev: z.infer<typeof ToolPermissionAuthorizePayload>): Promise<void> {
-    const { scope, command, ...rest } = ev;
+    const { scope, ...rest } = ev;
 
-    // Handle scope side-effects when approving
-    if (rest.response === "approve" && command && scope && scope !== "once") {
-        const commandNames = extractCommandNames(command);
-        if (commandNames.length > 0) {
-            if (scope === "session") {
-                addToSessionAllowList(commandNames);
-            } else if (scope === "always") {
+    // For "always" scope, derive command from the run log and persist to security config
+    if (rest.response === "approve" && scope === "always") {
+        const repo = container.resolve<IRunsRepo>('runsRepo');
+        const run = await repo.fetch(runId);
+        const permReqEvent = run.log.find(
+            (e): e is z.infer<typeof ToolPermissionRequestEvent> =>
+                e.type === "tool-permission-request"
+                && e.toolCall.toolCallId === rest.toolCallId
+                && JSON.stringify(e.subflow) === JSON.stringify(rest.subflow)
+        );
+        if (permReqEvent && typeof permReqEvent.toolCall.arguments === 'object' && permReqEvent.toolCall.arguments !== null && 'command' in permReqEvent.toolCall.arguments) {
+            const commandNames = extractCommandNames(String(permReqEvent.toolCall.arguments.command));
+            if (commandNames.length > 0) {
                 await addToSecurityConfig(commandNames);
             }
         }
@@ -47,6 +53,7 @@ export async function authorizePermission(runId: string, ev: z.infer<typeof Tool
         ...rest,
         runId,
         type: "tool-permission-response",
+        scope,
     };
     await repo.appendEvents(runId, [event]);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');

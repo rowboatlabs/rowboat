@@ -1532,7 +1532,6 @@ function App() {
     subflow: string[],
     response: 'approve' | 'deny',
     scope?: 'once' | 'session' | 'always',
-    command?: string,
   ) => {
     if (!runId) return
 
@@ -1551,7 +1550,7 @@ function App() {
     try {
       await window.ipc.invoke('runs:authorizePermission', {
         runId,
-        authorization: { subflow, toolCallId, response, scope, command }
+        authorization: { subflow, toolCallId, response, scope }
       })
     } catch (error) {
       console.error('Failed to authorize permission:', error)
@@ -2951,14 +2950,8 @@ function App() {
                                           <PermissionRequest
                                             toolCall={permRequest.toolCall}
                                             onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                            onApproveSession={() => {
-                                              const cmd = permRequest.toolCall.toolName === 'executeCommand' && typeof permRequest.toolCall.arguments === 'object' && permRequest.toolCall.arguments !== null && 'command' in permRequest.toolCall.arguments ? String(permRequest.toolCall.arguments.command) : undefined
-                                              handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session', cmd)
-                                            }}
-                                            onApproveAlways={() => {
-                                              const cmd = permRequest.toolCall.toolName === 'executeCommand' && typeof permRequest.toolCall.arguments === 'object' && permRequest.toolCall.arguments !== null && 'command' in permRequest.toolCall.arguments ? String(permRequest.toolCall.arguments.command) : undefined
-                                              handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always', cmd)
-                                            }}
+                                            onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
+                                            onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
                                             isProcessing={isActive && isProcessing}
                                             response={response}

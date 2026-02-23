@@ -20,16 +20,6 @@ const DEFAULT_ALLOW_LIST = [
 let cachedAllowList: string[] | null = null;
 let cachedMtimeMs: number | null = null;
 
-/** In-memory session allowlist — resets on app restart */
-const sessionAllowSet = new Set<string>();
-
-export function addToSessionAllowList(commands: string[]): void {
-    for (const cmd of commands) {
-        const normalized = cmd.trim().toLowerCase();
-        if (normalized) sessionAllowSet.add(normalized);
-    }
-}
-
 export async function addToSecurityConfig(commands: string[]): Promise<void> {
     ensureSecurityConfigSync();
     const current = readAllowList();
@@ -126,28 +116,16 @@ export function getSecurityAllowList(): string[] {
     ensureSecurityConfigSync();
     try {
         const stats = fs.statSync(SECURITY_CONFIG_PATH);
-        let fileList: string[];
         if (cachedAllowList && cachedMtimeMs === stats.mtimeMs) {
-            fileList = cachedAllowList;
-        } else {
-            fileList = readAllowList();
-            cachedAllowList = fileList;
-            cachedMtimeMs = stats.mtimeMs;
+            return cachedAllowList;
         }
-
-        // Merge session allowlist
-        if (sessionAllowSet.size === 0) return fileList;
-        const merged = new Set(fileList);
-        for (const cmd of sessionAllowSet) merged.add(cmd);
-        return Array.from(merged);
+        cachedAllowList = readAllowList();
+        cachedMtimeMs = stats.mtimeMs;
+        return cachedAllowList;
     } catch {
         cachedAllowList = null;
         cachedMtimeMs = null;
-        const fileList = readAllowList();
-        if (sessionAllowSet.size === 0) return fileList;
-        const merged = new Set(fileList);
-        for (const cmd of sessionAllowSet) merged.add(cmd);
-        return Array.from(merged);
+        return readAllowList();
     }
 }
 

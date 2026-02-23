@@ -1,129 +1,62 @@
 import { exec, execSync, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
+import { parse } from 'shell-quote';
 import { getSecurityAllowList } from '../../config/security.js';
 
 const execPromise = promisify(exec);
-const ENV_ASSIGNMENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
+const ENV_ASSIGNMENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const WRAPPER_COMMANDS = new Set(['sudo', 'env', 'time', 'command']);
-
-function sanitizeToken(token: string): string {
-  return token.trim().replace(/^['"()]+|['"()]+$/g, '');
-}
-
-/**
- * Split a shell command string on command separators (||, &&, ;, |, \n)
- * while respecting single and double quotes.
- */
-function splitCommandSegments(command: string): string[] {
-  const segments: string[] = [];
-  let current = '';
-  let inSingle = false;
-  let inDouble = false;
-
-  for (let i = 0; i < command.length; i++) {
-    const ch = command[i];
-
-    if (ch === "'" && !inDouble) {
-      inSingle = !inSingle;
-      current += ch;
-      continue;
-    }
-    if (ch === '"' && !inSingle) {
-      inDouble = !inDouble;
-      current += ch;
-      continue;
-    }
-
-    if (inSingle || inDouble) {
-      current += ch;
-      continue;
-    }
-
-    // Outside quotes — check for separators
-    if (ch === '\n' || ch === ';') {
-      segments.push(current);
-      current = '';
-      continue;
-    }
-    if (ch === '|') {
-      if (command[i + 1] === '|') {
-        // ||
-        segments.push(current);
-        current = '';
-        i++; // skip second |
-      } else {
-        // single pipe
-        segments.push(current);
-        current = '';
-      }
-      continue;
-    }
-    if (ch === '&' && command[i + 1] === '&') {
-      segments.push(current);
-      current = '';
-      i++; // skip second &
-      continue;
-    }
-
-    current += ch;
-  }
-
-  if (current) segments.push(current);
-  return segments;
-}
 
 export function extractCommandNames(command: string): string[] {
   const discovered = new Set<string>();
-  const segments = splitCommandSegments(command);
+  const tokens = parse(command);
 
-  for (const segment of segments) {
-    const tokens = segment.trim().split(/\s+/).filter(Boolean);
-    if (!tokens.length) continue;
-
-    let index = 0;
-    while (index < tokens.length && ENV_ASSIGNMENT_REGEX.test(tokens[index])) {
-      index++;
+  let expectCommand = true;
+  for (const token of tokens) {
+    // Operator tokens (|, &&, ;, ||, etc.) reset the "expect command" flag
+    if (typeof token === 'object' && token !== null && 'op' in token) {
+      expectCommand = true;
+      continue;
     }
 
-    if (index >= tokens.length) continue;
+    if (typeof token !== 'string') continue;
 
-    const primary = sanitizeToken(tokens[index]).toLowerCase();
-    if (!primary) continue;
+    if (!expectCommand) continue;
 
-    discovered.add(primary);
+    // Skip env assignments (VAR=val)
+    if (ENV_ASSIGNMENT_REGEX.test(token)) continue;
 
-    if (WRAPPER_COMMANDS.has(primary) && index + 1 < tokens.length) {
-      const wrapped = sanitizeToken(tokens[index + 1]).toLowerCase();
-      if (wrapped) {
-        discovered.add(wrapped);
-      }
+    const name = token.toLowerCase();
+    if (!name) continue;
+
+    discovered.add(name);
+
+    if (WRAPPER_COMMANDS.has(name)) {
+      // Don't mark command as found yet — the next token is the real command
+      continue;
     }
+
+    expectCommand = false;
   }
 
   return Array.from(discovered);
 }
 
-function findBlockedCommands(command: string): string[] {
+function findBlockedCommands(command: string, sessionAllowedCommands?: Set<string>): string[] {
   const invoked = extractCommandNames(command);
   if (!invoked.length) return [];
 
   const allowList = getSecurityAllowList();
-  if (!allowList.length) return invoked;
+  if (!allowList.length && (!sessionAllowedCommands || sessionAllowedCommands.size === 0)) return invoked;
 
   const allowSet = new Set(allowList);
   if (allowSet.has('*')) return [];
 
-  return invoked.filter((cmd) => !allowSet.has(cmd));
+  return invoked.filter((cmd) => !allowSet.has(cmd) && !sessionAllowedCommands?.has(cmd));
 }
 
-// export const BlockedResult = {
-//   stdout: '',
-//   stderr: `Command blocked by security policy. Update ${SECURITY_CONFIG_PATH} to allow them before retrying.`,
-//   exitCode: 126,
-// };
-
-export function isBlocked(command: string): boolean {
-  const blocked = findBlockedCommands(command);
+export function isBlocked(command: string, sessionAllowedCommands?: Set<string>): boolean {
+  const blocked = findBlockedCommands(command, sessionAllowedCommands);
   return blocked.length > 0;
 }
 
