@@ -1,0 +1,52 @@
+# Maintainer: rowboatlabs <https://rowboatlabs.com>
+pkgname=rowboat-bin
+pkgver=0.1.56
+pkgrel=2
+pkgdesc="AI coworker with memory"
+arch=('x86_64')
+url="https://github.com/rowboatlabs/rowboat"
+license=('Apache-2.0')
+depends=(
+    'electron39'
+    'gtk3'
+    'nss'
+    'libxss'
+    'libxtst'
+    'alsa-lib'
+    'libnotify'
+    'libxrandr'
+    'mesa'
+    'at-spi2-atk'
+    'libcups'
+    'libdrm'
+    'xdg-utils'
+)
+provides=('rowboat')
+conflicts=('rowboat' 'rowboat-git')
+options=('!strip')
+source_x86_64=("https://github.com/rowboatlabs/rowboat/releases/download/v${pkgver}/rowboat-linux_${pkgver}_amd64.deb")
+sha256sums_x86_64=('SKIP')
+ 
+package() {
+    # Extract the .deb (data.tar contains the actual files)
+    bsdtar -xf data.tar.* -C "$pkgdir/"
+ 
+    # Replace the DEB's bundled-Electron launcher with one that uses the
+    # system electron39 package.  The bundled Electron binary is compiled
+    # against Debian/Ubuntu libraries and segfaults on Arch Linux due to
+    # library ABI mismatches.  The app bundle (resources/app/) is reusable
+    # as-is with any compatible Electron binary.
+    #
+    # --ozone-platform=x11  forces XWayland instead of native Wayland, which
+    #   is required on Arch + NVIDIA where the Wayland GPU path segfaults.
+    # ROWBOAT_PACKAGED=1 tells main.ts it is running as a packaged release
+    #   even though app.isPackaged is false under a system electron.
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/rowboat" << 'EOF'
+#!/bin/bash
+exec env ROWBOAT_PACKAGED=1 electron39 \
+    --no-sandbox \
+    --ozone-platform=x11 \
+    /usr/lib/rowboat-linux/resources/app \
+    "$@"
+EOF
+}

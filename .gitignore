@@ -3,3 +3,8 @@
 .vscode/
 data/
 .venv/
+aur-bin/.SRCINFO
+aur-bin/src/
+aur-bin/pkg/
+aur-bin/*.tar.*
+aur-bin/*.zst
