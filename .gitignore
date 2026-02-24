@@ -27,3 +27,9 @@ aur/rowboat/
 aur/*.pkg.tar.zst
 aur/*.deb
 aur-bin/*.deb
+aur/pkg/
+aur/src/
+aur/rowboat/
+aur/*.pkg.tar.zst
+aur/*.deb
+aur-bin/*.deb
