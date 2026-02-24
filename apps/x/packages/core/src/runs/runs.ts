@@ -1,13 +1,15 @@
 import z from "zod";
 import container from "../di/container.js";
 import { IMessageQueue } from "../application/lib/message-queue.js";
-import { AskHumanResponseEvent, ToolPermissionResponseEvent, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload, AskHumanResponsePayload } from "@x/shared/dist/runs.js";
+import { AskHumanResponseEvent, ToolPermissionRequestEvent, ToolPermissionResponseEvent, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload, AskHumanResponsePayload } from "@x/shared/dist/runs.js";
 import { IRunsRepo } from "./repo.js";
 import { IAgentRuntime } from "../agents/runtime.js";
 import { IBus } from "../application/lib/bus.js";
 import { IAbortRegistry } from "./abort-registry.js";
 import { IRunsLock } from "./lock.js";
 import { forceCloseAllMcpClients } from "../mcp/mcp.js";
+import { extractCommandNames } from "../application/lib/command-executor.js";
+import { addToSecurityConfig } from "../config/security.js";
 
 export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {
     const repo = container.resolve<IRunsRepo>('runsRepo');
@@ -26,11 +28,32 @@ export async function createMessage(runId: string, message: string): Promise<str
 }
 
 export async function authorizePermission(runId: string, ev: z.infer<typeof ToolPermissionAuthorizePayload>): Promise<void> {
+    const { scope, ...rest } = ev;
+
+    // For "always" scope, derive command from the run log and persist to security config
+    if (rest.response === "approve" && scope === "always") {
+        const repo = container.resolve<IRunsRepo>('runsRepo');
+        const run = await repo.fetch(runId);
+        const permReqEvent = run.log.find(
+            (e): e is z.infer<typeof ToolPermissionRequestEvent> =>
+                e.type === "tool-permission-request"
+                && e.toolCall.toolCallId === rest.toolCallId
+                && JSON.stringify(e.subflow) === JSON.stringify(rest.subflow)
+        );
+        if (permReqEvent && typeof permReqEvent.toolCall.arguments === 'object' && permReqEvent.toolCall.arguments !== null && 'command' in permReqEvent.toolCall.arguments) {
+            const commandNames = extractCommandNames(String(permReqEvent.toolCall.arguments.command));
+            if (commandNames.length > 0) {
+                await addToSecurityConfig(commandNames);
+            }
+        }
+    }
+
     const repo = container.resolve<IRunsRepo>('runsRepo');
     const event: z.infer<typeof ToolPermissionResponseEvent> = {
-        ...ev,
+        ...rest,
         runId,
         type: "tool-permission-response",
+        scope,
     };
     await repo.appendEvents(runId, [event]);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');

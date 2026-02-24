@@ -5,6 +5,7 @@ import { workspace } from '@x/shared';
 import { z } from 'zod';
 import { RemoveOptions, WriteFileOptions, WriteFileResult } from 'packages/shared/dist/workspace.js';
 import { WorkDir } from '../config/config.js';
+import { rewriteWikiLinksForRenamedKnowledgeFile } from './wiki-link-rewrite.js';
 
 // ============================================================================
 // Path Utilities
@@ -56,6 +57,11 @@ export function absToRelPosix(absPath: string): string | null {
   }
   const relPath = path.relative(WorkDir, normalized);
   return relPath.split(path.sep).join('/');
+}
+
+function isKnowledgeMarkdownRelPath(relPath: string): boolean {
+  const normalized = relPath.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+  return normalized.startsWith('knowledge/') && normalized.endsWith('.md');
 }
 
 // ============================================================================
@@ -286,6 +292,7 @@ export async function rename(
 
   // Check if source exists
   await fs.access(fromPath);
+  const fromStats = await fs.lstat(fromPath);
 
   // Check if destination exists (only if overwrite is false)
   if (!overwrite) {
@@ -309,6 +316,19 @@ export async function rename(
   await fs.mkdir(path.dirname(toPath), { recursive: true });
 
   await fs.rename(fromPath, toPath);
+
+  if (
+    fromStats.isFile()
+    && isKnowledgeMarkdownRelPath(from)
+    && isKnowledgeMarkdownRelPath(to)
+  ) {
+    try {
+      await rewriteWikiLinksForRenamedKnowledgeFile(WorkDir, from, to);
+    } catch (error) {
+      console.error('Failed to rewrite wiki backlinks after file rename:', error);
+    }
+  }
+
   return { ok: true as const };
 }
 

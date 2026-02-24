@@ -1,60 +1,96 @@
 ---
 title: "Introduction"
-description: "Welcome to the official Rowboat documentation! Rowboat is a low-code AI IDE to build tool connected multi-agent assistants. Rowboat copilot builds the agents for you based on your requirements with the option do everything manually as well."
+description: "Welcome to the official Rowboat documentation! Rowboat is an open-source AI coworker that turns work into a knowledge graph and acts on it."
 icon: "book-open"
 ---
-
-<Frame>
-  <img src="../videos/Intro-Video.gif" alt="Intro Video" />
-</Frame>
-
-## What is RowBoat?
-**RowBoat is a state-of-art platform to build multi-agent AI systems in a visual interface, with the help of a copilot.**
-
-RowBoat enables you to build, manage and deploy user-facing assistants. An assistant is made up of multiple agents, each having access to a set of tools and working together to interact with the user as a single assistant. You can connect any tool to the agents.
-
-For example, you can build a *meeting prep assistant* that helps you prepare for upcoming meetings. One agent can access your Google Calendar to see your scheduled meetings, another agent can research the meeting attendees (such as finding their LinkedIn profiles or recent news), and a third agent can compile this research and send it to your email before the meeting. This way, you get automated, personalized meeting prep without manual effort.
+[![Demo](https://github.com/user-attachments/assets/3f560bcf-d93c-4064-81eb-75a9fae31742)](https://www.youtube.com/watch?v=5AWoGo-L16I)
 
 ---
 
-## How RowBoat works
+## What is Rowboat?  
+Rowboat is a local-first AI coworker, with work memory. Rowboat connects to your email and meeting notes, builds a long-lived knowledge graph, and uses that context to help you get work done - privately, on your machine.
 
-### RowBoat Studio
-RowBoat Studio lets you create AI agents in minutes, using a visual interface and plain language. 
-There are key components that you will work with:
-- Agents
-- Playground
-- Copilot
-
-
-<Card title="Using Rowboat" icon="puzzle-piece" horizontal href="/docs/using-rowboat/rowboat-studio">
-  Learn about Rowboat Studio and key concepts used in building assistants
-</Card>
-
-
-### RowBoat Chat API & SDK
-- [RowBoat Chat API](/docs/api-sdk/using_the_api) is a stateless HTTP API to interface with the assistant created on RowBoat Studio. You can use the API to drive end-user facing conversations in your app or website.
-- [RowBoat Chat SDK](/docs/api-sdk/using_the_sdk) is a simple Python SDK which wraps the HTTP API under the hood. It provides a clean interface for managing conversations using conversation IDs for state management.
+You can do things like:
+- `Build me a deck about our next quarter roadmap` → generates a PDF using context from your knowledge graph
+- `Prep me for my meeting with Alex` → pulls past decisions, open questions, and relevant threads into a crisp brief (or a voice note)
+- Visualize, edit, and update your knowledge graph anytime (it’s just Markdown)
+- Record voice memos that automatically capture and update key takeaways in the graph
 
 ---
 
-## Why RowBoat?
-Rowboat is the fastest way to build and deploy multi-agent assistants.
+## What it does
 
-<Steps>
-  <Step title="Build complex assistants">
-    Use plain language and a powerful visual interface to design and orchestrate multi-agent assistants with ease.
-  </Step>
+Rowboat is a **local-first AI coworker** that can:
+- **Remember** the important context you don’t want to re-explain (people, projects, decisions, commitments)
+- **Understand** what’s relevant right now (before a meeting, while replying to an email, when writing a doc)
+- **Help you act** by drafting, summarizing, planning, and producing real artifacts (briefs, emails, docs, PDF slides)
 
-  <Step title="Integrate tools and MCP servers">
-    Add tools and connect to MCP servers in just minutes — no complex setup required.
-  </Step>
+Under the hood, Rowboat maintains an **Obsidian-compatible vault** of plain Markdown notes with backlinks — a transparent “working memory” you can inspect and edit.
 
-  <Step title="Expedite your AI roadmap">
-    Accelerate development with battle-tested tooling tailored for building production-ready, multi-agent AI systems.
-  </Step>
-</Steps>
+## Integrations
 
+Rowboat builds memory from the work you already do, including:
+- **Gmail** (email)
+- **Granola** (meeting notes)
+- **Fireflies** (meeting notes)
+
+## How it’s different
+
+Most AI tools reconstruct context on demand by searching transcripts or documents.
+
+Rowboat maintains **long-lived knowledge** instead:
+- context accumulates over time
+- relationships are explicit and inspectable
+- notes are editable by you, not hidden inside a model
+- everything lives on your machine as plain Markdown
+
+The result is memory that compounds, rather than retrieval that starts cold every time.
+
+## What you can do with it
+
+- **Meeting prep** from prior decisions, threads, and open questions
+- **Email drafting** grounded in history and commitments
+- **Docs & decks** generated from your ongoing context (including PDF slides)
+- **Follow-ups**: capture decisions, action items, and owners so nothing gets dropped
+- **On-your-machine help**: create files, summarize into notes, and run workflows using local tools (with explicit, reviewable actions)
+
+## Background agents
+
+Rowboat can spin up **background agents** to do repeatable work automatically - so routine tasks happen without you having to ask every time.
+
+Examples:
+- Draft email replies in the background (grounded in your past context and commitments)
+- Generate a daily voice note each morning (agenda, priorities, upcoming meetings)
+- Create recurring project updates from the latest emails/notes
+- Keep your knowledge graph up to date as new information comes in
+
+You control what runs, when it runs, and what gets written back into your local Markdown vault.
+
+## Bring your own model
+
+Rowboat works with the model setup you prefer:
+- **Local models** via Ollama or LM Studio
+- **Hosted models** (bring your own API key/provider)
+- Swap models anytime — your data stays in your local Markdown vault
+
+## Extend Rowboat with tools (MCP)
+
+Rowboat can connect to external tools and services via **Model Context Protocol (MCP)**.
+That means you can plug in (for example) search, databases, CRMs, support tools, and automations - or your own internal tools.
+
+Examples: Exa (web search), Twitter/X, ElevenLabs (voice), Slack, Linear/Jira, GitHub, and more.
+
+## Local-first by design
+
+- All data is stored locally as plain Markdown
+- No proprietary formats or hosted lock-in
+- You can inspect, edit, back up, or delete everything at any time
+
+---
+<div align="center">
+
+[Discord](https://discord.gg/wajrgmJQ6b) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
+</div>
 ---
 
 ## Contributing
@@ -72,7 +108,7 @@ Need help using Rowboat? Join our community!
 <Card
 title="Discord"
 icon="discord"
-horizontal href="https://discord.gg/rxB8pzHxaS"
+horizontal href="https://discord.gg/wajrgmJQ6b"
 >
 Join our growing discord community and interact with hundreds of developer using Rowboat!
 </Card>

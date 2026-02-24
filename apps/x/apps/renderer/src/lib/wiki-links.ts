@@ -9,8 +9,7 @@ export const normalizeWikiPath = (input: string) => {
 }
 
 export const ensureMarkdownExtension = (path: string) => {
-  const lastSegment = path.split('/').pop() ?? path
-  if (lastSegment.includes('.')) return path
+  if (path.toLowerCase().endsWith('.md')) return path
   return `${path}.md`
 }
 

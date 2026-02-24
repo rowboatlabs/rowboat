@@ -52,7 +52,16 @@ function getMarkdownWithBlankLines(editor: Editor): string {
   const blocks: string[] = []
 
   // Helper to convert a node to markdown text
-  const nodeToText = (node: { type?: string; content?: Array<{ type?: string; text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }>; attrs?: Record<string, unknown> }): string => {
+  const nodeToText = (node: {
+    type?: string
+    content?: Array<{
+      type?: string
+      text?: string
+      marks?: Array<{ type: string; attrs?: Record<string, unknown> }>
+      attrs?: Record<string, unknown>
+    }>
+    attrs?: Record<string, unknown>
+  }): string => {
     if (!node.content) return ''
     return node.content.map(child => {
       if (child.type === 'text') {
@@ -67,6 +76,9 @@ function getMarkdownWithBlankLines(editor: Editor): string {
           }
         }
         return text
+      } else if (child.type === 'wikiLink') {
+        const path = (child.attrs?.path as string) || ''
+        return path ? `[[${path}]]` : ''
       } else if (child.type === 'hardBreak') {
         return '\n'
       }

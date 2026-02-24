@@ -12,7 +12,7 @@ import { execTool } from "../application/lib/exec-tool.js";
 import { AskHumanRequestEvent, RunEvent, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
 import { BuiltinTools } from "../application/lib/builtin-tools.js";
 import { CopilotAgent } from "../application/assistant/agent.js";
-import { isBlocked } from "../application/lib/command-executor.js";
+import { isBlocked, extractCommandNames } from "../application/lib/command-executor.js";
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createProvider } from "../models/models.js";
@@ -462,6 +462,7 @@ export class AgentState {
     pendingAskHumanRequests: Record<string, z.infer<typeof AskHumanRequestEvent>> = {};
     allowedToolCallIds: Record<string, true> = {};
     deniedToolCallIds: Record<string, true> = {};
+    sessionAllowedCommands: Set<string> = new Set();
 
     getPendingPermissions(): z.infer<typeof ToolPermissionRequestEvent>[] {
         const response: z.infer<typeof ToolPermissionRequestEvent>[] = [];
@@ -598,6 +599,16 @@ export class AgentState {
                 switch (event.response) {
                     case "approve":
                         this.allowedToolCallIds[event.toolCallId] = true;
+                        // For session scope, extract command names and add to session allowlist
+                        if (event.scope === "session") {
+                            const toolCall = this.toolCallIdMap[event.toolCallId];
+                            if (toolCall && typeof toolCall.arguments === 'object' && toolCall.arguments !== null && 'command' in toolCall.arguments) {
+                                const names = extractCommandNames(String(toolCall.arguments.command));
+                                for (const name of names) {
+                                    this.sessionAllowedCommands.add(name);
+                                }
+                            }
+                        }
                         break;
                     case "deny":
                         this.deniedToolCallIds[event.toolCallId] = true;
@@ -882,7 +893,7 @@ export async function* streamAgent({
                     }
                     if (underlyingTool.type === "builtin" && underlyingTool.name === "executeCommand") {
                         // if command is blocked, then seek permission
-                        if (isBlocked(part.arguments.command)) {
+                        if (isBlocked(part.arguments.command, state.sessionAllowedCommands)) {
                             loopLogger.log('emitting tool-permission-request, toolCallId:', part.toolCallId);
                             yield* processEvent({
                                 runId,
