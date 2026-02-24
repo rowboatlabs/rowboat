@@ -1,2 +1,0 @@
-#!/bin/bash
-exec env ROWBOAT_PACKAGED=1 electron39 /usr/lib/rowboat "$@"
