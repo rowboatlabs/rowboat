@@ -107,6 +107,10 @@ const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
 
 const untitledBaseName = 'untitled'
+const untitledIndexedNamePattern = /^untitled-\d+$/
+
+const isUntitledPlaceholderName = (name: string) =>
+  name === untitledBaseName || untitledIndexedNamePattern.test(name)
 
 const getHeadingTitle = (markdown: string) => {
   const lines = markdown.split('\n')
@@ -848,46 +852,52 @@ function App() {
 	      let renamedTo: string | null = null
 	      try {
 	        // Only rename the currently active file (avoids renaming/jumping while user switches rapidly)
-	        if (
-	          wasActiveAtStart &&
-	          selectedPathRef.current === pathAtStart &&
+        if (
+          wasActiveAtStart &&
+          selectedPathRef.current === pathAtStart &&
           !renameInProgressRef.current &&
           pathAtStart.startsWith('knowledge/')
         ) {
-          const headingTitle = getHeadingTitle(debouncedContent)
-          const desiredName = headingTitle ? sanitizeHeadingForFilename(headingTitle) : null
           const currentBase = getBaseName(pathAtStart)
-          if (desiredName && desiredName !== currentBase) {
-            const parentDir = pathAtStart.split('/').slice(0, -1).join('/')
-            const targetPath = `${parentDir}/${desiredName}.md`
-            if (targetPath !== pathAtStart) {
-              const exists = await window.ipc.invoke('workspace:exists', { path: targetPath })
-		              if (!exists.exists) {
-		                renameInProgressRef.current = true
-		                await window.ipc.invoke('workspace:rename', { from: pathAtStart, to: targetPath })
-		                pathToSave = targetPath
-		                renamedFrom = pathAtStart
-		                renamedTo = targetPath
-		                editorPathRef.current = targetPath
-		                setFileTabs(prev => prev.map(tab => (tab.path === pathAtStart ? { ...tab, path: targetPath } : tab)))
-		                initialContentByPathRef.current.delete(pathAtStart)
-		                const cachedContent = editorContentByPathRef.current.get(pathAtStart)
-		                if (cachedContent !== undefined) {
-		                  editorContentByPathRef.current.delete(pathAtStart)
-		                  editorContentByPathRef.current.set(targetPath, cachedContent)
-		                  setEditorContentByPath((prev) => {
-		                    const oldContent = prev[pathAtStart]
-		                    if (oldContent === undefined) return prev
-		                    const next = { ...prev }
-		                    delete next[pathAtStart]
-		                    next[targetPath] = oldContent
-		                    return next
-		                  })
-		                }
-		              }
-		            }
-		          }
-		        }
+          if (isUntitledPlaceholderName(currentBase)) {
+            const headingTitle = getHeadingTitle(debouncedContent)
+            const desiredName = headingTitle ? sanitizeHeadingForFilename(headingTitle) : null
+            if (desiredName && desiredName !== currentBase) {
+              const parentDir = pathAtStart.split('/').slice(0, -1).join('/')
+              let targetPath = `${parentDir}/${desiredName}.md`
+              if (targetPath !== pathAtStart) {
+                let suffix = 1
+                while (true) {
+                  const exists = await window.ipc.invoke('workspace:exists', { path: targetPath })
+                  if (!exists.exists) break
+                  targetPath = `${parentDir}/${desiredName}-${suffix}.md`
+                  suffix += 1
+                }
+                renameInProgressRef.current = true
+                await window.ipc.invoke('workspace:rename', { from: pathAtStart, to: targetPath })
+                pathToSave = targetPath
+                renamedFrom = pathAtStart
+                renamedTo = targetPath
+                editorPathRef.current = targetPath
+                setFileTabs(prev => prev.map(tab => (tab.path === pathAtStart ? { ...tab, path: targetPath } : tab)))
+                initialContentByPathRef.current.delete(pathAtStart)
+                const cachedContent = editorContentByPathRef.current.get(pathAtStart)
+                if (cachedContent !== undefined) {
+                  editorContentByPathRef.current.delete(pathAtStart)
+                  editorContentByPathRef.current.set(targetPath, cachedContent)
+                  setEditorContentByPath((prev) => {
+                    const oldContent = prev[pathAtStart]
+                    if (oldContent === undefined) return prev
+                    const next = { ...prev }
+                    delete next[pathAtStart]
+                    next[targetPath] = oldContent
+                    return next
+                  })
+                }
+              }
+            }
+          }
+        }
 	        await window.ipc.invoke('workspace:writeFile', {
 	          path: pathToSave,
 	          data: debouncedContent,
