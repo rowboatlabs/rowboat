@@ -138,6 +138,86 @@ const getBaseName = (path: string) => {
   return file.replace(/\.md$/i, '')
 }
 
+const WIKI_LINK_TOKEN_REGEX = /\[\[([^[\]]+)\]\]/g
+const KNOWLEDGE_PREFIX = 'knowledge/'
+
+const normalizeRelPathForWiki = (relPath: string) =>
+  relPath.replace(/\\/g, '/').replace(/^\/+/, '')
+
+const stripKnowledgePrefixForWiki = (relPath: string) => {
+  const normalized = normalizeRelPathForWiki(relPath)
+  return normalized.toLowerCase().startsWith(KNOWLEDGE_PREFIX)
+    ? normalized.slice(KNOWLEDGE_PREFIX.length)
+    : normalized
+}
+
+const stripMarkdownExtensionForWiki = (wikiPath: string) =>
+  wikiPath.toLowerCase().endsWith('.md') ? wikiPath.slice(0, -3) : wikiPath
+
+const wikiPathCompareKey = (wikiPath: string) =>
+  stripMarkdownExtensionForWiki(wikiPath).toLowerCase()
+
+const splitWikiPathPrefix = (rawPath: string) => {
+  let normalized = rawPath.trim().replace(/^\/+/, '').replace(/^\.\//, '')
+  const hadKnowledgePrefix = /^knowledge\//i.test(normalized)
+  if (hadKnowledgePrefix) {
+    normalized = normalized.slice(KNOWLEDGE_PREFIX.length)
+  }
+  return { pathWithoutPrefix: normalized, hadKnowledgePrefix }
+}
+
+const rewriteWikiLinksForRenamedFileInMarkdown = (
+  markdown: string,
+  fromRelPath: string,
+  toRelPath: string
+) => {
+  const normalizedFrom = normalizeRelPathForWiki(fromRelPath)
+  const normalizedTo = normalizeRelPathForWiki(toRelPath)
+  const lowerFrom = normalizedFrom.toLowerCase()
+  const lowerTo = normalizedTo.toLowerCase()
+  if (!lowerFrom.startsWith(KNOWLEDGE_PREFIX) || !lowerFrom.endsWith('.md')) return markdown
+  if (!lowerTo.startsWith(KNOWLEDGE_PREFIX) || !lowerTo.endsWith('.md')) return markdown
+
+  const fromWikiPath = stripKnowledgePrefixForWiki(normalizedFrom)
+  const toWikiPath = stripKnowledgePrefixForWiki(normalizedTo)
+  const fromCompareKey = wikiPathCompareKey(fromWikiPath)
+  const fromBaseName = stripMarkdownExtensionForWiki(fromWikiPath).split('/').pop()?.toLowerCase() ?? null
+  const toWikiPathWithoutExtension = stripMarkdownExtensionForWiki(toWikiPath)
+  const toBaseName = toWikiPathWithoutExtension.split('/').pop() ?? toWikiPathWithoutExtension
+
+  return markdown.replace(WIKI_LINK_TOKEN_REGEX, (fullMatch, innerRaw: string) => {
+    const pipeIndex = innerRaw.indexOf('|')
+    const pathAndAnchor = pipeIndex >= 0 ? innerRaw.slice(0, pipeIndex) : innerRaw
+    const aliasSuffix = pipeIndex >= 0 ? innerRaw.slice(pipeIndex) : ''
+
+    const hashIndex = pathAndAnchor.indexOf('#')
+    const pathPart = hashIndex >= 0 ? pathAndAnchor.slice(0, hashIndex) : pathAndAnchor
+    const anchorSuffix = hashIndex >= 0 ? pathAndAnchor.slice(hashIndex) : ''
+
+    const leadingWhitespace = pathPart.match(/^\s*/)?.[0] ?? ''
+    const trailingWhitespace = pathPart.match(/\s*$/)?.[0] ?? ''
+    const rawPath = pathPart.trim()
+    if (!rawPath) return fullMatch
+
+    const { pathWithoutPrefix, hadKnowledgePrefix } = splitWikiPathPrefix(rawPath)
+    if (!pathWithoutPrefix) return fullMatch
+
+    const matchesFullPath = wikiPathCompareKey(pathWithoutPrefix) === fromCompareKey
+    const isBareTarget = !pathWithoutPrefix.includes('/')
+    const targetBaseName = stripMarkdownExtensionForWiki(pathWithoutPrefix).toLowerCase()
+    const matchesBareSelfName = Boolean(fromBaseName && isBareTarget && targetBaseName === fromBaseName)
+    if (!matchesFullPath && !matchesBareSelfName) return fullMatch
+
+    const preserveMarkdownExtension = rawPath.toLowerCase().endsWith('.md')
+    const rewrittenTarget = matchesBareSelfName
+      ? (preserveMarkdownExtension ? `${toBaseName}.md` : toBaseName)
+      : (preserveMarkdownExtension ? toWikiPath : toWikiPathWithoutExtension)
+    const finalPath = hadKnowledgePrefix ? `${KNOWLEDGE_PREFIX}${rewrittenTarget}` : rewrittenTarget
+
+    return `[[${leadingWhitespace}${finalPath}${trailingWhitespace}${anchorSuffix}${aliasSuffix}]]`
+  })
+}
+
 const getAncestorDirectoryPaths = (path: string): string[] => {
   const parts = path.split('/').filter(Boolean)
   if (parts.length <= 2) return []
@@ -720,15 +800,44 @@ function App() {
 
       const changedPath = event.type === 'changed' ? event.path : null
       const changedPaths = (event.type === 'bulkChanged' ? event.paths : []) ?? []
+      const eventPaths = (() => {
+        if (event.type === 'changed') return [event.path]
+        if (event.type === 'bulkChanged') return event.paths ?? []
+        if (event.type === 'moved') return [event.from, event.to]
+        if (event.type === 'created' || event.type === 'deleted') return [event.path]
+        return []
+      })()
+      const selectedPathAtEvent = selectedPathRef.current
 
       // Reload background tasks if agent-schedule.json changed
-      if (changedPath === 'config/agent-schedule.json' || changedPaths.includes('config/agent-schedule.json')) {
+      if (
+        changedPath === 'config/agent-schedule.json'
+        || changedPaths.includes('config/agent-schedule.json')
+      ) {
         loadBackgroundTasks()
       }
 
+      // Invalidate cached content for files changed outside the active editor.
+      // This prevents stale backlinks after rename-rewrite passes touch many files.
+      for (const path of eventPaths) {
+        if (!path.endsWith('.md')) continue
+        if (selectedPathAtEvent && path === selectedPathAtEvent) continue
+        removeEditorCacheForPath(path)
+        initialContentByPathRef.current.delete(path)
+      }
+
+      // Keep selection stable if a file is moved externally.
+      if (
+        event.type === 'moved'
+        && selectedPathAtEvent
+        && event.from === selectedPathAtEvent
+      ) {
+        setSelectedPath(event.to)
+      }
+
       // Reload current file if it was changed externally
-      if (!selectedPath) return
-      const pathToReload = selectedPath
+      if (!selectedPathAtEvent) return
+      const pathToReload = selectedPathAtEvent
 
       const isCurrentFileChanged =
         changedPath === pathToReload || changedPaths.includes(pathToReload)
@@ -736,7 +845,7 @@ function App() {
       if (isCurrentFileChanged) {
         // Only reload if no unsaved edits
         const baseline = initialContentByPathRef.current.get(pathToReload) ?? initialContentRef.current
-        if (editorContent === baseline) {
+        if (editorContentRef.current === baseline) {
           const result = await window.ipc.invoke('workspace:readFile', { path: pathToReload })
           if (selectedPathRef.current !== pathToReload) return
           setFileContent(result.data)
@@ -751,7 +860,7 @@ function App() {
     })
     return cleanup
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadDirectory, selectedPath, editorContent, setEditorCacheForPath])
+  }, [loadDirectory, removeEditorCacheForPath, setEditorCacheForPath])
 
   // Load file content when selected
   useEffect(() => {
@@ -844,14 +953,15 @@ function App() {
     if (debouncedContent === baseline) return
     if (!debouncedContent) return
 
-	    const saveFile = async () => {
-	      const wasActiveAtStart = selectedPathRef.current === pathAtStart
-	      if (wasActiveAtStart) setIsSaving(true)
-	      let pathToSave = pathAtStart
-	      let renamedFrom: string | null = null
-	      let renamedTo: string | null = null
-	      try {
-	        // Only rename the currently active file (avoids renaming/jumping while user switches rapidly)
+    const saveFile = async () => {
+      const wasActiveAtStart = selectedPathRef.current === pathAtStart
+      if (wasActiveAtStart) setIsSaving(true)
+      let pathToSave = pathAtStart
+      let contentToSave = debouncedContent
+      let renamedFrom: string | null = null
+      let renamedTo: string | null = null
+      try {
+        // Only rename the currently active file (avoids renaming/jumping while user switches rapidly)
         if (
           wasActiveAtStart &&
           selectedPathRef.current === pathAtStart &&
@@ -876,6 +986,11 @@ function App() {
                 renameInProgressRef.current = true
                 await window.ipc.invoke('workspace:rename', { from: pathAtStart, to: targetPath })
                 pathToSave = targetPath
+                contentToSave = rewriteWikiLinksForRenamedFileInMarkdown(
+                  debouncedContent,
+                  pathAtStart,
+                  targetPath
+                )
                 renamedFrom = pathAtStart
                 renamedTo = targetPath
                 editorPathRef.current = targetPath
@@ -883,48 +998,61 @@ function App() {
                 initialContentByPathRef.current.delete(pathAtStart)
                 const cachedContent = editorContentByPathRef.current.get(pathAtStart)
                 if (cachedContent !== undefined) {
+                  const rewrittenCachedContent = rewriteWikiLinksForRenamedFileInMarkdown(
+                    cachedContent,
+                    pathAtStart,
+                    targetPath
+                  )
                   editorContentByPathRef.current.delete(pathAtStart)
-                  editorContentByPathRef.current.set(targetPath, cachedContent)
+                  editorContentByPathRef.current.set(targetPath, rewrittenCachedContent)
                   setEditorContentByPath((prev) => {
                     const oldContent = prev[pathAtStart]
                     if (oldContent === undefined) return prev
                     const next = { ...prev }
                     delete next[pathAtStart]
-                    next[targetPath] = oldContent
+                    next[targetPath] = rewriteWikiLinksForRenamedFileInMarkdown(
+                      oldContent,
+                      pathAtStart,
+                      targetPath
+                    )
                     return next
                   })
+                }
+                if (selectedPathRef.current === pathAtStart) {
+                  editorContentRef.current = contentToSave
+                  setEditorContent(contentToSave)
                 }
               }
             }
           }
         }
-	        await window.ipc.invoke('workspace:writeFile', {
-	          path: pathToSave,
-	          data: debouncedContent,
-	          opts: { encoding: 'utf8' }
-	        })
-	        initialContentByPathRef.current.set(pathToSave, debouncedContent)
+        await window.ipc.invoke('workspace:writeFile', {
+          path: pathToSave,
+          data: contentToSave,
+          opts: { encoding: 'utf8' }
+        })
+        initialContentByPathRef.current.set(pathToSave, contentToSave)
 
-	        // If we renamed the active file, update state/history AFTER the write completes so the editor
-	        // doesn't reload stale on-disk content mid-typing (which can drop the latest character).
-	        if (renamedFrom && renamedTo) {
-	          const fromPath = renamedFrom
-	          const toPath = renamedTo
-	          const replaceRenamedPath = (stack: ViewState[]) =>
-	            stack.map((v) => (v.type === 'file' && v.path === fromPath ? ({ type: 'file', path: toPath } satisfies ViewState) : v))
-	          setHistory({
-	            back: replaceRenamedPath(historyRef.current.back),
-	            forward: replaceRenamedPath(historyRef.current.forward),
-	          })
+        // If we renamed the active file, update state/history AFTER the write completes so the editor
+        // doesn't reload stale on-disk content mid-typing (which can drop the latest character).
+        if (renamedFrom && renamedTo) {
+          const fromPath = renamedFrom
+          const toPath = renamedTo
+          const replaceRenamedPath = (stack: ViewState[]) =>
+            stack.map((v) => (v.type === 'file' && v.path === fromPath ? ({ type: 'file', path: toPath } satisfies ViewState) : v))
+          setHistory({
+            back: replaceRenamedPath(historyRef.current.back),
+            forward: replaceRenamedPath(historyRef.current.forward),
+          })
 
-	          if (selectedPathRef.current === fromPath) {
-	            setSelectedPath(toPath)
-	          }
-	        }
+          if (selectedPathRef.current === fromPath) {
+            setSelectedPath(toPath)
+          }
+        }
 
-	        // Only update "current file" UI state if we're still on this file
-	        if (selectedPathRef.current === pathAtStart || selectedPathRef.current === pathToSave) {
-	          initialContentRef.current = debouncedContent
+        // Only update "current file" UI state if we're still on this file
+        if (selectedPathRef.current === pathAtStart || selectedPathRef.current === pathToSave) {
+          initialContentRef.current = contentToSave
           setLastSaved(new Date())
         }
       } catch (err) {
@@ -2426,6 +2554,8 @@ function App() {
         parts[parts.length - 1] = finalName
         const newPath = parts.join('/')
         await window.ipc.invoke('workspace:rename', { from: oldPath, to: newPath })
+        const rewriteForRename = (content: string) =>
+          isDir ? content : rewriteWikiLinksForRenamedFileInMarkdown(content, oldPath, newPath)
         setFileTabs(prev => prev.map(tab => (tab.path === oldPath ? { ...tab, path: newPath } : tab)))
         if (editorPathRef.current === oldPath) {
           editorPathRef.current = newPath
@@ -2433,19 +2563,26 @@ function App() {
         const baseline = initialContentByPathRef.current.get(oldPath)
         if (baseline !== undefined) {
           initialContentByPathRef.current.delete(oldPath)
-          initialContentByPathRef.current.set(newPath, baseline)
+          initialContentByPathRef.current.set(newPath, rewriteForRename(baseline))
         }
         const cachedContent = editorContentByPathRef.current.get(oldPath)
         if (cachedContent !== undefined) {
+          const rewrittenCachedContent = rewriteForRename(cachedContent)
           editorContentByPathRef.current.delete(oldPath)
-          editorContentByPathRef.current.set(newPath, cachedContent)
+          editorContentByPathRef.current.set(newPath, rewrittenCachedContent)
           setEditorContentByPath(prev => {
             if (!(oldPath in prev)) return prev
             const next = { ...prev }
             delete next[oldPath]
-            next[newPath] = cachedContent
+            next[newPath] = rewriteForRename(cachedContent)
             return next
           })
+        }
+        if (selectedPath === oldPath) {
+          const rewrittenEditorContent = rewriteForRename(editorContentRef.current)
+          editorContentRef.current = rewrittenEditorContent
+          setEditorContent(rewrittenEditorContent)
+          initialContentRef.current = rewriteForRename(initialContentRef.current)
         }
         if (selectedPath === oldPath) setSelectedPath(newPath)
       } catch (err) {

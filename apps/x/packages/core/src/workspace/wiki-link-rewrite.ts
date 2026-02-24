@@ -40,9 +40,16 @@ function splitWikiPathPrefix(rawPath: string): { pathWithoutPrefix: string; hadK
   return { pathWithoutPrefix: normalized, hadKnowledgePrefix };
 }
 
-function rewriteWikiLinksInMarkdown(markdown: string, fromWikiPath: string, toWikiPath: string): string {
+function rewriteWikiLinksInMarkdown(
+  markdown: string,
+  fromWikiPath: string,
+  toWikiPath: string,
+  opts?: { allowBareSelfNameMatch?: boolean }
+): string {
   const fromCompareKey = toWikiPathCompareKey(fromWikiPath);
+  const fromBaseName = stripMarkdownExtension(fromWikiPath).split('/').pop()?.toLowerCase() ?? null;
   const toWikiPathWithoutExtension = stripMarkdownExtension(toWikiPath);
+  const toBaseName = toWikiPathWithoutExtension.split('/').pop() ?? toWikiPathWithoutExtension;
 
   return markdown.replace(WIKI_LINK_REGEX, (fullMatch, innerRaw: string) => {
     const pipeIndex = innerRaw.indexOf('|');
@@ -61,12 +68,23 @@ function rewriteWikiLinksInMarkdown(markdown: string, fromWikiPath: string, toWi
     const { pathWithoutPrefix, hadKnowledgePrefix } = splitWikiPathPrefix(rawPath);
     if (!pathWithoutPrefix) return fullMatch;
 
-    if (toWikiPathCompareKey(pathWithoutPrefix) !== fromCompareKey) {
+    const matchesFullPath = toWikiPathCompareKey(pathWithoutPrefix) === fromCompareKey;
+    const isBareTarget = !pathWithoutPrefix.includes('/');
+    const targetBaseName = stripMarkdownExtension(pathWithoutPrefix).toLowerCase();
+    const matchesBareSelfName = Boolean(
+      opts?.allowBareSelfNameMatch
+      && fromBaseName
+      && isBareTarget
+      && targetBaseName === fromBaseName
+    );
+    if (!matchesFullPath && !matchesBareSelfName) {
       return fullMatch;
     }
 
     const preserveMarkdownExtension = rawPath.toLowerCase().endsWith(MARKDOWN_EXTENSION);
-    const rewrittenPath = preserveMarkdownExtension ? toWikiPath : toWikiPathWithoutExtension;
+    const rewrittenPath = matchesBareSelfName
+      ? (preserveMarkdownExtension ? `${toBaseName}.md` : toBaseName)
+      : (preserveMarkdownExtension ? toWikiPath : toWikiPathWithoutExtension);
     const finalPath = hadKnowledgePrefix ? `${KNOWLEDGE_PREFIX}${rewrittenPath}` : rewrittenPath;
 
     return `[[${leadingWhitespace}${finalPath}${trailingWhitespace}${anchorSuffix}${aliasSuffix}]]`;
@@ -128,13 +146,17 @@ export async function rewriteWikiLinksForRenamedKnowledgeFile(
   const markdownFiles = await collectKnowledgeMarkdownFiles(workspaceRoot);
   let rewrittenFiles = 0;
 
+  const normalizedToLower = normalizedTo.toLowerCase();
   for (const relativePath of markdownFiles) {
     const absolutePath = path.join(workspaceRoot, ...relativePath.split('/'));
     try {
       const markdown = await fs.readFile(absolutePath, 'utf8');
       if (!markdown.includes('[[')) continue;
 
-      const rewritten = rewriteWikiLinksInMarkdown(markdown, fromWikiPath, toWikiPath);
+      const isRenamedFile = normalizeRelPath(relativePath).toLowerCase() === normalizedToLower;
+      const rewritten = rewriteWikiLinksInMarkdown(markdown, fromWikiPath, toWikiPath, {
+        allowBareSelfNameMatch: isRenamedFile,
+      });
       if (rewritten === markdown) continue;
 
       await fs.writeFile(absolutePath, rewritten, 'utf8');
