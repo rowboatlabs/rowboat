@@ -1570,9 +1570,14 @@ function App() {
     }
   }, [runId, isStopping, stopClickedAt])
 
-  const handlePermissionResponse = useCallback(async (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => {
+  const handlePermissionResponse = useCallback(async (
+    toolCallId: string,
+    subflow: string[],
+    response: 'approve' | 'deny',
+    scope?: 'once' | 'session' | 'always',
+  ) => {
     if (!runId) return
-    
+
     // Optimistically update the UI immediately
     setPermissionResponses(prev => {
       const next = new Map(prev)
@@ -1584,11 +1589,11 @@ function App() {
       next.delete(toolCallId)
       return next
     })
-    
+
     try {
       await window.ipc.invoke('runs:authorizePermission', {
         runId,
-        authorization: { subflow, toolCallId, response }
+        authorization: { subflow, toolCallId, response, scope }
       })
     } catch (error) {
       console.error('Failed to authorize permission:', error)
@@ -3057,6 +3062,8 @@ function App() {
                                           <PermissionRequest
                                             toolCall={permRequest.toolCall}
                                             onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                            onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
+                                            onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
                                             isProcessing={isActive && isProcessing}
                                             response={response}

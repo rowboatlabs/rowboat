@@ -73,6 +73,7 @@ export const ToolPermissionResponseEvent = BaseRunEvent.extend({
     type: z.literal("tool-permission-response"),
     toolCallId: z.string(),
     response: z.enum(["approve", "deny"]),
+    scope: z.enum(["once", "session", "always"]).optional(),
 });
 
 export const RunErrorEvent = BaseRunEvent.extend({
@@ -106,6 +107,7 @@ export const ToolPermissionAuthorizePayload = ToolPermissionResponseEvent.pick({
     subflow: true,
     toolCallId: true,
     response: true,
+    scope: true,
 });
 
 export const AskHumanResponsePayload = AskHumanResponseEvent.pick({
