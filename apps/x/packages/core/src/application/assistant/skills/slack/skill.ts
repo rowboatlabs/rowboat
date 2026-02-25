@@ -125,6 +125,7 @@ agent-slack channel --help
 - **Summarize, don't dump** — When showing channel history, summarize the key points rather than pasting everything
 - **Prefer Slack URLs** — When referring to messages, use Slack URLs over raw channel names when available
 - **Use --limit** — Always set reasonable limits to keep output concise and token-efficient
+- **Resolve user IDs** — Messages contain raw user IDs like \`U078AHJP341\`. Use \`agent-slack user get <id>\` to resolve them to real names before presenting to the user. Batch-resolve all unknown IDs upfront rather than one at a time.
 - **Cross-reference with knowledge base** — Check if mentioned people have notes in the knowledge base
 `;
 
