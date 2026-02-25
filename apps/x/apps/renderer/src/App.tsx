@@ -3340,7 +3340,7 @@ function App() {
                           >
                             <MarkdownEditor
                               content={tabContent}
-                              onChange={(markdown) => handleEditorChange(tab.path, markdown)}
+                              onChange={(markdown) => { if (!isViewingHistory) handleEditorChange(tab.path, markdown) }}
                               placeholder="Start writing..."
                               wikiLinks={wikiLinkConfig}
                               onImageUpload={handleImageUpload}
