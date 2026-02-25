@@ -83,13 +83,15 @@ agent-slack canvas get F01234567 --workspace https://team.slack.com
 
 ## 3. Multi-Workspace
 
-If the user has multiple workspaces configured, use \`--workspace <url>\` to disambiguate:
+**Important:** The user has chosen which workspaces to use. Before your first Slack operation, read \`~/.rowboat/config/slack.json\` to see the selected workspaces. Only interact with workspaces listed in that config — ignore any other authenticated workspaces.
+
+If the selected workspace list contains multiple entries, use \`--workspace <url>\` to disambiguate:
 
 \`\`\`
 agent-slack message list "#general" --workspace https://team.slack.com
 \`\`\`
 
-Use \`agent-slack auth whoami\` to see all configured workspaces.
+If only one workspace is selected, always use \`--workspace\` with its URL to avoid ambiguity with other authenticated workspaces.
 
 ---
 

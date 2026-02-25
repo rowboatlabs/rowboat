@@ -81,6 +81,12 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   // Slack state (agent-slack CLI)
   const [slackEnabled, setSlackEnabled] = useState(false)
   const [slackLoading, setSlackLoading] = useState(true)
+  const [slackWorkspaces, setSlackWorkspaces] = useState<Array<{ url: string; name: string }>>([])
+  const [slackAvailableWorkspaces, setSlackAvailableWorkspaces] = useState<Array<{ url: string; name: string }>>([])
+  const [slackSelectedUrls, setSlackSelectedUrls] = useState<Set<string>>(new Set())
+  const [slackPickerOpen, setSlackPickerOpen] = useState(false)
+  const [slackDiscovering, setSlackDiscovering] = useState(false)
+  const [slackDiscoverError, setSlackDiscoverError] = useState<string | null>(null)
 
   const updateProviderConfig = useCallback(
     (provider: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string }>) => {
@@ -214,21 +220,67 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       setSlackLoading(true)
       const result = await window.ipc.invoke('slack:getConfig', null)
       setSlackEnabled(result.enabled)
+      setSlackWorkspaces(result.workspaces || [])
     } catch (error) {
       console.error('Failed to load Slack config:', error)
       setSlackEnabled(false)
+      setSlackWorkspaces([])
     } finally {
       setSlackLoading(false)
     }
   }, [])
 
-  // Update Slack config
-  const handleSlackToggle = useCallback(async (enabled: boolean) => {
+  // Enable Slack: discover workspaces
+  const handleSlackEnable = useCallback(async () => {
+    setSlackDiscovering(true)
+    setSlackDiscoverError(null)
+    try {
+      const result = await window.ipc.invoke('slack:listWorkspaces', null)
+      if (result.error || result.workspaces.length === 0) {
+        setSlackDiscoverError(result.error || 'No Slack workspaces found. Set up with: agent-slack auth import-desktop')
+        setSlackAvailableWorkspaces([])
+        setSlackPickerOpen(true)
+      } else {
+        setSlackAvailableWorkspaces(result.workspaces)
+        setSlackSelectedUrls(new Set(result.workspaces.map((w: { url: string }) => w.url)))
+        setSlackPickerOpen(true)
+      }
+    } catch (error) {
+      console.error('Failed to discover Slack workspaces:', error)
+      setSlackDiscoverError('Failed to discover Slack workspaces')
+      setSlackPickerOpen(true)
+    } finally {
+      setSlackDiscovering(false)
+    }
+  }, [])
+
+  // Save selected Slack workspaces
+  const handleSlackSaveWorkspaces = useCallback(async () => {
+    const selected = slackAvailableWorkspaces.filter(w => slackSelectedUrls.has(w.url))
     try {
       setSlackLoading(true)
-      await window.ipc.invoke('slack:setConfig', { enabled })
-      setSlackEnabled(enabled)
-      toast.success(enabled ? 'Slack enabled' : 'Slack disabled')
+      await window.ipc.invoke('slack:setConfig', { enabled: true, workspaces: selected })
+      setSlackEnabled(true)
+      setSlackWorkspaces(selected)
+      setSlackPickerOpen(false)
+      toast.success('Slack enabled')
+    } catch (error) {
+      console.error('Failed to save Slack config:', error)
+      toast.error('Failed to save Slack settings')
+    } finally {
+      setSlackLoading(false)
+    }
+  }, [slackAvailableWorkspaces, slackSelectedUrls])
+
+  // Disable Slack
+  const handleSlackDisable = useCallback(async () => {
+    try {
+      setSlackLoading(true)
+      await window.ipc.invoke('slack:setConfig', { enabled: false, workspaces: [] })
+      setSlackEnabled(false)
+      setSlackWorkspaces([])
+      setSlackPickerOpen(false)
+      toast.success('Slack disabled')
     } catch (error) {
       console.error('Failed to update Slack config:', error)
       toast.error('Failed to update Slack settings')
@@ -492,28 +544,82 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Render Slack row
   const renderSlackRow = () => (
-    <div className="flex items-center justify-between gap-3 rounded-md px-3 py-3 hover:bg-accent">
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="flex size-10 items-center justify-center rounded-md bg-muted">
-          <MessageSquare className="size-5" />
+    <div className="rounded-md px-3 py-3 hover:bg-accent">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex size-10 items-center justify-center rounded-md bg-muted">
+            <MessageSquare className="size-5" />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-medium truncate">Slack</span>
+            {slackEnabled && slackWorkspaces.length > 0 ? (
+              <span className="text-xs text-muted-foreground truncate">
+                {slackWorkspaces.map(w => w.name).join(', ')}
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground truncate">
+                Send messages and view channels
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex flex-col min-w-0">
-          <span className="text-sm font-medium truncate">Slack</span>
-          <span className="text-xs text-muted-foreground truncate">
-            Send messages and view channels
-          </span>
+        <div className="shrink-0 flex items-center gap-2">
+          {(slackLoading || slackDiscovering) && (
+            <Loader2 className="size-3 animate-spin" />
+          )}
+          {slackEnabled ? (
+            <Switch
+              checked={true}
+              onCheckedChange={() => handleSlackDisable()}
+              disabled={slackLoading}
+            />
+          ) : (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleSlackEnable}
+              disabled={slackLoading || slackDiscovering}
+            >
+              Enable
+            </Button>
+          )}
         </div>
       </div>
-      <div className="shrink-0 flex items-center gap-2">
-        {slackLoading && (
-          <Loader2 className="size-3 animate-spin" />
-        )}
-        <Switch
-          checked={slackEnabled}
-          onCheckedChange={handleSlackToggle}
-          disabled={slackLoading}
-        />
-      </div>
+      {slackPickerOpen && (
+        <div className="mt-2 ml-13 space-y-2">
+          {slackDiscoverError ? (
+            <p className="text-xs text-muted-foreground">{slackDiscoverError}</p>
+          ) : (
+            <>
+              {slackAvailableWorkspaces.map(w => (
+                <label key={w.url} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={slackSelectedUrls.has(w.url)}
+                    onChange={(e) => {
+                      setSlackSelectedUrls(prev => {
+                        const next = new Set(prev)
+                        if (e.target.checked) next.add(w.url)
+                        else next.delete(w.url)
+                        return next
+                      })
+                    }}
+                    className="rounded border-border"
+                  />
+                  <span className="truncate">{w.name}</span>
+                </label>
+              ))}
+              <Button
+                size="sm"
+                onClick={handleSlackSaveWorkspaces}
+                disabled={slackSelectedUrls.size === 0 || slackLoading}
+              >
+                Save
+              </Button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 

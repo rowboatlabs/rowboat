@@ -15,7 +15,11 @@ import { bus } from '@x/core/dist/runs/bus.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import z from 'zod';
+
+const execAsync = promisify(exec);
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
@@ -397,12 +401,26 @@ export function setupIpcHandlers() {
     'slack:getConfig': async () => {
       const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
       const config = await repo.getConfig();
-      return { enabled: config.enabled };
+      return { enabled: config.enabled, workspaces: config.workspaces };
     },
     'slack:setConfig': async (_event, args) => {
       const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
-      await repo.setConfig({ enabled: args.enabled });
+      await repo.setConfig({ enabled: args.enabled, workspaces: args.workspaces });
       return { success: true };
+    },
+    'slack:listWorkspaces': async () => {
+      try {
+        const { stdout } = await execAsync('agent-slack auth whoami', { timeout: 10000 });
+        const parsed = JSON.parse(stdout);
+        const workspaces = (parsed.workspaces || []).map((w: { workspace_url?: string; workspace_name?: string }) => ({
+          url: w.workspace_url || '',
+          name: w.workspace_name || '',
+        }));
+        return { workspaces };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Failed to list Slack workspaces';
+        return { workspaces: [], error: message };
+      }
     },
     'onboarding:getStatus': async () => {
       // Show onboarding if it hasn't been completed yet

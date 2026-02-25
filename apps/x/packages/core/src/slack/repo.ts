@@ -10,7 +10,7 @@ export interface ISlackConfigRepo {
 
 export class FSSlackConfigRepo implements ISlackConfigRepo {
     private readonly configPath = path.join(WorkDir, 'config', 'slack.json');
-    private readonly defaultConfig: SlackConfig = { enabled: false };
+    private readonly defaultConfig: SlackConfig = { enabled: false, workspaces: [] };
 
     constructor() {
         this.ensureConfigFile();

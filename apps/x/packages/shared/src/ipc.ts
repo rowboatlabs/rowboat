@@ -274,14 +274,23 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({
       enabled: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
     }),
   },
   'slack:setConfig': {
     req: z.object({
       enabled: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
     }),
     res: z.object({
       success: z.literal(true),
+    }),
+  },
+  'slack:listWorkspaces': {
+    req: z.null(),
+    res: z.object({
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
     }),
   },
   'onboarding:getStatus': {
