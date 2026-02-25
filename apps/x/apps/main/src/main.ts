@@ -18,6 +18,7 @@ import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
+import { init as initSlackSync } from "@x/core/dist/knowledge/sync_slack.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
 
@@ -172,6 +173,9 @@ app.whenReady().then(async () => {
 
   // start background agent runner (scheduled agents)
   initAgentRunner();
+
+  // start slack sync
+  initSlackSync();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

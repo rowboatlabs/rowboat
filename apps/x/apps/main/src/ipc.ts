@@ -30,6 +30,7 @@ import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
+import { triggerSync as triggerSlackSync } from '@x/core/dist/knowledge/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import * as composioHandler from './composio-handler.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -406,6 +407,7 @@ export function setupIpcHandlers() {
     'slack:setConfig': async (_event, args) => {
       const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
       await repo.setConfig({ enabled: args.enabled, workspaces: args.workspaces });
+      if (args.enabled) triggerSlackSync();
       return { success: true };
     },
     'slack:listWorkspaces': async () => {
