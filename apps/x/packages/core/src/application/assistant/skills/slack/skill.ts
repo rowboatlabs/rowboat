@@ -5,19 +5,11 @@ You interact with Slack by running **agent-slack** commands through \`executeCom
 
 ---
 
-## 1. Check Authentication
+## 1. Check Connection
 
-Before any Slack operation, verify credentials:
+Before any Slack operation, read \`~/.rowboat/config/slack.json\`. If \`enabled\` is \`false\` or the \`workspaces\` array is empty, simply tell the user: "Slack is not enabled. You can enable it in the Connectors settings." Do not attempt any agent-slack commands.
 
-\`\`\`
-executeCommand({ command: "agent-slack auth test" })
-\`\`\`
-
-If auth fails, guide the user:
-- **Easiest (macOS):** \`agent-slack auth import-desktop\` — imports tokens from Slack Desktop (no need to quit Slack)
-- **Chrome:** \`agent-slack auth import-chrome\` — imports from a logged-in Slack tab in Google Chrome
-- **Manual:** \`agent-slack auth add --workspace-url https://team.slack.com --token xoxp-...\`
-- **Check configured workspaces:** \`agent-slack auth whoami\`
+If enabled, use the workspace URLs from the config for all commands.
 
 ---
 
@@ -125,7 +117,7 @@ agent-slack channel --help
 - **Summarize, don't dump** — When showing channel history, summarize the key points rather than pasting everything
 - **Prefer Slack URLs** — When referring to messages, use Slack URLs over raw channel names when available
 - **Use --limit** — Always set reasonable limits to keep output concise and token-efficient
-- **Resolve user IDs** — Messages contain raw user IDs like \`U078AHJP341\`. Use \`agent-slack user get <id>\` to resolve them to real names before presenting to the user. Batch-resolve all unknown IDs upfront rather than one at a time.
+- **Resolve user IDs** — Messages contain raw user IDs like \`U078AHJP341\`. Resolve them to real names before presenting to the user. Batch all lookups into a single \`executeCommand\` call using \`;\` separators, e.g. \`agent-slack user get U078AHJP341 --workspace ... ; agent-slack user get U090UEZCEQ0 --workspace ...\`
 - **Cross-reference with knowledge base** — Check if mentioned people have notes in the knowledge base
 `;
 
