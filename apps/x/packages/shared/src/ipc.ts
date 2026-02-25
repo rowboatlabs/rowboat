@@ -417,6 +417,10 @@ const ipcSchemas = {
     req: z.object({ path: RelPath, oid: z.string() }),
     res: z.object({ ok: z.literal(true) }),
   },
+  'knowledge:didCommit': {
+    req: z.object({}),
+    res: z.null(),
+  },
   // Search channels
   'search:query': {
     req: z.object({

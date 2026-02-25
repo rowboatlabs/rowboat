@@ -5,6 +5,21 @@ import { WorkDir } from '../config/config.js';
 
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
 
+// Simple promise-based mutex to serialize commits
+let commitLock: Promise<void> = Promise.resolve();
+
+// Commit listeners for notifying other layers (e.g. renderer refresh)
+type CommitListener = () => void;
+const commitListeners: CommitListener[] = [];
+
+export function onCommit(listener: CommitListener): () => void {
+    commitListeners.push(listener);
+    return () => {
+        const idx = commitListeners.indexOf(listener);
+        if (idx >= 0) commitListeners.splice(idx, 1);
+    };
+}
+
 /**
  * Initialize a git repo in the knowledge directory if one doesn't exist.
  * Stages all existing .md files and makes an initial commit.
@@ -66,8 +81,22 @@ function getAllMdFiles(baseDir: string, relDir: string): string[] {
 
 /**
  * Stage all changes to .md files and commit. No-op if nothing changed.
+ * Serialized via a promise lock to prevent concurrent git index corruption.
  */
 export async function commitAll(message: string, authorName: string): Promise<void> {
+    const prev = commitLock;
+    let resolve: () => void;
+    commitLock = new Promise(r => { resolve = r; });
+
+    await prev;
+    try {
+        await commitAllInner(message, authorName);
+    } finally {
+        resolve!();
+    }
+}
+
+async function commitAllInner(message: string, authorName: string): Promise<void> {
     const matrix = await git.statusMatrix({ fs, dir: KNOWLEDGE_DIR });
 
     let hasChanges = false;
@@ -98,6 +127,10 @@ export async function commitAll(message: string, authorName: string): Promise<vo
         message,
         author: { name: authorName, email: 'local' },
     });
+
+    for (const listener of commitListeners) {
+        try { listener(); } catch { /* ignore */ }
+    }
 }
 
 export interface CommitInfo {
@@ -107,9 +140,12 @@ export interface CommitInfo {
     author: string;
 }
 
+const MAX_FILE_HISTORY = 50;
+
 /**
  * Get commit history for a specific file.
  * Returns commits where the file content changed, most recent first.
+ * Capped at MAX_FILE_HISTORY entries.
  */
 export async function getFileHistory(knowledgeRelPath: string): Promise<CommitInfo[]> {
     // Normalize path separators for git (always forward slashes)
@@ -128,6 +164,8 @@ export async function getFileHistory(knowledgeRelPath: string): Promise<CommitIn
 
     // Walk through commits and check if file changed between consecutive commits
     for (let i = 0; i < commits.length; i++) {
+        if (result.length >= MAX_FILE_HISTORY) break;
+
         const commit = commits[i]!;
         const parentCommit = commits[i + 1]; // undefined for the first (oldest) commit
 

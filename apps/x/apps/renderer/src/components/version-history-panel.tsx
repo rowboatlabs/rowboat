@@ -1,6 +1,5 @@
-import * as React from 'react'
 import { useEffect, useState, useCallback } from 'react'
-import { X, Lock } from 'lucide-react'
+import { X, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
@@ -55,6 +54,13 @@ export function VersionHistoryPanel({
 
   useEffect(() => {
     loadHistory()
+  }, [loadHistory])
+
+  // Refresh when new commits land
+  useEffect(() => {
+    return window.ipc.on('knowledge:didCommit', () => {
+      loadHistory()
+    })
   }, [loadHistory])
 
   const handleSelectCommit = useCallback(async (oid: string, isLatest: boolean) => {
@@ -135,7 +141,7 @@ export function VersionHistoryPanel({
                 >
                   <div className="flex items-center gap-1.5">
                     {!isLatest && (
-                      <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
                     )}
                     <span className="text-sm text-foreground">
                       {date} &middot; {time}

@@ -107,6 +107,18 @@ const changeQueue = new Set<string>();
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
+ * Emit knowledge commit event to all renderer windows
+ */
+function emitKnowledgeCommitEvent(): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('knowledge:didCommit', {});
+    }
+  }
+}
+
+/**
  * Emit workspace change event to all renderer windows
  */
 function emitWorkspaceChangeEvent(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): void {
@@ -284,6 +296,9 @@ export function stopServicesWatcher(): void {
  * Add new handlers here as you add channels to IPCChannels
  */
 export function setupIpcHandlers() {
+  // Forward knowledge commit events to renderer for panel refresh
+  versionHistory.onCommit(() => emitKnowledgeCommitEvent());
+
   registerIpcHandlers({
     'app:getVersions': async () => {
       // args is null for this channel (no request payload)
