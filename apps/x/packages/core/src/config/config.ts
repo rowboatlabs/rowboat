@@ -92,3 +92,8 @@ function ensureWelcomeFile() {
 ensureDirs();
 ensureDefaultConfigs();
 ensureWelcomeFile();
+
+// Initialize version history repo (async, fire-and-forget on startup)
+import('../knowledge/version_history.js').then(m => m.initRepo()).catch(err => {
+    console.error('[VersionHistory] Failed to init repo:', err);
+});
