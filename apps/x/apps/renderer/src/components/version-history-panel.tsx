@@ -147,10 +147,11 @@ export function VersionHistoryPanel({
                       {date} &middot; {time}
                     </span>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    {commit.author}
-                    {isLatest && ' (current)'}
-                  </div>
+                  {isLatest && (
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      Current version
+                    </div>
+                  )}
                 </button>
               )
             })}
