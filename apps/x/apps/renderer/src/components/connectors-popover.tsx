@@ -17,7 +17,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
 import { getGoogleClientId, setGoogleClientId, clearGoogleClientId } from "@/lib/google-client-id-store"
 import { toast } from "sonner"
@@ -55,11 +54,9 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
   const [granolaEnabled, setGranolaEnabled] = useState(false)
   const [granolaLoading, setGranolaLoading] = useState(true)
 
-  // Composio/Slack state
-  const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
-  const [slackConnected, setSlackConnected] = useState(false)
+  // Slack state (agent-slack CLI)
+  const [slackEnabled, setSlackEnabled] = useState(false)
   const [slackLoading, setSlackLoading] = useState(true)
-  const [slackConnecting, setSlackConnecting] = useState(false)
 
   // Load available providers on mount
   useEffect(() => {
@@ -107,76 +104,30 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     }
   }, [])
 
-  // Load Slack connection status
-  const refreshSlackStatus = useCallback(async () => {
+  // Load Slack config
+  const refreshSlackConfig = useCallback(async () => {
     try {
       setSlackLoading(true)
-      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'slack' })
-      setSlackConnected(result.isConnected)
+      const result = await window.ipc.invoke('slack:getConfig', null)
+      setSlackEnabled(result.enabled)
     } catch (error) {
-      console.error('Failed to load Slack status:', error)
-      setSlackConnected(false)
+      console.error('Failed to load Slack config:', error)
+      setSlackEnabled(false)
     } finally {
       setSlackLoading(false)
     }
   }, [])
 
-  // Connect to Slack via Composio
-  const startSlackConnect = useCallback(async () => {
-    try {
-      setSlackConnecting(true)
-      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'slack' })
-      if (!result.success) {
-        toast.error(result.error || 'Failed to connect to Slack')
-        setSlackConnecting(false)
-      }
-      // Success will be handled by composio:didConnect event
-    } catch (error) {
-      console.error('Failed to connect to Slack:', error)
-      toast.error('Failed to connect to Slack')
-      setSlackConnecting(false)
-    }
-  }, [])
-
-  // Handle Slack connect button click
-  const handleConnectSlack = useCallback(async () => {
-    // Check if Composio is configured
-    const configResult = await window.ipc.invoke('composio:is-configured', null)
-    if (!configResult.configured) {
-      setComposioApiKeyOpen(true)
-      return
-    }
-    await startSlackConnect()
-  }, [startSlackConnect])
-
-  // Handle Composio API key submission
-  const handleComposioApiKeySubmit = useCallback(async (apiKey: string) => {
-    try {
-      await window.ipc.invoke('composio:set-api-key', { apiKey })
-      setComposioApiKeyOpen(false)
-      toast.success('Composio API key saved')
-      // Now start the Slack connection
-      await startSlackConnect()
-    } catch (error) {
-      console.error('Failed to save Composio API key:', error)
-      toast.error('Failed to save API key')
-    }
-  }, [startSlackConnect])
-
-  // Disconnect from Slack
-  const handleDisconnectSlack = useCallback(async () => {
+  // Update Slack config
+  const handleSlackToggle = useCallback(async (enabled: boolean) => {
     try {
       setSlackLoading(true)
-      const result = await window.ipc.invoke('composio:disconnect', { toolkitSlug: 'slack' })
-      if (result.success) {
-        setSlackConnected(false)
-        toast.success('Disconnected from Slack')
-      } else {
-        toast.error('Failed to disconnect from Slack')
-      }
+      await window.ipc.invoke('slack:setConfig', { enabled })
+      setSlackEnabled(enabled)
+      toast.success(enabled ? 'Slack enabled' : 'Slack disabled')
     } catch (error) {
-      console.error('Failed to disconnect from Slack:', error)
-      toast.error('Failed to disconnect from Slack')
+      console.error('Failed to update Slack config:', error)
+      toast.error('Failed to update Slack settings')
     } finally {
       setSlackLoading(false)
     }
@@ -187,8 +138,8 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     // Refresh Granola
     refreshGranolaConfig()
 
-    // Refresh Slack status
-    refreshSlackStatus()
+    // Refresh Slack config
+    refreshSlackConfig()
 
     // Refresh OAuth providers
     if (providers.length === 0) return
@@ -226,7 +177,7 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     }
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackStatus])
+  }, [providers, refreshGranolaConfig, refreshSlackConfig])
 
   // Refresh statuses when popover opens or providers list changes
   useEffect(() => {
@@ -269,26 +220,6 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
 
     return cleanup
   }, [refreshAllStatuses])
-
-  // Listen for Composio connection events
-  useEffect(() => {
-    const cleanup = window.ipc.on('composio:didConnect', (event) => {
-      const { toolkitSlug, success, error } = event
-
-      if (toolkitSlug === 'slack') {
-        setSlackConnected(success)
-        setSlackConnecting(false)
-
-        if (success) {
-          toast.success('Connected to Slack')
-        } else {
-          toast.error(error || 'Failed to connect to Slack')
-        }
-      }
-    })
-
-    return cleanup
-  }, [])
 
   const startConnect = useCallback(async (provider: string, clientId?: string) => {
     setProviderStates(prev => ({
@@ -581,42 +512,20 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
                   </div>
                   <div className="flex flex-col min-w-0">
                     <span className="text-sm font-medium truncate">Slack</span>
-                    {slackLoading ? (
-                      <span className="text-xs text-muted-foreground">Checking...</span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground truncate">
-                        Send messages and view channels
-                      </span>
-                    )}
+                    <span className="text-xs text-muted-foreground truncate">
+                      Send messages and view channels
+                    </span>
                   </div>
                 </div>
-                <div className="shrink-0">
-                  {slackLoading ? (
-                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                  ) : slackConnected ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleDisconnectSlack}
-                      className="h-7 px-2 text-xs"
-                    >
-                      Disconnect
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={handleConnectSlack}
-                      disabled={slackConnecting}
-                      className="h-7 px-2 text-xs"
-                    >
-                      {slackConnecting ? (
-                        <Loader2 className="size-3 animate-spin" />
-                      ) : (
-                        "Connect"
-                      )}
-                    </Button>
+                <div className="shrink-0 flex items-center gap-2">
+                  {slackLoading && (
+                    <Loader2 className="size-3 animate-spin" />
                   )}
+                  <Switch
+                    checked={slackEnabled}
+                    onCheckedChange={handleSlackToggle}
+                    disabled={slackLoading}
+                  />
                 </div>
               </div>
             </>
@@ -624,12 +533,6 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
         </div>
       </PopoverContent>
     </Popover>
-    <ComposioApiKeyModal
-      open={composioApiKeyOpen}
-      onOpenChange={setComposioApiKeyOpen}
-      onSubmit={handleComposioApiKeySubmit}
-      isSubmitting={slackConnecting}
-    />
     </>
   )
 }

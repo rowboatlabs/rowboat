@@ -270,6 +270,20 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  'slack:getConfig': {
+    req: z.null(),
+    res: z.object({
+      enabled: z.boolean(),
+    }),
+  },
+  'slack:setConfig': {
+    req: z.object({
+      enabled: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
   'onboarding:getStatus': {
     req: z.null(),
     res: z.object({
