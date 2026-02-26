@@ -9,7 +9,8 @@ import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeft
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
-import { ChatInputWithMentions } from './components/chat-input-with-mentions';
+import { ChatInputWithMentions, type StagedAttachment } from './components/chat-input-with-mentions';
+import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
@@ -52,6 +53,7 @@ import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
 import {
+  type ChatMessage,
   type ChatTabViewState,
   type ConversationItem,
   type ToolCall,
@@ -1171,19 +1173,41 @@ function App() {
             if (msg.role === 'user' || msg.role === 'assistant') {
               // Extract text content from message
               let textContent = ''
+              let msgAttachments: ChatMessage['attachments'] = undefined
               if (typeof msg.content === 'string') {
                 textContent = msg.content
               } else if (Array.isArray(msg.content)) {
-                // Extract text parts
-                textContent = msg.content
-                  .filter((part: { type: string }) => part.type === 'text')
-                  .map((part: { type: string; text?: string }) => part.text || '')
+                const contentParts = msg.content as Array<{
+                  type: string
+                  text?: string
+                  path?: string
+                  filename?: string
+                  mimeType?: string
+                  size?: number
+                  toolCallId?: string
+                  toolName?: string
+                  arguments?: ToolUIPart['input']
+                }>
+
+                textContent = contentParts
+                  .filter((part) => part.type === 'text')
+                  .map((part) => part.text || '')
                   .join('')
-                
+
+                const attachmentParts = contentParts.filter((part) => part.type === 'attachment' && part.path)
+                if (attachmentParts.length > 0) {
+                  msgAttachments = attachmentParts.map((part) => ({
+                    path: part.path!,
+                    filename: part.filename || part.path!.split('/').pop() || part.path!,
+                    mimeType: part.mimeType || 'application/octet-stream',
+                    size: part.size,
+                  }))
+                }
+
                 // Also extract tool-call parts from assistant messages
                 if (msg.role === 'assistant') {
-                  for (const part of msg.content) {
-                    if (part.type === 'tool-call') {
+                  for (const part of contentParts) {
+                    if (part.type === 'tool-call' && part.toolCallId && part.toolName) {
                       const toolCall: ToolCall = {
                         id: part.toolCallId,
                         name: part.toolName,
@@ -1197,11 +1221,12 @@ function App() {
                   }
                 }
               }
-              if (textContent) {
+              if (textContent || msgAttachments) {
                 items.push({
                   id: event.messageId,
                   role: msg.role,
                   content: textContent,
+                  attachments: msgAttachments,
                   timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
                 })
               }
@@ -1618,20 +1643,35 @@ function App() {
     return cleanup
   }, [handleRunEvent])
 
-  const handlePromptSubmit = async (message: PromptInputMessage, mentions?: FileMention[]) => {
+  const handlePromptSubmit = async (
+    message: PromptInputMessage,
+    mentions?: FileMention[],
+    stagedAttachments: StagedAttachment[] = []
+  ) => {
     if (isProcessing) return
 
-    const { text } = message;
+    const { text } = message
     const userMessage = text.trim()
-    if (!userMessage) return
+    const hasAttachments = stagedAttachments.length > 0
+    if (!userMessage && !hasAttachments) return
 
     setMessage('')
 
     const userMessageId = `user-${Date.now()}`
-    setConversation(prev => [...prev, {
+    const displayAttachments: ChatMessage['attachments'] = hasAttachments
+      ? stagedAttachments.map((attachment) => ({
+          path: attachment.path,
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          thumbnailUrl: attachment.thumbnailUrl,
+        }))
+      : undefined
+    setConversation((prev) => [...prev, {
       id: userMessageId,
       role: 'user',
       content: userMessage,
+      attachments: displayAttachments,
       timestamp: Date.now(),
     }])
 
@@ -1647,42 +1687,98 @@ function App() {
         newRunCreatedAt = run.createdAt
         setRunId(currentRunId)
         // Update active chat tab's runId to the new run
-        setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: currentRunId } : t))
+        setChatTabs((prev) => prev.map((tab) => (
+          tab.id === activeChatTabId
+            ? { ...tab, runId: currentRunId }
+            : tab
+        )))
         isNewRun = true
       }
 
-      // Read mentioned file contents and format message with XML context
-      let formattedMessage = userMessage
-      if (mentions && mentions.length > 0) {
-        const attachedFiles = await Promise.all(
-          mentions.map(async (m) => {
-            try {
-              const result = await window.ipc.invoke('workspace:readFile', { path: m.path })
-              return { path: m.path, content: result.data as string }
-            } catch (err) {
-              console.error('Failed to read mentioned file:', m.path, err)
-              return { path: m.path, content: `[Error reading file: ${m.path}]` }
-            }
-          })
-        )
+      let titleSource = userMessage
 
-        if (attachedFiles.length > 0) {
-          const filesXml = attachedFiles
-            .map(f => `<file path="${f.path}">\n${f.content}\n</file>`)
-            .join('\n')
-          formattedMessage = `<attached-files>\n${filesXml}\n</attached-files>\n\n${userMessage}`
+      if (hasAttachments) {
+        type ContentPart =
+          | { type: 'text'; text: string }
+          | {
+              type: 'attachment'
+              path: string
+              filename: string
+              mimeType: string
+              size?: number
+            }
+
+        const contentParts: ContentPart[] = []
+
+        if (mentions && mentions.length > 0) {
+          for (const mention of mentions) {
+            contentParts.push({
+              type: 'attachment',
+              path: mention.path,
+              filename: mention.displayName || mention.path.split('/').pop() || mention.path,
+              mimeType: 'text/markdown',
+            })
+          }
         }
+
+        for (const attachment of stagedAttachments) {
+          contentParts.push({
+            type: 'attachment',
+            path: attachment.path,
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            size: attachment.size,
+          })
+        }
+
+        if (userMessage) {
+          contentParts.push({ type: 'text', text: userMessage })
+        } else {
+          titleSource = stagedAttachments[0]?.filename ?? ''
+        }
+
+        // Shared IPC payload types can lag until package rebuilds; runtime validation still enforces schema.
+        const attachmentPayload = contentParts as unknown as string
+        await window.ipc.invoke('runs:createMessage', {
+          runId: currentRunId,
+          message: attachmentPayload,
+        })
+      } else {
+        // Legacy path: plain string with optional XML-formatted @mentions.
+        let formattedMessage = userMessage
+        if (mentions && mentions.length > 0) {
+          const attachedFiles = await Promise.all(
+            mentions.map(async (mention) => {
+              try {
+                const result = await window.ipc.invoke('workspace:readFile', { path: mention.path })
+                return { path: mention.path, content: result.data as string }
+              } catch (err) {
+                console.error('Failed to read mentioned file:', mention.path, err)
+                return { path: mention.path, content: `[Error reading file: ${mention.path}]` }
+              }
+            })
+          )
+
+          if (attachedFiles.length > 0) {
+            const filesXml = attachedFiles
+              .map((file) => `<file path="${file.path}">\n${file.content}\n</file>`)
+              .join('\n')
+            formattedMessage = `<attached-files>\n${filesXml}\n</attached-files>\n\n${userMessage}`
+          }
+        }
+
+        await window.ipc.invoke('runs:createMessage', {
+          runId: currentRunId,
+          message: formattedMessage,
+        })
+
+        titleSource = formattedMessage
       }
 
-      await window.ipc.invoke('runs:createMessage', {
-        runId: currentRunId,
-        message: formattedMessage,
-      })
-
       if (isNewRun) {
-        const inferredTitle = inferRunTitleFromMessage(formattedMessage)
-        setRuns(prev => {
-          const withoutCurrent = prev.filter(run => run.id !== currentRunId)
+        const inferredTitle = inferRunTitleFromMessage(titleSource)
+        setRuns((prev) => {
+          const withoutCurrent = prev.filter((run) => run.id !== currentRunId)
           return [{
             id: currentRunId!,
             title: inferredTitle,
@@ -2849,6 +2945,18 @@ function App() {
   const renderConversationItem = (item: ConversationItem, tabId: string) => {
     if (isChatMessage(item)) {
       if (item.role === 'user') {
+        if (item.attachments && item.attachments.length > 0) {
+          return (
+            <Message key={item.id} from={item.role}>
+              <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
+                <ChatMessageAttachments attachments={item.attachments} />
+              </MessageContent>
+              {item.content && (
+                <MessageContent>{item.content}</MessageContent>
+              )}
+            </Message>
+          )
+        }
         const { message, files } = parseAttachedFiles(item.content)
         return (
           <Message key={item.id} from={item.role}>

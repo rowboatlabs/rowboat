@@ -2,10 +2,19 @@ import type { ToolUIPart } from 'ai'
 import z from 'zod'
 import { AskHumanRequestEvent, ToolPermissionRequestEvent } from '@x/shared/src/runs.js'
 
+export interface MessageAttachment {
+  path: string
+  filename: string
+  mimeType: string
+  size?: number
+  thumbnailUrl?: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  attachments?: MessageAttachment[]
   timestamp: number
 }
 

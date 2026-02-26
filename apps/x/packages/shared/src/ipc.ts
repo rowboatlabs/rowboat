@@ -6,6 +6,7 @@ import { LlmModelConfig } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
+import { UserMessageContent } from './message.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -128,7 +129,7 @@ const ipcSchemas = {
   'runs:createMessage': {
     req: z.object({
       runId: z.string(),
-      message: z.string(),
+      message: UserMessageContent,
     }),
     res: z.object({
       messageId: z.string(),
