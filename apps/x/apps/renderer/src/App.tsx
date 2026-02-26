@@ -1180,7 +1180,10 @@ function App() {
                 const contentParts = msg.content as Array<{
                   type: string
                   text?: string
-                  attachment?: NonNullable<ChatMessage['attachments']>[number]
+                  path?: string
+                  filename?: string
+                  mimeType?: string
+                  size?: number
                   toolCallId?: string
                   toolName?: string
                   arguments?: ToolUIPart['input']
@@ -1191,13 +1194,16 @@ function App() {
                   .map((part) => part.text || '')
                   .join('')
 
-                const attachmentParts = contentParts.filter((part) => part.type === 'attachment' && part.attachment)
+                const attachmentParts = contentParts.filter((part) => part.type === 'attachment' && part.path)
                 if (attachmentParts.length > 0) {
-                  msgAttachments = attachmentParts
-                    .map((part) => part.attachment)
-                    .filter((attachment): attachment is NonNullable<ChatMessage['attachments']>[number] => Boolean(attachment))
+                  msgAttachments = attachmentParts.map((part) => ({
+                    path: part.path!,
+                    filename: part.filename || part.path!.split('/').pop() || part.path!,
+                    mimeType: part.mimeType || 'application/octet-stream',
+                    size: part.size,
+                  }))
                 }
-                
+
                 // Also extract tool-call parts from assistant messages
                 if (msg.role === 'assistant') {
                   for (const part of contentParts) {
@@ -1654,10 +1660,9 @@ function App() {
     const userMessageId = `user-${Date.now()}`
     const displayAttachments: ChatMessage['attachments'] = hasAttachments
       ? stagedAttachments.map((attachment) => ({
-          type: attachment.isImage ? 'image' : 'file',
           path: attachment.path,
           filename: attachment.filename,
-          mediaType: attachment.mediaType,
+          mimeType: attachment.mimeType,
           size: attachment.size,
           thumbnailUrl: attachment.thumbnailUrl,
         }))
@@ -1697,13 +1702,10 @@ function App() {
           | { type: 'text'; text: string }
           | {
               type: 'attachment'
-              attachment: {
-                type: 'file' | 'image'
-                path: string
-                filename: string
-                mediaType: string
-                size?: number
-              }
+              path: string
+              filename: string
+              mimeType: string
+              size?: number
             }
 
         const contentParts: ContentPart[] = []
@@ -1712,12 +1714,9 @@ function App() {
           for (const mention of mentions) {
             contentParts.push({
               type: 'attachment',
-              attachment: {
-                type: 'file',
-                path: mention.path,
-                filename: mention.displayName || mention.path.split('/').pop() || mention.path,
-                mediaType: 'text/markdown',
-              },
+              path: mention.path,
+              filename: mention.displayName || mention.path.split('/').pop() || mention.path,
+              mimeType: 'text/markdown',
             })
           }
         }
@@ -1725,13 +1724,10 @@ function App() {
         for (const attachment of stagedAttachments) {
           contentParts.push({
             type: 'attachment',
-            attachment: {
-              type: attachment.isImage ? 'image' : 'file',
-              path: attachment.path,
-              filename: attachment.filename,
-              mediaType: attachment.mediaType,
-              size: attachment.size,
-            },
+            path: attachment.path,
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            size: attachment.size,
           })
         }
 

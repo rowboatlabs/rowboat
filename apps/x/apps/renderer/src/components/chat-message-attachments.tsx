@@ -54,13 +54,13 @@ function ImageAttachmentPreview({ attachment }: { attachment: MessageAttachment 
     () => async () => {
       try {
         const result = await window.ipc.invoke('shell:readFileBase64', { path: attachment.path })
-        const mimeType = result.mimeType || attachment.mediaType || 'image/*'
+        const mimeType = result.mimeType || attachment.mimeType || 'image/*'
         setSrc(`data:${mimeType};base64,${result.data}`)
       } catch {
         // Keep current src; fallback rendering (broken image icon) is better than crashing.
       }
     },
-    [attachment.mediaType, attachment.path]
+    [attachment.mimeType, attachment.path]
   )
 
   useEffect(() => {
@@ -91,8 +91,8 @@ interface ChatMessageAttachmentsProps {
 export function ChatMessageAttachments({ attachments, className }: ChatMessageAttachmentsProps) {
   if (attachments.length === 0) return null
 
-  const imageAttachments = attachments.filter((attachment) => isImageMime(attachment.mediaType))
-  const fileAttachments = attachments.filter((attachment) => !isImageMime(attachment.mediaType))
+  const imageAttachments = attachments.filter((attachment) => isImageMime(attachment.mimeType))
+  const fileAttachments = attachments.filter((attachment) => !isImageMime(attachment.mimeType))
 
   return (
     <div className={cn('flex flex-col items-end gap-2', className)}>

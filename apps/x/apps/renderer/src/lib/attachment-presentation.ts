@@ -3,7 +3,7 @@ import { getExtension } from '@/lib/file-utils'
 export type AttachmentLike = {
   filename?: string
   path: string
-  mediaType: string
+  mimeType: string
 }
 
 export type AttachmentIconKind =
@@ -39,7 +39,7 @@ export function getAttachmentTypeLabel(attachment: AttachmentLike): string {
   const ext = getExtension(getAttachmentDisplayName(attachment))
   if (ext) return ext.toUpperCase()
 
-  const mediaType = attachment.mediaType.toLowerCase()
+  const mediaType = attachment.mimeType.toLowerCase()
   if (mediaType.startsWith('audio/')) return 'AUDIO'
   if (mediaType.startsWith('video/')) return 'VIDEO'
   if (mediaType.startsWith('text/')) return 'TEXT'
@@ -52,7 +52,7 @@ export function getAttachmentTypeLabel(attachment: AttachmentLike): string {
 }
 
 export function getAttachmentIconKind(attachment: AttachmentLike): AttachmentIconKind {
-  const mediaType = attachment.mediaType.toLowerCase()
+  const mediaType = attachment.mimeType.toLowerCase()
   const ext = getExtension(attachment.filename || attachment.path)
 
   if (mediaType.startsWith('audio/')) return 'audio'

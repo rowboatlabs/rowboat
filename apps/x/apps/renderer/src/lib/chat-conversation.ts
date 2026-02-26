@@ -3,10 +3,9 @@ import z from 'zod'
 import { AskHumanRequestEvent, ToolPermissionRequestEvent } from '@x/shared/src/runs.js'
 
 export interface MessageAttachment {
-  type: 'file' | 'image'
   path: string
   filename: string
-  mediaType: string
+  mimeType: string
   size?: number
   thumbnailUrl?: string
 }

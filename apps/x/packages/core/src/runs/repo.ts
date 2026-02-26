@@ -49,10 +49,10 @@ export class FSRunsRepo implements IRunsRepo {
                     let textContent: string | undefined;
                     if (typeof content === 'string') {
                         textContent = content;
-                    } else if (Array.isArray(content)) {
+                    } else {
                         textContent = content
-                            .filter((p: { type: string }) => p.type === 'text')
-                            .map((p: { type: string; text?: string }) => p.text || '')
+                            .filter(p => p.type === 'text')
+                            .map(p => p.text)
                             .join('');
                     }
                     if (textContent && textContent.trim()) {
@@ -101,10 +101,10 @@ export class FSRunsRepo implements IRunsRepo {
                                 let textContent: string | undefined;
                                 if (typeof content === 'string') {
                                     textContent = content;
-                                } else if (Array.isArray(content)) {
+                                } else {
                                     textContent = content
-                                        .filter((p: { type: string }) => p.type === 'text')
-                                        .map((p: { type: string; text?: string }) => p.text || '')
+                                        .filter(p => p.type === 'text')
+                                        .map(p => p.text)
                                         .join('');
                                 }
                                 if (textContent && textContent.trim()) {
@@ -257,13 +257,5 @@ export class FSRunsRepo implements IRunsRepo {
     async delete(id: string): Promise<void> {
         const filePath = path.join(WorkDir, 'runs', `${id}.jsonl`);
         await fsp.unlink(filePath);
-        // Clean up attachment sidecar directory if it exists
-        const attachmentsDir = path.join(WorkDir, 'runs', 'attachments', id);
-        try {
-            await fsp.rm(attachmentsDir, { recursive: true });
-        } catch (err: unknown) {
-            const e = err as { code?: string };
-            if (e.code !== 'ENOENT') throw err;
-        }
     }
 }

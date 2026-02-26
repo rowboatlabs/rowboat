@@ -416,23 +416,19 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                 } else {
                     // New content parts array — collapse to text for LLM
                     const textSegments: string[] = [];
+                    const attachmentLines: string[] = [];
 
-                    // Collect attachments into a header block
-                    const attachmentParts = msg.content.filter((p: { type: string }) => p.type === "attachment");
-                    if (attachmentParts.length > 0) {
-                        textSegments.push("User has attached the following files:");
-                        for (const part of attachmentParts) {
-                            const att = (part as { type: string; attachment: { filename: string; mediaType: string; size?: number; path: string } }).attachment;
-                            const sizeStr = att.size ? `, ${formatBytes(att.size)}` : '';
-                            textSegments.push(`- ${att.filename} (${att.mediaType}${sizeStr}) at ${att.path}`);
+                    for (const part of msg.content) {
+                        if (part.type === "attachment") {
+                            const sizeStr = part.size ? `, ${formatBytes(part.size)}` : '';
+                            attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}`);
+                        } else {
+                            textSegments.push(part.text);
                         }
-                        textSegments.push(""); // blank line separator
                     }
 
-                    // Collect text parts
-                    const textParts = msg.content.filter((p: { type: string }) => p.type === "text");
-                    for (const part of textParts) {
-                        textSegments.push((part as { type: string; text: string }).text);
+                    if (attachmentLines.length > 0) {
+                        textSegments.unshift("User has attached the following files:", ...attachmentLines, "");
                     }
 
                     result.push({

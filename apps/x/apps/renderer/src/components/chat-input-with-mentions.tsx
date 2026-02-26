@@ -37,7 +37,7 @@ export type StagedAttachment = {
   id: string
   path: string
   filename: string
-  mediaType: string
+  mimeType: string
   isImage: boolean
   size: number
   thumbnailUrl?: string
@@ -130,7 +130,7 @@ function ChatInputInner({
           id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           path: filePath,
           filename: getFileDisplayName(filePath),
-          mediaType: mime,
+          mimeType: mime,
           isImage: image,
           size: result.size,
           thumbnailUrl: image ? `data:${mime};base64,${result.data}` : undefined,
