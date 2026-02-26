@@ -201,11 +201,18 @@ async function performSync(): Promise<void> {
             await ensureRun();
             totalMessages += messages.length;
 
-            // Batch-resolve unknown user IDs
+            // Batch-resolve unknown user IDs (from authors + @mentions in content)
             const unknownIds = new Set<string>();
+            const mentionPattern = /<@(U[A-Z0-9]+)>/g;
             for (const msg of messages) {
                 if (msg.author?.user_id && !state.userCache[msg.author.user_id]) {
                     unknownIds.add(msg.author.user_id);
+                }
+                let match;
+                while ((match = mentionPattern.exec(msg.content)) !== null) {
+                    if (!state.userCache[match[1]]) {
+                        unknownIds.add(match[1]);
+                    }
                 }
             }
 
@@ -217,6 +224,13 @@ async function performSync(): Promise<void> {
                     console.error(`[Slack] Error resolving user ${userId}:`, err);
                     state.userCache[userId] = userId;
                 }
+            }
+
+            // Replace @mentions in message content with resolved names
+            for (const msg of messages) {
+                msg.content = msg.content.replace(/<@(U[A-Z0-9]+)>/g, (_: string, id: string) => {
+                    return `@${state.userCache[id] || id}`;
+                });
             }
 
             // Build and write markdown
