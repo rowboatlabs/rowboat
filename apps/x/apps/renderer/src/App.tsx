@@ -452,6 +452,7 @@ function ContentHeader({
 
 function App() {
   type ShortcutPane = 'left' | 'right'
+  type MarkdownHistoryHandlers = { undo: () => boolean; redo: () => boolean }
 
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -596,6 +597,8 @@ function App() {
   // File tab state
   const [fileTabs, setFileTabs] = useState<FileTab[]>([])
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null)
+  const [editorSessionByTabId, setEditorSessionByTabId] = useState<Record<string, number>>({})
+  const fileHistoryHandlersRef = useRef<Map<string, MarkdownHistoryHandlers>>(new Map())
   const fileTabIdCounterRef = useRef(0)
   const newFileTabId = () => `file-tab-${++fileTabIdCounterRef.current}`
 
@@ -2036,6 +2039,13 @@ function App() {
       }
       return next
     })
+    setEditorSessionByTabId((prev) => {
+      if (!(tabId in prev)) return prev
+      const next = { ...prev }
+      delete next[tabId]
+      return next
+    })
+    fileHistoryHandlersRef.current.delete(tabId)
   }, [activeFileTabId, fileTabs, removeEditorCacheForPath])
 
   const handleNewChatTab = useCallback(() => {
@@ -2136,6 +2146,11 @@ function App() {
         setFileTabs((prev) => prev.map((tab) => (
           tab.id === activeFileTabId ? { ...tab, path } : tab
         )))
+        // Rebinds this tab to a different note path: reset editor session to clear undo history.
+        setEditorSessionByTabId((prev) => ({
+          ...prev,
+          [activeFileTabId]: (prev[activeFileTabId] ?? 0) + 1,
+        }))
         return
       }
     }
@@ -2351,6 +2366,46 @@ function App() {
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  // Route undo/redo to the active markdown tab only (prevents cross-tab browser undo behavior).
+  useEffect(() => {
+    const handleHistoryKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod || e.altKey) return
+
+      const key = e.key.toLowerCase()
+      const wantsUndo = key === 'z' && !e.shiftKey
+      const wantsRedo = (key === 'z' && e.shiftKey) || (!isMac && key === 'y')
+      if (!wantsUndo && !wantsRedo) return
+
+      if (!selectedPath || !selectedPath.endsWith('.md') || !activeFileTabId) return
+
+      const target = e.target as EventTarget | null
+      if (target instanceof HTMLElement) {
+        const inTipTapEditor = Boolean(target.closest('.tiptap-editor'))
+        const inOtherTextInput = (
+          target instanceof HTMLInputElement
+          || target instanceof HTMLTextAreaElement
+          || target.isContentEditable
+        ) && !inTipTapEditor
+        if (inOtherTextInput) return
+      }
+
+      const handlers = fileHistoryHandlersRef.current.get(activeFileTabId)
+      if (!handlers) return
+
+      e.preventDefault()
+      e.stopPropagation()
+      if (wantsUndo) {
+        handlers.undo()
+      } else {
+        handlers.redo()
+      }
+    }
+
+    document.addEventListener('keydown', handleHistoryKeyDown, true)
+    return () => document.removeEventListener('keydown', handleHistoryKeyDown, true)
+  }, [activeFileTabId, isMac, selectedPath])
 
   // Keyboard shortcuts for tab management
   useEffect(() => {
@@ -3136,6 +3191,14 @@ function App() {
                             placeholder="Start writing..."
                             wikiLinks={wikiLinkConfig}
                             onImageUpload={handleImageUpload}
+                            editorSessionKey={editorSessionByTabId[tab.id] ?? 0}
+                            onHistoryHandlersChange={(handlers) => {
+                              if (handlers) {
+                                fileHistoryHandlersRef.current.set(tab.id, handlers)
+                              } else {
+                                fileHistoryHandlersRef.current.delete(tab.id)
+                              }
+                            }}
                           />
                         </div>
                       )
