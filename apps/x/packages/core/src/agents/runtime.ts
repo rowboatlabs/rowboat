@@ -365,7 +365,8 @@ function formatBytes(bytes: number): string {
 
 export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
     const result: ModelMessage[] = [];
-    for (const msg of messages) {
+    for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
         const { providerOptions } = msg;
         switch (msg.role) {
             case "assistant":
@@ -438,23 +439,50 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     });
                 }
                 break;
-            case "tool":
+            case "tool": {
+                // Collect all consecutive tool messages into a single message
+                // This is required by Anthropic's API which expects all tool_result blocks
+                // for parallel tool calls to be in a single message
+                const toolResults: Array<{
+                    type: "tool-result";
+                    toolCallId: string;
+                    toolName: string;
+                    output: { type: "text"; value: string };
+                }> = [];
+
+                // Add current tool message
+                toolResults.push({
+                    type: "tool-result",
+                    toolCallId: msg.toolCallId,
+                    toolName: msg.toolName,
+                    output: {
+                        type: "text",
+                        value: msg.content,
+                    },
+                });
+
+                // Collect any consecutive tool messages
+                while (i + 1 < messages.length && messages[i + 1].role === "tool") {
+                    i++;
+                    const nextMsg = messages[i] as z.infer<typeof ToolMessage>;
+                    toolResults.push({
+                        type: "tool-result",
+                        toolCallId: nextMsg.toolCallId,
+                        toolName: nextMsg.toolName,
+                        output: {
+                            type: "text",
+                            value: nextMsg.content,
+                        },
+                    });
+                }
+
                 result.push({
                     role: "tool",
-                    content: [
-                        {
-                            type: "tool-result",
-                            toolCallId: msg.toolCallId,
-                            toolName: msg.toolName,
-                            output: {
-                                type: "text",
-                                value: msg.content,
-                            },
-                        },
-                    ],
+                    content: toolResults,
                     providerOptions,
                 });
                 break;
+            }
         }
     }
     // doing this because: https://github.com/OpenRouterTeam/ai-sdk-provider/issues/262
