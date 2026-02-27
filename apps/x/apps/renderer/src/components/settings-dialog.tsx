@@ -416,13 +416,14 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             />
           ) : (
             <Select
-              value={activeConfig.knowledgeGraphModel}
-              onValueChange={(value) => updateConfig(provider, { knowledgeGraphModel: value })}
+              value={activeConfig.knowledgeGraphModel || "__same__"}
+              onValueChange={(value) => updateConfig(provider, { knowledgeGraphModel: value === "__same__" ? "" : value })}
             >
               <SelectTrigger>
-                <SelectValue placeholder={activeConfig.model || "Same as assistant"} />
+                <SelectValue placeholder="Select a model" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="__same__">Same as assistant</SelectItem>
                 {modelsForProvider.map((model) => (
                   <SelectItem key={model.id} value={model.id}>
                     {model.name || model.id}

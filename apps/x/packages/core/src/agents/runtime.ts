@@ -711,7 +711,7 @@ export async function* streamAgent({
         ? modelConfig.knowledgeGraphModel
         : modelConfig.model;
     const model = provider.languageModel(modelId);
-    console.log(`[main] [GraphBuilder] Agent "${state.agentName}" using model: ${modelId}`);
+    logger.log(`using model: ${modelId}`);
 
     let loopCounter = 0;
     while (true) {
