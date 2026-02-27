@@ -1,11 +1,13 @@
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { getSecurityAllowList, SECURITY_CONFIG_PATH } from '../../config/security.js';
+import { getExecutionShell } from '../assistant/runtime-context.js';
 
 const execPromise = promisify(exec);
 const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n)/;
 const ENV_ASSIGNMENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
 const WRAPPER_COMMANDS = new Set(['sudo', 'env', 'time', 'command']);
+const EXECUTION_SHELL = getExecutionShell();
 
 function sanitizeToken(token: string): string {
   return token.trim().replace(/^['"]+|['"]+$/g, '');
@@ -91,7 +93,7 @@ export async function executeCommand(
       cwd: options?.cwd,
       timeout: options?.timeout,
       maxBuffer: options?.maxBuffer || 1024 * 1024, // default 1MB
-      shell: '/bin/sh', // use sh for cross-platform compatibility
+      shell: EXECUTION_SHELL,
     });
 
     return {
@@ -125,7 +127,7 @@ export function executeCommandSync(
       cwd: options?.cwd,
       timeout: options?.timeout,
       encoding: 'utf-8',
-      shell: '/bin/sh',
+      shell: EXECUTION_SHELL,
     });
 
     return {

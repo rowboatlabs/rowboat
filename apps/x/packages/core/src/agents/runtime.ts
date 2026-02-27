@@ -357,6 +357,12 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     return await repo.fetch(id);
 }
 
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
     const result: ModelMessage[] = [];
     for (const msg of messages) {
@@ -400,11 +406,37 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                 });
                 break;
             case "user":
-                result.push({
-                    role: "user",
-                    content: msg.content,
-                    providerOptions,
-                });
+                if (typeof msg.content === 'string') {
+                    // Legacy string — pass through unchanged
+                    result.push({
+                        role: "user",
+                        content: msg.content,
+                        providerOptions,
+                    });
+                } else {
+                    // New content parts array — collapse to text for LLM
+                    const textSegments: string[] = [];
+                    const attachmentLines: string[] = [];
+
+                    for (const part of msg.content) {
+                        if (part.type === "attachment") {
+                            const sizeStr = part.size ? `, ${formatBytes(part.size)}` : '';
+                            attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}`);
+                        } else {
+                            textSegments.push(part.text);
+                        }
+                    }
+
+                    if (attachmentLines.length > 0) {
+                        textSegments.unshift("User has attached the following files:", ...attachmentLines, "");
+                    }
+
+                    result.push({
+                        role: "user",
+                        content: textSegments.join("\n"),
+                        providerOptions,
+                    });
+                }
                 break;
             case "tool":
                 result.push({
@@ -674,7 +706,12 @@ export async function* streamAgent({
 
     // set up provider + model
     const provider = createProvider(modelConfig.provider);
-    const model = provider.languageModel(modelConfig.model);
+    const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep"];
+    const modelId = (knowledgeGraphAgents.includes(state.agentName!) && modelConfig.knowledgeGraphModel)
+        ? modelConfig.knowledgeGraphModel
+        : modelConfig.model;
+    const model = provider.languageModel(modelId);
+    logger.log(`using model: ${modelId}`);
 
     let loopCounter = 0;
     while (true) {

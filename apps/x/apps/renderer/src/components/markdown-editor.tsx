@@ -195,6 +195,9 @@ interface MarkdownEditorProps {
   placeholder?: string
   wikiLinks?: WikiLinkConfig
   onImageUpload?: (file: File) => Promise<string | null>
+  editorSessionKey?: number
+  onHistoryHandlersChange?: (handlers: { undo: () => boolean; redo: () => boolean } | null) => void
+  editable?: boolean
 }
 
 type WikiLinkMatch = {
@@ -278,6 +281,9 @@ export function MarkdownEditor({
   placeholder = 'Start writing...',
   wikiLinks,
   onImageUpload,
+  editorSessionKey = 0,
+  onHistoryHandlersChange,
+  editable = true,
 }: MarkdownEditorProps) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -299,6 +305,7 @@ export function MarkdownEditor({
   )
 
   const editor = useEditor({
+    editable,
     extensions: [
       StarterKit.configure({
         heading: {
@@ -400,7 +407,7 @@ export function MarkdownEditor({
         return false
       },
     },
-  })
+  }, [editorSessionKey])
 
   const orderedFiles = useMemo(() => {
     if (!wikiLinks) return []
@@ -489,11 +496,36 @@ export function MarkdownEditor({
         isInternalUpdate.current = true
         // Pre-process to preserve blank lines
         const preprocessed = preprocessMarkdown(content)
-        editor.commands.setContent(preprocessed)
+        // Treat tab-open content as baseline: do not add hydration to undo history.
+        editor.chain().setMeta('addToHistory', false).setContent(preprocessed).run()
         isInternalUpdate.current = false
       }
     }
   }, [editor, content])
+
+  useEffect(() => {
+    if (!onHistoryHandlersChange) return
+    if (!editor) {
+      onHistoryHandlersChange(null)
+      return
+    }
+
+    onHistoryHandlersChange({
+      undo: () => editor.chain().focus().undo().run(),
+      redo: () => editor.chain().focus().redo().run(),
+    })
+
+    return () => {
+      onHistoryHandlersChange(null)
+    }
+  }, [editor, onHistoryHandlersChange])
+
+  // Update editable state when prop changes
+  useEffect(() => {
+    if (editor) {
+      editor.setEditable(editable)
+    }
+  }, [editor, editable])
 
   // Force re-render decorations when selection highlight changes
   useEffect(() => {

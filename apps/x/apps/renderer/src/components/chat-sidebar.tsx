@@ -25,7 +25,8 @@ import { type PromptInputMessage, type FileMention } from '@/components/ai-eleme
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { TabBar, type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions } from '@/components/chat-input-with-mentions'
+import { ChatInputWithMentions, type StagedAttachment } from '@/components/chat-input-with-mentions'
+import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { wikiLabel } from '@/lib/wiki-links'
 import {
   type ChatTabViewState,
@@ -89,7 +90,7 @@ interface ChatSidebarProps {
   isProcessing: boolean
   isStopping?: boolean
   onStop?: () => void
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[]) => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[]) => void
   knowledgeFiles?: string[]
   recentFiles?: string[]
   visibleFiles?: string[]
@@ -256,6 +257,18 @@ export function ChatSidebar({
   const renderConversationItem = (item: ConversationItem, tabId: string) => {
     if (isChatMessage(item)) {
       if (item.role === 'user') {
+        if (item.attachments && item.attachments.length > 0) {
+          return (
+            <Message key={item.id} from={item.role}>
+              <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
+                <ChatMessageAttachments attachments={item.attachments} />
+              </MessageContent>
+              {item.content && (
+                <MessageContent>{item.content}</MessageContent>
+              )}
+            </Message>
+          )
+        }
         const { message, files } = parseAttachedFiles(item.content)
         return (
           <Message key={item.id} from={item.role}>
