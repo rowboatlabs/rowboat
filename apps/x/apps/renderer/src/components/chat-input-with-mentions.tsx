@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowUp,
   AudioLines,
+  ChevronDown,
   FileArchive,
   FileCode2,
   FileIcon,
@@ -15,6 +16,13 @@ import {
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   type AttachmentIconKind,
   getAttachmentDisplayName,
@@ -44,6 +52,25 @@ export type StagedAttachment = {
 }
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024 // 10MB
+
+const providerDisplayNames: Record<string, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  google: 'Gemini',
+  ollama: 'Ollama',
+  openrouter: 'OpenRouter',
+  aigateway: 'AI Gateway',
+  'openai-compatible': 'OpenAI-Compatible',
+}
+
+interface ConfiguredModel {
+  flavor: string
+  model: string
+  apiKey?: string
+  baseURL?: string
+  headers?: Record<string, string>
+  knowledgeGraphModel?: string
+}
 
 function getAttachmentIcon(kind: AttachmentIconKind) {
   switch (kind) {
@@ -95,6 +122,62 @@ function ChatInputInner({
   const [focusNonce, setFocusNonce] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canSubmit = (Boolean(message.trim()) || attachments.length > 0) && !isProcessing
+
+  const [configuredModels, setConfiguredModels] = useState<ConfiguredModel[]>([])
+  const [activeModelKey, setActiveModelKey] = useState('')
+
+  // Load model config from disk
+  useEffect(() => {
+    async function loadModels() {
+      try {
+        const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
+        const parsed = JSON.parse(result.data)
+        const models: ConfiguredModel[] = []
+        if (parsed?.providers) {
+          for (const [flavor, entry] of Object.entries(parsed.providers)) {
+            const e = entry as Record<string, unknown>
+            if (e.model && typeof e.model === 'string') {
+              models.push({
+                flavor,
+                model: e.model,
+                apiKey: (e.apiKey as string) || undefined,
+                baseURL: (e.baseURL as string) || undefined,
+                headers: (e.headers as Record<string, string>) || undefined,
+                knowledgeGraphModel: (e.knowledgeGraphModel as string) || undefined,
+              })
+            }
+          }
+        }
+        setConfiguredModels(models)
+        if (parsed?.provider?.flavor && parsed?.model) {
+          setActiveModelKey(`${parsed.provider.flavor}/${parsed.model}`)
+        }
+      } catch {
+        // No config yet
+      }
+    }
+    loadModels()
+  }, [])
+
+  const handleModelChange = useCallback(async (key: string) => {
+    const entry = configuredModels.find((m) => `${m.flavor}/${m.model}` === key)
+    if (!entry) return
+    setActiveModelKey(key)
+    try {
+      await window.ipc.invoke('models:saveConfig', {
+        provider: {
+          flavor: entry.flavor,
+          apiKey: entry.apiKey,
+          baseURL: entry.baseURL,
+          headers: entry.headers,
+        },
+        model: entry.model,
+        knowledgeGraphModel: entry.knowledgeGraphModel,
+      })
+    } catch {
+      toast.error('Failed to switch model')
+    }
+  }, [configuredModels])
 
   // Restore the tab draft when this input mounts.
   useEffect(() => {
@@ -239,24 +322,33 @@ function ChatInputInner({
           })}
         </div>
       )}
-      <div className="flex items-center gap-2 px-4 py-4">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            const files = e.target.files
-            if (!files || files.length === 0) return
-            const paths = Array.from(files)
-              .map((file) => window.electronUtils?.getPathForFile(file))
-              .filter(Boolean) as string[]
-            if (paths.length > 0) {
-              void addFiles(paths)
-            }
-            e.target.value = ''
-          }}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = e.target.files
+          if (!files || files.length === 0) return
+          const paths = Array.from(files)
+            .map((file) => window.electronUtils?.getPathForFile(file))
+            .filter(Boolean) as string[]
+          if (paths.length > 0) {
+            void addFiles(paths)
+          }
+          e.target.value = ''
+        }}
+      />
+      <div className="px-4 pt-4 pb-2">
+        <PromptInputTextarea
+          placeholder="Type your message..."
+          onKeyDown={handleKeyDown}
+          autoFocus={isActive}
+          focusTrigger={isActive ? `${runId ?? 'new'}:${focusNonce}` : undefined}
+          className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
         />
+      </div>
+      <div className="flex items-center gap-2 px-4 pb-3">
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -265,13 +357,35 @@ function ChatInputInner({
         >
           <Plus className="h-4 w-4" />
         </button>
-        <PromptInputTextarea
-          placeholder="Type your message..."
-          onKeyDown={handleKeyDown}
-          autoFocus={isActive}
-          focusTrigger={isActive ? `${runId ?? 'new'}:${focusNonce}` : undefined}
-          className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
-        />
+        <div className="flex-1" />
+        {configuredModels.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <span className="max-w-[150px] truncate">
+                  {configuredModels.find((m) => `${m.flavor}/${m.model}` === activeModelKey)?.model || 'Model'}
+                </span>
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuRadioGroup value={activeModelKey} onValueChange={handleModelChange}>
+                {configuredModels.map((m) => {
+                  const key = `${m.flavor}/${m.model}`
+                  return (
+                    <DropdownMenuRadioItem key={key} value={key}>
+                      <span className="truncate">{m.model}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">{providerDisplayNames[m.flavor] || m.flavor}</span>
+                    </DropdownMenuRadioItem>
+                  )
+                })}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {isProcessing ? (
           <Button
             size="icon"

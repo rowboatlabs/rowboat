@@ -34,6 +34,24 @@ export class FSModelConfigRepo implements IModelConfigRepo {
     }
 
     async setConfig(config: z.infer<typeof ModelConfig>): Promise<void> {
-        await fs.writeFile(this.configPath, JSON.stringify(config, null, 2));
+        let existingProviders: Record<string, Record<string, unknown>> = {};
+        try {
+            const raw = await fs.readFile(this.configPath, "utf8");
+            const existing = JSON.parse(raw);
+            existingProviders = existing.providers || {};
+        } catch {
+            // No existing config
+        }
+
+        existingProviders[config.provider.flavor] = {
+            apiKey: config.provider.apiKey,
+            baseURL: config.provider.baseURL,
+            headers: config.provider.headers,
+            model: config.model,
+            knowledgeGraphModel: config.knowledgeGraphModel,
+        };
+
+        const toWrite = { ...config, providers: existingProviders };
+        await fs.writeFile(this.configPath, JSON.stringify(toWrite, null, 2));
     }
 }

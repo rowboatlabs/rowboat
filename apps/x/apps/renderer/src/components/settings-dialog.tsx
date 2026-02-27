@@ -223,15 +223,31 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         if (parsed?.provider?.flavor && parsed?.model) {
           const flavor = parsed.provider.flavor as LlmProviderFlavor
           setProvider(flavor)
-          setProviderConfigs(prev => ({
-            ...prev,
-            [flavor]: {
+          setProviderConfigs(prev => {
+            const next = { ...prev };
+            // Hydrate all saved providers from the providers map
+            if (parsed.providers) {
+              for (const [key, entry] of Object.entries(parsed.providers)) {
+                if (key in next) {
+                  const e = entry as any;
+                  next[key as LlmProviderFlavor] = {
+                    apiKey: e.apiKey || "",
+                    baseURL: e.baseURL || (defaultBaseURLs[key as LlmProviderFlavor] || ""),
+                    model: e.model || "",
+                    knowledgeGraphModel: e.knowledgeGraphModel || "",
+                  };
+                }
+              }
+            }
+            // Active provider takes precedence from top-level config
+            next[flavor] = {
               apiKey: parsed.provider.apiKey || "",
               baseURL: parsed.provider.baseURL || (defaultBaseURLs[flavor] || ""),
               model: parsed.model,
               knowledgeGraphModel: parsed.knowledgeGraphModel || "",
-            },
-          }))
+            };
+            return next;
+          })
         }
       } catch {
         // No existing config or parse error - use defaults
