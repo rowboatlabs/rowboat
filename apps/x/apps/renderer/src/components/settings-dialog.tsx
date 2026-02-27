@@ -364,74 +364,74 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         )}
       </div>
 
-      {/* Model selection */}
-      <div className="space-y-2">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Assistant model</span>
-        {modelsLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            Loading models...
-          </div>
-        ) : showModelInput ? (
-          <Input
-            value={activeConfig.model}
-            onChange={(e) => updateConfig(provider, { model: e.target.value })}
-            placeholder="Enter model"
-          />
-        ) : (
-          <Select
-            value={activeConfig.model}
-            onValueChange={(value) => updateConfig(provider, { model: value })}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select a model" />
-            </SelectTrigger>
-            <SelectContent>
-              {modelsForProvider.map((model) => (
-                <SelectItem key={model.id} value={model.id}>
-                  {model.name || model.id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-        {modelsError && (
-          <div className="text-xs text-destructive">{modelsError}</div>
-        )}
-      </div>
+      {/* Model selection - side by side */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Assistant model</span>
+          {modelsLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading...
+            </div>
+          ) : showModelInput ? (
+            <Input
+              value={activeConfig.model}
+              onChange={(e) => updateConfig(provider, { model: e.target.value })}
+              placeholder="Enter model"
+            />
+          ) : (
+            <Select
+              value={activeConfig.model}
+              onValueChange={(value) => updateConfig(provider, { model: value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a model" />
+              </SelectTrigger>
+              <SelectContent>
+                {modelsForProvider.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.name || model.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {modelsError && (
+            <div className="text-xs text-destructive">{modelsError}</div>
+          )}
+        </div>
 
-      {/* Knowledge graph model selection */}
-      <div className="space-y-2">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Knowledge graph model</span>
-        <p className="text-xs text-muted-foreground">Used for note creation, email drafts, and meeting prep. Defaults to assistant model if empty.</p>
-        {modelsLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            Loading models...
-          </div>
-        ) : showModelInput ? (
-          <Input
-            value={activeConfig.knowledgeGraphModel}
-            onChange={(e) => updateConfig(provider, { knowledgeGraphModel: e.target.value })}
-            placeholder={activeConfig.model || "Enter model"}
-          />
-        ) : (
-          <Select
-            value={activeConfig.knowledgeGraphModel}
-            onValueChange={(value) => updateConfig(provider, { knowledgeGraphModel: value })}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder={activeConfig.model || "Same as assistant model"} />
-            </SelectTrigger>
-            <SelectContent>
-              {modelsForProvider.map((model) => (
-                <SelectItem key={model.id} value={model.id}>
-                  {model.name || model.id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Knowledge graph model</span>
+          {modelsLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading...
+            </div>
+          ) : showModelInput ? (
+            <Input
+              value={activeConfig.knowledgeGraphModel}
+              onChange={(e) => updateConfig(provider, { knowledgeGraphModel: e.target.value })}
+              placeholder={activeConfig.model || "Enter model"}
+            />
+          ) : (
+            <Select
+              value={activeConfig.knowledgeGraphModel}
+              onValueChange={(value) => updateConfig(provider, { knowledgeGraphModel: value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={activeConfig.model || "Same as assistant"} />
+              </SelectTrigger>
+              <SelectContent>
+                {modelsForProvider.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.name || model.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
       </div>
 
       {/* API Key */}
