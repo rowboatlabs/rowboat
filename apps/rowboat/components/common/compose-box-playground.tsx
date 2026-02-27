@@ -3,7 +3,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button, Spinner } from "@heroui/react";
 
 interface ComposeBoxPlaygroundProps {
-    handleUserMessage: (message: string) => void;
+    handleUserMessage: (message: string, imageDebug?: { url: string; description?: string | null }) => void;
     messages: any[];
     loading: boolean;
     disabled?: boolean;
@@ -22,9 +22,12 @@ export function ComposeBoxPlayground({
     onCancel,
 }: ComposeBoxPlaygroundProps) {
     const [input, setInput] = useState('');
+    const [uploading, setUploading] = useState(false);
+    const [pendingImage, setPendingImage] = useState<{ url?: string; previewSrc?: string; mimeType?: string; description?: string | null } | null>(null);
     const [isFocused, setIsFocused] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const previousMessagesLength = useRef(messages.length);
+    const uploadAbortRef = useRef<AbortController | null>(null);
 
     // Handle auto-focus when new messages arrive
     useEffect(() => {
@@ -35,12 +38,27 @@ export function ComposeBoxPlayground({
     }, [messages.length, shouldAutoFocus]);
 
     function handleInput() {
-        const prompt = input.trim();
-        if (!prompt) {
+        // Mirror send-button disable rules to block Enter submits
+        if (disabled || loading || uploading) return;
+        if (pendingImage?.url && pendingImage.description === undefined) return;
+        const text = input.trim();
+        if (!text && !pendingImage) {
             return;
         }
+        // Only include the user's typed text; omit image URL/markdown from user message
+        const parts: string[] = [];
+        if (text) parts.push(text);
+        const prompt = parts.join('\n\n');
+        // Build optional debug payload to render as internal-only message in debug view
+        const imageDebug = pendingImage?.url
+            ? { url: pendingImage.url, description: pendingImage.description ?? null }
+            : undefined;
         setInput('');
-        handleUserMessage(prompt);
+        if (pendingImage?.previewSrc) {
+            try { URL.revokeObjectURL(pendingImage.previewSrc); } catch {}
+        }
+        setPendingImage(null);
+        handleUserMessage(prompt, imageDebug);
     }
 
     const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -55,6 +73,95 @@ export function ComposeBoxPlayground({
         onFocus?.();
     };
 
+    async function handleImagePicked(file: File) {
+        if (!file) return;
+        try {
+            // Show immediate local preview
+            const previewSrc = URL.createObjectURL(file);
+            setPendingImage({ previewSrc });
+            setUploading(true);
+            // Cancel any in-flight request
+            if (uploadAbortRef.current) {
+                try { uploadAbortRef.current.abort(); } catch {}
+                uploadAbortRef.current = null;
+            }
+            const controller = new AbortController();
+            uploadAbortRef.current = controller;
+            try {
+                // 1) Request a presigned S3 upload URL via server action
+                const { getUploadUrlForImage } = await import('@/app/actions/uploaded-images.actions');
+                const urlData = await getUploadUrlForImage(file.type);
+                const uploadUrl: string | undefined = urlData?.uploadUrl;
+                const imageId: string | undefined = urlData?.id; // includes extension
+                const imageUrl: string | undefined = urlData?.url; // points to /api/uploaded-images/<idWithExt>
+                if (!uploadUrl || !imageId || !imageUrl) throw new Error('Invalid upload URL response');
+
+                // 2) Upload the file directly to S3
+                const putRes = await fetch(uploadUrl, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': file.type },
+                    body: file,
+                    signal: controller.signal,
+                });
+                if (!putRes.ok) throw new Error(`Failed to upload image: ${putRes.status}`);
+
+                // 3) Update local state with URL (description pending)
+                if (uploadAbortRef.current === controller) {
+                    setPendingImage({ url: imageUrl, previewSrc, mimeType: file.type, description: undefined });
+                }
+
+                // 4) Ask server to generate description from S3 image
+                try {
+                    const { describeUploadedImage } = await import('@/app/actions/uploaded-images.actions');
+                    const descData = await describeUploadedImage(imageId);
+                    const description: string | null = descData?.description ?? null;
+                    if (uploadAbortRef.current === controller) {
+                        setPendingImage({ url: imageUrl, previewSrc, mimeType: file.type, description });
+                    }
+                } catch {
+                    // If description fails, still allow sending
+                    if (uploadAbortRef.current === controller) {
+                        setPendingImage({ url: imageUrl, previewSrc, mimeType: file.type, description: null });
+                    }
+                }
+            } catch (err: any) {
+                if (err?.name === 'AbortError') throw err;
+                // Fallback to temp in-memory upload for local/dev without S3
+                const form = new FormData();
+                form.append('file', file);
+                const res = await fetch('/api/tmp-images/upload', {
+                    method: 'POST',
+                    body: form,
+                    signal: controller.signal,
+                });
+                if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+                const data = await res.json();
+                const url: string | undefined = data?.url;
+                if (!url) throw new Error('No URL returned');
+                if (uploadAbortRef.current === controller) {
+                    setPendingImage({ url, previewSrc, mimeType: data?.mimeType || file.type, description: data?.description ?? null });
+                }
+            }
+        } catch (e: any) {
+            if (e?.name === 'AbortError') {
+                // Swallow aborts
+                console.log('Image upload/description aborted');
+            } else {
+                console.error('Image upload failed', e);
+                alert('Image upload failed. Please try again.');
+            }
+        } finally {
+            if (uploadAbortRef.current === null) {
+                // Dismissed earlier; ensure uploading is false
+                setUploading(false);
+            } else {
+                // If this is still the active controller, clear uploading and ref
+                setUploading(false);
+                uploadAbortRef.current = null;
+            }
+        }
+    }
+
     return (
         <div className="relative group">
             {/* Keyboard shortcut hint */}
@@ -68,6 +175,33 @@ export function ComposeBoxPlayground({
                           bg-white dark:bg-[#1e2023] flex items-end gap-2">
                 {/* Textarea */}
                 <div className="flex-1">
+                    {pendingImage && (
+                        <div className="mb-2 inline-block relative">
+                            <img
+                                src={pendingImage.previewSrc || pendingImage.url}
+                                alt="Uploaded image preview"
+                                className="w-16 h-16 object-cover rounded border border-gray-200 dark:border-gray-700"
+                            />
+                            <button
+                                type="button"
+                                aria-label="Remove image"
+                                className="absolute -top-1 -right-1 p-1 rounded-full bg-white dark:bg-zinc-900 border border-gray-200 dark:border-gray-700 shadow hover:bg-gray-50 dark:hover:bg-zinc-800"
+                                onClick={() => {
+                                    if (pendingImage?.previewSrc) {
+                                        try { URL.revokeObjectURL(pendingImage.previewSrc); } catch {}
+                                    }
+                                    if (uploadAbortRef.current) {
+                                        try { uploadAbortRef.current.abort(); } catch {}
+                                        uploadAbortRef.current = null;
+                                    }
+                                    setUploading(false);
+                                    setPendingImage(null);
+                                }}
+                            >
+                                <XIcon size={12} />
+                            </button>
+                        </div>
+                    )}
                     <Textarea
                         ref={textareaRef}
                         value={input}
@@ -95,11 +229,37 @@ export function ComposeBoxPlayground({
                     />
                 </div>
 
+                {/* Image upload button (moved to the right) */}
+                <label className={`
+                          flex items-center justify-center w-9 h-9 rounded-lg cursor-pointer
+                          ${uploading ? 'bg-gray-100 dark:bg-gray-800 text-gray-400' : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300'}
+                          transition-colors
+                        `}>
+                    <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={disabled || loading || uploading}
+                        onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleImagePicked(f);
+                            e.currentTarget.value = '';
+                        }}
+                    />
+                    {uploading ? <Spinner size="sm" /> : <ImageIcon size={16} />}
+                </label>
                 {/* Send/Stop button */}
                 <Button
                     size="sm"
                     isIconOnly
-                    disabled={disabled || (loading ? false : !input.trim())}
+                    disabled={
+                        disabled
+                        || uploading
+                        // If an image is selected but description isn't ready yet, keep disabled
+                        || (pendingImage?.url && pendingImage.description === undefined)
+                        // When not loading a response, require either text or a ready image
+                        || (loading ? false : (!input.trim() && !pendingImage))
+                    }
                     onPress={loading ? onCancel : handleInput}
                     className={`
                         transition-all duration-200
@@ -163,4 +323,43 @@ function StopIcon({ size, className }: { size: number, className?: string }) {
             <rect x="6" y="6" width="12" height="12" rx="1" />
         </svg>
     );
-} 
+}
+
+function ImageIcon({ size, className }: { size: number, className?: string }) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <path d="M21 15l-5-5L5 21" />
+        </svg>
+    );
+}
+
+function XIcon({ size, className }: { size: number, className?: string }) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+    );
+}
