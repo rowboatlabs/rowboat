@@ -15,7 +15,11 @@ import { bus } from '@x/core/dist/runs/bus.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import z from 'zod';
+
+const execAsync = promisify(exec);
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
@@ -25,6 +29,7 @@ import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
+import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import * as composioHandler from './composio-handler.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -408,6 +413,30 @@ export function setupIpcHandlers() {
       }
 
       return { success: true };
+    },
+    'slack:getConfig': async () => {
+      const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
+      const config = await repo.getConfig();
+      return { enabled: config.enabled, workspaces: config.workspaces };
+    },
+    'slack:setConfig': async (_event, args) => {
+      const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
+      await repo.setConfig({ enabled: args.enabled, workspaces: args.workspaces });
+      return { success: true };
+    },
+    'slack:listWorkspaces': async () => {
+      try {
+        const { stdout } = await execAsync('agent-slack auth whoami', { timeout: 10000 });
+        const parsed = JSON.parse(stdout);
+        const workspaces = (parsed.workspaces || []).map((w: { workspace_url?: string; workspace_name?: string }) => ({
+          url: w.workspace_url || '',
+          name: w.workspace_name || '',
+        }));
+        return { workspaces };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Failed to list Slack workspaces';
+        return { workspaces: [], error: message };
+      }
     },
     'onboarding:getStatus': async () => {
       // Show onboarding if it hasn't been completed yet
