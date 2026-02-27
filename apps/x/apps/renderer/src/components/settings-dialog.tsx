@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2 } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X } from "lucide-react"
 
 import {
   Dialog,
@@ -167,14 +167,14 @@ const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
 
 function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [provider, setProvider] = useState<LlmProviderFlavor>("openai")
-  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string }>>({
-    openai: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
-    anthropic: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
-    google: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
-    openrouter: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
-    aigateway: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
-    ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "", knowledgeGraphModel: "" },
-    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", model: "", knowledgeGraphModel: "" },
+  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string }>>({
+    openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
+    anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
+    google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
+    openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
+    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
+    ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "" },
+    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "" },
   })
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -193,17 +193,51 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const showModelInput = isLocalProvider || modelsForProvider.length === 0
   const isMoreProvider = moreProviders.some(p => p.id === provider)
 
+  const primaryModel = activeConfig.models[0] || ""
   const canTest =
-    activeConfig.model.trim().length > 0 &&
+    primaryModel.trim().length > 0 &&
     (!requiresApiKey || activeConfig.apiKey.trim().length > 0) &&
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
   const updateConfig = useCallback(
-    (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string }>) => {
+    (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string }>) => {
       setProviderConfigs(prev => ({
         ...prev,
         [prov]: { ...prev[prov], ...updates },
       }))
+      setTestState({ status: "idle" })
+    },
+    []
+  )
+
+  const updateModelAt = useCallback(
+    (prov: LlmProviderFlavor, index: number, value: string) => {
+      setProviderConfigs(prev => {
+        const models = [...prev[prov].models]
+        models[index] = value
+        return { ...prev, [prov]: { ...prev[prov], models } }
+      })
+      setTestState({ status: "idle" })
+    },
+    []
+  )
+
+  const addModel = useCallback(
+    (prov: LlmProviderFlavor) => {
+      setProviderConfigs(prev => ({
+        ...prev,
+        [prov]: { ...prev[prov], models: [...prev[prov].models, ""] },
+      }))
+    },
+    []
+  )
+
+  const removeModel = useCallback(
+    (prov: LlmProviderFlavor, index: number) => {
+      setProviderConfigs(prev => {
+        const models = prev[prov].models.filter((_, i) => i !== index)
+        return { ...prev, [prov]: { ...prev[prov], models: models.length > 0 ? models : [""] } }
+      })
       setTestState({ status: "idle" })
     },
     []
@@ -230,20 +264,27 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
               for (const [key, entry] of Object.entries(parsed.providers)) {
                 if (key in next) {
                   const e = entry as any;
+                  const savedModels: string[] = Array.isArray(e.models) && e.models.length > 0
+                    ? e.models
+                    : e.model ? [e.model] : [""];
                   next[key as LlmProviderFlavor] = {
                     apiKey: e.apiKey || "",
                     baseURL: e.baseURL || (defaultBaseURLs[key as LlmProviderFlavor] || ""),
-                    model: e.model || "",
+                    models: savedModels,
                     knowledgeGraphModel: e.knowledgeGraphModel || "",
                   };
                 }
               }
             }
             // Active provider takes precedence from top-level config
+            const existingModels = next[flavor].models;
+            const activeModels = existingModels[0] === parsed.model
+              ? existingModels
+              : [parsed.model, ...existingModels.filter((m: string) => m && m !== parsed.model)];
             next[flavor] = {
               apiKey: parsed.provider.apiKey || "",
               baseURL: parsed.provider.baseURL || (defaultBaseURLs[flavor] || ""),
-              model: parsed.model,
+              models: activeModels.length > 0 ? activeModels : [""],
               knowledgeGraphModel: parsed.knowledgeGraphModel || "",
             };
             return next;
@@ -291,11 +332,12 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       const next = { ...prev }
       const cloudProviders: LlmProviderFlavor[] = ["openai", "anthropic", "google"]
       for (const prov of cloudProviders) {
-        const models = modelsCatalog[prov]
-        if (models?.length && !next[prov].model) {
+        const catalog = modelsCatalog[prov]
+        if (catalog?.length && !next[prov].models[0]) {
           const preferred = preferredDefaults[prov]
-          const hasPreferred = preferred && models.some(m => m.id === preferred)
-          next[prov] = { ...next[prov], model: hasPreferred ? preferred : (models[0]?.id || "") }
+          const hasPreferred = preferred && catalog.some(m => m.id === preferred)
+          const defaultModel = hasPreferred ? preferred! : (catalog[0]?.id || "")
+          next[prov] = { ...next[prov], models: [defaultModel] }
         }
       }
       return next
@@ -306,13 +348,15 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     if (!canTest) return
     setTestState({ status: "testing" })
     try {
+      const allModels = activeConfig.models.map(m => m.trim()).filter(Boolean)
       const providerConfig = {
         provider: {
           flavor: provider,
           apiKey: activeConfig.apiKey.trim() || undefined,
           baseURL: activeConfig.baseURL.trim() || undefined,
         },
-        model: activeConfig.model.trim(),
+        model: allModels[0] || "",
+        models: allModels,
         knowledgeGraphModel: activeConfig.knowledgeGraphModel.trim() || undefined,
       }
       const result = await window.ipc.invoke("models:test", providerConfig)
@@ -382,6 +426,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
       {/* Model selection - side by side */}
       <div className="grid grid-cols-2 gap-3">
+        {/* Assistant models (left column) */}
         <div className="space-y-2">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Assistant model</span>
           {modelsLoading ? (
@@ -389,34 +434,58 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
               <Loader2 className="size-4 animate-spin" />
               Loading...
             </div>
-          ) : showModelInput ? (
-            <Input
-              value={activeConfig.model}
-              onChange={(e) => updateConfig(provider, { model: e.target.value })}
-              placeholder="Enter model"
-            />
           ) : (
-            <Select
-              value={activeConfig.model}
-              onValueChange={(value) => updateConfig(provider, { model: value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                {modelsForProvider.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.name || model.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-2">
+              {activeConfig.models.map((model, index) => (
+                <div key={index} className="group/model relative">
+                  {showModelInput ? (
+                    <Input
+                      value={model}
+                      onChange={(e) => updateModelAt(provider, index, e.target.value)}
+                      placeholder="Enter model"
+                    />
+                  ) : (
+                    <Select
+                      value={model}
+                      onValueChange={(value) => updateModelAt(provider, index, value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {modelsForProvider.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.name || m.id}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {activeConfig.models.length > 1 && (
+                    <button
+                      onClick={() => removeModel(provider, index)}
+                      className="absolute right-8 top-1/2 -translate-y-1/2 flex size-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/model:opacity-100"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                onClick={() => addModel(provider)}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Plus className="size-3.5" />
+                Add assistant model
+              </button>
+            </div>
           )}
           {modelsError && (
             <div className="text-xs text-destructive">{modelsError}</div>
           )}
         </div>
 
+        {/* Knowledge graph model (right column) */}
         <div className="space-y-2">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Knowledge graph model</span>
           {modelsLoading ? (
@@ -428,7 +497,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             <Input
               value={activeConfig.knowledgeGraphModel}
               onChange={(e) => updateConfig(provider, { knowledgeGraphModel: e.target.value })}
-              placeholder={activeConfig.model || "Enter model"}
+              placeholder={primaryModel || "Enter model"}
             />
           ) : (
             <Select
@@ -440,9 +509,9 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__same__">Same as assistant</SelectItem>
-                {modelsForProvider.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.name || model.id}
+                {modelsForProvider.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name || m.id}
                   </SelectItem>
                 ))}
               </SelectContent>

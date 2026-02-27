@@ -44,10 +44,12 @@ export class FSModelConfigRepo implements IModelConfigRepo {
         }
 
         existingProviders[config.provider.flavor] = {
+            ...existingProviders[config.provider.flavor],
             apiKey: config.provider.apiKey,
             baseURL: config.provider.baseURL,
             headers: config.provider.headers,
             model: config.model,
+            models: config.models,
             knowledgeGraphModel: config.knowledgeGraphModel,
         };
 

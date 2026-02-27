@@ -126,20 +126,23 @@ function ChatInputInner({
   const [configuredModels, setConfiguredModels] = useState<ConfiguredModel[]>([])
   const [activeModelKey, setActiveModelKey] = useState('')
 
-  // Load model config from disk
-  useEffect(() => {
-    async function loadModels() {
-      try {
-        const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
-        const parsed = JSON.parse(result.data)
-        const models: ConfiguredModel[] = []
-        if (parsed?.providers) {
-          for (const [flavor, entry] of Object.entries(parsed.providers)) {
-            const e = entry as Record<string, unknown>
-            if (e.model && typeof e.model === 'string') {
+  // Load model config from disk (on mount and whenever tab becomes active)
+  const loadModelConfig = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
+      const parsed = JSON.parse(result.data)
+      const models: ConfiguredModel[] = []
+      if (parsed?.providers) {
+        for (const [flavor, entry] of Object.entries(parsed.providers)) {
+          const e = entry as Record<string, unknown>
+          const modelList: string[] = Array.isArray(e.models) ? e.models as string[] : []
+          const singleModel = typeof e.model === 'string' ? e.model : ''
+          const allModels = modelList.length > 0 ? modelList : singleModel ? [singleModel] : []
+          for (const model of allModels) {
+            if (model) {
               models.push({
                 flavor,
-                model: e.model,
+                model,
                 apiKey: (e.apiKey as string) || undefined,
                 baseURL: (e.baseURL as string) || undefined,
                 headers: (e.headers as Record<string, string>) || undefined,
@@ -148,16 +151,19 @@ function ChatInputInner({
             }
           }
         }
-        setConfiguredModels(models)
-        if (parsed?.provider?.flavor && parsed?.model) {
-          setActiveModelKey(`${parsed.provider.flavor}/${parsed.model}`)
-        }
-      } catch {
-        // No config yet
       }
+      setConfiguredModels(models)
+      if (parsed?.provider?.flavor && parsed?.model) {
+        setActiveModelKey(`${parsed.provider.flavor}/${parsed.model}`)
+      }
+    } catch {
+      // No config yet
     }
-    loadModels()
   }, [])
+
+  useEffect(() => {
+    loadModelConfig()
+  }, [isActive, loadModelConfig])
 
   const handleModelChange = useCallback(async (key: string) => {
     const entry = configuredModels.find((m) => `${m.flavor}/${m.model}` === key)
