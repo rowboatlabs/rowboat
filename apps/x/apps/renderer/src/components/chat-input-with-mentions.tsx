@@ -152,9 +152,19 @@ function ChatInputInner({
           }
         }
       }
+      const defaultKey = parsed?.provider?.flavor && parsed?.model
+        ? `${parsed.provider.flavor}/${parsed.model}`
+        : ''
+      models.sort((a, b) => {
+        const aKey = `${a.flavor}/${a.model}`
+        const bKey = `${b.flavor}/${b.model}`
+        if (aKey === defaultKey) return -1
+        if (bKey === defaultKey) return 1
+        return 0
+      })
       setConfiguredModels(models)
-      if (parsed?.provider?.flavor && parsed?.model) {
-        setActiveModelKey(`${parsed.provider.flavor}/${parsed.model}`)
+      if (defaultKey) {
+        setActiveModelKey(defaultKey)
       }
     } catch {
       // No config yet

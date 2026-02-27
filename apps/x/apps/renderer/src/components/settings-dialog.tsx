@@ -167,6 +167,7 @@ const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
 
 function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [provider, setProvider] = useState<LlmProviderFlavor>("openai")
+  const [defaultProvider, setDefaultProvider] = useState<LlmProviderFlavor | null>(null)
   const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string }>>({
     openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
     anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
@@ -257,6 +258,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         if (parsed?.provider?.flavor && parsed?.model) {
           const flavor = parsed.provider.flavor as LlmProviderFlavor
           setProvider(flavor)
+          setDefaultProvider(flavor)
           setProviderConfigs(prev => {
             const next = { ...prev };
             // Hydrate all saved providers from the providers map
@@ -362,6 +364,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
         await window.ipc.invoke("models:saveConfig", providerConfig)
+        setDefaultProvider(provider)
         setTestState({ status: "success" })
         toast.success("Model configuration saved")
       } else {
@@ -374,24 +377,70 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     }
   }, [canTest, provider, activeConfig])
 
-  const renderProviderCard = (p: { id: LlmProviderFlavor; name: string; description: string }) => (
-    <button
-      key={p.id}
-      onClick={() => {
-        setProvider(p.id)
-        setTestState({ status: "idle" })
-      }}
-      className={cn(
-        "rounded-md border px-3 py-2.5 text-left transition-colors",
-        provider === p.id
-          ? "border-primary bg-primary/5"
-          : "border-border hover:bg-accent"
-      )}
-    >
-      <div className="text-sm font-medium">{p.name}</div>
-      <div className="text-xs text-muted-foreground mt-0.5">{p.description}</div>
-    </button>
-  )
+  const handleSetDefault = useCallback(async (prov: LlmProviderFlavor) => {
+    const config = providerConfigs[prov]
+    const allModels = config.models.map(m => m.trim()).filter(Boolean)
+    if (!allModels[0]) return
+    try {
+      await window.ipc.invoke("models:saveConfig", {
+        provider: {
+          flavor: prov,
+          apiKey: config.apiKey.trim() || undefined,
+          baseURL: config.baseURL.trim() || undefined,
+        },
+        model: allModels[0],
+        models: allModels,
+        knowledgeGraphModel: config.knowledgeGraphModel.trim() || undefined,
+      })
+      setDefaultProvider(prov)
+      toast.success("Default provider updated")
+    } catch {
+      toast.error("Failed to set default provider")
+    }
+  }, [providerConfigs])
+
+  const renderProviderCard = (p: { id: LlmProviderFlavor; name: string; description: string }) => {
+    const isDefault = defaultProvider === p.id
+    const isSelected = provider === p.id
+    const hasModel = providerConfigs[p.id].models[0]?.trim().length > 0
+    return (
+      <button
+        key={p.id}
+        onClick={() => {
+          setProvider(p.id)
+          setTestState({ status: "idle" })
+        }}
+        className={cn(
+          "rounded-md border px-3 py-2.5 text-left transition-colors relative",
+          isSelected
+            ? "border-primary bg-primary/5"
+            : "border-border hover:bg-accent"
+        )}
+      >
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-medium">{p.name}</span>
+          {isDefault && (
+            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+              Default
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-muted-foreground mt-0.5">{p.description}</div>
+        {!isDefault && hasModel && isSelected && (
+          <span
+            role="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleSetDefault(p.id)
+            }}
+            className="mt-1.5 inline-flex text-[11px] text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+          >
+            Set as default
+          </span>
+        )}
+      </button>
+    )
+  }
 
   if (configLoading) {
     return (
