@@ -1,0 +1,88 @@
+# Maintainer: rowboatlabs <https://rowboatlabs.com>
+pkgname=rowboat-git
+pkgver=r1357.bbed2f79
+pkgrel=1
+pkgdesc="AI coworker with memory"
+arch=('x86_64')
+url="https://github.com/rowboatlabs/rowboat"
+license=('Apache-2.0')
+depends=(
+    'electron39'
+    'gtk3'
+    'nss'
+    'libxss'
+    'libxtst'
+    'alsa-lib'
+    'libnotify'
+    'libxrandr'
+    'mesa'
+    'at-spi2-atk'
+    'libcups'
+    'libdrm'
+    'xdg-utils'
+)
+makedepends=('nodejs' 'pnpm' 'git' 'python')
+provides=('rowboat')
+conflicts=('rowboat' 'rowboat-bin')
+source=("git+https://github.com/rowboatlabs/rowboat.git"
+        "rowboat.desktop")
+sha256sums=('SKIP'
+            'SKIP')
+
+
+pkgver() {
+    cd rowboat
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+    cd rowboat/apps/x
+    pnpm install --frozen-lockfile
+}
+
+build() {
+    cd "$srcdir/rowboat/apps/x"
+
+    # Build workspace packages in dependency order: shared → core → preload
+    npm run deps
+
+    # Build renderer (Vite)
+    (cd apps/renderer && pnpm run build)
+
+    # Build and bundle main process (tsc + esbuild → .package/dist/main.cjs)
+    (cd apps/main && pnpm run build)
+
+    # Stage preload and renderer into .package/
+    cd apps/main
+    mkdir -p .package/preload .package/renderer
+    cp -r ../preload/dist .package/preload/
+    cp -r ../renderer/dist .package/renderer/
+}
+
+package() {
+    local _maindir="$srcdir/rowboat/apps/x/apps/main"
+
+    install -dm755 "$pkgdir/usr/lib/rowboat"
+    cp -r "$_maindir/.package" "$pkgdir/usr/lib/rowboat/"
+
+    printf '{"name":"rowboat","version":"%s","main":".package/dist/main.cjs"}\n' \
+        "$pkgver" > "$pkgdir/usr/lib/rowboat/package.json"
+
+    # ROWBOAT_PACKAGED=1 tells main.ts it's production mode under system electron
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/rowboat" << 'EOF'
+#!/bin/bash
+exec env ROWBOAT_PACKAGED=1 electron39 \
+    --no-sandbox \
+    --ozone-platform=x11 \
+    /usr/lib/rowboat "$@"
+EOF
+
+    install -Dm644 "$srcdir/rowboat.desktop" \
+        "$pkgdir/usr/share/applications/rowboat.desktop"
+
+    install -Dm644 "$_maindir/icons/icon.png" \
+        "$pkgdir/usr/share/icons/hicolor/512x512/apps/rowboat.png"
+
+    install -Dm644 "$srcdir/rowboat/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

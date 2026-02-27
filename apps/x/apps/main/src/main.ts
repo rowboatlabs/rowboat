@@ -27,13 +27,17 @@ const __dirname = dirname(__filename);
 // run this as early in the main process as possible
 if (started) app.quit();
 
-// Path resolution differs between development and production:
-const preloadPath = app.isPackaged
+// Path resolution differs between development and production.
+// app.isPackaged is false when launched via electron (e.g. AUR packages),
+// so I also check ROWBOAT_PACKAGED to use to correct production paths.
+const isPackaged = app.isPackaged || process.env.ROWBOAT_PACKAGED === "1";
+
+const preloadPath = isPackaged
   ? path.join(__dirname, "../preload/dist/preload.js")
   : path.join(__dirname, "../../../preload/dist/preload.js");
 console.log("preloadPath", preloadPath);
 
-const rendererPath = app.isPackaged
+const rendererPath = isPackaged
   ? path.join(__dirname, "../renderer/dist") // Production
   : path.join(__dirname, "../../../renderer/dist"); // Development
 console.log("rendererPath", rendererPath);
@@ -111,7 +115,7 @@ function createWindow() {
     }
   });
 
-  if (app.isPackaged) {
+  if (isPackaged) {
     win.loadURL("app://-/index.html");
   } else {
     win.loadURL("http://localhost:5173");
@@ -120,7 +124,7 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   // Register custom protocol before creating window (for production builds)
-  if (app.isPackaged) {
+  if (isPackaged) {
     registerAppProtocol();
   }
 
