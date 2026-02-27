@@ -167,14 +167,14 @@ const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
 
 function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [provider, setProvider] = useState<LlmProviderFlavor>("openai")
-  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; model: string }>>({
-    openai: { apiKey: "", baseURL: "", model: "" },
-    anthropic: { apiKey: "", baseURL: "", model: "" },
-    google: { apiKey: "", baseURL: "", model: "" },
-    openrouter: { apiKey: "", baseURL: "", model: "" },
-    aigateway: { apiKey: "", baseURL: "", model: "" },
-    ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "" },
-    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", model: "" },
+  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string }>>({
+    openai: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
+    anthropic: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
+    google: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
+    openrouter: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
+    aigateway: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
+    ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "", knowledgeGraphModel: "" },
+    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", model: "", knowledgeGraphModel: "" },
   })
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -199,7 +199,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
   const updateConfig = useCallback(
-    (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string }>) => {
+    (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string }>) => {
       setProviderConfigs(prev => ({
         ...prev,
         [prov]: { ...prev[prov], ...updates },
@@ -229,6 +229,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
               apiKey: parsed.provider.apiKey || "",
               baseURL: parsed.provider.baseURL || (defaultBaseURLs[flavor] || ""),
               model: parsed.model,
+              knowledgeGraphModel: parsed.knowledgeGraphModel || "",
             },
           }))
         }
@@ -296,6 +297,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
           baseURL: activeConfig.baseURL.trim() || undefined,
         },
         model: activeConfig.model.trim(),
+        knowledgeGraphModel: activeConfig.knowledgeGraphModel.trim() || undefined,
       }
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
@@ -364,7 +366,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
       {/* Model selection */}
       <div className="space-y-2">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model</span>
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Assistant model</span>
         {modelsLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
@@ -395,6 +397,40 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         )}
         {modelsError && (
           <div className="text-xs text-destructive">{modelsError}</div>
+        )}
+      </div>
+
+      {/* Knowledge graph model selection */}
+      <div className="space-y-2">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Knowledge graph model</span>
+        <p className="text-xs text-muted-foreground">Used for note creation, email drafts, and meeting prep. Defaults to assistant model if empty.</p>
+        {modelsLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Loading models...
+          </div>
+        ) : showModelInput ? (
+          <Input
+            value={activeConfig.knowledgeGraphModel}
+            onChange={(e) => updateConfig(provider, { knowledgeGraphModel: e.target.value })}
+            placeholder={activeConfig.model || "Enter model"}
+          />
+        ) : (
+          <Select
+            value={activeConfig.knowledgeGraphModel}
+            onValueChange={(value) => updateConfig(provider, { knowledgeGraphModel: value })}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder={activeConfig.model || "Same as assistant model"} />
+            </SelectTrigger>
+            <SelectContent>
+              {modelsForProvider.map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                  {model.name || model.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
       </div>
 

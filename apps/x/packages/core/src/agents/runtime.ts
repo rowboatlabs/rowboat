@@ -706,7 +706,12 @@ export async function* streamAgent({
 
     // set up provider + model
     const provider = createProvider(modelConfig.provider);
-    const model = provider.languageModel(modelConfig.model);
+    const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep"];
+    const modelId = (knowledgeGraphAgents.includes(state.agentName!) && modelConfig.knowledgeGraphModel)
+        ? modelConfig.knowledgeGraphModel
+        : modelConfig.model;
+    const model = provider.languageModel(modelId);
+    console.log(`[main] [GraphBuilder] Agent "${state.agentName}" using model: ${modelId}`);
 
     let loopCounter = 0;
     while (true) {
