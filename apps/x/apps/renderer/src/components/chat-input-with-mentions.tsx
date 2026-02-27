@@ -175,10 +175,21 @@ function ChatInputInner({
     loadModelConfig()
   }, [isActive, loadModelConfig])
 
+  // Reload when model config changes (e.g. from settings dialog)
+  useEffect(() => {
+    const handler = () => { loadModelConfig() }
+    window.addEventListener('models-config-changed', handler)
+    return () => window.removeEventListener('models-config-changed', handler)
+  }, [loadModelConfig])
+
   const handleModelChange = useCallback(async (key: string) => {
     const entry = configuredModels.find((m) => `${m.flavor}/${m.model}` === key)
     if (!entry) return
     setActiveModelKey(key)
+    // Collect all models for this provider so the full list is preserved
+    const providerModels = configuredModels
+      .filter((m) => m.flavor === entry.flavor)
+      .map((m) => m.model)
     try {
       await window.ipc.invoke('models:saveConfig', {
         provider: {
@@ -188,6 +199,7 @@ function ChatInputInner({
           headers: entry.headers,
         },
         model: entry.model,
+        models: providerModels,
         knowledgeGraphModel: entry.knowledgeGraphModel,
       })
     } catch {

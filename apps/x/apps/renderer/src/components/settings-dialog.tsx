@@ -278,17 +278,20 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                 }
               }
             }
-            // Active provider takes precedence from top-level config
-            const existingModels = next[flavor].models;
-            const activeModels = existingModels[0] === parsed.model
-              ? existingModels
-              : [parsed.model, ...existingModels.filter((m: string) => m && m !== parsed.model)];
-            next[flavor] = {
-              apiKey: parsed.provider.apiKey || "",
-              baseURL: parsed.provider.baseURL || (defaultBaseURLs[flavor] || ""),
-              models: activeModels.length > 0 ? activeModels : [""],
-              knowledgeGraphModel: parsed.knowledgeGraphModel || "",
-            };
+            // Active provider takes precedence from top-level config,
+            // but only if it exists in the providers map (wasn't deleted)
+            if (parsed.providers?.[flavor]) {
+              const existingModels = next[flavor].models;
+              const activeModels = existingModels[0] === parsed.model
+                ? existingModels
+                : [parsed.model, ...existingModels.filter((m: string) => m && m !== parsed.model)];
+              next[flavor] = {
+                apiKey: parsed.provider.apiKey || "",
+                baseURL: parsed.provider.baseURL || (defaultBaseURLs[flavor] || ""),
+                models: activeModels.length > 0 ? activeModels : [""],
+                knowledgeGraphModel: parsed.knowledgeGraphModel || "",
+              };
+            }
             return next;
           })
         }
@@ -366,6 +369,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         await window.ipc.invoke("models:saveConfig", providerConfig)
         setDefaultProvider(provider)
         setTestState({ status: "success" })
+        window.dispatchEvent(new Event('models-config-changed'))
         toast.success("Model configuration saved")
       } else {
         setTestState({ status: "error", error: result.error })
@@ -393,11 +397,49 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         knowledgeGraphModel: config.knowledgeGraphModel.trim() || undefined,
       })
       setDefaultProvider(prov)
+      window.dispatchEvent(new Event('models-config-changed'))
       toast.success("Default provider updated")
     } catch {
       toast.error("Failed to set default provider")
     }
   }, [providerConfigs])
+
+  const handleDeleteProvider = useCallback(async (prov: LlmProviderFlavor) => {
+    try {
+      const result = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
+      const parsed = JSON.parse(result.data)
+      if (parsed?.providers?.[prov]) {
+        delete parsed.providers[prov]
+      }
+      // If the deleted provider is the current top-level active one,
+      // switch top-level config to the current default provider
+      if (parsed?.provider?.flavor === prov && defaultProvider && defaultProvider !== prov) {
+        const defConfig = providerConfigs[defaultProvider]
+        const defModels = defConfig.models.map(m => m.trim()).filter(Boolean)
+        parsed.provider = {
+          flavor: defaultProvider,
+          apiKey: defConfig.apiKey.trim() || undefined,
+          baseURL: defConfig.baseURL.trim() || undefined,
+        }
+        parsed.model = defModels[0] || ""
+        parsed.models = defModels
+        parsed.knowledgeGraphModel = defConfig.knowledgeGraphModel.trim() || undefined
+      }
+      await window.ipc.invoke("workspace:writeFile", {
+        path: "config/models.json",
+        data: JSON.stringify(parsed, null, 2),
+      })
+      setProviderConfigs(prev => ({
+        ...prev,
+        [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "" },
+      }))
+      setTestState({ status: "idle" })
+      window.dispatchEvent(new Event('models-config-changed'))
+      toast.success("Provider configuration removed")
+    } catch {
+      toast.error("Failed to remove provider")
+    }
+  }, [defaultProvider, providerConfigs])
 
   const renderProviderCard = (p: { id: LlmProviderFlavor; name: string; description: string }) => {
     const isDefault = defaultProvider === p.id
@@ -427,16 +469,28 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         </div>
         <div className="text-xs text-muted-foreground mt-0.5">{p.description}</div>
         {!isDefault && hasModel && isSelected && (
-          <span
-            role="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              handleSetDefault(p.id)
-            }}
-            className="mt-1.5 inline-flex text-[11px] text-muted-foreground hover:text-primary transition-colors cursor-pointer"
-          >
-            Set as default
-          </span>
+          <div className="mt-1.5 flex items-center gap-3">
+            <span
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleSetDefault(p.id)
+              }}
+              className="inline-flex text-[11px] text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+            >
+              Set as default
+            </span>
+            <span
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleDeleteProvider(p.id)
+              }}
+              className="inline-flex text-[11px] text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+            >
+              Remove
+            </span>
+          </div>
         )}
       </button>
     )
