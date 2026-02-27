@@ -18,6 +18,7 @@ export const ModelConfig = LlmModelConfig;
 
 export async function createProvider(config: z.infer<typeof Provider>): Promise<ProviderV2> {
     let { apiKey, baseURL, headers } = config;
+    let isOAuthToken = false;
 
     // Inject OAuth token if apiKey is missing
     if (!apiKey) {
@@ -30,6 +31,7 @@ export async function createProvider(config: z.infer<typeof Provider>): Promise<
             if (tokens?.access_token) {
                 console.log(`[models] Injecting OAuth token for flavor: ${config.flavor} (key: ${providerKey})`);
                 apiKey = tokens.access_token;
+                isOAuthToken = true;
                 if (config.flavor === 'openai') {
                     baseURL = 'https://chatgpt.com/backend-api/codex';
                 } else if (config.flavor === 'anthropic') {
@@ -65,7 +67,7 @@ export async function createProvider(config: z.infer<typeof Provider>): Promise<
                         body.instructions = typeof systemMessage.content === 'string' ? systemMessage.content : JSON.stringify(systemMessage.content);
                         msgList.splice(sysIdx, 1);
                     } else {
-                        body.instructions = ""; // Ensure field exists
+                        // don't inject empty instructions string if unnecessary
                     }
                 }
 
@@ -101,12 +103,9 @@ export async function createProvider(config: z.infer<typeof Provider>): Promise<
                             }
                         }
                     }
-                    if (body.messages) body.messages = newMessages;
-                    if (body.input) body.input = newMessages;
+                    if (body.input) delete body.input;
+                    body.messages = newMessages;
                 }
-
-                // Codex API requirement
-                body.store = false;
 
                 init.body = JSON.stringify(body);
                 console.log(`[models] Simplified Codex request to ${url}:`, JSON.stringify(body, null, 2));
@@ -131,12 +130,33 @@ export async function createProvider(config: z.infer<typeof Provider>): Promise<
                 baseURL,
                 headers,
             });
-        case "anthropic":
+        case "anthropic": {
+            if (isOAuthToken && apiKey) {
+                // OAuth tokens must be sent as Authorization: Bearer, not x-api-key
+                // The @ai-sdk/anthropic SDK always sends apiKey as x-api-key header,
+                // so we use a custom fetch to override the auth header
+                const oauthToken = apiKey;
+                const anthropicOAuthFetch = async (url: string, init?: RequestInit) => {
+                    const newInit = { ...init };
+                    const newHeaders = new Headers(init?.headers);
+                    newHeaders.delete('x-api-key');
+                    newHeaders.set('Authorization', `Bearer ${oauthToken}`);
+                    newInit.headers = newHeaders;
+                    return fetch(url, newInit);
+                };
+                return createAnthropic({
+                    apiKey: 'oauth-placeholder', // SDK requires non-empty, but we override in fetch
+                    baseURL,
+                    headers,
+                    fetch: anthropicOAuthFetch as any,
+                });
+            }
             return createAnthropic({
                 apiKey: apiKey || 'empty',
                 baseURL,
                 headers,
             });
+        }
         case "google":
             return createGoogleGenerativeAI({
                 apiKey,

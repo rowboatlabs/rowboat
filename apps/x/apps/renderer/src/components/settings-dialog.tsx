@@ -11,13 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
@@ -146,6 +140,7 @@ const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description
   { id: "openai", name: "OpenAI", description: "GPT models" },
   { id: "anthropic", name: "Anthropic", description: "Claude models" },
   { id: "google", name: "Gemini", description: "Google AI Studio" },
+  { id: "antigravity", name: "Antigravity", description: "Internal AI Engine" },
   { id: "ollama", name: "Ollama (Local)", description: "Run models locally" },
 ]
 
@@ -195,10 +190,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const showModelInput = isLocalProvider || modelsForProvider.length === 0
   const isMoreProvider = moreProviders.some(p => p.id === provider)
 
-  const canTest =
-    activeConfig.model.trim().length > 0 &&
-    (!requiresApiKey || activeConfig.apiKey.trim().length > 0) &&
-    (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
+  const canTest = activeConfig.model.trim().length > 0
 
   const updateConfig = useCallback(
     (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string }>) => {
@@ -293,7 +285,15 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     const cleanup = window.ipc.on('oauth:didConnect', (event) => {
       const { provider: eventProvider, success, error } = event
 
-      if ((eventProvider === 'chatgpt' && provider === 'openai') || (eventProvider === 'anthropic' && provider === 'anthropic') || (eventProvider === 'antigravity' && provider === 'antigravity')) {
+      // Map OAuth repo keys back to provider flavor IDs
+      const oauthKeyToFlavor: Record<string, string> = {
+        'chatgpt': 'openai',
+        'anthropic-native': 'anthropic',
+        'antigravity': 'antigravity',
+      }
+      const eventFlavor = oauthKeyToFlavor[eventProvider] || eventProvider
+
+      if (eventFlavor === provider) {
         if (success) {
           toast.success(`Connected to ${eventProvider}`)
           setTestState({ status: 'success' })
@@ -453,7 +453,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             onChange={(e) => updateConfig(provider, { apiKey: e.target.value })}
             placeholder="Paste your API key"
           />
-          {(provider === 'openai' || provider === 'anthropic' || provider === 'antigravity') && (
+          {(provider === 'openai' || provider === 'antigravity') && (
             <div className="flex items-center gap-4 mt-2">
               <span className="text-xs text-muted-foreground">— OR —</span>
               <Button
@@ -476,15 +476,6 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                         toast.error(result.error || "Failed to connect via OAuth");
                         setTestState({ status: "error", error: result.error });
                       }
-                    } else if (provider === 'anthropic') {
-                      const result = await window.ipc.invoke('oauth:anthropic', null);
-                      if (result.success) {
-                        toast.success(`Successfully connected Claude Pro!`);
-                        setTestState({ status: "success" });
-                      } else {
-                        toast.error(result.error || "Failed to connect via OAuth");
-                        setTestState({ status: "error", error: result.error });
-                      }
                     } else if (provider === 'antigravity') {
                       const result = await window.ipc.invoke('oauth:antigravity', null);
                       if (result.success) {
@@ -501,8 +492,16 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                   }
                 }}
               >
-                Sign in to {provider === 'openai' ? 'ChatGPT Plus' : provider === 'anthropic' ? 'Claude Pro' : 'Antigravity'}
+                Sign in to {provider === 'openai' ? 'ChatGPT Plus' : 'Antigravity'}
               </Button>
+            </div>
+          )}
+          {provider === 'anthropic' && (
+            <div className="text-xs text-muted-foreground mt-2 p-2 rounded-md bg-muted/50 border">
+              Get your API key from{' '}
+              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" className="text-foreground underline">
+                console.anthropic.com
+              </a>
             </div>
           )}
 

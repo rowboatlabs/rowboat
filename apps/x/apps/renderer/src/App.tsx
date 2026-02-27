@@ -52,6 +52,7 @@ import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
 import { QuickModelSelector } from '@/components/model-selector'
+import { StatusBar } from '@/components/status-bar'
 import {
   type ChatTabViewState,
   type ConversationItem,
@@ -424,7 +425,22 @@ function App() {
   const [, setMessage] = useState<string>('')
   const [conversation, setConversation] = useState<ConversationItem[]>([])
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>('')
-  const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
+  const [modelUsage, setModelUsage] = useState<LanguageModelUsage | null>(null)
+
+  // Dispatch usage events when modelUsage changes so StatusBar can track
+  useEffect(() => {
+    if (modelUsage) {
+      window.dispatchEvent(new CustomEvent('run:usage', {
+        detail: {
+          usage: {
+            promptTokens: modelUsage.inputTokens ?? 0,
+            completionTokens: modelUsage.outputTokens ?? 0,
+            totalTokens: modelUsage.totalTokens ?? 0,
+          }
+        }
+      }))
+    }
+  }, [modelUsage])
   const [runId, setRunId] = useState<string | null>(null)
   const runIdRef = useRef<string | null>(null)
   const loadRunRequestIdRef = useRef(0)
@@ -2764,439 +2780,442 @@ function App() {
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="tasks">
-        <div className="flex h-svh w-full overflow-hidden">
-          {/* Content sidebar with SidebarProvider for collapse functionality */}
-          <SidebarProvider
-            style={{
-              "--sidebar-width": `${DEFAULT_SIDEBAR_WIDTH}px`,
-            } as React.CSSProperties}
-          >
-            <SidebarContentPanel
-              tree={tree}
-              selectedPath={selectedPath}
-              expandedPaths={expandedPaths}
-              onSelectFile={toggleExpand}
-              knowledgeActions={knowledgeActions}
-              onVoiceNoteCreated={handleVoiceNoteCreated}
-              runs={runs}
-              currentRunId={runId}
-              processingRunIds={processingRunIds}
-              tasksActions={{
-                onNewChat: handleNewChatTab,
-                onSelectRun: (runIdToLoad) => {
-                  if (selectedPath || isGraphOpen) {
-                    setIsChatSidebarOpen(true)
-                  }
+        <div className="flex flex-col h-svh w-full overflow-hidden">
+          <div className="flex flex-1 min-h-0 w-full overflow-hidden">
+            {/* Content sidebar with SidebarProvider for collapse functionality */}
+            <SidebarProvider
+              style={{
+                "--sidebar-width": `${DEFAULT_SIDEBAR_WIDTH}px`,
+              } as React.CSSProperties}
+            >
+              <SidebarContentPanel
+                tree={tree}
+                selectedPath={selectedPath}
+                expandedPaths={expandedPaths}
+                onSelectFile={toggleExpand}
+                knowledgeActions={knowledgeActions}
+                onVoiceNoteCreated={handleVoiceNoteCreated}
+                runs={runs}
+                currentRunId={runId}
+                processingRunIds={processingRunIds}
+                tasksActions={{
+                  onNewChat: handleNewChatTab,
+                  onSelectRun: (runIdToLoad) => {
+                    if (selectedPath || isGraphOpen) {
+                      setIsChatSidebarOpen(true)
+                    }
 
-                  // If already open in a chat tab, switch to it
-                  const existingTab = chatTabs.find(t => t.runId === runIdToLoad)
-                  if (existingTab) {
-                    switchChatTab(existingTab.id)
-                    return
-                  }
-                  // In two-pane mode, keep current knowledge/graph context and just swap chat context.
-                  if (selectedPath || isGraphOpen) {
+                    // If already open in a chat tab, switch to it
+                    const existingTab = chatTabs.find(t => t.runId === runIdToLoad)
+                    if (existingTab) {
+                      switchChatTab(existingTab.id)
+                      return
+                    }
+                    // In two-pane mode, keep current knowledge/graph context and just swap chat context.
+                    if (selectedPath || isGraphOpen) {
+                      setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
+                      loadRun(runIdToLoad)
+                      return
+                    }
+
+                    // Outside two-pane mode, navigate to chat.
                     setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
-                    loadRun(runIdToLoad)
-                    return
-                  }
-
-                  // Outside two-pane mode, navigate to chat.
-                  setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
-                  void navigateToView({ type: 'chat', runId: runIdToLoad })
-                },
-                onOpenInNewTab: (targetRunId) => {
-                  openChatInNewTab(targetRunId)
-                },
-                onDeleteRun: async (runIdToDelete) => {
-                  try {
-                    await window.ipc.invoke('runs:delete', { runId: runIdToDelete })
-                    // Close any chat tab showing the deleted run
-                    const tabForRun = chatTabs.find(t => t.runId === runIdToDelete)
-                    if (tabForRun) {
-                      if (chatTabs.length > 1) {
-                        closeChatTab(tabForRun.id)
-                      } else {
-                        // Only one tab, reset it to new chat
-                        setChatTabs([{ id: tabForRun.id, runId: null }])
+                    void navigateToView({ type: 'chat', runId: runIdToLoad })
+                  },
+                  onOpenInNewTab: (targetRunId) => {
+                    openChatInNewTab(targetRunId)
+                  },
+                  onDeleteRun: async (runIdToDelete) => {
+                    try {
+                      await window.ipc.invoke('runs:delete', { runId: runIdToDelete })
+                      // Close any chat tab showing the deleted run
+                      const tabForRun = chatTabs.find(t => t.runId === runIdToDelete)
+                      if (tabForRun) {
+                        if (chatTabs.length > 1) {
+                          closeChatTab(tabForRun.id)
+                        } else {
+                          // Only one tab, reset it to new chat
+                          setChatTabs([{ id: tabForRun.id, runId: null }])
+                          if (selectedPath || isGraphOpen) {
+                            handleNewChat()
+                          } else {
+                            void navigateToView({ type: 'chat', runId: null })
+                          }
+                        }
+                      } else if (runId === runIdToDelete) {
                         if (selectedPath || isGraphOpen) {
+                          setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: null } : t))
                           handleNewChat()
                         } else {
                           void navigateToView({ type: 'chat', runId: null })
                         }
                       }
-                    } else if (runId === runIdToDelete) {
-                      if (selectedPath || isGraphOpen) {
-                        setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: null } : t))
-                        handleNewChat()
-                      } else {
-                        void navigateToView({ type: 'chat', runId: null })
-                      }
+                      await loadRuns()
+                    } catch (err) {
+                      console.error('Failed to delete run:', err)
                     }
-                    await loadRuns()
-                  } catch (err) {
-                    console.error('Failed to delete run:', err)
-                  }
-                },
-                onSelectBackgroundTask: (taskName) => {
-                  void navigateToView({ type: 'task', name: taskName })
-                },
-              }}
-              backgroundTasks={backgroundTasks}
-              selectedBackgroundTask={selectedBackgroundTask}
-            />
-            <SidebarInset
-              className={cn(
-                "overflow-hidden! min-h-0 min-w-0 transition-[max-width] duration-200 ease-linear",
-                shouldCollapseLeftPane && "pointer-events-none select-none"
-              )}
-              style={shouldCollapseLeftPane ? { maxWidth: 0 } : { maxWidth: '100%' }}
-              aria-hidden={shouldCollapseLeftPane}
-              onMouseDownCapture={() => setActiveShortcutPane('left')}
-              onFocusCapture={() => setActiveShortcutPane('left')}
-            >
-              {/* Header - also serves as titlebar drag region, adjusts padding when sidebar collapsed */}
-              <ContentHeader
-                onNavigateBack={() => { void navigateBack() }}
-                onNavigateForward={() => { void navigateForward() }}
-                canNavigateBack={canNavigateBack}
-                canNavigateForward={canNavigateForward}
-                collapsedLeftPaddingPx={collapsedLeftPaddingPx}
+                  },
+                  onSelectBackgroundTask: (taskName) => {
+                    void navigateToView({ type: 'task', name: taskName })
+                  },
+                }}
+                backgroundTasks={backgroundTasks}
+                selectedBackgroundTask={selectedBackgroundTask}
+              />
+              <SidebarInset
+                className={cn(
+                  "overflow-hidden! min-h-0 min-w-0 transition-[max-width] duration-200 ease-linear",
+                  shouldCollapseLeftPane && "pointer-events-none select-none"
+                )}
+                style={shouldCollapseLeftPane ? { maxWidth: 0 } : { maxWidth: '100%' }}
+                aria-hidden={shouldCollapseLeftPane}
+                onMouseDownCapture={() => setActiveShortcutPane('left')}
+                onFocusCapture={() => setActiveShortcutPane('left')}
               >
-                {(selectedPath || isGraphOpen) && fileTabs.length >= 1 ? (
-                  <TabBar
-                    tabs={fileTabs}
-                    activeTabId={activeFileTabId ?? ''}
-                    getTabTitle={getFileTabTitle}
-                    getTabId={(t) => t.id}
-                    onSwitchTab={switchFileTab}
-                    onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && isGraphOpen}
-                  />
-                ) : (
-                  <TabBar
-                    tabs={chatTabs}
-                    activeTabId={activeChatTabId}
-                    getTabTitle={getChatTabTitle}
-                    getTabId={(t) => t.id}
-                    isProcessing={isChatTabProcessing}
-                    onSwitchTab={switchChatTab}
-                    onCloseTab={closeChatTab}
-                  />
-                )}
-                {selectedPath && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground self-center shrink-0 pl-2">
-                    {isSaving ? (
-                      <>
-                        <LoaderIcon className="h-3 w-3 animate-spin" />
-                        <span>Saving...</span>
-                      </>
-                    ) : lastSaved ? (
-                      <>
-                        <CheckIcon className="h-3 w-3 text-green-500" />
-                        <span>Saved</span>
-                      </>
-                    ) : null}
-                  </div>
-                )}
-                {!selectedPath && !isGraphOpen && !selectedTask && (
-                  <div className="flex items-center gap-2 self-center shrink-0 pr-2">
-                    <QuickModelSelector />
+                {/* Header - also serves as titlebar drag region, adjusts padding when sidebar collapsed */}
+                <ContentHeader
+                  onNavigateBack={() => { void navigateBack() }}
+                  onNavigateForward={() => { void navigateForward() }}
+                  canNavigateBack={canNavigateBack}
+                  canNavigateForward={canNavigateForward}
+                  collapsedLeftPaddingPx={collapsedLeftPaddingPx}
+                >
+                  {(selectedPath || isGraphOpen) && fileTabs.length >= 1 ? (
+                    <TabBar
+                      tabs={fileTabs}
+                      activeTabId={activeFileTabId ?? ''}
+                      getTabTitle={getFileTabTitle}
+                      getTabId={(t) => t.id}
+                      onSwitchTab={switchFileTab}
+                      onCloseTab={closeFileTab}
+                      allowSingleTabClose={fileTabs.length === 1 && isGraphOpen}
+                    />
+                  ) : (
+                    <TabBar
+                      tabs={chatTabs}
+                      activeTabId={activeChatTabId}
+                      getTabTitle={getChatTabTitle}
+                      getTabId={(t) => t.id}
+                      isProcessing={isChatTabProcessing}
+                      onSwitchTab={switchChatTab}
+                      onCloseTab={closeChatTab}
+                    />
+                  )}
+                  {selectedPath && (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground self-center shrink-0 pl-2">
+                      {isSaving ? (
+                        <>
+                          <LoaderIcon className="h-3 w-3 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : lastSaved ? (
+                        <>
+                          <CheckIcon className="h-3 w-3 text-green-500" />
+                          <span>Saved</span>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
+                  {!selectedPath && !isGraphOpen && !selectedTask && (
+                    <div className="flex items-center gap-2 self-center shrink-0 pr-2">
+                      <QuickModelSelector />
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={handleNewChatTab}
+                            className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                            aria-label="New chat tab"
+                          >
+                            <SquarePen className="size-5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">New chat tab</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
+                  {!selectedPath && !isGraphOpen && expandedFrom && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
                           type="button"
-                          onClick={handleNewChatTab}
-                          className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                          aria-label="New chat tab"
+                          onClick={handleCloseFullScreenChat}
+                          className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
+                          aria-label="Restore two-pane view"
                         >
-                          <SquarePen className="size-5" />
+                          <Minimize2 className="size-5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom">New chat tab</TooltipContent>
+                      <TooltipContent side="bottom">Restore two-pane view</TooltipContent>
                     </Tooltip>
-                  </div>
-                )}
-                {!selectedPath && !isGraphOpen && expandedFrom && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={handleCloseFullScreenChat}
-                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
-                        aria-label="Restore two-pane view"
-                      >
-                        <Minimize2 className="size-5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Restore two-pane view</TooltipContent>
-                  </Tooltip>
-                )}
-                {(selectedPath || isGraphOpen) && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={toggleKnowledgePane}
-                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1 self-center shrink-0"
-                        aria-label={isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
-                      >
-                        {isChatSidebarOpen ? <Maximize2 className="size-5" /> : <Minimize2 className="size-5" />}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-              </ContentHeader>
-
-              {isGraphOpen ? (
-                <div className="flex-1 min-h-0">
-                  <GraphView
-                    nodes={graphData.nodes}
-                    edges={graphData.edges}
-                    isLoading={graphStatus === 'loading'}
-                    error={graphStatus === 'error' ? (graphError ?? 'Failed to build graph') : null}
-                    onSelectNode={(path) => {
-                      navigateToFile(path)
-                    }}
-                  />
-                </div>
-              ) : selectedPath ? (
-                selectedPath.endsWith('.md') ? (
-                  <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                    {openMarkdownTabs.map((tab) => {
-                      const isActive = activeFileTabId
-                        ? tab.id === activeFileTabId || tab.path === selectedPath
-                        : tab.path === selectedPath
-                      const tabContent = editorContentByPath[tab.path]
-                        ?? (isActive && editorPathRef.current === tab.path ? editorContent : '')
-                      return (
-                        <div
-                          key={tab.id}
-                          className={cn(
-                            'min-h-0 flex-1 flex-col overflow-hidden',
-                            isActive ? 'flex' : 'hidden'
-                          )}
-                          data-file-tab-panel={tab.id}
-                          aria-hidden={!isActive}
+                  )}
+                  {(selectedPath || isGraphOpen) && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={toggleKnowledgePane}
+                          className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1 self-center shrink-0"
+                          aria-label={isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
                         >
-                          <MarkdownEditor
-                            content={tabContent}
-                            onChange={(markdown) => handleEditorChange(tab.path, markdown)}
-                            placeholder="Start writing..."
-                            wikiLinks={wikiLinkConfig}
-                            onImageUpload={handleImageUpload}
-                          />
-                        </div>
-                      )
-                    })}
+                          {isChatSidebarOpen ? <Maximize2 className="size-5" /> : <Minimize2 className="size-5" />}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        {isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                </ContentHeader>
+
+                {isGraphOpen ? (
+                  <div className="flex-1 min-h-0">
+                    <GraphView
+                      nodes={graphData.nodes}
+                      edges={graphData.edges}
+                      isLoading={graphStatus === 'loading'}
+                      error={graphStatus === 'error' ? (graphError ?? 'Failed to build graph') : null}
+                      onSelectNode={(path) => {
+                        navigateToFile(path)
+                      }}
+                    />
                   </div>
-                ) : (
-                  <div className="flex-1 overflow-auto p-4">
-                    <pre className="text-sm font-mono text-foreground whitespace-pre-wrap">
-                      {fileContent || 'Loading...'}
-                    </pre>
-                  </div>
-                )
-              ) : selectedTask ? (
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  <BackgroundTaskDetail
-                    name={selectedTask.name}
-                    description={selectedTask.description}
-                    schedule={selectedTask.schedule}
-                    enabled={selectedTask.enabled}
-                    status={selectedTask.status}
-                    nextRunAt={selectedTask.nextRunAt}
-                    lastRunAt={selectedTask.lastRunAt}
-                    lastError={selectedTask.lastError}
-                    runCount={selectedTask.runCount}
-                    onToggleEnabled={(enabled) => handleToggleBackgroundTask(selectedTask.name, enabled)}
-                  />
-                </div>
-              ) : (
-                <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    <div className="relative min-h-0 flex-1">
-                      {chatTabs.map((tab) => {
-                        const isActive = tab.id === activeChatTabId
-                        const tabState = getChatTabStateForRender(tab.id)
-                        const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
-                        const tabConversationContentClassName = tabHasConversation
-                          ? "mx-auto w-full max-w-4xl pb-28"
-                          : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
+                ) : selectedPath ? (
+                  selectedPath.endsWith('.md') ? (
+                    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                      {openMarkdownTabs.map((tab) => {
+                        const isActive = activeFileTabId
+                          ? tab.id === activeFileTabId || tab.path === selectedPath
+                          : tab.path === selectedPath
+                        const tabContent = editorContentByPath[tab.path]
+                          ?? (isActive && editorPathRef.current === tab.path ? editorContent : '')
                         return (
                           <div
                             key={tab.id}
                             className={cn(
-                              'min-h-0 h-full flex-col',
-                              isActive
-                                ? 'flex'
-                                : 'pointer-events-none invisible absolute inset-0 flex'
+                              'min-h-0 flex-1 flex-col overflow-hidden',
+                              isActive ? 'flex' : 'hidden'
                             )}
-                            data-chat-tab-panel={tab.id}
+                            data-file-tab-panel={tab.id}
                             aria-hidden={!isActive}
                           >
-                            <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-                              <ScrollPositionPreserver />
-                              <ConversationContent className={tabConversationContentClassName}>
-                                {!tabHasConversation ? (
-                                  <ConversationEmptyState className="h-auto">
-                                    <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
-                                      What are we working on?
-                                    </div>
-                                  </ConversationEmptyState>
-                                ) : (
-                                  <>
-                                    {tabState.conversation.map(item => {
-                                      const rendered = renderConversationItem(item, tab.id)
-                                      if (isToolCall(item)) {
-                                        const permRequest = tabState.allPermissionRequests.get(item.id)
-                                        if (permRequest) {
-                                          const response = tabState.permissionResponses.get(item.id) || null
-                                          return (
-                                            <React.Fragment key={item.id}>
-                                              {rendered}
-                                              <PermissionRequest
-                                                toolCall={permRequest.toolCall}
-                                                onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                                onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                                isProcessing={isActive && isProcessing}
-                                                response={response}
-                                              />
-                                            </React.Fragment>
-                                          )
-                                        }
-                                      }
-                                      return rendered
-                                    })}
-
-                                    {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
-                                      <AskHumanRequest
-                                        key={request.toolCallId}
-                                        query={request.query}
-                                        onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                        isProcessing={isActive && isProcessing}
-                                      />
-                                    ))}
-
-                                    {tabState.currentAssistantMessage && (
-                                      <Message from="assistant">
-                                        <MessageContent>
-                                          <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
-                                        </MessageContent>
-                                      </Message>
-                                    )}
-
-                                    {isActive && isProcessing && !tabState.currentAssistantMessage && (
-                                      <Message from="assistant">
-                                        <MessageContent>
-                                          <Shimmer duration={1}>Thinking...</Shimmer>
-                                        </MessageContent>
-                                      </Message>
-                                    )}
-                                  </>
-                                )}
-                              </ConversationContent>
-                            </Conversation>
+                            <MarkdownEditor
+                              content={tabContent}
+                              onChange={(markdown) => handleEditorChange(tab.path, markdown)}
+                              placeholder="Start writing..."
+                              wikiLinks={wikiLinkConfig}
+                              onImageUpload={handleImageUpload}
+                            />
                           </div>
                         )
                       })}
                     </div>
-
-                    <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
-                      <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
-                      <div className="mx-auto w-full max-w-4xl px-4">
-                        {!hasConversation && (
-                          <Suggestions onSelect={setPresetMessage} className="mb-3 justify-center" />
-                        )}
+                  ) : (
+                    <div className="flex-1 overflow-auto p-4">
+                      <pre className="text-sm font-mono text-foreground whitespace-pre-wrap">
+                        {fileContent || 'Loading...'}
+                      </pre>
+                    </div>
+                  )
+                ) : selectedTask ? (
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <BackgroundTaskDetail
+                      name={selectedTask.name}
+                      description={selectedTask.description}
+                      schedule={selectedTask.schedule}
+                      enabled={selectedTask.enabled}
+                      status={selectedTask.status}
+                      nextRunAt={selectedTask.nextRunAt}
+                      lastRunAt={selectedTask.lastRunAt}
+                      lastError={selectedTask.lastError}
+                      runCount={selectedTask.runCount}
+                      onToggleEnabled={(enabled) => handleToggleBackgroundTask(selectedTask.name, enabled)}
+                    />
+                  </div>
+                ) : (
+                  <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
+                    <div className="flex min-h-0 flex-1 flex-col">
+                      <div className="relative min-h-0 flex-1">
                         {chatTabs.map((tab) => {
                           const isActive = tab.id === activeChatTabId
                           const tabState = getChatTabStateForRender(tab.id)
+                          const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
+                          const tabConversationContentClassName = tabHasConversation
+                            ? "mx-auto w-full max-w-4xl pb-28"
+                            : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
                           return (
                             <div
                               key={tab.id}
-                              className={isActive ? 'block' : 'hidden'}
-                              data-chat-input-panel={tab.id}
+                              className={cn(
+                                'min-h-0 h-full flex-col',
+                                isActive
+                                  ? 'flex'
+                                  : 'pointer-events-none invisible absolute inset-0 flex'
+                              )}
+                              data-chat-tab-panel={tab.id}
                               aria-hidden={!isActive}
                             >
-                              <ChatInputWithMentions
-                                knowledgeFiles={knowledgeFiles}
-                                recentFiles={recentWikiFiles}
-                                visibleFiles={visibleKnowledgeFiles}
-                                onSubmit={handlePromptSubmit}
-                                onStop={handleStop}
-                                isProcessing={isActive && isProcessing}
-                                isStopping={isActive && isStopping}
-                                isActive={isActive}
-                                presetMessage={isActive ? presetMessage : undefined}
-                                onPresetMessageConsumed={isActive ? () => setPresetMessage(undefined) : undefined}
-                                runId={tabState.runId}
-                                initialDraft={chatDraftsRef.current.get(tab.id)}
-                                onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
-                              />
+                              <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+                                <ScrollPositionPreserver />
+                                <ConversationContent className={tabConversationContentClassName}>
+                                  {!tabHasConversation ? (
+                                    <ConversationEmptyState className="h-auto">
+                                      <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
+                                        What are we working on?
+                                      </div>
+                                    </ConversationEmptyState>
+                                  ) : (
+                                    <>
+                                      {tabState.conversation.map(item => {
+                                        const rendered = renderConversationItem(item, tab.id)
+                                        if (isToolCall(item)) {
+                                          const permRequest = tabState.allPermissionRequests.get(item.id)
+                                          if (permRequest) {
+                                            const response = tabState.permissionResponses.get(item.id) || null
+                                            return (
+                                              <React.Fragment key={item.id}>
+                                                {rendered}
+                                                <PermissionRequest
+                                                  toolCall={permRequest.toolCall}
+                                                  onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                                  onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                                  isProcessing={isActive && isProcessing}
+                                                  response={response}
+                                                />
+                                              </React.Fragment>
+                                            )
+                                          }
+                                        }
+                                        return rendered
+                                      })}
+
+                                      {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
+                                        <AskHumanRequest
+                                          key={request.toolCallId}
+                                          query={request.query}
+                                          onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
+                                          isProcessing={isActive && isProcessing}
+                                        />
+                                      ))}
+
+                                      {tabState.currentAssistantMessage && (
+                                        <Message from="assistant">
+                                          <MessageContent>
+                                            <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
+                                          </MessageContent>
+                                        </Message>
+                                      )}
+
+                                      {isActive && isProcessing && !tabState.currentAssistantMessage && (
+                                        <Message from="assistant">
+                                          <MessageContent>
+                                            <Shimmer duration={1}>Thinking...</Shimmer>
+                                          </MessageContent>
+                                        </Message>
+                                      )}
+                                    </>
+                                  )}
+                                </ConversationContent>
+                              </Conversation>
                             </div>
                           )
                         })}
                       </div>
-                    </div>
-                  </div>
-                </FileCardProvider>
-              )}
-            </SidebarInset>
 
-            {/* Chat sidebar - shown when viewing files/graph */}
-            {isRightPaneContext && (
-              <ChatSidebar
-                defaultWidth={460}
-                isOpen={isChatSidebarOpen}
-                isMaximized={isRightPaneMaximized}
-                chatTabs={chatTabs}
-                activeChatTabId={activeChatTabId}
-                getChatTabTitle={getChatTabTitle}
-                isChatTabProcessing={isChatTabProcessing}
-                onSwitchChatTab={switchChatTab}
-                onCloseChatTab={closeChatTab}
-                onNewChatTab={handleNewChatTabInSidebar}
-                onOpenFullScreen={toggleRightPaneMaximize}
-                conversation={conversation}
-                currentAssistantMessage={currentAssistantMessage}
-                chatTabStates={chatViewStateByTab}
-                isProcessing={isProcessing}
-                isStopping={isStopping}
-                onStop={handleStop}
-                onSubmit={handlePromptSubmit}
-                knowledgeFiles={knowledgeFiles}
-                recentFiles={recentWikiFiles}
-                visibleFiles={visibleKnowledgeFiles}
-                runId={runId}
-                presetMessage={presetMessage}
-                onPresetMessageConsumed={() => setPresetMessage(undefined)}
-                getInitialDraft={(tabId) => chatDraftsRef.current.get(tabId)}
-                onDraftChangeForTab={setChatDraftForTab}
-                pendingAskHumanRequests={pendingAskHumanRequests}
-                allPermissionRequests={allPermissionRequests}
-                permissionResponses={permissionResponses}
-                onPermissionResponse={handlePermissionResponse}
-                onAskHumanResponse={handleAskHumanResponse}
-                isToolOpenForTab={isToolOpenForTab}
-                onToolOpenChangeForTab={setToolOpenForTab}
-                onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
-                onActivate={() => setActiveShortcutPane('right')}
+                      <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
+                        <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
+                        <div className="mx-auto w-full max-w-4xl px-4">
+                          {!hasConversation && (
+                            <Suggestions onSelect={setPresetMessage} className="mb-3 justify-center" />
+                          )}
+                          {chatTabs.map((tab) => {
+                            const isActive = tab.id === activeChatTabId
+                            const tabState = getChatTabStateForRender(tab.id)
+                            return (
+                              <div
+                                key={tab.id}
+                                className={isActive ? 'block' : 'hidden'}
+                                data-chat-input-panel={tab.id}
+                                aria-hidden={!isActive}
+                              >
+                                <ChatInputWithMentions
+                                  knowledgeFiles={knowledgeFiles}
+                                  recentFiles={recentWikiFiles}
+                                  visibleFiles={visibleKnowledgeFiles}
+                                  onSubmit={handlePromptSubmit}
+                                  onStop={handleStop}
+                                  isProcessing={isActive && isProcessing}
+                                  isStopping={isActive && isStopping}
+                                  isActive={isActive}
+                                  presetMessage={isActive ? presetMessage : undefined}
+                                  onPresetMessageConsumed={isActive ? () => setPresetMessage(undefined) : undefined}
+                                  runId={tabState.runId}
+                                  initialDraft={chatDraftsRef.current.get(tab.id)}
+                                  onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
+                                />
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </FileCardProvider>
+                )}
+              </SidebarInset>
+
+              {/* Chat sidebar - shown when viewing files/graph */}
+              {isRightPaneContext && (
+                <ChatSidebar
+                  defaultWidth={460}
+                  isOpen={isChatSidebarOpen}
+                  isMaximized={isRightPaneMaximized}
+                  chatTabs={chatTabs}
+                  activeChatTabId={activeChatTabId}
+                  getChatTabTitle={getChatTabTitle}
+                  isChatTabProcessing={isChatTabProcessing}
+                  onSwitchChatTab={switchChatTab}
+                  onCloseChatTab={closeChatTab}
+                  onNewChatTab={handleNewChatTabInSidebar}
+                  onOpenFullScreen={toggleRightPaneMaximize}
+                  conversation={conversation}
+                  currentAssistantMessage={currentAssistantMessage}
+                  chatTabStates={chatViewStateByTab}
+                  isProcessing={isProcessing}
+                  isStopping={isStopping}
+                  onStop={handleStop}
+                  onSubmit={handlePromptSubmit}
+                  knowledgeFiles={knowledgeFiles}
+                  recentFiles={recentWikiFiles}
+                  visibleFiles={visibleKnowledgeFiles}
+                  runId={runId}
+                  presetMessage={presetMessage}
+                  onPresetMessageConsumed={() => setPresetMessage(undefined)}
+                  getInitialDraft={(tabId) => chatDraftsRef.current.get(tabId)}
+                  onDraftChangeForTab={setChatDraftForTab}
+                  pendingAskHumanRequests={pendingAskHumanRequests}
+                  allPermissionRequests={allPermissionRequests}
+                  permissionResponses={permissionResponses}
+                  onPermissionResponse={handlePermissionResponse}
+                  onAskHumanResponse={handleAskHumanResponse}
+                  isToolOpenForTab={isToolOpenForTab}
+                  onToolOpenChangeForTab={setToolOpenForTab}
+                  onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
+                  onActivate={() => setActiveShortcutPane('right')}
+                />
+              )}
+              {/* Rendered last so its no-drag region paints over the sidebar drag region */}
+              <FixedSidebarToggle
+                onNavigateBack={() => { void navigateBack() }}
+                onNavigateForward={() => { void navigateForward() }}
+                canNavigateBack={canNavigateBack}
+                canNavigateForward={canNavigateForward}
+                onNewChat={handleNewChatTab}
+                onOpenSearch={() => setIsSearchOpen(true)}
+                leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
               />
-            )}
-            {/* Rendered last so its no-drag region paints over the sidebar drag region */}
-            <FixedSidebarToggle
-              onNavigateBack={() => { void navigateBack() }}
-              onNavigateForward={() => { void navigateForward() }}
-              canNavigateBack={canNavigateBack}
-              canNavigateForward={canNavigateForward}
-              onNewChat={handleNewChatTab}
-              onOpenSearch={() => setIsSearchOpen(true)}
-              leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
-            />
-          </SidebarProvider>
+            </SidebarProvider>
+          </div>
+          <StatusBar />
         </div>
         <SearchDialog
           open={isSearchOpen}

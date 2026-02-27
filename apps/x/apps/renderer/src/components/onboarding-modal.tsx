@@ -368,8 +368,15 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Listen for OAuth completion events
   useEffect(() => {
+    const oauthKeyToFlavor: Record<string, string> = {
+      'chatgpt': 'openai',
+      'anthropic-native': 'anthropic',
+      'antigravity': 'antigravity',
+    }
+
     const cleanup = window.ipc.on('oauth:didConnect', (event) => {
       const { provider, success, error } = event
+      const eventFlavor = oauthKeyToFlavor[provider] || provider
 
       setProviderStates(prev => ({
         ...prev,
@@ -385,13 +392,13 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         toast.success(`Connected to ${displayName}`)
 
         // Unblock loading state if the current LLM provider completes its out-of-band flow
-        if ((provider === 'chatgpt' && llmProvider === 'openai') || (provider === 'anthropic' && llmProvider === 'anthropic') || (provider === 'antigravity' && (llmProvider as string) === 'antigravity')) {
+        if (eventFlavor === (llmProvider as string)) {
           setTestState({ status: "success" })
         }
       } else {
         toast.error(error || `Failed to connect to ${provider}`)
 
-        if ((provider === 'chatgpt' && llmProvider === 'openai') || (provider === 'anthropic' && llmProvider === 'anthropic') || (provider === 'antigravity' && (llmProvider as string) === 'antigravity')) {
+        if (eventFlavor === (llmProvider as string)) {
           setTestState({ status: "error", error })
         }
       }
