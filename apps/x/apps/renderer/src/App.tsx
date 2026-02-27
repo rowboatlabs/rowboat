@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -49,6 +49,7 @@ import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-lin
 import { OnboardingModal } from '@/components/onboarding-modal'
 import { SearchDialog } from '@/components/search-dialog'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
+import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
@@ -505,6 +506,13 @@ function App() {
   const debouncedContent = useDebounce(editorContent, 500)
   const initialContentRef = useRef<string>('')
   const renameInProgressRef = useRef(false)
+
+  // Version history state
+  const [versionHistoryPath, setVersionHistoryPath] = useState<string | null>(null)
+  const [viewingHistoricalVersion, setViewingHistoricalVersion] = useState<{
+    oid: string
+    content: string
+  } | null>(null)
 
   // Chat state
   const [, setMessage] = useState<string>('')
@@ -1071,6 +1079,14 @@ function App() {
     }
     saveFile()
   }, [debouncedContent, setHistory])
+
+  // Close version history panel when switching files
+  useEffect(() => {
+    if (versionHistoryPath && selectedPath !== versionHistoryPath) {
+      setVersionHistoryPath(null)
+      setViewingHistoricalVersion(null)
+    }
+  }, [selectedPath, versionHistoryPath])
 
   // Load runs list (all pages)
   const loadRuns = useCallback(async () => {
@@ -3213,6 +3229,31 @@ function App() {
                     ) : null}
                   </div>
                 )}
+                {selectedPath && selectedPath.startsWith('knowledge/') && selectedPath.endsWith('.md') && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (versionHistoryPath) {
+                            setVersionHistoryPath(null)
+                            setViewingHistoricalVersion(null)
+                          } else {
+                            setVersionHistoryPath(selectedPath)
+                          }
+                        }}
+                        className={cn(
+                          "titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0",
+                          versionHistoryPath && "bg-accent text-foreground"
+                        )}
+                        aria-label="Version history"
+                      >
+                        <HistoryIcon className="size-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Version history</TooltipContent>
+                  </Tooltip>
+                )}
                 {!selectedPath && !isGraphOpen && !selectedTask && (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -3276,41 +3317,80 @@ function App() {
                 </div>
               ) : selectedPath ? (
                 selectedPath.endsWith('.md') ? (
-                  <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                    {openMarkdownTabs.map((tab) => {
-                      const isActive = activeFileTabId
-                        ? tab.id === activeFileTabId || tab.path === selectedPath
-                        : tab.path === selectedPath
-                      const tabContent = editorContentByPath[tab.path]
-                        ?? (isActive && editorPathRef.current === tab.path ? editorContent : '')
-                      return (
-                        <div
-                          key={tab.id}
-                          className={cn(
-                            'min-h-0 flex-1 flex-col overflow-hidden',
-                            isActive ? 'flex' : 'hidden'
-                          )}
-                          data-file-tab-panel={tab.id}
-                          aria-hidden={!isActive}
-                        >
-                          <MarkdownEditor
-                            content={tabContent}
-                            onChange={(markdown) => handleEditorChange(tab.path, markdown)}
-                            placeholder="Start writing..."
-                            wikiLinks={wikiLinkConfig}
-                            onImageUpload={handleImageUpload}
-                            editorSessionKey={editorSessionByTabId[tab.id] ?? 0}
-                            onHistoryHandlersChange={(handlers) => {
-                              if (handlers) {
-                                fileHistoryHandlersRef.current.set(tab.id, handlers)
-                              } else {
-                                fileHistoryHandlersRef.current.delete(tab.id)
-                              }
-                            }}
-                          />
-                        </div>
-                      )
-                    })}
+                  <div className="flex-1 min-h-0 flex flex-row overflow-hidden">
+                    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                      {openMarkdownTabs.map((tab) => {
+                        const isActive = activeFileTabId
+                          ? tab.id === activeFileTabId || tab.path === selectedPath
+                          : tab.path === selectedPath
+                        const isViewingHistory = viewingHistoricalVersion && isActive && versionHistoryPath === tab.path
+                        const tabContent = isViewingHistory
+                          ? viewingHistoricalVersion.content
+                          : editorContentByPath[tab.path]
+                            ?? (isActive && editorPathRef.current === tab.path ? editorContent : '')
+                        return (
+                          <div
+                            key={tab.id}
+                            className={cn(
+                              'min-h-0 flex-1 flex-col overflow-hidden',
+                              isActive ? 'flex' : 'hidden'
+                            )}
+                            data-file-tab-panel={tab.id}
+                            aria-hidden={!isActive}
+                          >
+                            <MarkdownEditor
+                              content={tabContent}
+                              onChange={(markdown) => { if (!isViewingHistory) handleEditorChange(tab.path, markdown) }}
+                              placeholder="Start writing..."
+                              wikiLinks={wikiLinkConfig}
+                              onImageUpload={handleImageUpload}
+                              editorSessionKey={editorSessionByTabId[tab.id] ?? 0}
+                              onHistoryHandlersChange={(handlers) => {
+                                if (handlers) {
+                                  fileHistoryHandlersRef.current.set(tab.id, handlers)
+                                } else {
+                                  fileHistoryHandlersRef.current.delete(tab.id)
+                                }
+                              }}
+                              editable={!isViewingHistory}
+                            />
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {versionHistoryPath && (
+                      <VersionHistoryPanel
+                        path={versionHistoryPath}
+                        onClose={() => {
+                          setVersionHistoryPath(null)
+                          setViewingHistoricalVersion(null)
+                        }}
+                        onSelectVersion={(oid, content) => {
+                          if (oid === null) {
+                            setViewingHistoricalVersion(null)
+                          } else {
+                            setViewingHistoricalVersion({ oid, content })
+                          }
+                        }}
+                        onRestore={async (oid) => {
+                          try {
+                            await window.ipc.invoke('knowledge:restore', {
+                              path: versionHistoryPath.startsWith('knowledge/')
+                                ? versionHistoryPath.slice('knowledge/'.length)
+                                : versionHistoryPath,
+                              oid,
+                            })
+                            // Reload file content
+                            const result = await window.ipc.invoke('workspace:readFile', { path: versionHistoryPath })
+                            handleEditorChange(versionHistoryPath, result.data)
+                            setViewingHistoricalVersion(null)
+                            setVersionHistoryPath(null)
+                          } catch (err) {
+                            console.error('Failed to restore version:', err)
+                          }
+                        }}
+                      />
+                    )}
                   </div>
                 ) : (
                   <div className="flex-1 overflow-auto p-4">

@@ -197,6 +197,7 @@ interface MarkdownEditorProps {
   onImageUpload?: (file: File) => Promise<string | null>
   editorSessionKey?: number
   onHistoryHandlersChange?: (handlers: { undo: () => boolean; redo: () => boolean } | null) => void
+  editable?: boolean
 }
 
 type WikiLinkMatch = {
@@ -282,6 +283,7 @@ export function MarkdownEditor({
   onImageUpload,
   editorSessionKey = 0,
   onHistoryHandlersChange,
+  editable = true,
 }: MarkdownEditorProps) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -303,6 +305,7 @@ export function MarkdownEditor({
   )
 
   const editor = useEditor({
+    editable,
     extensions: [
       StarterKit.configure({
         heading: {
@@ -516,6 +519,13 @@ export function MarkdownEditor({
       onHistoryHandlersChange(null)
     }
   }, [editor, onHistoryHandlersChange])
+
+  // Update editable state when prop changes
+  useEffect(() => {
+    if (editor) {
+      editor.setEditable(editable)
+    }
+  }, [editor, editable])
 
   // Force re-render decorations when selection highlight changes
   useEffect(() => {
