@@ -74,7 +74,18 @@ export async function testModelConnection(
     timeoutMs?: number,
 ): Promise<{ success: boolean; error?: string }> {
     const isLocal = providerConfig.flavor === "ollama" || providerConfig.flavor === "openai-compatible";
-    const effectiveTimeout = timeoutMs ?? (isLocal ? 60000 : 8000);
+    // Cloud providers can occasionally take >8s for a small prompt, especially via aggregators like OpenRouter.
+    // Prefer a more forgiving default to avoid false negatives while still keeping the UI responsive.
+    let effectiveTimeout = timeoutMs;
+    if (effectiveTimeout == null) {
+        if (isLocal) {
+            effectiveTimeout = 60000;
+        } else if (providerConfig.flavor === "openrouter") {
+            effectiveTimeout = 60000;
+        } else {
+            effectiveTimeout = 20000;
+        }
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), effectiveTimeout);
     try {
@@ -87,6 +98,14 @@ export async function testModelConnection(
         });
         return { success: true };
     } catch (error) {
+        if (
+            controller.signal.aborted ||
+            (error instanceof Error &&
+                (error.name === "AbortError" || /aborted/i.test(error.message)))
+        ) {
+            return { success: false, error: `Connection test timed out after ${Math.round(effectiveTimeout / 1000)}s` };
+        }
+
         const message = error instanceof Error ? error.message : "Connection test failed";
         return { success: false, error: message };
     } finally {
