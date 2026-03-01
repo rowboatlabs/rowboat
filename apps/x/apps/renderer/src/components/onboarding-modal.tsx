@@ -370,7 +370,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   useEffect(() => {
     const oauthKeyToFlavor: Record<string, string> = {
       'chatgpt': 'openai',
-      'anthropic-native': 'anthropic',
       'antigravity': 'antigravity',
     }
 
@@ -729,7 +728,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                 onChange={(e) => updateProviderConfig(llmProvider, { apiKey: e.target.value })}
                 placeholder="Paste your API key"
               />
-              {((llmProvider as string) === 'openai' || (llmProvider as string) === 'anthropic' || (llmProvider as string) === 'antigravity') && (
+              {((llmProvider as string) === 'openai' || (llmProvider as string) === 'antigravity') && (
                 <div className="flex items-center gap-4 mt-2">
                   <span className="text-xs text-muted-foreground">— OR —</span>
                   <Button
@@ -752,15 +751,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                             toast.error(result.error || "Failed to connect via OAuth");
                             setTestState({ status: "error", error: result.error });
                           }
-                        } else if (llmProvider === 'anthropic') {
-                          const result = await window.ipc.invoke('oauth:anthropic', null);
-                          if (result.success) {
-                            toast.success(`Successfully connected Claude Pro!`);
-                            setTestState({ status: "success" });
-                          } else {
-                            toast.error(result.error || "Failed to connect via OAuth");
-                            setTestState({ status: "error", error: result.error });
-                          }
                         } else if ((llmProvider as string) === 'antigravity') {
                           const result = await window.ipc.invoke('oauth:antigravity', null);
                           if (result.success) {
@@ -777,7 +767,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                       }
                     }}
                   >
-                    Sign in to {llmProvider === 'openai' ? 'ChatGPT Plus' : llmProvider === 'anthropic' ? 'Claude Pro' : 'Antigravity'}
+                    Sign in to {llmProvider === 'openai' ? 'ChatGPT Plus' : 'Antigravity'}
                   </Button>
                 </div>
               )}

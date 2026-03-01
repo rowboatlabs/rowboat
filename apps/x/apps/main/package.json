@@ -7,7 +7,7 @@
     "main": ".package/dist/main.cjs",
     "license": "Apache-2.0",
     "scripts": {
-        "start": "electron .",
+        "start": "unset ELECTRON_RUN_AS_NODE && electron .",
         "build": "rm -rf dist && tsc && node bundle.mjs",
         "package": "electron-forge package",
         "make": "electron-forge make"
@@ -35,7 +35,7 @@
         "@electron-forge/publisher-s3": "^7.10.2",
         "@types/electron-squirrel-startup": "^1.0.2",
         "@types/node": "^25.0.3",
-        "electron": "^39.2.7",
+        "electron": "^39.4.0",
         "esbuild": "^0.24.2"
     }
 }

@@ -370,10 +370,6 @@ export function setupIpcHandlers() {
       const { handleChatGPTDeviceAuth } = await import('./oauth-device-handler.js');
       return await handleChatGPTDeviceAuth();
     },
-    'oauth:anthropic': async () => {
-      const { handleAnthropicBrowserAuth } = await import('./oauth-device-handler.js');
-      return await handleAnthropicBrowserAuth();
-    },
     'oauth:antigravity': async () => {
       const { handleAntigravityBrowserAuth } = await import('./oauth-device-handler.js');
       return await handleAntigravityBrowserAuth();

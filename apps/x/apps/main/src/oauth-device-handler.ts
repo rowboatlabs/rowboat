@@ -1,6 +1,5 @@
 import { shell } from 'electron';
 import { ChatGPTAuth } from './oauth/chatgpt.js';
-import { AnthropicAuth } from './oauth/anthropic.js';
 import { AntigravityAuth } from './oauth/antigravity.js';
 import container from '@x/core/dist/di/container.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
@@ -60,112 +59,6 @@ export async function handleChatGPTDeviceAuth(): Promise<{ success: boolean; dev
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         emitOAuthEvent({ provider: 'chatgpt', success: false, error: errorMessage });
         return { success: false, error: errorMessage };
-    }
-}
-
-export async function handleAnthropicBrowserAuth(): Promise<{ success: boolean; error?: string }> {
-    // This client ID is registered with redirect_uri http://localhost:8765/callback
-    const ANTHROPIC_PORT = 8765;
-    const ANTHROPIC_REDIRECT_URI = `http://localhost:${ANTHROPIC_PORT}/callback`;
-    try {
-        const pkce = AnthropicAuth.generatePKCE();
-        const authUrl = AnthropicAuth.getAuthorizeUrl(pkce, ANTHROPIC_REDIRECT_URI);
-
-        console.log(`[OAuth] Starting Anthropic browser auth on port ${ANTHROPIC_PORT}...`);
-        console.log(`[OAuth] Anthropic redirect URI: ${ANTHROPIC_REDIRECT_URI}`);
-
-        // Create a dedicated callback server for Anthropic using /callback path
-        // (auth-server.ts uses /oauth/callback which doesn't match Anthropic's registered URI)
-        return new Promise((resolve) => {
-            const { createServer } = require('http');
-            const { URL } = require('url');
-
-            const server = createServer((req: any, res: any) => {
-                if (!req.url) {
-                    res.writeHead(400);
-                    res.end('Bad Request');
-                    return;
-                }
-
-                const url = new URL(req.url, `http://localhost:${ANTHROPIC_PORT}`);
-
-                if (url.pathname === '/callback') {
-                    const code = url.searchParams.get('code');
-                    const state = url.searchParams.get('state');
-                    const error = url.searchParams.get('error');
-
-                    if (error) {
-                        res.writeHead(200, { 'Content-Type': 'text/html' });
-                        res.end(`<!DOCTYPE html><html><body style="font-family:system-ui;text-align:center;padding:50px"><h1 style="color:#d32f2f">Authorization Failed</h1><p>${error}</p><p>You can close this window.</p><script>setTimeout(()=>window.close(),3000)</script></body></html>`);
-                        server.close();
-                        emitOAuthEvent({ provider: 'anthropic-native', success: false, error });
-                        resolve({ success: false, error });
-                        return;
-                    }
-
-                    // Process the callback
-                    (async () => {
-                        try {
-                            if (!code) {
-                                throw new Error('No authorization code received from Anthropic');
-                            }
-                            if (state && state !== pkce.verifier) {
-                                console.warn(`[OAuth] Anthropic state mismatch`);
-                                throw new Error('Invalid state parameter - possible CSRF attack');
-                            }
-
-                            console.log('[OAuth] Anthropic: exchanging code for tokens...');
-                            const tokens = await AnthropicAuth.exchangeCodeForTokens(code, pkce.verifier, ANTHROPIC_REDIRECT_URI);
-
-                            const oauthRepo = getOAuthRepo();
-                            const normalized = normalizeOAuthTokens(tokens);
-                            await oauthRepo.upsert('anthropic-native', { tokens: normalized, error: null });
-
-                            console.log('[OAuth] Anthropic: successfully connected!');
-                            res.writeHead(200, { 'Content-Type': 'text/html' });
-                            res.end(`<!DOCTYPE html><html><body style="font-family:system-ui;text-align:center;padding:50px"><h1 style="color:#2e7d32">Authorization Successful</h1><p>You can close this window.</p><script>setTimeout(()=>window.close(),2000)</script></body></html>`);
-                            server.close();
-                            emitOAuthEvent({ provider: 'anthropic-native', success: true });
-                            resolve({ success: true });
-                        } catch (err) {
-                            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-                            console.error('[OAuth] Anthropic token exchange failed:', errorMessage);
-                            res.writeHead(200, { 'Content-Type': 'text/html' });
-                            res.end(`<!DOCTYPE html><html><body style="font-family:system-ui;text-align:center;padding:50px"><h1 style="color:#d32f2f">Authorization Failed</h1><p>${errorMessage}</p><p>You can close this window.</p><script>setTimeout(()=>window.close(),3000)</script></body></html>`);
-                            server.close();
-                            emitOAuthEvent({ provider: 'anthropic-native', success: false, error: errorMessage });
-                            resolve({ success: false, error: errorMessage });
-                        }
-                    })();
-                } else {
-                    res.writeHead(404);
-                    res.end('Not Found');
-                }
-            });
-
-            server.listen(ANTHROPIC_PORT, 'localhost', () => {
-                console.log(`[OAuth] Anthropic auth server listening on port ${ANTHROPIC_PORT}`);
-                shell.openExternal(authUrl);
-            });
-
-            server.on('error', (err: any) => {
-                const msg = err.code === 'EADDRINUSE'
-                    ? `Port ${ANTHROPIC_PORT} is already in use`
-                    : (err.message || 'Failed to start auth server');
-                console.error('[OAuth] Anthropic: failed to start auth server:', msg);
-                resolve({ success: false, error: msg });
-            });
-
-            // Timeout after 3 minutes
-            setTimeout(() => {
-                server.close();
-                resolve({ success: false, error: 'OAuth timeout - did not receive callback within 3 minutes' });
-            }, 180000);
-        });
-    } catch (error) {
-        const msg = error instanceof Error ? error.message : 'Unknown error';
-        console.error('[OAuth] Anthropic: unexpected error:', msg);
-        return { success: false, error: msg };
     }
 }
 

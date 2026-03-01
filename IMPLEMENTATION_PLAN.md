@@ -2,14 +2,10 @@
 
 ## All Fixes Complete ✅
 
-### 1. ✅ Fix Anthropic Login (Port conflict + state validation)
-**File:** `apps/x/apps/main/src/oauth-device-handler.ts`
-- Moved Anthropic OAuth to dedicated port **8081** (was sharing 8080 with generic OAuth handler)
-- Added robust state validation that handles empty/missing state gracefully
-- Added code validation (checks for missing authorization code)
-- Added `.catch()` handler for auth server startup failures (e.g. port in use)
-- Added comprehensive logging throughout the flow
-- Improved error messages with specific failure descriptions
+### 1. ✅ ~~Fix Anthropic Login~~ → REMOVED (Anthropic blocked third-party OAuth Feb 2026)
+**Removed files:** `apps/x/apps/main/src/oauth/anthropic.ts`
+- Anthropic updated their ToS and began technically blocking OAuth tokens from being used outside Claude Code/claude.ai
+- Anthropic now uses API keys only in this integration
 
 ### 2. ✅ Fix Antigravity Login (Callback path mismatch bug)
 **File:** `apps/x/apps/main/src/oauth-device-handler.ts`

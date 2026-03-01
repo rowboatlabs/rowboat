@@ -12,12 +12,14 @@ import z from "zod";
 
 import { IOAuthRepo } from "../auth/repo.js";
 import container from "../di/container.js";
+import { loadCodeAssist, createAntigravityFetch, ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET } from "./antigravity-gateway.js";
 
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
 
 export async function createProvider(config: z.infer<typeof Provider>): Promise<ProviderV2> {
-    let { apiKey, baseURL, headers } = config;
+    let { apiKey, baseURL } = config;
+    const { headers } = config;
     let isOAuthToken = false;
 
     // Inject OAuth token if apiKey is missing
@@ -29,16 +31,39 @@ export async function createProvider(config: z.infer<typeof Provider>): Promise<
             const tokens = connection.tokens;
 
             if (tokens?.access_token) {
+                let accessToken = tokens.access_token;
+
+                // Refresh expired tokens before using them
+                const now = Math.floor(Date.now() / 1000);
+                if (tokens.expires_at && tokens.expires_at <= now && tokens.refresh_token) {
+                    console.log(`[models] OAuth token expired for ${providerKey}, refreshing...`);
+                    try {
+                        const refreshed = await refreshGoogleOAuthToken(tokens.refresh_token);
+                        accessToken = refreshed.access_token;
+                        // Persist the refreshed tokens
+                        const updatedTokens = {
+                            ...tokens,
+                            access_token: refreshed.access_token,
+                            expires_at: Math.floor(Date.now() / 1000) + (refreshed.expires_in || 3600),
+                            refresh_token: refreshed.refresh_token || tokens.refresh_token,
+                        };
+                        await oauthRepo.upsert(providerKey, { tokens: updatedTokens, error: null });
+                        console.log(`[models] OAuth token refreshed for ${providerKey}`);
+                    } catch (refreshErr) {
+                        console.error(`[models] Token refresh failed for ${providerKey}:`, refreshErr);
+                        // Fall through with the expired token — the API will return 401
+                    }
+                }
+
                 console.log(`[models] Injecting OAuth token for flavor: ${config.flavor} (key: ${providerKey})`);
-                apiKey = tokens.access_token;
+                apiKey = accessToken;
                 isOAuthToken = true;
                 if (config.flavor === 'openai') {
                     baseURL = 'https://chatgpt.com/backend-api/codex';
                 } else if (config.flavor === 'anthropic') {
                     baseURL = 'https://api.anthropic.com/v1';
-                } else if (config.flavor === 'antigravity') {
-                    baseURL = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
                 }
+                // Antigravity baseURL is handled in its own provider case
             } else {
                 console.log(`[models] No OAuth token found for flavor: ${config.flavor} (key: ${providerKey})`);
             }
@@ -52,7 +77,7 @@ export async function createProvider(config: z.infer<typeof Provider>): Promise<
     }
 
     const customFetch = async (url: string, init?: RequestInit) => {
-        if (init?.body && (url.includes('chatgpt.com/backend-api/codex') || url.includes('daily-cloudcode-pa.sandbox.googleapis.com'))) {
+        if (init?.body && url.includes('chatgpt.com/backend-api/codex')) {
             try {
                 fs.writeFileSync('/tmp/rowboat_models_log_before.json', init.body as string);
                 const body = JSON.parse(init.body as string);
@@ -187,16 +212,53 @@ export async function createProvider(config: z.infer<typeof Provider>): Promise<
                 baseURL,
                 headers,
             });
-        case "antigravity":
-            return createOpenAI({
-                apiKey: apiKey || 'empty',
-                baseURL: baseURL || 'https://daily-cloudcode-pa.sandbox.googleapis.com',
+        case "antigravity": {
+            // Antigravity uses Google's Cloud Code gateway with Gemini-format requests
+            // wrapped in a custom envelope. We use the Google AI SDK provider with a
+            // custom fetch that handles the envelope transformation.
+            const oauthToken = apiKey!;
+            const session = await loadCodeAssist(oauthToken);
+            const antigravityFetch = createAntigravityFetch(oauthToken, session.project);
+            return createGoogleGenerativeAI({
+                // The Google provider requires an apiKey but we handle auth in our custom fetch
+                apiKey: 'antigravity-oauth',
+                // Set baseURL to the gateway – the custom fetch will rewrite the full URL
+                baseURL: 'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal',
                 headers,
-                fetch: customFetch as any,
+                fetch: antigravityFetch as any,
             });
+        }
         default:
             throw new Error(`Unsupported provider flavor: ${config.flavor}`);
     }
+}
+
+/**
+ * Refresh a Google OAuth token using the Antigravity client credentials.
+ * Works for any Google OAuth token obtained with these credentials.
+ */
+async function refreshGoogleOAuthToken(refreshToken: string): Promise<{
+    access_token: string;
+    refresh_token?: string;
+    expires_in?: number;
+}> {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: refreshToken,
+            client_id: ANTIGRAVITY_CLIENT_ID,
+            client_secret: ANTIGRAVITY_CLIENT_SECRET,
+        }).toString(),
+    });
+
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Google token refresh failed (${res.status}): ${text}`);
+    }
+
+    return res.json();
 }
 
 export async function testModelConnection(
@@ -205,7 +267,8 @@ export async function testModelConnection(
     timeoutMs?: number,
 ): Promise<{ success: boolean; error?: string }> {
     const isLocal = providerConfig.flavor === "ollama" || providerConfig.flavor === "openai-compatible";
-    const effectiveTimeout = timeoutMs ?? (isLocal ? 60000 : 8000);
+    const isAntigravity = providerConfig.flavor === "antigravity";
+    const effectiveTimeout = timeoutMs ?? (isLocal ? 60000 : isAntigravity ? 30000 : 8000);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), effectiveTimeout);
     try {

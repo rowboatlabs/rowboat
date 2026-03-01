@@ -2864,7 +2864,7 @@ function App() {
               />
               <SidebarInset
                 className={cn(
-                  "overflow-hidden! min-h-0 min-w-0 transition-[max-width] duration-200 ease-linear",
+                  "overflow-hidden! min-h-0 min-w-0 flex flex-col transition-[max-width] duration-200 ease-linear",
                   shouldCollapseLeftPane && "pointer-events-none select-none"
                 )}
                 style={shouldCollapseLeftPane ? { maxWidth: 0 } : { maxWidth: '100%' }}
@@ -3161,6 +3161,7 @@ function App() {
                     </div>
                   </FileCardProvider>
                 )}
+                <StatusBar />
               </SidebarInset>
 
               {/* Chat sidebar - shown when viewing files/graph */}
@@ -3215,7 +3216,6 @@ function App() {
               />
             </SidebarProvider>
           </div>
-          <StatusBar />
         </div>
         <SearchDialog
           open={isSearchOpen}

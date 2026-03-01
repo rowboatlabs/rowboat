@@ -140,7 +140,7 @@ const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description
   { id: "openai", name: "OpenAI", description: "GPT models" },
   { id: "anthropic", name: "Anthropic", description: "Claude models" },
   { id: "google", name: "Gemini", description: "Google AI Studio" },
-  { id: "antigravity", name: "Antigravity", description: "Internal AI Engine" },
+  { id: "antigravity", name: "Antigravity", description: "Free Gemini & Claude via Google" },
   { id: "ollama", name: "Ollama (Local)", description: "Run models locally" },
 ]
 
@@ -153,12 +153,24 @@ const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: s
 const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
   openai: "gpt-5.2",
   anthropic: "claude-opus-4-6-20260202",
+  antigravity: "gemini-3-flash",
 }
 
 const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
   ollama: "http://localhost:11434",
   "openai-compatible": "http://localhost:1234/v1",
 }
+
+// Built-in Antigravity models (not in models.dev catalog)
+const antigravityModels: LlmModelOption[] = [
+  { id: "gemini-3-flash", name: "Gemini 3 Flash" },
+  { id: "gemini-3-pro-low", name: "Gemini 3 Pro (Low Thinking)" },
+  { id: "gemini-3-pro-high", name: "Gemini 3 Pro (High Thinking)" },
+  { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low Thinking)" },
+  { id: "gemini-3.1-pro-high", name: "Gemini 3.1 Pro (High Thinking)" },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
+]
 
 function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [provider, setProvider] = useState<LlmProviderFlavor>("openai")
@@ -179,18 +191,68 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
   const [deviceCodeData, setDeviceCodeData] = useState<{ provider: string, code: string } | null>(null)
+  const [oauthConnections, setOauthConnections] = useState<Record<string, boolean>>({})
+
+  // Check OAuth connection status on open
+  useEffect(() => {
+    if (!dialogOpen) return
+    async function checkOAuth() {
+      try {
+        const result = await window.ipc.invoke('oauth:getState', null)
+        const connected: Record<string, boolean> = {}
+        for (const [key, value] of Object.entries(result.config)) {
+          connected[key] = value.connected
+        }
+        setOauthConnections(connected)
+      } catch {
+        // ignore
+      }
+    }
+    checkOAuth()
+  }, [dialogOpen])
+
+  // Refresh OAuth state when connections change
+  useEffect(() => {
+    if (!dialogOpen) return
+    const cleanup = window.ipc.on('oauth:didConnect', async () => {
+      try {
+        const result = await window.ipc.invoke('oauth:getState', null)
+        const connected: Record<string, boolean> = {}
+        for (const [key, value] of Object.entries(result.config)) {
+          connected[key] = value.connected
+        }
+        setOauthConnections(connected)
+      } catch {
+        // ignore
+      }
+    })
+    return cleanup
+  }, [dialogOpen])
+
+  const isChatGPTConnected = oauthConnections['chatgpt'] ?? false
+  const isAntigravityConnected = oauthConnections['antigravity'] ?? false
+
+  // Determine the active auth method for the current provider
+  const getAuthInfo = useCallback((prov: LlmProviderFlavor): { method: 'api-key' | 'chatgpt-oauth' | 'antigravity-oauth' | 'none'; label: string } => {
+    const hasApiKey = providerConfigs[prov]?.apiKey?.trim().length > 0
+    if (hasApiKey) return { method: 'api-key', label: 'API Key' }
+    if (prov === 'openai' && isChatGPTConnected) return { method: 'chatgpt-oauth', label: 'ChatGPT Plus subscription' }
+    if (prov === 'antigravity' && isAntigravityConnected) return { method: 'antigravity-oauth', label: 'Antigravity subscription' }
+    return { method: 'none', label: 'No authentication' }
+  }, [providerConfigs, isChatGPTConnected, isAntigravityConnected])
 
   const activeConfig = providerConfigs[provider]
-  const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible" || provider === "antigravity"
-  const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "antigravity"
+  const authInfo = getAuthInfo(provider)
+  const showApiKey = provider !== "antigravity" && (provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible")
+  const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway"
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
   const requiresBaseURL = provider === "ollama" || provider === "openai-compatible"
   const isLocalProvider = provider === "ollama" || provider === "openai-compatible"
-  const modelsForProvider = modelsCatalog[provider] || []
+  const modelsForProvider = provider === "antigravity" ? antigravityModels : (modelsCatalog[provider] || [])
   const showModelInput = isLocalProvider || modelsForProvider.length === 0
   const isMoreProvider = moreProviders.some(p => p.id === provider)
 
-  const canTest = activeConfig.model.trim().length > 0
+  const canTest = activeConfig.model.trim().length > 0 && (provider !== 'antigravity' || isAntigravityConnected)
 
   const updateConfig = useCallback(
     (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string }>) => {
@@ -275,6 +337,10 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
           next[prov] = { ...next[prov], model: hasPreferred ? preferred : (models[0]?.id || "") }
         }
       }
+      // Set default for Antigravity (built-in catalog, not from models.dev)
+      if (!next.antigravity.model) {
+        next.antigravity = { ...next.antigravity, model: preferredDefaults.antigravity || antigravityModels[0]?.id || "" }
+      }
       return next
     })
   }, [modelsCatalog])
@@ -288,7 +354,6 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       // Map OAuth repo keys back to provider flavor IDs
       const oauthKeyToFlavor: Record<string, string> = {
         'chatgpt': 'openai',
-        'anthropic-native': 'anthropic',
         'antigravity': 'antigravity',
       }
       const eventFlavor = oauthKeyToFlavor[eventProvider] || eventProvider
@@ -395,6 +460,18 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         )}
       </div>
 
+      {/* Auth status banner */}
+      {(authInfo.method === 'chatgpt-oauth' || authInfo.method === 'antigravity-oauth') && !activeConfig.apiKey.trim() && (
+        <div className="flex items-center gap-2 p-2.5 rounded-md bg-green-500/10 border border-green-500/30">
+          <CheckCircle2 className="size-4 text-green-600 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-medium text-green-700 dark:text-green-400">
+              Using {authInfo.label}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Model selection */}
       <div className="space-y-2">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model</span>
@@ -441,19 +518,62 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         )}
       </div>
 
+      {/* Antigravity OAuth-only auth */}
+      {provider === 'antigravity' && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Authentication</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            disabled={testState.status === "testing"}
+            onClick={async () => {
+              if (isAntigravityConnected) return
+              setTestState({ status: "testing" });
+              try {
+                const result = await window.ipc.invoke('oauth:antigravity', null);
+                if (result.success) {
+                  toast.success(`Successfully connected Antigravity!`);
+                  setTestState({ status: "success" });
+                } else {
+                  toast.error(result.error || "Failed to connect via OAuth");
+                  setTestState({ status: "error", error: result.error });
+                }
+              } catch (e: any) {
+                toast.error("An error occurred during OAuth");
+                setTestState({ status: "error", error: e.message });
+              }
+            }}
+          >
+            {isAntigravityConnected
+              ? "Connected to Antigravity"
+              : "Sign in with Google"}
+          </Button>
+          <div className="text-xs text-muted-foreground p-2 rounded-md bg-muted/50 border">
+            Antigravity provides free access to Gemini and Claude models through Google's Cloud Code gateway.
+            Sign in with your Google account to get started.
+          </div>
+        </div>
+      )}
+
       {/* API Key */}
       {showApiKey && (
         <div className="space-y-2">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            {provider === "openai-compatible" ? "API Key (optional)" : "API Key"}
+            {provider === "openai-compatible" ? "API Key (optional)" :
+              authInfo.method === 'chatgpt-oauth' ? "API Key (optional — subscription active)" : "API Key"}
           </span>
           <Input
             type="password"
             value={activeConfig.apiKey}
             onChange={(e) => updateConfig(provider, { apiKey: e.target.value })}
-            placeholder="Paste your API key"
+            placeholder={
+              authInfo.method === 'chatgpt-oauth'
+                ? "Leave empty to use subscription, or paste API key to override"
+                : "Paste your API key"
+            }
           />
-          {(provider === 'openai' || provider === 'antigravity') && (
+          {provider === 'openai' && (
             <div className="flex items-center gap-4 mt-2">
               <span className="text-xs text-muted-foreground">— OR —</span>
               <Button
@@ -462,29 +582,18 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                 onClick={async () => {
                   setTestState({ status: "testing" });
                   try {
-                    if (provider === 'openai') {
-                      const result = await window.ipc.invoke('oauth:chatgpt', null);
-                      if (result.success) {
-                        if (result.deviceCode) {
-                          setDeviceCodeData({ provider, code: result.deviceCode });
-                          toast.info(`Please enter your device code in the browser window.`);
-                        } else {
-                          toast.success(`Successfully connected ChatGPT Plus!`);
-                          setTestState({ status: "success" });
-                        }
+                    const result = await window.ipc.invoke('oauth:chatgpt', null);
+                    if (result.success) {
+                      if (result.deviceCode) {
+                        setDeviceCodeData({ provider, code: result.deviceCode });
+                        toast.info(`Please enter your device code in the browser window.`);
                       } else {
-                        toast.error(result.error || "Failed to connect via OAuth");
-                        setTestState({ status: "error", error: result.error });
-                      }
-                    } else if (provider === 'antigravity') {
-                      const result = await window.ipc.invoke('oauth:antigravity', null);
-                      if (result.success) {
-                        toast.success(`Successfully connected Antigravity!`);
+                        toast.success(`Successfully connected ChatGPT Plus!`);
                         setTestState({ status: "success" });
-                      } else {
-                        toast.error(result.error || "Failed to connect via OAuth");
-                        setTestState({ status: "error", error: result.error });
                       }
+                    } else {
+                      toast.error(result.error || "Failed to connect via OAuth");
+                      setTestState({ status: "error", error: result.error });
                     }
                   } catch (e: any) {
                     toast.error("An error occurred during OAuth");
@@ -492,7 +601,9 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                   }
                 }}
               >
-                Sign in to {provider === 'openai' ? 'ChatGPT Plus' : 'Antigravity'}
+                {isChatGPTConnected
+                  ? "Connected to ChatGPT Plus"
+                  : "Sign in to ChatGPT Plus"}
               </Button>
             </div>
           )}
@@ -501,6 +612,14 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
               Get your API key from{' '}
               <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" className="text-foreground underline">
                 console.anthropic.com
+              </a>
+            </div>
+          )}
+          {provider === 'google' && (
+            <div className="text-xs text-muted-foreground mt-2 p-2 rounded-md bg-muted/50 border">
+              Get your API key from{' '}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-foreground underline">
+                aistudio.google.com
               </a>
             </div>
           )}

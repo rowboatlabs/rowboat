@@ -234,13 +234,6 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
-  'oauth:anthropic': {
-    req: z.null(),
-    res: z.object({
-      success: z.boolean(),
-      error: z.string().optional(),
-    }),
-  },
   'oauth:antigravity': {
     req: z.null(),
     res: z.object({
