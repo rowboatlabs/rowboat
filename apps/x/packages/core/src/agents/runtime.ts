@@ -28,8 +28,8 @@ import { parse } from "yaml";
 import { raw as noteCreationMediumRaw } from "../knowledge/note_creation_medium.js";
 import { raw as noteCreationLowRaw } from "../knowledge/note_creation_low.js";
 import { raw as noteCreationHighRaw } from "../knowledge/note_creation_high.js";
-import { raw as labelingAgentRaw } from "../knowledge/labeling_agent.js";
-import { raw as noteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
+import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
+import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -356,6 +356,7 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     }
 
     if (id === 'labeling_agent') {
+        const labelingAgentRaw = getLabelingAgentRaw();
         let agent: z.infer<typeof Agent> = {
             name: id,
             instructions: labelingAgentRaw,
@@ -380,6 +381,7 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     }
 
     if (id === 'note_tagging_agent') {
+        const noteTaggingAgentRaw = getNoteTaggingAgentRaw();
         let agent: z.infer<typeof Agent> = {
             name: id,
             instructions: noteTaggingAgentRaw,

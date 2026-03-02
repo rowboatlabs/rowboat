@@ -1,6 +1,7 @@
-import { raw as tagSystemRaw } from './tag_system.js';
+import { renderTagSystemForNotes } from './tag_system.js';
 
-export const raw = `---
+export function getRaw(): string {
+  return `---
 model: gpt-5.2
 tools:
   workspace-readFile:
@@ -69,7 +70,6 @@ tags:
 
 ---
 
-# Rowboat Tag System Reference
-
-${tagSystemRaw}
+${renderTagSystemForNotes()}
 `;
+}

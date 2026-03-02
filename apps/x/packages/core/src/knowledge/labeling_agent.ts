@@ -1,4 +1,7 @@
-export const raw = `---
+import { renderTagSystemForEmails } from './tag_system.js';
+
+export function getRaw(): string {
+  return `---
 model: gpt-5.2
 tools:
   workspace-readFile:
@@ -15,24 +18,7 @@ tools:
 
 You are an email labeling agent. Given a batch of email files, you will classify each email and prepend YAML frontmatter with structured labels.
 
-# Label Taxonomy
-
-Apply the following labels to each email:
-
-## Relationship (pick all that apply)
-Investor, Customer, Prospect, Partner, Vendor, Product, Candidate, Team, Advisor, Personal, Press, Community, Government
-
-## Topic (pick all that apply)
-Sales, Support, Legal, Finance, Hiring, Fundraising, Travel, Event, Shopping, Health, Learning, Research
-
-## Email Type (pick one)
-Intro, Followup, Scheduling, Cold Outreach, Newsletter, Notification
-
-## Filter (pick all that apply)
-Spam, Promotion, Social, Forums
-
-## Action (pick one)
-Action Required, FYI, Urgent, Waiting
+${renderTagSystemForEmails()}
 
 # Instructions
 
@@ -70,3 +56,4 @@ labeled_at: "2026-02-28T12:00:00Z"
 - The \`labeled_at\` timestamp should be the current time in ISO 8601 format.
 - Process all files in the batch. Do not skip any unless they already have frontmatter.
 `;
+}
