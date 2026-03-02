@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { autoConfigureStrictnessIfNeeded } from '../config/strictness_analyzer.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
@@ -363,7 +362,19 @@ export async function buildGraph(sourceDir: string): Promise<void> {
     console.log(`[buildGraph] State loaded. Previously processed: ${previouslyProcessedCount} files`);
 
     // Get files that need processing (new or changed)
-    const filesToProcess = getFilesToProcess(sourceDir, state);
+    let filesToProcess = getFilesToProcess(sourceDir, state);
+
+    // For gmail_sync, only process emails that have been labeled (have YAML frontmatter)
+    if (sourceDir.endsWith('gmail_sync')) {
+        filesToProcess = filesToProcess.filter(filePath => {
+            try {
+                const content = fs.readFileSync(filePath, 'utf-8');
+                return content.startsWith('---');
+            } catch {
+                return false;
+            }
+        });
+    }
 
     if (filesToProcess.length === 0) {
         console.log(`[buildGraph] No new or changed files to process in ${path.basename(sourceDir)}`);
@@ -525,8 +536,6 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
 async function processAllSources(): Promise<void> {
     console.log('[GraphBuilder] Checking for new content in all sources...');
 
-    // Auto-configure strictness on first run if not already done
-    autoConfigureStrictnessIfNeeded();
 
     let anyFilesProcessed = false;
 
@@ -555,7 +564,19 @@ async function processAllSources(): Promise<void> {
         }
 
         try {
-            const filesToProcess = getFilesToProcess(sourceDir, state);
+            let filesToProcess = getFilesToProcess(sourceDir, state);
+
+            // For gmail_sync, only process emails that have been labeled (have YAML frontmatter)
+            if (folder === 'gmail_sync') {
+                filesToProcess = filesToProcess.filter(filePath => {
+                    try {
+                        const content = fs.readFileSync(filePath, 'utf-8');
+                        return content.startsWith('---');
+                    } catch {
+                        return false;
+                    }
+                });
+            }
 
             if (filesToProcess.length > 0) {
                 console.log(`[GraphBuilder] Found ${filesToProcess.length} new/changed files in ${folder}`);

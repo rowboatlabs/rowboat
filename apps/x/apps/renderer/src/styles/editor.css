@@ -237,6 +237,34 @@
   flex-shrink: 0;
 }
 
+/* Tag pills row shown between toolbar and editor content */
+.tag-pills-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--background);
+  flex-shrink: 0;
+  max-height: 4.5em;
+  overflow: hidden;
+}
+
+.tag-pill {
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.dark .tag-pill {
+  background-color: color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
 .editor-toolbar .separator {
   width: 1px;
   height: 1.5rem;

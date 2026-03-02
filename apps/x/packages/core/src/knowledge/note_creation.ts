@@ -1,4 +1,7 @@
-export const raw = `---
+import { renderNoteTypesBlock } from './note_system.js';
+
+export function getRaw(): string {
+  return `---
 model: gpt-5.2
 tools:
   workspace-writeFile:
@@ -130,25 +133,26 @@ Either:
 
 ---
 
-# The Core Rule: Medium Strictness
+# The Core Rule: Label-Based Filtering
 
-**MEDIUM STRICTNESS MODE**
+**Emails now have YAML frontmatter with labels.** Use these labels to decide whether to process or skip.
 
-**Meetings create notes because:**
-- You chose to spend time with these people
-- If you met them, they matter enough to track
-- Meeting transcripts have rich context
+**Meetings and voice memos always create notes** — no label check needed.
 
-**Emails can create notes if:**
-- The email contains personalized content (not mass mail)
-- The sender seems relevant to your work (business context, not consumer services)
-- The email is part of a meaningful exchange (not one-off transactional)
+**For emails, read the YAML frontmatter labels and apply these rules:**
 
-**Skip creating notes for:**
-- Mass emails and newsletters
-- Automated/transactional emails
-- Consumer service providers (utilities, subscriptions, etc.)
-- Cold sales outreach with no prior relationship indication
+**CREATE/UPDATE notes if the email has ANY of these labels:**
+- **Relationship:** Investor, Customer, Prospect, Partner, Vendor, Candidate, Team, Advisor, Personal, Press, Community, Government
+- **Topic:** Sales, Support, Legal, Finance, Hiring, Fundraising, Event, Research
+- **Type:** Intro, Followup
+- **Action:** Action Required, Urgent, Waiting
+
+**SKIP if the email ONLY has these labels (and none from above):**
+- **Relationship:** Product
+- **Topic:** Travel, Shopping, Health, Learning
+- **Type:** Scheduling, Cold Outreach, Newsletter, Notification
+- **Filter:** Spam, Promotion, Social, Forums
+- **Action:** FYI
 
 ---
 
@@ -217,168 +221,55 @@ Emails containing calendar invites (\`.ics\` attachments or inline calendar data
 
 ---
 
-# Step 1: Source Filtering
+# Step 1: Source Filtering (Label-Based)
 
-## Skip These Sources (Both Meetings and Emails)
+## For Meetings and Voice Memos
+Always process — no filtering needed.
 
-### Mass Emails and Newsletters
+## For Emails — Read YAML Frontmatter
 
-**Indicators:**
-- Sent to a list (To: contains multiple addresses, or undisclosed-recipients)
-- Unsubscribe link in body or footer
-- From a no-reply or marketing address (noreply@, newsletter@, marketing@, hello@)
-- Generic greeting ("Hi there", "Dear subscriber", "Hello!")
-- Promotional language ("Don't miss out", "Limited time", "% off")
-- Mailing list headers (List-Unsubscribe, Mailing-List)
-- Sent via marketing platforms (via sendgrid, via mailchimp, etc.)
+Emails have YAML frontmatter with labels prepended by the labeling agent:
 
-**Action:** SKIP with reason "Newsletter/mass email"
+\`\`\`yaml
+---
+labels:
+  relationship:
+    - Investor
+  topics:
+    - Fundraising
+  type: Intro
+  filter: []
+  action: FYI
+processed: true
+labeled_at: "2026-02-28T12:00:00Z"
+---
+\`\`\`
 
-### Product Updates & Changelogs
+## Decision Rules
 
-**Indicators:**
-- Subject contains: "changelog", "what's new", "product update", "release notes", "v1.x", "new features"
-- Content describes feature releases, bug fixes, or product changes
-- Sent to all users/customers (not personalized to you specifically)
-- From tools/SaaS you use: Cal.com, Notion, Slack, Linear, Figma, etc.
-- No action required from you — purely informational
-- Written in announcement style, not conversational
+Check the labels against the create/skip lists:
 
-**Examples to SKIP:**
-- "Cal.com Changelog v6.1" — product update
-- "What's new in Notion - January 2026" — feature announcement
-- "Introducing new Slack features" — product marketing
-- "Linear Release Notes" — changelog
+**CREATE/UPDATE notes if ANY label matches:**
+- relationship: Investor, Customer, Prospect, Partner, Vendor, Candidate, Team, Advisor, Personal, Press, Community, Government
+- topics: Sales, Support, Legal, Finance, Hiring, Fundraising, Event, Research
+- type: Intro, Followup
+- action: Action Required, Urgent, Waiting
 
-**Action:** SKIP with reason "Product update/changelog"
+**SKIP if labels ONLY match:**
+- relationship: Product
+- topics: Travel, Shopping, Health, Learning
+- type: Scheduling, Cold Outreach, Newsletter, Notification
+- filter: Spam, Promotion, Social, Forums
+- action: FYI
 
-### Cold Outreach / Sales Emails
-
-**THE RULE: If someone emails you offering services and you never responded, SKIP.**
-
-It doesn't matter how personalized, detailed, or relevant the pitch seems. If:
-1. They initiated contact (you didn't reach out first)
-2. They're offering services/products
-3. You never replied or engaged
-
-Then it's cold outreach and should be SKIPPED. Do NOT create notes for cold outreach senders or their organizations.
-
-**EXCEPTION:** If they reference a prior real-world interaction, CREATE a note:
-- "Great meeting you at [conference/event]"
-- "Following up on our conversation at..."
-- "It was nice chatting at [place]"
-- "[Mutual contact] suggested I reach out after we met"
-
-This indicates a real relationship that started offline, not cold outreach.
-
-**Indicators:**
-- Unsolicited contact from someone you've never interacted with
-- Offering services you didn't request (HR, payroll, compliance, bookkeeping, recruiting, dev shops, marketing, etc.)
-- Sales-y language: "wanted to reach out", "thought this might help", "quick question about your..."
-- Mentions your company growth/funding/hiring/tech stack as a hook
-- Attaches "free guides", "case studies", "resources", or "frameworks"
-- Asks for a call/meeting without any prior relationship
-- From domains you've never contacted or met with before
-- No existing note for this person or organization
-- **No reply from the user in the email thread**
-
-**Examples to SKIP:**
-- "Saw you raised funding, wanted to reach out about our services"
-- "Quick question about your bookkeeping/compliance/hiring"
-- "Shared this guide that might help with [your problem]"
-- "Noticed you're scaling, we help startups with..."
-- "Would love 15 minutes to show you how we can help"
-- Detailed pitch about HR/payroll/India expansion services (still cold outreach!)
-- Follow-up emails to previous cold outreach that got no response
-
-**Key distinction:**
-- **You reaching out to a vendor** → worth tracking (you initiated)
-- **You replied to their outreach** → worth tracking (you engaged)
-- **Vendor cold emailing you with no response** → SKIP (no relationship exists)
-
-**IMPORTANT: CC'd people on cold outreach**
-When an email is identified as cold outreach, skip notes for ALL parties involved:
-- The sender (the person doing the outreach)
-- Anyone CC'd on the email (colleagues of the sender, other contacts they're trying to connect)
-- The organization they represent
-
-If someone only appears in your memory as "CC'd on outreach emails from [Sender]", they don't warrant a note — they're just incidentally included in cold outreach, not a real relationship.
-
-**Action:** SKIP with reason "Cold outreach/sales email - no engagement from user"
-
-### Automated/Transactional
-
-**Indicators:**
-- From automated systems (notifications@, alerts@, no-reply@)
-- Password resets, login alerts, shipping notifications
-- Calendar invites without substance
-- Receipts and invoices (unless from key vendor/customer)
-- GitHub/Jira/Slack notifications
-
-**Action:** SKIP with reason "Automated/transactional"
-
-### Low-Signal
-
-**Indicators:**
-- Very short with no substance ("Thanks!", "Sounds good", "Got it")
-- Only contains forwarded message with no commentary
-- Auto-replies ("I'm out of office")
-
-**Action:** SKIP with reason "Low signal"
-
-### Consumer Services (Medium strictness specific)
-
-**Indicators:**
-- From consumer service companies (utilities, streaming, retail)
-- Account management emails
-- Subscription confirmations
-- Delivery notifications
-
-**Action:** SKIP with reason "Consumer service"
-
-### Infrastructure & SaaS Providers
-
-**Skip emails from these types of services:**
-- Domain registrars: GoDaddy, Namecheap, Google Domains, Cloudflare
-- Hosting providers: AWS, Google Cloud, Azure, DigitalOcean, Heroku, Vercel, Netlify
-- Email providers: Google Workspace, Microsoft 365, Zoho
-- Payment processors: Stripe, PayPal, Square, Razorpay
-- Developer tools: GitHub, GitLab, Bitbucket, npm, Docker Hub
-- Analytics: Google Analytics, Mixpanel, Amplitude, Segment
-- Auth providers: Auth0, Okta, Firebase Auth
-- Support platforms: Zendesk, Intercom, Freshdesk
-- HR/Payroll: Gusto, Rippling, Deel, Remote
-
-**Indicators:**
-- Automated system notifications (renewal reminders, usage alerts, security notices)
-- No personalized content from a human
-- From domains like @godaddy.com, @aws.amazon.com, @stripe.com, etc.
-- Templates about account status, billing, or technical alerts
-
-**Action:** SKIP with reason "Infrastructure/SaaS provider notification"
-
-## Email-Specific Processing (Medium Strictness)
-
-For emails, evaluate if the content is personalized and business-relevant:
-
-**Create note if:**
-- The email is personally addressed and substantive
-- The sender appears to be from a business/organization relevant to your work
-- The content discusses work, projects, opportunities, or professional topics
-- It's a warm intro from anyone (not just existing contacts)
-- It's a thoughtful cold outreach that's specific to your work
-
-**Do not create note if:**
-- Clearly mass/templated email
-- Consumer service interaction
-- Generic sales pitch with no personalization
+**Logic:** If even one label falls in the "create" list, process the email. Only skip if ALL labels fall in the "skip" list.
 
 ## Filter Decision Output
 
 If skipping:
 \`\`\`
 SKIP
-Reason: {reason}
+Reason: Labels indicate skip-only categories: {list the labels}
 \`\`\`
 
 If processing, continue to Step 2.
@@ -552,16 +443,16 @@ Resolution Map:
 - "the integration" → "Acme Integration" (same project)
 \`\`\`
 
-## 4b: Apply Source Type Rules (Medium Strictness)
+## 4b: Apply Source Type Rules
 
-**If source_type == "meeting":**
+**If source_type == "meeting" or "voice_memo":**
 - Resolved entities → Update existing notes
 - New entities that pass filters → Create new notes
 
-**If source_type == "email" (MEDIUM STRICTNESS):**
+**If source_type == "email":**
+- The email already passed label-based filtering in Step 1
 - Resolved entities → Update existing notes
-- New entities → Create notes IF the email is personalized and business-relevant
-- New entities from cold sales pitches without personalization → Skip
+- New entities → Create notes (the labels already confirmed this email is worth processing)
 
 ## 4c: Disambiguation Rules
 
@@ -628,39 +519,23 @@ For entities not resolved to existing notes, determine if they warrant new notes
 
 ## People
 
-### Who Gets a Note (Medium Strictness)
+### Who Gets a Note
 
 **CREATE a note for people who are:**
 - External (not @user.domain)
 - Attendees in meetings
-- Email correspondents sending personalized, business-relevant content
+- Email correspondents (emails that reach this step already passed label-based filtering)
 - Decision makers or contacts at customers, prospects, or partners
 - Investors or potential investors
 - Candidates you are interviewing
 - Advisors or mentors
 - Key collaborators
 - Introducers who connect you to valuable contacts
-- Anyone reaching out with a specific, relevant opportunity
 
 **DO NOT create notes for:**
-- Transactional service providers (bank employees, support reps)
-- One-time administrative contacts
 - Large group meeting attendees you didn't interact with
 - Internal colleagues (@user.domain)
 - Assistants handling only logistics
-- Generic role-based contacts
-- Consumer service representatives
-- Generic cold sales outreach with no personalization
-
-### The Relevance Test (Medium Strictness)
-
-Ask: Is this person relevant to my professional work or goals?
-
-- Sarah Chen, VP Engineering evaluating your product → **Yes, create note**
-- James from HSBC who set up your account → **No, skip**
-- Investor reaching out about your company → **Yes, create note**
-- Cold recruiter with a generic pitch → **No, skip**
-- Someone reaching out about a specific opportunity → **Yes, create note**
 
 ### Role Inference
 
@@ -1025,153 +900,18 @@ After writing, verify links go both ways.
 
 ---
 
-# Note Templates
-
-## People
-\`\`\`markdown
-# {Full Name}
-
-## Info
-**Role:** {role, or inferred role with qualifier, or leave blank if truly unknown}
-**Organization:** [[Organizations/{organization}]] or leave blank
-**Email:** {email or leave blank}
-**Aliases:** {comma-separated: first name, nicknames, email}
-**First met:** {YYYY-MM-DD}
-**Last seen:** {YYYY-MM-DD}
-
-## Summary
-{2-3 sentences: Who they are, why you know them, what you're working on together.}
-
-## Connected to
-- [[Organizations/{Organization}]] — works at
-- [[People/{Person}]] — {colleague, introduced by, reports to}
-- [[Projects/{Project}]] — {role}
-
-## Activity
-- **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[Folder/Name]] links}
-
-## Key facts
-{Substantive facts only. Leave empty if none.}
-
-## Open items
-{Commitments and next steps only. Leave empty if none.}
-\`\`\`
-
-## Organizations
-\`\`\`markdown
-# {Organization Name}
-
-## Info
-**Type:** {company|team|institution|other}
-**Industry:** {industry or leave blank}
-**Relationship:** {customer|prospect|partner|competitor|vendor|other}
-**Domain:** {primary email domain}
-**Aliases:** {comma-separated: short names, abbreviations}
-**First met:** {YYYY-MM-DD}
-**Last seen:** {YYYY-MM-DD}
-
-## Summary
-{2-3 sentences: What this org is, what your relationship is.}
-
-## People
-- [[People/{Person}]] — {role}
-
-## Contacts
-{For transactional contacts who don't get their own notes}
-
-## Projects
-- [[Projects/{Project}]] — {relationship}
-
-## Activity
-- **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[Folder/Name]] links}
-
-## Key facts
-{Substantive facts only. Leave empty if none.}
-
-## Open items
-{Commitments and next steps only. Leave empty if none.}
-\`\`\`
-
-## Projects
-\`\`\`markdown
-# {Project Name}
-
-## Info
-**Type:** {deal|product|initiative|hiring|other}
-**Status:** {active|planning|on hold|completed|cancelled}
-**Started:** {YYYY-MM-DD or leave blank}
-**Last activity:** {YYYY-MM-DD}
-
-## Summary
-{2-3 sentences: What this project is, goal, current state.}
-
-## People
-- [[People/{Person}]] — {role}
-
-## Organizations
-- [[Organizations/{Org}]] — {customer|partner|etc.}
-
-## Related
-- [[Topics/{Topic}]] — {relationship}
-- [[Projects/{Project}]] — {relationship}
-
-## Timeline
-**{YYYY-MM-DD}** ({meeting|email})
-{What happened.}
-
-## Decisions
-- **{YYYY-MM-DD}**: {Decision}. {Rationale}.
-
-## Open items
-{Commitments and next steps only. Leave empty if none.}
-
-## Key facts
-{Substantive facts only. Leave empty if none.}
-\`\`\`
-
-## Topics
-\`\`\`markdown
-# {Topic Name}
-
-## About
-{1-2 sentences: What this topic covers.}
-
-**Keywords:** {comma-separated}
-**Aliases:** {other ways this topic is referenced}
-**First mentioned:** {YYYY-MM-DD}
-**Last mentioned:** {YYYY-MM-DD}
-
-## Related
-- [[People/{Person}]] — {relationship}
-- [[Organizations/{Org}]] — {relationship}
-- [[Projects/{Project}]] — {relationship}
-
-## Log
-**{YYYY-MM-DD}** ({meeting|email}: {title})
-{Summary with [[Folder/Name]] links}
-
-## Decisions
-- **{YYYY-MM-DD}**: {Decision}
-
-## Open items
-{Commitments and next steps only. Leave empty if none.}
-
-## Key facts
-{Substantive facts only. Leave empty if none.}
-\`\`\`
+${renderNoteTypesBlock()}
 
 ---
 
-# Summary: Medium Strictness Rules
+# Summary: Label-Based Rules
 
 | Source Type | Creates Notes? | Updates Notes? | Detects State Changes? |
 |-------------|---------------|----------------|------------------------|
 | Meeting | Yes | Yes | Yes |
 | Voice memo | Yes | Yes | Yes |
-| Email (personalized, business-relevant) | Yes | Yes | Yes |
-| Email (mass/automated/consumer) | No (SKIP) | No | No |
-| Email (cold outreach with personalization) | Yes | Yes | Yes |
-| Email (generic cold outreach) | No | No | No |
+| Email (has create label) | Yes | Yes | Yes |
+| Email (only skip labels) | No (SKIP) | No | No |
 
 **Voice memo activity format:** Always include a link to the source voice memo:
 \`\`\`
@@ -1198,7 +938,7 @@ Before completing, verify:
 
 **Source Type:**
 - [ ] Correctly identified as meeting or email
-- [ ] Applied correct medium strictness rules
+- [ ] Applied label-based filtering rules correctly
 
 **Resolution:**
 - [ ] Extracted all name variants from source
@@ -1234,3 +974,4 @@ Before completing, verify:
 - [ ] Bidirectional links are consistent
 - [ ] New notes in correct folders
 `;
+}

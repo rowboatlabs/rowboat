@@ -11,7 +11,7 @@ interface NoteCreationConfig {
 }
 
 const CONFIG_FILE = path.join(WorkDir, 'config', 'note_creation.json');
-const DEFAULT_STRICTNESS: NoteCreationStrictness = 'high';
+const DEFAULT_STRICTNESS: NoteCreationStrictness = 'medium';
 
 /**
  * Read the full config file.
