@@ -28,6 +28,7 @@ import { parse } from "yaml";
 import { raw as noteCreationMediumRaw } from "../knowledge/note_creation_medium.js";
 import { raw as noteCreationLowRaw } from "../knowledge/note_creation_low.js";
 import { raw as noteCreationHighRaw } from "../knowledge/note_creation_high.js";
+import { raw as labelingAgentRaw } from "../knowledge/labeling_agent.js";
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -340,6 +341,30 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
             if (end !== -1) {
                 const fm = raw.slice(3, end).trim();
                 const content = raw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
+    if (id === 'labeling_agent') {
+        let agent: z.infer<typeof Agent> = {
+            name: id,
+            instructions: labelingAgentRaw,
+        };
+
+        if (labelingAgentRaw.startsWith("---")) {
+            const end = labelingAgentRaw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = labelingAgentRaw.slice(3, end).trim();
+                const content = labelingAgentRaw.slice(end + 4).trim();
                 const yaml = parse(fm);
                 const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
                 agent = {
@@ -706,7 +731,7 @@ export async function* streamAgent({
 
     // set up provider + model
     const provider = createProvider(modelConfig.provider);
-    const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep"];
+    const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep", "labeling_agent"];
     const modelId = (knowledgeGraphAgents.includes(state.agentName!) && modelConfig.knowledgeGraphModel)
         ? modelConfig.knowledgeGraphModel
         : modelConfig.model;
