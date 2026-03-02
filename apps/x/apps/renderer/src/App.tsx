@@ -46,6 +46,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
+import { splitFrontmatter, joinFrontmatter, extractTags } from '@/lib/frontmatter'
 import { OnboardingModal } from '@/components/onboarding-modal'
 import { SearchDialog } from '@/components/search-dialog'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
@@ -509,6 +510,10 @@ function App() {
   const initialContentRef = useRef<string>('')
   const renameInProgressRef = useRef(false)
 
+  // Frontmatter state: store raw frontmatter per file path, tags for active file
+  const frontmatterByPathRef = useRef<Map<string, string | null>>(new Map())
+  const [activeFileTags, setActiveFileTags] = useState<string[]>([])
+
   // Version history state
   const [versionHistoryPath, setVersionHistoryPath] = useState<string | null>(null)
   const [viewingHistoricalVersion, setViewingHistoricalVersion] = useState<{
@@ -892,12 +897,15 @@ function App() {
           const result = await window.ipc.invoke('workspace:readFile', { path: pathToReload })
           if (selectedPathRef.current !== pathToReload) return
           setFileContent(result.data)
-          setEditorContent(result.data)
-          setEditorCacheForPath(pathToReload, result.data)
-          editorContentRef.current = result.data
+          const { raw: fm, body } = splitFrontmatter(result.data)
+          frontmatterByPathRef.current.set(pathToReload, fm)
+          setEditorContent(body)
+          setEditorCacheForPath(pathToReload, body)
+          editorContentRef.current = body
           editorPathRef.current = pathToReload
-          initialContentByPathRef.current.set(pathToReload, result.data)
-          initialContentRef.current = result.data
+          initialContentByPathRef.current.set(pathToReload, body)
+          initialContentRef.current = body
+          setActiveFileTags(extractTags(fm))
         }
       }
     })
@@ -926,6 +934,7 @@ function App() {
         editorContentRef.current = cachedContent
         editorPathRef.current = selectedPath
         initialContentRef.current = initialContentByPathRef.current.get(selectedPath) ?? cachedContent
+        setActiveFileTags(extractTags(frontmatterByPathRef.current.get(selectedPath) ?? null))
         return
       }
     }
@@ -940,6 +949,8 @@ function App() {
           const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
           if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
           setFileContent(result.data)
+          const { raw: fm, body } = splitFrontmatter(result.data)
+          frontmatterByPathRef.current.set(pathToLoad, fm)
           const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
           const isSameEditorFile = editorPathRef.current === pathToLoad
           const knownBaseline = initialContentByPathRef.current.get(pathToLoad)
@@ -949,15 +960,16 @@ function App() {
             && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(knownBaseline)
           const shouldPreserveActiveDraft = isSameEditorFile && hasUnsavedEdits
           if (!shouldPreserveActiveDraft) {
-            setEditorContent(result.data)
+            setEditorContent(body)
             if (pathToLoad.endsWith('.md')) {
-              setEditorCacheForPath(pathToLoad, result.data)
+              setEditorCacheForPath(pathToLoad, body)
             }
-            editorContentRef.current = result.data
+            editorContentRef.current = body
             editorPathRef.current = pathToLoad
-            initialContentByPathRef.current.set(pathToLoad, result.data)
-            initialContentRef.current = result.data
+            initialContentByPathRef.current.set(pathToLoad, body)
+            initialContentRef.current = body
             setLastSaved(null)
+            setActiveFileTags(extractTags(fm))
           } else {
             // Still update the editor's path so subsequent autosaves write to the correct file.
             editorPathRef.current = pathToLoad
@@ -1006,7 +1018,7 @@ function App() {
       const wasActiveAtStart = selectedPathRef.current === pathAtStart
       if (wasActiveAtStart) setIsSaving(true)
       let pathToSave = pathAtStart
-      let contentToSave = debouncedContent
+      let contentToSave = joinFrontmatter(frontmatterByPathRef.current.get(pathAtStart) ?? null, debouncedContent)
       let renamedFrom: string | null = null
       let renamedTo: string | null = null
       try {
@@ -1036,16 +1048,21 @@ function App() {
                 renameInProgressRef.current = true
                 await window.ipc.invoke('workspace:rename', { from: pathAtStart, to: targetPath })
                 pathToSave = targetPath
-                contentToSave = rewriteWikiLinksForRenamedFileInMarkdown(
+                const rewrittenBody = rewriteWikiLinksForRenamedFileInMarkdown(
                   debouncedContent,
                   pathAtStart,
                   targetPath
                 )
+                contentToSave = joinFrontmatter(frontmatterByPathRef.current.get(pathAtStart) ?? null, rewrittenBody)
                 renamedFrom = pathAtStart
                 renamedTo = targetPath
                 editorPathRef.current = targetPath
                 untitledRenameReadyPathsRef.current.delete(pathAtStart)
                 setFileTabs(prev => prev.map(tab => (tab.path === pathAtStart ? { ...tab, path: targetPath } : tab)))
+                // Migrate frontmatter entry
+                const fmEntry = frontmatterByPathRef.current.get(pathAtStart)
+                frontmatterByPathRef.current.delete(pathAtStart)
+                frontmatterByPathRef.current.set(targetPath, fmEntry ?? null)
                 initialContentByPathRef.current.delete(pathAtStart)
                 const cachedContent = editorContentByPathRef.current.get(pathAtStart)
                 if (cachedContent !== undefined) {
@@ -1070,8 +1087,9 @@ function App() {
                   })
                 }
                 if (selectedPathRef.current === pathAtStart) {
-                  editorContentRef.current = contentToSave
-                  setEditorContent(contentToSave)
+                  const bodyForEditor = splitFrontmatter(contentToSave).body
+                  editorContentRef.current = bodyForEditor
+                  setEditorContent(bodyForEditor)
                 }
               }
             }
@@ -1083,7 +1101,8 @@ function App() {
           opts: { encoding: 'utf8' }
         })
         markRecentLocalMarkdownWrite(pathToSave)
-        initialContentByPathRef.current.set(pathToSave, contentToSave)
+        // Store body-only baseline (matches what debouncedContent compares against)
+        initialContentByPathRef.current.set(pathToSave, splitFrontmatter(contentToSave).body)
 
         // If we renamed the active file, update state/history AFTER the write completes so the editor
         // doesn't reload stale on-disk content mid-typing (which can drop the latest character).
@@ -1104,7 +1123,7 @@ function App() {
 
         // Only update "current file" UI state if we're still on this file
         if (selectedPathRef.current === pathAtStart || selectedPathRef.current === pathToSave) {
-          initialContentRef.current = contentToSave
+          initialContentRef.current = splitFrontmatter(contentToSave).body
           setLastSaved(new Date())
         }
       } catch (err) {
@@ -2162,6 +2181,7 @@ function App() {
       removeEditorCacheForPath(closingTab.path)
       initialContentByPathRef.current.delete(closingTab.path)
       untitledRenameReadyPathsRef.current.delete(closingTab.path)
+      frontmatterByPathRef.current.delete(closingTab.path)
       if (editorPathRef.current === closingTab.path) {
         editorPathRef.current = null
       }
@@ -2768,6 +2788,12 @@ function App() {
         if (editorPathRef.current === oldPath) {
           editorPathRef.current = newPath
         }
+        // Migrate frontmatter entry
+        const fmEntry = frontmatterByPathRef.current.get(oldPath)
+        if (fmEntry !== undefined) {
+          frontmatterByPathRef.current.delete(oldPath)
+          frontmatterByPathRef.current.set(newPath, fmEntry)
+        }
         const baseline = initialContentByPathRef.current.get(oldPath)
         if (baseline !== undefined) {
           initialContentByPathRef.current.delete(oldPath)
@@ -2805,6 +2831,7 @@ function App() {
           removeEditorCacheForPath(path)
           initialContentByPathRef.current.delete(path)
           untitledRenameReadyPathsRef.current.delete(path)
+          frontmatterByPathRef.current.delete(path)
         }
         // Close any file tab showing the deleted file
         const tabForFile = fileTabs.find(t => t.path === path)
@@ -3391,6 +3418,7 @@ function App() {
                               wikiLinks={wikiLinkConfig}
                               onImageUpload={handleImageUpload}
                               editorSessionKey={editorSessionByTabId[tab.id] ?? 0}
+                              tags={isActive ? activeFileTags : undefined}
                               onHistoryHandlersChange={(handlers) => {
                                 if (handlers) {
                                   fileHistoryHandlersRef.current.set(tab.id, handlers)

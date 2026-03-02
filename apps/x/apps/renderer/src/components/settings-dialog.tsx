@@ -1,8 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { useState, useEffect, useCallback } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Tags, ChevronRight, Plus, X } from "lucide-react"
 
 import {
   Dialog,
@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 
-type ConfigTab = "models" | "mcp" | "security" | "appearance"
+type ConfigTab = "models" | "mcp" | "security" | "appearance" | "note-tagging"
 
 interface TabConfig {
   id: ConfigTab
@@ -59,6 +59,13 @@ const tabs: TabConfig[] = [
     label: "Appearance",
     icon: Palette,
     description: "Customize the look and feel",
+  },
+  {
+    id: "note-tagging",
+    label: "Note Tagging",
+    icon: Tags,
+    path: "config/tags.json",
+    description: "Configure tags for notes and emails",
   },
 ]
 
@@ -685,6 +692,311 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Note Tagging Settings ---
+
+interface TagDef {
+  tag: string
+  type: string
+  applicability: "email" | "notes" | "both"
+  description: string
+  example?: string
+}
+
+const TAG_TYPE_ORDER = [
+  "relationship", "relationship-sub", "topic", "email-type",
+  "filter", "action", "status", "source",
+]
+
+const TAG_TYPE_LABELS: Record<string, string> = {
+  "relationship": "Relationship",
+  "relationship-sub": "Relationship Sub-Tags",
+  "topic": "Topic",
+  "email-type": "Email Type",
+  "filter": "Filter",
+  "action": "Action",
+  "status": "Status",
+  "source": "Source",
+}
+
+const DEFAULT_TAGS: TagDef[] = [
+  { tag: "investor", type: "relationship", applicability: "both", description: "Investors, VCs, or angels", example: "Following up on our meeting — we'd like to move forward with the Series A term sheet." },
+  { tag: "customer", type: "relationship", applicability: "both", description: "Paying customers", example: "We're seeing great results with Rowboat. Can we discuss expanding to more teams?" },
+  { tag: "prospect", type: "relationship", applicability: "both", description: "Potential customers", example: "Thanks for the demo yesterday. We're interested in starting a pilot." },
+  { tag: "partner", type: "relationship", applicability: "both", description: "Business partners", example: "Let's discuss how we can promote the integration to both our user bases." },
+  { tag: "vendor", type: "relationship", applicability: "both", description: "Service providers you work with", example: "Here are the updated employment agreements you requested." },
+  { tag: "product", type: "relationship", applicability: "both", description: "Products or services you use (automated)", example: "Your AWS bill for January 2025 is now available." },
+  { tag: "candidate", type: "relationship", applicability: "both", description: "Job applicants", example: "Thanks for reaching out. I'd love to learn more about the engineering role." },
+  { tag: "team", type: "relationship", applicability: "both", description: "Internal team members", example: "Here's the updated roadmap for Q2. Let's discuss in our sync." },
+  { tag: "advisor", type: "relationship", applicability: "both", description: "Advisors, mentors, or board members", example: "I've reviewed the deck. Here are my thoughts on the GTM strategy." },
+  { tag: "personal", type: "relationship", applicability: "both", description: "Family or friends", example: "Are you coming to Thanksgiving this year? Let me know your travel dates." },
+  { tag: "press", type: "relationship", applicability: "both", description: "Journalists or media", example: "I'm writing a piece on AI agents. Would you be available for an interview?" },
+  { tag: "community", type: "relationship", applicability: "both", description: "Users, peers, or open source contributors", example: "Love what you're building with Rowboat. Here's a bug I found..." },
+  { tag: "government", type: "relationship", applicability: "both", description: "Government agencies", example: "Your Delaware franchise tax is due by March 1, 2025." },
+  { tag: "primary", type: "relationship-sub", applicability: "notes", description: "Main contact or decision maker", example: "Sarah Chen — VP Engineering, your main point of contact at Acme." },
+  { tag: "secondary", type: "relationship-sub", applicability: "notes", description: "Supporting contact, involved but not the lead", example: "David Kim — Engineer CC'd on customer emails." },
+  { tag: "executive-assistant", type: "relationship-sub", applicability: "notes", description: "EA or admin handling scheduling and logistics", example: "Lisa — Sarah's EA who schedules all her meetings." },
+  { tag: "cc", type: "relationship-sub", applicability: "notes", description: "Person who's CC'd but not actively engaged", example: "Manager looped in for visibility on deal." },
+  { tag: "referred-by", type: "relationship-sub", applicability: "notes", description: "Person who made an introduction or referral", example: "David Park — Investor who intro'd you to Sarah." },
+  { tag: "former", type: "relationship-sub", applicability: "notes", description: "Previously held this relationship, no longer active", example: "John — Former customer who churned last year." },
+  { tag: "champion", type: "relationship-sub", applicability: "notes", description: "Internal advocate pushing for you", example: "Engineer who loves your product and is selling internally." },
+  { tag: "blocker", type: "relationship-sub", applicability: "notes", description: "Person opposing or blocking progress", example: "CFO resistant to spending on new tools." },
+  { tag: "sales", type: "topic", applicability: "both", description: "Sales conversations, deals, and revenue", example: "Here's the pricing proposal we discussed. Let me know if you have questions." },
+  { tag: "support", type: "topic", applicability: "both", description: "Help requests, issues, and customer support", example: "We're seeing an error when trying to export. Can you help?" },
+  { tag: "legal", type: "topic", applicability: "both", description: "Contracts, terms, compliance, and legal matters", example: "Legal has reviewed the MSA. Attached are our requested changes." },
+  { tag: "finance", type: "topic", applicability: "both", description: "Money, invoices, payments, banking, and taxes", example: "Your invoice #1234 for $5,000 is attached. Payment due in 30 days." },
+  { tag: "hiring", type: "topic", applicability: "both", description: "Recruiting, interviews, and employment", example: "We'd like to move forward with a final round interview. Are you available Thursday?" },
+  { tag: "fundraising", type: "topic", applicability: "both", description: "Raising money and investor relations", example: "Thanks for sending the deck. We'd like to schedule a partner meeting." },
+  { tag: "travel", type: "topic", applicability: "both", description: "Flights, hotels, trips, and travel logistics", example: "Your flight to Tokyo on March 15 is confirmed. Confirmation #ABC123." },
+  { tag: "event", type: "topic", applicability: "both", description: "Conferences, meetups, and gatherings", example: "You're invited to speak at TechCrunch Disrupt. Can you confirm your availability?" },
+  { tag: "shopping", type: "topic", applicability: "both", description: "Purchases, orders, and returns", example: "Your order #12345 has shipped. Track it here." },
+  { tag: "health", type: "topic", applicability: "both", description: "Medical, wellness, and health-related matters", example: "Your appointment with Dr. Smith is confirmed for Monday at 2pm." },
+  { tag: "learning", type: "topic", applicability: "both", description: "Courses, education, and skill-building", example: "Welcome to the Advanced Python course. Here's your access link." },
+  { tag: "research", type: "topic", applicability: "both", description: "Research requests and information gathering", example: "Here's the market analysis you requested on the AI agent space." },
+  { tag: "intro", type: "email-type", applicability: "both", description: "Warm introduction from someone you know", example: "I'd like to introduce you to Sarah Chen, VP Engineering at Acme." },
+  { tag: "followup", type: "email-type", applicability: "both", description: "Following up on a previous conversation", example: "Following up on our call last week. Have you had a chance to review the proposal?" },
+  { tag: "scheduling", type: "email-type", applicability: "email", description: "Meeting and calendar scheduling", example: "Are you available for a call next Tuesday at 2pm?" },
+  { tag: "cold-outreach", type: "email-type", applicability: "email", description: "Unsolicited contact from someone you don't know", example: "Hi, I noticed your company is growing fast. I'd love to show you how we can help with..." },
+  { tag: "newsletter", type: "email-type", applicability: "email", description: "Newsletters, marketing emails, and subscriptions", example: "This week in AI: The latest developments in agent frameworks..." },
+  { tag: "notification", type: "email-type", applicability: "email", description: "Automated alerts, receipts, and system notifications", example: "Your password was changed successfully. If this wasn't you, contact support." },
+  { tag: "spam", type: "filter", applicability: "email", description: "Junk and unwanted email", example: "Congratulations! You've won $1,000,000..." },
+  { tag: "promotion", type: "filter", applicability: "email", description: "Marketing offers and sales pitches", example: "50% off all items this weekend only!" },
+  { tag: "social", type: "filter", applicability: "email", description: "Social media notifications", example: "John Smith commented on your post." },
+  { tag: "forums", type: "filter", applicability: "email", description: "Mailing lists and group discussions", example: "Re: [dev-list] Question about API design" },
+  { tag: "action-required", type: "action", applicability: "both", description: "Needs a response or action from you", example: "Can you send me the pricing by Friday?" },
+  { tag: "fyi", type: "action", applicability: "email", description: "Informational only, no action needed", example: "Just wanted to let you know the deal closed. Thanks for your help!" },
+  { tag: "urgent", type: "action", applicability: "both", description: "Time-sensitive, needs immediate attention", example: "We need your signature on the contract by EOD today or we lose the deal." },
+  { tag: "waiting", type: "action", applicability: "both", description: "Waiting on a response from them" },
+  { tag: "unread", type: "status", applicability: "email", description: "Not yet processed" },
+  { tag: "to-reply", type: "status", applicability: "email", description: "Need to respond" },
+  { tag: "done", type: "status", applicability: "email", description: "Handled, can be archived" },
+  { tag: "active", type: "status", applicability: "notes", description: "Currently relevant, recent activity" },
+  { tag: "archived", type: "status", applicability: "notes", description: "No longer active, kept for reference" },
+  { tag: "stale", type: "status", applicability: "notes", description: "No activity in 60+ days, needs attention or archive" },
+  { tag: "email", type: "source", applicability: "notes", description: "Created or updated from email" },
+  { tag: "meeting", type: "source", applicability: "notes", description: "Created or updated from meeting transcript" },
+  { tag: "browser", type: "source", applicability: "notes", description: "Content captured from web browsing" },
+  { tag: "web-search", type: "source", applicability: "notes", description: "Information from web search" },
+  { tag: "manual", type: "source", applicability: "notes", description: "Manually entered by user" },
+  { tag: "import", type: "source", applicability: "notes", description: "Imported from another system" },
+]
+
+function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  const [tags, setTags] = useState<TagDef[]>([])
+  const [originalTags, setOriginalTags] = useState<TagDef[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+
+  const hasChanges = JSON.stringify(tags) !== JSON.stringify(originalTags)
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    async function load() {
+      setLoading(true)
+      try {
+        const result = await window.ipc.invoke("workspace:readFile", { path: "config/tags.json" })
+        const parsed = JSON.parse(result.data)
+        setTags(parsed)
+        setOriginalTags(parsed)
+      } catch {
+        setTags([...DEFAULT_TAGS])
+        setOriginalTags([...DEFAULT_TAGS])
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [dialogOpen])
+
+  const groups = useMemo(() => {
+    const map = new Map<string, TagDef[]>()
+    for (const tag of tags) {
+      const list = map.get(tag.type) ?? []
+      list.push(tag)
+      map.set(tag.type, list)
+    }
+    return TAG_TYPE_ORDER.map(type => ({
+      type,
+      label: TAG_TYPE_LABELS[type],
+      tags: map.get(type) ?? [],
+    }))
+  }, [tags])
+
+  const getGlobalIndex = useCallback((type: string, localIndex: number) => {
+    let count = 0
+    for (let i = 0; i < tags.length; i++) {
+      if (tags[i].type === type) {
+        if (count === localIndex) return i
+        count++
+      }
+    }
+    return -1
+  }, [tags])
+
+  const updateTag = useCallback((index: number, field: keyof TagDef, value: string) => {
+    setTags(prev => prev.map((t, i) => i === index ? { ...t, [field]: value } : t))
+  }, [])
+
+  const removeTag = useCallback((index: number) => {
+    setTags(prev => prev.filter((_, i) => i !== index))
+  }, [])
+
+  const addTag = useCallback((type: string) => {
+    const newTag: TagDef = { tag: "", type, applicability: "both", description: "" }
+    const lastIndex = tags.reduce((acc, t, i) => t.type === type ? i : acc, -1)
+    if (lastIndex === -1) {
+      setTags(prev => [...prev, newTag])
+    } else {
+      setTags(prev => [...prev.slice(0, lastIndex + 1), newTag, ...prev.slice(lastIndex + 1)])
+    }
+  }, [tags])
+
+  const handleSave = useCallback(async () => {
+    setSaving(true)
+    try {
+      await window.ipc.invoke("workspace:writeFile", {
+        path: "config/tags.json",
+        data: JSON.stringify(tags, null, 2),
+      })
+      setOriginalTags([...tags])
+      toast.success("Tag configuration saved")
+    } catch {
+      toast.error("Failed to save tag configuration")
+    } finally {
+      setSaving(false)
+    }
+  }, [tags])
+
+  const handleReset = useCallback(() => {
+    if (!confirm("Reset all tags to defaults? This will discard your changes.")) return
+    setTags([...DEFAULT_TAGS])
+  }, [])
+
+  const toggleGroup = useCallback((type: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
+      return next
+    })
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+        <Loader2 className="size-4 animate-spin mr-2" />
+        Loading...
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex-1 overflow-y-auto space-y-4 min-h-0">
+        {groups.map(group => (
+          <div key={group.type}>
+            <div className="flex items-center justify-between mb-1.5">
+              <button
+                onClick={() => toggleGroup(group.type)}
+                className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ChevronRight className={cn("size-3.5 transition-transform", !collapsedGroups.has(group.type) && "rotate-90")} />
+                {group.label}
+                <span className="text-[10px] ml-0.5">({group.tags.length})</span>
+              </button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => addTag(group.type)}
+              >
+                <Plus className="size-3 mr-1" />
+                Add
+              </Button>
+            </div>
+            {!collapsedGroups.has(group.type) && group.tags.length > 0 && (
+              <div className="border rounded-md overflow-hidden">
+                <div className="grid grid-cols-[100px_1fr_1fr_80px_24px] gap-1 bg-muted/50 px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                  <div>Tag</div>
+                  <div>Description</div>
+                  <div>Example</div>
+                  <div>Applies to</div>
+                  <div />
+                </div>
+                {group.tags.map((tag, localIdx) => {
+                  const globalIdx = getGlobalIndex(group.type, localIdx)
+                  return (
+                    <div key={globalIdx} className="grid grid-cols-[100px_1fr_1fr_80px_24px] gap-1 border-t px-2 py-0.5 items-center">
+                      <Input
+                        value={tag.tag}
+                        onChange={e => updateTag(globalIdx, "tag", e.target.value)}
+                        className="h-7 text-xs"
+                        placeholder="tag-name"
+                        title={tag.tag}
+                      />
+                      <Input
+                        value={tag.description}
+                        onChange={e => updateTag(globalIdx, "description", e.target.value)}
+                        className="h-7 text-xs"
+                        placeholder="Description"
+                        title={tag.description}
+                      />
+                      <Input
+                        value={tag.example || ""}
+                        onChange={e => updateTag(globalIdx, "example", e.target.value)}
+                        className="h-7 text-xs"
+                        placeholder="Example"
+                        title={tag.example || ""}
+                      />
+                      <Select
+                        value={tag.applicability}
+                        onValueChange={v => updateTag(globalIdx, "applicability", v)}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="both">Both</SelectItem>
+                          <SelectItem value="email">Email</SelectItem>
+                          <SelectItem value="notes">Notes</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <button
+                        onClick={() => removeTag(globalIdx)}
+                        className="flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {!collapsedGroups.has(group.type) && group.tags.length === 0 && (
+              <div className="text-xs text-muted-foreground italic px-2">No tags in this group</div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="pt-3 border-t mt-3 flex items-center justify-between">
+        <div>
+          {hasChanges && (
+            <span className="text-xs text-muted-foreground">Unsaved changes</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleReset}>
+            Reset to defaults
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={saving || !hasChanges}>
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- Main Settings Dialog ---
 
 export function SettingsDialog({ children }: SettingsDialogProps) {
@@ -708,7 +1020,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -814,9 +1126,11 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", activeTab === "models" ? "overflow-y-auto" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", activeTab === "models" ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "models" ? (
                 <ModelSettings dialogOpen={open} />
+              ) : activeTab === "note-tagging" ? (
+                <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
               ) : loading ? (

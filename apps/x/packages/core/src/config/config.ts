@@ -23,7 +23,7 @@ function ensureDefaultConfigs() {
     const noteCreationConfig = path.join(WorkDir, "config", "note_creation.json");
     if (!fs.existsSync(noteCreationConfig)) {
         fs.writeFileSync(noteCreationConfig, JSON.stringify({
-            strictness: "high",
+            strictness: "medium",
             configured: false
         }, null, 2));
     }
