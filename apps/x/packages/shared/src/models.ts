@@ -10,5 +10,6 @@ export const LlmProvider = z.object({
 export const LlmModelConfig = z.object({
   provider: LlmProvider,
   model: z.string(),
+  models: z.array(z.string()).optional(),
   knowledgeGraphModel: z.string().optional(),
 });
