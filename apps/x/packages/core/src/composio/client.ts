@@ -46,6 +46,7 @@ function resetComposioClient(): void {
  */
 const ZComposioConfig = z.object({
     apiKey: z.string().optional(),
+    use_composio_for_google: z.boolean().optional(),
 });
 
 type ComposioConfig = z.infer<typeof ZComposioConfig>;
@@ -99,6 +100,14 @@ export function setApiKey(apiKey: string): void {
  */
 export function isConfigured(): boolean {
     return !!getApiKey();
+}
+
+/**
+ * Check if Composio should be used for Google services (Gmail, etc.)
+ */
+export function useComposioForGoogle(): boolean {
+    const config = loadConfig();
+    return config.use_composio_for_google === true;
 }
 
 /**

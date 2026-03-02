@@ -443,6 +443,9 @@ export function setupIpcHandlers() {
     'composio:execute-action': async (_event, args) => {
       return composioHandler.executeAction(args.actionSlug, args.toolkitSlug, args.input);
     },
+    'composio:use-composio-for-google': async () => {
+      return composioHandler.useComposioForGoogle();
+    },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
       const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');

@@ -3,6 +3,7 @@ import { createAuthServer } from './auth-server.js';
 import * as composioClient from '@x/core/dist/composio/client.js';
 import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
 import type { LocalConnectedAccount } from '@x/core/dist/composio/types.js';
+import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 
 const REDIRECT_URI = 'http://localhost:8081/oauth/callback';
 
@@ -151,6 +152,9 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
 
                 if (accountStatus.status === 'ACTIVE') {
                     emitComposioEvent({ toolkitSlug, success: true });
+                    if (toolkitSlug === 'gmail') {
+                        triggerGmailSync();
+                    }
                 } else {
                     emitComposioEvent({
                         toolkitSlug,
@@ -263,6 +267,13 @@ export async function disconnect(toolkitSlug: string): Promise<{ success: boolea
  */
 export function listConnected(): { toolkits: string[] } {
     return { toolkits: composioAccountsRepo.getConnectedToolkits() };
+}
+
+/**
+ * Check if Composio should be used for Google services (Gmail, etc.)
+ */
+export function useComposioForGoogle(): { enabled: boolean } {
+    return { enabled: composioClient.useComposioForGoogle() };
 }
 
 /**

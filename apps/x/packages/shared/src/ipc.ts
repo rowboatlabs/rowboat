@@ -354,6 +354,12 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  'composio:use-composio-for-google': {
+    req: z.null(),
+    res: z.object({
+      enabled: z.boolean(),
+    }),
+  },
   'composio:didConnect': {
     req: z.object({
       toolkitSlug: z.string(),
