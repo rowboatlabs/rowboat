@@ -29,11 +29,27 @@ export function joinFrontmatter(raw: string | null, body: string): string {
   return raw + '\n' + body
 }
 
+/** Tag category keys used in the categorized frontmatter format. */
+const TAG_CATEGORY_KEYS = new Set([
+  'relationship',
+  'relationship_sub',
+  'topic',
+  'email_type',
+  'action',
+  'status',
+  'source',
+])
+
+/** Keys that are metadata, not tags — skip when collecting tags. */
+const METADATA_KEYS = new Set(['processed', 'labeled_at', 'tagged_at'])
+
 /**
  * Extract tags from raw frontmatter YAML.
  *
- * Handles two formats:
- * - Note format: `tags:` followed by `  - value` items
+ * Handles three formats:
+ * - Legacy flat list: `tags:` followed by `  - value` items
+ * - Categorized format: top-level keys like `relationship: customer` or
+ *   `topic:` followed by `  - value` list items
  * - Email format: `labels:` with nested keys (relationship, topics, type, filter, action)
  *   where values can be single strings or `  - value` arrays
  *
@@ -48,21 +64,22 @@ export function extractTags(raw: string | null): string[] {
   let inTags = false
   let inLabels = false
   let inLabelSubKey = false
-
-  const metadataKeys = new Set(['processed', 'labeled_at', 'tagged_at'])
+  let inCategoryList = false
 
   for (const line of lines) {
-    // Top-level key detection
+    // Top-level key detection — resets all nested state
     if (/^\w/.test(line) || line === '---') {
       inTags = false
       inLabels = false
       inLabelSubKey = false
+      inCategoryList = false
     }
 
-    // Note format: tags:
+    // Legacy note format: tags:
     if (/^tags:\s*$/.test(line)) {
       inTags = true
       inLabels = false
+      inCategoryList = false
       continue
     }
 
@@ -70,11 +87,40 @@ export function extractTags(raw: string | null): string[] {
     if (/^labels:\s*$/.test(line)) {
       inLabels = true
       inTags = false
+      inCategoryList = false
       continue
+    }
+
+    // Categorized format: top-level tag category key
+    const topKeyMatch = line.match(/^(\w+):\s*(.*)$/)
+    if (topKeyMatch) {
+      const key = topKeyMatch[1]
+      const inlineValue = topKeyMatch[2].trim()
+
+      if (TAG_CATEGORY_KEYS.has(key)) {
+        if (inlineValue) {
+          // Single value: `relationship: customer`
+          tags.push(inlineValue)
+          inCategoryList = false
+        } else {
+          // List follows: `topic:\n  - sales`
+          inCategoryList = true
+        }
+        continue
+      }
     }
 
     // Collect tag items under `tags:`
     if (inTags) {
+      const match = line.match(/^\s+-\s+(.+)$/)
+      if (match) {
+        tags.push(match[1].trim())
+      }
+      continue
+    }
+
+    // Collect list items under a category key
+    if (inCategoryList) {
       const match = line.match(/^\s+-\s+(.+)$/)
       if (match) {
         tags.push(match[1].trim())
@@ -89,7 +135,7 @@ export function extractTags(raw: string | null): string[] {
       if (subKeyMatch) {
         const key = subKeyMatch[1]
         const inlineValue = subKeyMatch[2].trim()
-        if (metadataKeys.has(key)) {
+        if (METADATA_KEYS.has(key)) {
           inLabelSubKey = false
           continue
         }
