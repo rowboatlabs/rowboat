@@ -11,14 +11,13 @@ import {
     markNoteAsTagged,
     type NoteTaggingState,
 } from './note_tagging_state.js';
+import { getNoteTypeDefinitions } from './note_system.js';
 
-const SYNC_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
+const SYNC_INTERVAL_MS = 30 * 1000; // 30 seconds
 const BATCH_SIZE = 15;
 const NOTE_TAGGING_AGENT = 'note_tagging_agent';
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
 const MAX_CONTENT_LENGTH = 8000;
-
-const NOTE_FOLDERS = ['People', 'Organizations', 'Projects', 'Topics'];
 
 /**
  * Find knowledge notes that haven't been tagged yet
@@ -29,8 +28,9 @@ function getUntaggedNotes(state: NoteTaggingState): string[] {
     }
 
     const untagged: string[] = [];
+    const noteFolders = getNoteTypeDefinitions().map(d => d.folder);
 
-    for (const folder of NOTE_FOLDERS) {
+    for (const folder of noteFolders) {
         const folderPath = path.join(KNOWLEDGE_DIR, folder);
         if (!fs.existsSync(folderPath)) {
             continue;

@@ -1,4 +1,7 @@
-export const raw = `---
+import { renderNoteTypesBlock } from './note_system.js';
+
+export function getRaw(): string {
+  return `---
 model: gpt-5.2
 tools:
   workspace-writeFile:
@@ -897,140 +900,7 @@ After writing, verify links go both ways.
 
 ---
 
-# Note Templates
-
-## People
-\`\`\`markdown
-# {Full Name}
-
-## Info
-**Role:** {role, or inferred role with qualifier, or leave blank if truly unknown}
-**Organization:** [[Organizations/{organization}]] or leave blank
-**Email:** {email or leave blank}
-**Aliases:** {comma-separated: first name, nicknames, email}
-**First met:** {YYYY-MM-DD}
-**Last seen:** {YYYY-MM-DD}
-
-## Summary
-{2-3 sentences: Who they are, why you know them, what you're working on together.}
-
-## Connected to
-- [[Organizations/{Organization}]] — works at
-- [[People/{Person}]] — {colleague, introduced by, reports to}
-- [[Projects/{Project}]] — {role}
-
-## Activity
-- **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[Folder/Name]] links}
-
-## Key facts
-{Substantive facts only. Leave empty if none.}
-
-## Open items
-{Commitments and next steps only. Leave empty if none.}
-\`\`\`
-
-## Organizations
-\`\`\`markdown
-# {Organization Name}
-
-## Info
-**Type:** {company|team|institution|other}
-**Industry:** {industry or leave blank}
-**Relationship:** {customer|prospect|partner|competitor|vendor|other}
-**Domain:** {primary email domain}
-**Aliases:** {comma-separated: short names, abbreviations}
-**First met:** {YYYY-MM-DD}
-**Last seen:** {YYYY-MM-DD}
-
-## Summary
-{2-3 sentences: What this org is, what your relationship is.}
-
-## People
-- [[People/{Person}]] — {role}
-
-## Contacts
-{For transactional contacts who don't get their own notes}
-
-## Projects
-- [[Projects/{Project}]] — {relationship}
-
-## Activity
-- **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[Folder/Name]] links}
-
-## Key facts
-{Substantive facts only. Leave empty if none.}
-
-## Open items
-{Commitments and next steps only. Leave empty if none.}
-\`\`\`
-
-## Projects
-\`\`\`markdown
-# {Project Name}
-
-## Info
-**Type:** {deal|product|initiative|hiring|other}
-**Status:** {active|planning|on hold|completed|cancelled}
-**Started:** {YYYY-MM-DD or leave blank}
-**Last activity:** {YYYY-MM-DD}
-
-## Summary
-{2-3 sentences: What this project is, goal, current state.}
-
-## People
-- [[People/{Person}]] — {role}
-
-## Organizations
-- [[Organizations/{Org}]] — {customer|partner|etc.}
-
-## Related
-- [[Topics/{Topic}]] — {relationship}
-- [[Projects/{Project}]] — {relationship}
-
-## Timeline
-**{YYYY-MM-DD}** ({meeting|email})
-{What happened.}
-
-## Decisions
-- **{YYYY-MM-DD}**: {Decision}. {Rationale}.
-
-## Open items
-{Commitments and next steps only. Leave empty if none.}
-
-## Key facts
-{Substantive facts only. Leave empty if none.}
-\`\`\`
-
-## Topics
-\`\`\`markdown
-# {Topic Name}
-
-## About
-{1-2 sentences: What this topic covers.}
-
-**Keywords:** {comma-separated}
-**Aliases:** {other ways this topic is referenced}
-**First mentioned:** {YYYY-MM-DD}
-**Last mentioned:** {YYYY-MM-DD}
-
-## Related
-- [[People/{Person}]] — {relationship}
-- [[Organizations/{Org}]] — {relationship}
-- [[Projects/{Project}]] — {relationship}
-
-## Log
-**{YYYY-MM-DD}** ({meeting|email}: {title})
-{Summary with [[Folder/Name]] links}
-
-## Decisions
-- **{YYYY-MM-DD}**: {Decision}
-
-## Open items
-{Commitments and next steps only. Leave empty if none.}
-
-## Key facts
-{Substantive facts only. Leave empty if none.}
-\`\`\`
+${renderNoteTypesBlock()}
 
 ---
 
@@ -1104,3 +974,4 @@ Before completing, verify:
 - [ ] Bidirectional links are consistent
 - [ ] New notes in correct folders
 `;
+}

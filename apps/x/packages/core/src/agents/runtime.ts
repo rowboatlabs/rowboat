@@ -2,7 +2,6 @@ import { jsonSchema, ModelMessage } from "ai";
 import fs from "fs";
 import path from "path";
 import { WorkDir } from "../config/config.js";
-import { getNoteCreationStrictness } from "../config/note_creation_config.js";
 import { Agent, ToolAttachment } from "@x/shared/dist/agent.js";
 import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage } from "@x/shared/dist/message.js";
 import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
@@ -25,9 +24,7 @@ import { IRunsLock } from "../runs/lock.js";
 import { IAbortRegistry } from "../runs/abort-registry.js";
 import { PrefixLogger } from "@x/shared";
 import { parse } from "yaml";
-import { raw as noteCreationMediumRaw } from "../knowledge/note_creation_medium.js";
-import { raw as noteCreationLowRaw } from "../knowledge/note_creation_low.js";
-import { raw as noteCreationHighRaw } from "../knowledge/note_creation_high.js";
+import { getRaw as getNoteCreationRaw } from "../knowledge/note_creation.js";
 import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
 
@@ -318,19 +315,7 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     }
 
     if (id === 'note_creation') {
-        const strictness = getNoteCreationStrictness();
-        let raw = '';
-        switch (strictness) {
-            case 'medium':
-                raw = noteCreationMediumRaw;
-                break;
-            case 'low':
-                raw = noteCreationLowRaw;
-                break;
-            case 'high':
-                raw = noteCreationHighRaw;
-                break;
-        }
+        const raw = getNoteCreationRaw();
         let agent: z.infer<typeof Agent> = {
             name: id,
             instructions: raw,
