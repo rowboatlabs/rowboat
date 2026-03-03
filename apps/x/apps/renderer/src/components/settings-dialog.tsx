@@ -728,34 +728,51 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
             </div>
             {!collapsedGroups.has(group.type) && group.tags.length > 0 && (
               <div className="border rounded-md overflow-hidden">
-                <div className="grid grid-cols-[100px_1fr_1fr_24px] gap-1 bg-muted/50 px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                <div className="grid grid-cols-[100px_1fr_1fr_80px_24px] gap-1 bg-muted/50 px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                   <div>Tag</div>
                   <div>Description</div>
                   <div>Example</div>
+                  <div>Applies to</div>
                   <div />
                 </div>
                 {group.tags.map((tag, localIdx) => {
                   const globalIdx = getGlobalIndex(group.type, localIdx)
                   return (
-                    <div key={globalIdx} className="grid grid-cols-[100px_1fr_1fr_24px] gap-1 border-t px-2 py-0.5 items-center">
+                    <div key={globalIdx} className="grid grid-cols-[100px_1fr_1fr_80px_24px] gap-1 border-t px-2 py-0.5 items-center">
                       <Input
                         value={tag.tag}
                         onChange={e => updateTag(globalIdx, "tag", e.target.value)}
                         className="h-7 text-xs"
                         placeholder="tag-name"
+                        title={tag.tag}
                       />
                       <Input
                         value={tag.description}
                         onChange={e => updateTag(globalIdx, "description", e.target.value)}
                         className="h-7 text-xs"
                         placeholder="Description"
+                        title={tag.description}
                       />
                       <Input
                         value={tag.example || ""}
                         onChange={e => updateTag(globalIdx, "example", e.target.value)}
                         className="h-7 text-xs"
                         placeholder="Example"
+                        title={tag.example || ""}
                       />
+                      <Select
+                        value={tag.applicability}
+                        onValueChange={v => updateTag(globalIdx, "applicability", v)}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="both">Both</SelectItem>
+                          <SelectItem value="email">Email</SelectItem>
+                          <SelectItem value="notes">Notes</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <button
                         onClick={() => removeTag(globalIdx)}
                         className="flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
