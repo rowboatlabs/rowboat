@@ -181,6 +181,29 @@ export function extractAllFrontmatterValues(raw: string | null): Record<string, 
   return result
 }
 
+/**
+ * Convert a Record of frontmatter fields back to a raw YAML frontmatter string.
+ * Returns null if no non-empty fields remain.
+ */
+export function buildFrontmatter(fields: Record<string, string | string[]>): string | null {
+  const lines: string[] = []
+  for (const [key, value] of Object.entries(fields)) {
+    if (Array.isArray(value)) {
+      if (value.length === 0) continue
+      lines.push(`${key}:`)
+      for (const item of value) {
+        if (item.trim()) lines.push(`  - ${item.trim()}`)
+      }
+    } else {
+      const trimmed = (value ?? '').trim()
+      if (!trimmed) continue
+      lines.push(`${key}: ${trimmed}`)
+    }
+  }
+  if (lines.length === 0) return null
+  return `---\n${lines.join('\n')}\n---`
+}
+
 /** Map known tag values → category for legacy flat-list frontmatter. */
 const LEGACY_TAG_TO_CATEGORY: Record<string, string> = {
   // relationship

@@ -47,7 +47,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
-import { splitFrontmatter, joinFrontmatter, extractTags } from '@/lib/frontmatter'
+import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { OnboardingModal } from '@/components/onboarding-modal'
 import { SearchDialog } from '@/components/search-dialog'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
@@ -512,9 +512,8 @@ function App() {
   const initialContentRef = useRef<string>('')
   const renameInProgressRef = useRef(false)
 
-  // Frontmatter state: store raw frontmatter per file path, tags for active file
+  // Frontmatter state: store raw frontmatter per file path
   const frontmatterByPathRef = useRef<Map<string, string | null>>(new Map())
-  const [activeFileTags, setActiveFileTags] = useState<string[]>([])
 
   // Version history state
   const [versionHistoryPath, setVersionHistoryPath] = useState<string | null>(null)
@@ -906,7 +905,6 @@ function App() {
           editorPathRef.current = pathToReload
           initialContentByPathRef.current.set(pathToReload, body)
           initialContentRef.current = body
-          setActiveFileTags(extractTags(fm))
         }
       }
     })
@@ -957,7 +955,6 @@ function App() {
         editorContentRef.current = cachedContent
         editorPathRef.current = selectedPath
         initialContentRef.current = initialContentByPathRef.current.get(selectedPath) ?? cachedContent
-        setActiveFileTags(extractTags(frontmatterByPathRef.current.get(selectedPath) ?? null))
         return
       }
     }
@@ -1000,7 +997,6 @@ function App() {
           initialContentByPathRef.current.set(pathToLoad, body)
           initialContentRef.current = body
           setLastSaved(null)
-          setActiveFileTags(extractTags(fm))
         } else {
           // Still update the editor's path so subsequent autosaves write to the correct file.
           editorPathRef.current = pathToLoad
@@ -3491,7 +3487,20 @@ function App() {
                               wikiLinks={wikiLinkConfig}
                               onImageUpload={handleImageUpload}
                               editorSessionKey={editorSessionByTabId[tab.id] ?? 0}
-                              tags={isActive ? activeFileTags : undefined}
+                              frontmatter={frontmatterByPathRef.current.get(tab.path) ?? null}
+                              onFrontmatterChange={(newRaw) => {
+                                frontmatterByPathRef.current.set(tab.path, newRaw)
+                                // Write updated frontmatter to disk immediately
+                                const currentBody = editorContentRef.current
+                                const fullContent = joinFrontmatter(newRaw, currentBody)
+                                initialContentByPathRef.current.set(tab.path, splitFrontmatter(fullContent).body)
+                                initialContentRef.current = splitFrontmatter(fullContent).body
+                                void window.ipc.invoke('workspace:writeFile', {
+                                  path: tab.path,
+                                  data: fullContent,
+                                  opts: { encoding: 'utf8' },
+                                })
+                              }}
                               onHistoryHandlersChange={(handlers) => {
                                 if (handlers) {
                                   fileHistoryHandlersRef.current.set(tab.id, handlers)
