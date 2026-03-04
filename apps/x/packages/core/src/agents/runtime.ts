@@ -27,6 +27,7 @@ import { parse } from "yaml";
 import { getRaw as getNoteCreationRaw } from "../knowledge/note_creation.js";
 import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
+import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -377,6 +378,31 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
             if (end !== -1) {
                 const fm = noteTaggingAgentRaw.slice(3, end).trim();
                 const content = noteTaggingAgentRaw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
+    if (id === 'inline_task_agent') {
+        const inlineTaskAgentRaw = getInlineTaskAgentRaw();
+        let agent: z.infer<typeof Agent> = {
+            name: id,
+            instructions: inlineTaskAgentRaw,
+        };
+
+        if (inlineTaskAgentRaw.startsWith("---")) {
+            const end = inlineTaskAgentRaw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = inlineTaskAgentRaw.slice(3, end).trim();
+                const content = inlineTaskAgentRaw.slice(end + 4).trim();
                 const yaml = parse(fm);
                 const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
                 agent = {

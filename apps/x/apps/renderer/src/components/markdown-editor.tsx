@@ -8,6 +8,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
+import { TaskBlockExtension } from '@/extensions/task-block'
 import { Markdown } from 'tiptap-markdown'
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
 
@@ -133,6 +134,8 @@ function getMarkdownWithBlankLines(editor: Editor): string {
         })
       })
       blocks.push(listLines.join('\n'))
+    } else if (node.type === 'taskBlock') {
+      blocks.push('```task\n' + (node.attrs?.data as string || '{}') + '\n```')
     } else if (node.type === 'codeBlock') {
       const lang = (node.attrs?.language as string) || ''
       blocks.push('```' + lang + '\n' + nodeToText(node) + '\n```')
@@ -181,7 +184,20 @@ import { WikiLink } from '@/extensions/wiki-link'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command'
 import { ensureMarkdownExtension, normalizeWikiPath, wikiLabel } from '@/lib/wiki-links'
+import { extractAllFrontmatterValues, buildFrontmatter } from '@/lib/frontmatter'
+import { RowboatMentionPopover } from './rowboat-mention-popover'
 import '@/styles/editor.css'
+
+type RowboatMentionMatch = {
+  range: { from: number; to: number }
+}
+
+type RowboatBlockEdit = {
+  /** ProseMirror position of the taskBlock node */
+  nodePos: number
+  /** Existing instruction text */
+  existingText: string
+}
 
 type WikiLinkConfig = {
   files: string[]
@@ -304,6 +320,10 @@ export function MarkdownEditor({
   const onPrimaryHeadingCommitRef = useRef(onPrimaryHeadingCommit)
   const wikiKeyStateRef = useRef<{ open: boolean; options: string[]; value: string }>({ open: false, options: [], value: '' })
   const handleSelectWikiLinkRef = useRef<(path: string) => void>(() => {})
+  const [activeRowboatMention, setActiveRowboatMention] = useState<RowboatMentionMatch | null>(null)
+  const [rowboatBlockEdit, setRowboatBlockEdit] = useState<RowboatBlockEdit | null>(null)
+  const [rowboatAnchorTop, setRowboatAnchorTop] = useState<{ top: number; left: number; width: number } | null>(null)
+  const rowboatBlockEditRef = useRef<RowboatBlockEdit | null>(null)
 
   // Keep ref in sync with state for the plugin to access
   selectionHighlightRef.current = selectionHighlight
@@ -399,6 +419,7 @@ export function MarkdownEditor({
         },
       }),
       ImageUploadPlaceholderExtension,
+      TaskBlockExtension,
       WikiLink.configure({
         onCreate: wikiLinks?.onCreate
           ? (path) => {
@@ -492,7 +513,7 @@ export function MarkdownEditor({
 
         return false
       },
-      handleClickOn: (_view, _pos, node, _nodePos, event) => {
+      handleClickOn: (_view, _pos, node, nodePos, event) => {
         if (node.type.name === 'wikiLink') {
           event.preventDefault()
           wikiLinks?.onOpen?.(node.attrs.path)
@@ -575,6 +596,55 @@ export function MarkdownEditor({
     })
   }, [editor, wikiLinks])
 
+  const updateRowboatMentionState = useCallback(() => {
+    if (!editor) return
+    const { selection } = editor.state
+    if (!selection.empty) {
+      setActiveRowboatMention(null)
+      setRowboatAnchorTop(null)
+      return
+    }
+
+    const { $from } = selection
+    if ($from.parent.type.spec.code) {
+      setActiveRowboatMention(null)
+      setRowboatAnchorTop(null)
+      return
+    }
+
+    const text = $from.parent.textBetween(0, $from.parent.content.size, '\n', '\n')
+    const textBefore = text.slice(0, $from.parentOffset)
+
+    // Match @rowboat at a word boundary (preceded by nothing or whitespace)
+    const match = textBefore.match(/(^|\s)@rowboat$/)
+    if (!match) {
+      setActiveRowboatMention(null)
+      setRowboatAnchorTop(null)
+      return
+    }
+
+    const triggerStart = textBefore.length - '@rowboat'.length
+    const from = selection.from - (textBefore.length - triggerStart)
+    const to = selection.from
+    setActiveRowboatMention({ range: { from, to } })
+
+    const wrapper = wrapperRef.current
+    if (!wrapper) {
+      setRowboatAnchorTop(null)
+      return
+    }
+
+    const coords = editor.view.coordsAtPos(selection.from)
+    const wrapperRect = wrapper.getBoundingClientRect()
+    const proseMirrorEl = wrapper.querySelector('.ProseMirror') as HTMLElement | null
+    const pmRect = proseMirrorEl?.getBoundingClientRect()
+    setRowboatAnchorTop({
+      top: coords.top - wrapperRect.top + wrapper.scrollTop,
+      left: pmRect ? pmRect.left - wrapperRect.left : 0,
+      width: pmRect ? pmRect.width : wrapperRect.width,
+    })
+  }, [editor])
+
   useEffect(() => {
     if (!editor || !wikiLinks) return
     editor.on('update', updateWikiLinkState)
@@ -584,6 +654,32 @@ export function MarkdownEditor({
       editor.off('selectionUpdate', updateWikiLinkState)
     }
   }, [editor, wikiLinks, updateWikiLinkState])
+
+  useEffect(() => {
+    if (!editor) return
+    editor.on('update', updateRowboatMentionState)
+    editor.on('selectionUpdate', updateRowboatMentionState)
+    return () => {
+      editor.off('update', updateRowboatMentionState)
+      editor.off('selectionUpdate', updateRowboatMentionState)
+    }
+  }, [editor, updateRowboatMentionState])
+
+  // When a tell-rowboat block is clicked, compute anchor and open popover
+  useEffect(() => {
+    if (!rowboatBlockEdit || !editor) return
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
+    const coords = editor.view.coordsAtPos(rowboatBlockEdit.nodePos)
+    const wrapperRect = wrapper.getBoundingClientRect()
+    const proseMirrorEl = wrapper.querySelector('.ProseMirror') as HTMLElement | null
+    const pmRect = proseMirrorEl?.getBoundingClientRect()
+    setRowboatAnchorTop({
+      top: coords.top - wrapperRect.top + wrapper.scrollTop,
+      left: pmRect ? pmRect.left - wrapperRect.left : 0,
+      width: pmRect ? pmRect.width : wrapperRect.width,
+    })
+  }, [editor, rowboatBlockEdit])
 
   // Update editor content when prop changes (e.g., file selection changes)
   useEffect(() => {
@@ -674,6 +770,85 @@ export function MarkdownEditor({
   useEffect(() => {
     handleSelectWikiLinkRef.current = handleSelectWikiLink
   }, [handleSelectWikiLink])
+
+  const handleRowboatAdd = useCallback(async (instruction: string) => {
+    if (!editor) return
+
+    if (rowboatBlockEdit) {
+      // Editing existing taskBlock — update its data attribute
+      const { nodePos } = rowboatBlockEdit
+      const node = editor.state.doc.nodeAt(nodePos)
+      if (node && node.type.name === 'taskBlock') {
+        // Preserve existing schedule data
+        let updated: Record<string, unknown> = { instruction }
+        try {
+          const existing = JSON.parse(node.attrs.data || '{}')
+          updated = { ...existing, instruction }
+        } catch {
+          // Invalid JSON — just write new
+        }
+        const tr = editor.state.tr.setNodeMarkup(nodePos, undefined, { data: JSON.stringify(updated) })
+        editor.view.dispatch(tr)
+      }
+      setRowboatBlockEdit(null)
+      rowboatBlockEditRef.current = null
+      setRowboatAnchorTop(null)
+      return
+    }
+
+    if (activeRowboatMention) {
+      // Classify schedule intent for new blocks
+      const blockData: Record<string, unknown> = { instruction }
+      try {
+        const result = await window.ipc.invoke('inline-task:classifySchedule', { instruction })
+        if (result.schedule) {
+          const { label, ...rest } = result.schedule
+          blockData.schedule = rest
+          blockData['schedule-label'] = label
+        }
+      } catch (error) {
+        console.error('[RowboatAdd] Schedule classification failed:', error)
+      }
+
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(
+          { from: activeRowboatMention.range.from, to: activeRowboatMention.range.to },
+          [
+            { type: 'taskBlock', attrs: { data: JSON.stringify(blockData) } },
+            { type: 'paragraph' },
+          ],
+        )
+        .run()
+
+      // Mark note as live
+      if (onFrontmatterChange) {
+        const fields = extractAllFrontmatterValues(frontmatter ?? null)
+        fields['live_note'] = 'true'
+        onFrontmatterChange(buildFrontmatter(fields))
+      }
+
+      setActiveRowboatMention(null)
+      setRowboatAnchorTop(null)
+    }
+  }, [editor, activeRowboatMention, rowboatBlockEdit, frontmatter, onFrontmatterChange])
+
+  const handleRowboatRemove = useCallback(() => {
+    if (!editor || !rowboatBlockEdit) return
+    const { nodePos } = rowboatBlockEdit
+    const node = editor.state.doc.nodeAt(nodePos)
+    if (node) {
+      editor
+        .chain()
+        .focus()
+        .deleteRange({ from: nodePos, to: nodePos + node.nodeSize })
+        .run()
+    }
+    setRowboatBlockEdit(null)
+    rowboatBlockEditRef.current = null
+    setRowboatAnchorTop(null)
+  }, [editor, rowboatBlockEdit])
 
   const handleScroll = useCallback(() => {
     updateWikiLinkState()
@@ -789,6 +964,19 @@ export function MarkdownEditor({
             </PopoverContent>
           </Popover>
         ) : null}
+        <RowboatMentionPopover
+          open={Boolean((activeRowboatMention || rowboatBlockEdit) && rowboatAnchorTop)}
+          anchor={rowboatAnchorTop}
+          initialText={rowboatBlockEdit?.existingText ?? ''}
+          onAdd={handleRowboatAdd}
+          onRemove={rowboatBlockEdit ? handleRowboatRemove : undefined}
+          onClose={() => {
+            setActiveRowboatMention(null)
+            setRowboatBlockEdit(null)
+            rowboatBlockEditRef.current = null
+            setRowboatAnchorTop(null)
+          }}
+        />
       </div>
     </div>
   )
