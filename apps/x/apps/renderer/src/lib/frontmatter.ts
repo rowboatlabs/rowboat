@@ -132,6 +132,55 @@ export function extractFrontmatterFields(raw: string | null): FrontmatterFields 
   return fields
 }
 
+/**
+ * Extract ALL top-level YAML key/value pairs from raw frontmatter.
+ * Returns a flat record where scalar values are strings and list values are string[].
+ * Skips `---` delimiters and blank lines.
+ */
+export function extractAllFrontmatterValues(raw: string | null): Record<string, string | string[]> {
+  const result: Record<string, string | string[]> = {}
+  if (!raw) return result
+
+  const lines = raw.split('\n')
+  let currentKey: string | null = null
+
+  for (const line of lines) {
+    if (line === '---' || line.trim() === '') {
+      currentKey = null
+      continue
+    }
+
+    // Top-level key: value
+    const topMatch = line.match(/^(\w[\w\s]*\w|\w+):\s*(.*)$/)
+    if (topMatch) {
+      const key = topMatch[1]
+      const value = topMatch[2].trim()
+      if (value) {
+        result[key] = value
+        currentKey = null
+      } else {
+        // List will follow
+        currentKey = key
+        result[key] = []
+      }
+      continue
+    }
+
+    // List item under current key
+    if (currentKey) {
+      const itemMatch = line.match(/^\s+-\s+(.+)$/)
+      if (itemMatch) {
+        const arr = result[currentKey]
+        if (Array.isArray(arr)) {
+          arr.push(itemMatch[1].trim())
+        }
+      }
+    }
+  }
+
+  return result
+}
+
 /** Map known tag values → category for legacy flat-list frontmatter. */
 const LEGACY_TAG_TO_CATEGORY: Record<string, string> = {
   // relationship

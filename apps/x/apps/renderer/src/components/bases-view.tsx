@@ -1,9 +1,11 @@
 import * as React from 'react'
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import { Command, CommandInput, CommandList, CommandItem, CommandEmpty, CommandGroup } from '@/components/ui/command'
 import { cn } from '@/lib/utils'
-import { splitFrontmatter, extractFrontmatterFields, type FrontmatterFields } from '@/lib/frontmatter'
+import { splitFrontmatter, extractAllFrontmatterValues } from '@/lib/frontmatter'
 
 interface TreeNode {
   path: string
@@ -13,25 +15,39 @@ interface TreeNode {
   stat?: { size: number; mtimeMs: number }
 }
 
-const EMPTY_FIELDS: FrontmatterFields = {
-  relationship: null, relationship_sub: [], topic: [], email_type: [], action: [], status: null, source: [],
-}
-
 type NoteEntry = {
   path: string
   name: string
   folder: string
-  fields: FrontmatterFields
+  fields: Record<string, string | string[]>
   mtimeMs: number
 }
 
-type SortField = 'name' | 'folder' | 'relationship' | 'status' | 'mtimeMs'
 type SortDir = 'asc' | 'desc'
-
-type FilterCategory = 'relationship' | 'topic' | 'status'
-type ActiveFilter = { category: FilterCategory; value: string }
+type ActiveFilter = { category: string; value: string }
 
 const PAGE_SIZE = 25
+
+/** Built-in columns that don't come from frontmatter */
+const BUILTIN_COLUMNS = ['name', 'folder', 'mtimeMs'] as const
+type BuiltinColumn = (typeof BUILTIN_COLUMNS)[number]
+
+const BUILTIN_LABELS: Record<BuiltinColumn, string> = {
+  name: 'Name',
+  folder: 'Folder',
+  mtimeMs: 'Last Modified',
+}
+
+const DEFAULT_COLUMNS: string[] = ['name', 'folder', 'relationship', 'topic', 'status', 'mtimeMs']
+
+/** Convert key to title case: `first_met` → `First Met` */
+function toTitleCase(key: string): string {
+  if (key in BUILTIN_LABELS) return BUILTIN_LABELS[key as BuiltinColumn]
+  return key
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
 
 type BasesViewProps = {
   tree: TreeNode[]
@@ -68,27 +84,43 @@ function hasFilter(filters: ActiveFilter[], f: ActiveFilter): boolean {
   return filters.some((x) => filtersEqual(x, f))
 }
 
-function getCategoryValues(fields: FrontmatterFields, category: FilterCategory): string[] {
-  if (category === 'relationship') return fields.relationship ? [fields.relationship] : []
-  if (category === 'topic') return fields.topic
-  if (category === 'status') return fields.status ? [fields.status] : []
-  return []
+/** Get the string values for a column from a note */
+function getColumnValues(note: NoteEntry, column: string): string[] {
+  if (column === 'name') return [note.name]
+  if (column === 'folder') return [note.folder]
+  if (column === 'mtimeMs') return []
+  const v = note.fields[column]
+  if (!v) return []
+  return Array.isArray(v) ? v : [v]
 }
 
+/** Get a single sortable string for a column */
+function getSortValue(note: NoteEntry, column: string): string | number {
+  if (column === 'name') return note.name
+  if (column === 'folder') return note.folder
+  if (column === 'mtimeMs') return note.mtimeMs
+  const v = note.fields[column]
+  if (!v) return ''
+  return Array.isArray(v) ? v[0] ?? '' : v
+}
+
+const isBuiltin = (col: string): col is BuiltinColumn =>
+  (BUILTIN_COLUMNS as readonly string[]).includes(col)
+
 export function BasesView({ tree, onSelectNote }: BasesViewProps) {
-  // Build notes instantly from tree — no file reads needed for the table shell
+  // Build notes instantly from tree
   const notes = useMemo<NoteEntry[]>(() => {
     return collectFiles(tree).map((f) => ({
       path: f.path,
       name: f.name,
       folder: getFolder(f.path),
-      fields: EMPTY_FIELDS,
+      fields: {},
       mtimeMs: f.mtimeMs,
     }))
   }, [tree])
 
   // Frontmatter fields loaded async, keyed by path
-  const [fieldsByPath, setFieldsByPath] = useState<Map<string, FrontmatterFields>>(new Map())
+  const [fieldsByPath, setFieldsByPath] = useState<Map<string, Record<string, string | string[]>>>(new Map())
   const loadGenRef = useRef(0)
 
   // Load frontmatter in background batches
@@ -107,9 +139,9 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
             try {
               const result = await window.ipc.invoke('workspace:readFile', { path: p, encoding: 'utf8' })
               const { raw } = splitFrontmatter(result.data)
-              return { path: p, fields: extractFrontmatterFields(raw) }
+              return { path: p, fields: extractAllFrontmatterValues(raw) }
             } catch {
-              return { path: p, fields: EMPTY_FIELDS }
+              return { path: p, fields: {} as Record<string, string | string[]> }
             }
           }),
         )
@@ -135,8 +167,18 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
     })
   }, [notes, fieldsByPath])
 
+  // Collect all unique frontmatter property keys across all notes
+  const allPropertyKeys = useMemo<string[]>(() => {
+    const keys = new Set<string>()
+    for (const fields of fieldsByPath.values()) {
+      for (const k of Object.keys(fields)) keys.add(k)
+    }
+    return Array.from(keys).sort()
+  }, [fieldsByPath])
+
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_COLUMNS)
   const [filters, setFilters] = useState<ActiveFilter[]>([])
-  const [sortField, setSortField] = useState<SortField>('mtimeMs')
+  const [sortField, setSortField] = useState<string>('mtimeMs')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [page, setPage] = useState(0)
 
@@ -146,7 +188,7 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
   // Filter
   const filteredNotes = useMemo(() => {
     if (filters.length === 0) return enrichedNotes
-    const byCategory = new Map<FilterCategory, string[]>()
+    const byCategory = new Map<string, string[]>()
     for (const f of filters) {
       const vals = byCategory.get(f.category) ?? []
       vals.push(f.value)
@@ -154,7 +196,7 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
     }
     return enrichedNotes.filter((note) => {
       for (const [category, requiredValues] of byCategory) {
-        const noteValues = getCategoryValues(note.fields, category)
+        const noteValues = getColumnValues(note, category)
         if (!requiredValues.some((v) => noteValues.includes(v))) return false
       }
       return true
@@ -164,12 +206,14 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
   // Sort
   const sortedNotes = useMemo(() => {
     return [...filteredNotes].sort((a, b) => {
-      let cmp = 0
-      if (sortField === 'name') cmp = a.name.localeCompare(b.name)
-      else if (sortField === 'folder') cmp = a.folder.localeCompare(b.folder)
-      else if (sortField === 'relationship') cmp = (a.fields.relationship ?? '').localeCompare(b.fields.relationship ?? '')
-      else if (sortField === 'status') cmp = (a.fields.status ?? '').localeCompare(b.fields.status ?? '')
-      else cmp = a.mtimeMs - b.mtimeMs
+      const va = getSortValue(a, sortField)
+      const vb = getSortValue(b, sortField)
+      let cmp: number
+      if (typeof va === 'number' && typeof vb === 'number') {
+        cmp = va - vb
+      } else {
+        cmp = String(va).localeCompare(String(vb))
+      }
       return sortDir === 'asc' ? cmp : -cmp
     })
   }, [filteredNotes, sortField, sortDir])
@@ -182,7 +226,7 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
     [sortedNotes, clampedPage],
   )
 
-  const toggleFilter = useCallback((category: FilterCategory, value: string) => {
+  const toggleFilter = useCallback((category: string, value: string) => {
     setFilters((prev) => {
       const f: ActiveFilter = { category, value }
       if (hasFilter(prev, f)) return prev.filter((x) => !filtersEqual(x, f))
@@ -192,7 +236,7 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
 
   const clearFilters = useCallback(() => { setFilters([]) }, [])
 
-  const handleSort = useCallback((field: SortField) => {
+  const handleSort = useCallback((field: string) => {
     setSortField((prev) => {
       if (prev === field) {
         setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -203,7 +247,13 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
     })
   }, [])
 
-  const SortIcon = ({ field }: { field: SortField }) => {
+  const toggleColumn = useCallback((key: string) => {
+    setVisibleColumns((prev) =>
+      prev.includes(key) ? prev.filter((c) => c !== key) : [...prev, key],
+    )
+  }, [])
+
+  const SortIcon = ({ field }: { field: string }) => {
     if (sortField !== field) return null
     return sortDir === 'asc'
       ? <ArrowUp className="size-3 inline ml-1" />
@@ -212,6 +262,42 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Toolbar */}
+      <div className="shrink-0 border-b border-border px-4 py-2">
+        <Popover>
+          <PopoverTrigger asChild>
+            <button className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+              <ListFilter className="size-3.5" />
+              Properties
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-56 p-0">
+            <Command>
+              <CommandInput placeholder="Search properties..." />
+              <CommandList>
+                <CommandEmpty>No properties found.</CommandEmpty>
+                <CommandGroup heading="Built-in">
+                  {BUILTIN_COLUMNS.map((col) => (
+                    <CommandItem key={col} onSelect={() => toggleColumn(col)}>
+                      <Check className={cn('size-3.5 mr-2', visibleColumns.includes(col) ? 'opacity-100' : 'opacity-0')} />
+                      {BUILTIN_LABELS[col]}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+                <CommandGroup heading="Frontmatter">
+                  {allPropertyKeys.map((key) => (
+                    <CommandItem key={key} onSelect={() => toggleColumn(key)}>
+                      <Check className={cn('size-3.5 mr-2', visibleColumns.includes(key) ? 'opacity-100' : 'opacity-0')} />
+                      {toTitleCase(key)}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </div>
+
       {/* Filter bar */}
       {filters.length > 0 && (
         <div className="shrink-0 border-b border-border px-4 py-2">
@@ -242,24 +328,15 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-background border-b border-border z-10">
             <tr>
-              <th className="text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none" onClick={() => handleSort('name')}>
-                Name<SortIcon field="name" />
-              </th>
-              <th className="text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none" onClick={() => handleSort('folder')}>
-                Folder<SortIcon field="folder" />
-              </th>
-              <th className="text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none" onClick={() => handleSort('relationship')}>
-                Relationship<SortIcon field="relationship" />
-              </th>
-              <th className="text-left px-4 py-2 font-medium text-muted-foreground select-none">
-                Topic
-              </th>
-              <th className="text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none" onClick={() => handleSort('status')}>
-                Status<SortIcon field="status" />
-              </th>
-              <th className="text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none" onClick={() => handleSort('mtimeMs')}>
-                Last Modified<SortIcon field="mtimeMs" />
-              </th>
+              {visibleColumns.map((col) => (
+                <th
+                  key={col}
+                  className="text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                  onClick={() => handleSort(col)}
+                >
+                  {toTitleCase(col)}<SortIcon field={col} />
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -269,33 +346,21 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
                 className="border-b border-border/50 hover:bg-accent/50 cursor-pointer transition-colors"
                 onClick={() => onSelectNote(note.path)}
               >
-                <td className="px-4 py-2 font-medium">{note.name}</td>
-                <td className="px-4 py-2 text-muted-foreground">{note.folder}</td>
-                <td className="px-4 py-2">
-                  {note.fields.relationship && (
-                    <CategoryBadge category="relationship" value={note.fields.relationship} active={hasFilter(filters, { category: 'relationship', value: note.fields.relationship })} onClick={toggleFilter} />
-                  )}
-                </td>
-                <td className="px-4 py-2">
-                  <div className="flex items-center gap-1 flex-wrap">
-                    {note.fields.topic.map((t) => (
-                      <CategoryBadge key={t} category="topic" value={t} active={hasFilter(filters, { category: 'topic', value: t })} onClick={toggleFilter} />
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-2">
-                  {note.fields.status && (
-                    <CategoryBadge category="status" value={note.fields.status} active={hasFilter(filters, { category: 'status', value: note.fields.status })} onClick={toggleFilter} />
-                  )}
-                </td>
-                <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">
-                  {formatDate(note.mtimeMs)}
-                </td>
+                {visibleColumns.map((col) => (
+                  <td key={col} className="px-4 py-2">
+                    <CellRenderer
+                      note={note}
+                      column={col}
+                      filters={filters}
+                      toggleFilter={toggleFilter}
+                    />
+                  </td>
+                ))}
               </tr>
             ))}
             {pageNotes.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={visibleColumns.length} className="px-4 py-8 text-center text-muted-foreground">
                   No notes found
                 </td>
               </tr>
@@ -309,7 +374,7 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
         <span className="text-xs text-muted-foreground">
           {sortedNotes.length === 0
             ? '0 notes'
-            : `${clampedPage * PAGE_SIZE + 1}–${Math.min((clampedPage + 1) * PAGE_SIZE, sortedNotes.length)} of ${sortedNotes.length}`}
+            : `${clampedPage * PAGE_SIZE + 1}\u2013${Math.min((clampedPage + 1) * PAGE_SIZE, sortedNotes.length)} of ${sortedNotes.length}`}
         </span>
         {totalPages > 1 && (
           <div className="flex items-center gap-1">
@@ -337,16 +402,69 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
   )
 }
 
+/** Renders a single table cell based on the column type */
+function CellRenderer({
+  note,
+  column,
+  filters,
+  toggleFilter,
+}: {
+  note: NoteEntry
+  column: string
+  filters: ActiveFilter[]
+  toggleFilter: (category: string, value: string) => void
+}) {
+  if (column === 'name') {
+    return <span className="font-medium">{note.name}</span>
+  }
+  if (column === 'folder') {
+    return <span className="text-muted-foreground">{note.folder}</span>
+  }
+  if (column === 'mtimeMs') {
+    return <span className="text-muted-foreground whitespace-nowrap">{formatDate(note.mtimeMs)}</span>
+  }
+
+  // Frontmatter column
+  const value = note.fields[column]
+  if (!value) return null
+
+  if (Array.isArray(value)) {
+    return (
+      <div className="flex items-center gap-1 flex-wrap">
+        {value.map((v) => (
+          <CategoryBadge
+            key={v}
+            category={column}
+            value={v}
+            active={hasFilter(filters, { category: column, value: v })}
+            onClick={toggleFilter}
+          />
+        ))}
+      </div>
+    )
+  }
+
+  // Single string value — render as badge for filterability
+  return (
+    <CategoryBadge
+      category={column}
+      value={value}
+      active={hasFilter(filters, { category: column, value })}
+      onClick={toggleFilter}
+    />
+  )
+}
+
 function CategoryBadge({
   category,
   value,
   active,
   onClick,
 }: {
-  category: FilterCategory
+  category: string
   value: string
   active: boolean
-  onClick: (category: FilterCategory, value: string) => void
+  onClick: (category: string, value: string) => void
 }) {
   return (
     <Badge
