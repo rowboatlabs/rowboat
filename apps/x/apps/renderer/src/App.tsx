@@ -1017,10 +1017,13 @@ function App() {
         frontmatterByPathRef.current.set(pathToLoad, fm)
         const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
         const isSameEditorFile = editorPathRef.current === pathToLoad
-        const wouldClobberActiveEdits =
-          isSameEditorFile
-          && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(body)
-        if (!wouldClobberActiveEdits) {
+        const knownBaseline = initialContentByPathRef.current.get(pathToLoad)
+        const hasKnownBaseline = knownBaseline !== undefined
+        const hasUnsavedEdits =
+          hasKnownBaseline
+          && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(knownBaseline)
+        const shouldPreserveActiveDraft = isSameEditorFile && hasUnsavedEdits
+        if (!shouldPreserveActiveDraft) {
           setEditorContent(body)
           if (pathToLoad.endsWith('.md')) {
             setEditorCacheForPath(pathToLoad, body)

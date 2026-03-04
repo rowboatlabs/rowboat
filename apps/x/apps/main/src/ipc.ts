@@ -32,6 +32,7 @@ import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 import { search } from '@x/core/dist/search/search.js';
 import { versionHistory } from '@x/core';
+import { classifySchedule } from '@x/core/dist/knowledge/inline_tasks.js';
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -530,6 +531,11 @@ export function setupIpcHandlers() {
     // Search handler
     'search:query': async (_event, args) => {
       return search(args.query, args.limit, args.types);
+    },
+    // Inline task schedule classification
+    'inline-task:classifySchedule': async (_event, args) => {
+      const schedule = await classifySchedule(args.instruction);
+      return { schedule };
     },
   });
 }

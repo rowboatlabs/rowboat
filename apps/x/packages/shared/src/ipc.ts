@@ -437,6 +437,19 @@ const ipcSchemas = {
       })),
     }),
   },
+  // Inline task schedule classification
+  'inline-task:classifySchedule': {
+    req: z.object({
+      instruction: z.string(),
+    }),
+    res: z.object({
+      schedule: z.union([
+        z.object({ type: z.literal('cron'), expression: z.string(), startDate: z.string(), endDate: z.string(), label: z.string() }),
+        z.object({ type: z.literal('window'), cron: z.string(), startTime: z.string(), endTime: z.string(), startDate: z.string(), endDate: z.string(), label: z.string() }),
+        z.object({ type: z.literal('once'), runAt: z.string(), label: z.string() }),
+      ]).nullable(),
+    }),
+  },
 } as const;
 
 // ============================================================================

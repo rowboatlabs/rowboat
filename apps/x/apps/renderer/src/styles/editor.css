@@ -531,6 +531,83 @@
   transition: width 0.3s ease;
 }
 
+/* Task block */
+.tiptap-editor .ProseMirror .task-block-wrapper {
+  margin: 8px 0;
+}
+
+.tiptap-editor .ProseMirror .task-block-card {
+  position: relative;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  cursor: default;
+  transition: background-color 0.15s ease;
+}
+
+.tiptap-editor .ProseMirror .task-block-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--foreground) 40%, transparent);
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.tiptap-editor .ProseMirror .task-block-card:hover .task-block-delete {
+  opacity: 1;
+}
+
+.tiptap-editor .ProseMirror .task-block-delete:hover {
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .task-block-card:hover {
+  background-color: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.tiptap-editor .ProseMirror .task-block-wrapper.ProseMirror-selectednode .task-block-card {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.tiptap-editor .ProseMirror .task-block-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tiptap-editor .ProseMirror .task-block-prefix {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.tiptap-editor .ProseMirror .task-block-instruction {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .task-block-schedule {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+}
+
 /* Dark mode overrides */
 .dark .tiptap-editor .ProseMirror {
   color: rgba(255, 255, 255, 0.9);
@@ -550,6 +627,10 @@
 
 .dark .tiptap-editor .ProseMirror pre {
   background: rgba(255, 255, 255, 0.05);
+}
+
+.dark .tiptap-editor .ProseMirror pre code {
+  color: inherit;
 }
 
 .dark .tiptap-editor .ProseMirror code {
