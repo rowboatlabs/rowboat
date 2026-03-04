@@ -545,22 +545,12 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
         <button
           onClick={toggleSearch}
           className={cn(
-            'inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground',
+            'inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground shrink-0',
             searchOpen && 'text-foreground',
           )}
         >
           <Search className="size-3.5" />
           Search
-        </button>
-
-        <div className="flex-1" />
-
-        <button
-          onClick={handleSaveClick}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-        >
-          <Save className="size-3.5" />
-          {isDefaultBase ? 'Save As' : 'Save'}
         </button>
 
         {searchOpen && (
@@ -586,6 +576,16 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
             </button>
           </div>
         )}
+
+        <div className="flex-1" />
+
+        <button
+          onClick={handleSaveClick}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground shrink-0"
+        >
+          <Save className="size-3.5" />
+          {isDefaultBase ? 'Save As' : 'Save'}
+        </button>
       </div>
 
       {/* Filter bar */}
