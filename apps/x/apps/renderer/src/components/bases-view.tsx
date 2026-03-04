@@ -1,9 +1,17 @@
 import * as React from 'react'
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter, Search, Save } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty, CommandGroup } from '@/components/ui/command'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { splitFrontmatter, extractAllFrontmatterValues } from '@/lib/frontmatter'
 import { useDebounce } from '@/hooks/use-debounce'
@@ -27,6 +35,22 @@ type NoteEntry = {
 type SortDir = 'asc' | 'desc'
 type ActiveFilter = { category: string; value: string }
 
+export type BaseConfig = {
+  name: string
+  visibleColumns: string[]
+  columnWidths: Record<string, number>
+  sort: { field: string; dir: SortDir }
+  filters: ActiveFilter[]
+}
+
+export const DEFAULT_BASE_CONFIG: BaseConfig = {
+  name: 'All Notes',
+  visibleColumns: ['name', 'folder', 'relationship', 'topic', 'status', 'mtimeMs'],
+  columnWidths: {},
+  sort: { field: 'mtimeMs', dir: 'desc' },
+  filters: [],
+}
+
 const PAGE_SIZE = 25
 
 /** Built-in columns that don't come from frontmatter */
@@ -38,8 +62,6 @@ const BUILTIN_LABELS: Record<BuiltinColumn, string> = {
   folder: 'Folder',
   mtimeMs: 'Last Modified',
 }
-
-const DEFAULT_COLUMNS: string[] = ['name', 'folder', 'relationship', 'topic', 'status', 'mtimeMs']
 
 /** Default pixel widths for columns */
 const DEFAULT_WIDTHS: Record<string, number> = {
@@ -61,6 +83,10 @@ function toTitleCase(key: string): string {
 type BasesViewProps = {
   tree: TreeNode[]
   onSelectNote: (path: string) => void
+  config: BaseConfig
+  onConfigChange: (config: BaseConfig) => void
+  isDefaultBase: boolean
+  onSave: (name: string | null) => void
 }
 
 function collectFiles(nodes: TreeNode[]): { path: string; name: string; mtimeMs: number }[] {
@@ -116,7 +142,7 @@ function getSortValue(note: NoteEntry, column: string): string | number {
 const isBuiltin = (col: string): col is BuiltinColumn =>
   (BUILTIN_COLUMNS as readonly string[]).includes(col)
 
-export function BasesView({ tree, onSelectNote }: BasesViewProps) {
+export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaultBase, onSave }: BasesViewProps) {
   // Build notes instantly from tree
   const notes = useMemo<NoteEntry[]>(() => {
     return collectFiles(tree).map((f) => ({
@@ -185,12 +211,31 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
     return Array.from(keys).sort()
   }, [fieldsByPath])
 
-  const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_COLUMNS)
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
-  const [filters, setFilters] = useState<ActiveFilter[]>([])
-  const [sortField, setSortField] = useState<string>('mtimeMs')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const visibleColumns = config.visibleColumns
+  const columnWidths = config.columnWidths
+  const filters = config.filters
+  const sortField = config.sort.field
+  const sortDir = config.sort.dir
   const [page, setPage] = useState(0)
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [saveName, setSaveName] = useState('')
+  const saveInputRef = useRef<HTMLInputElement>(null)
+
+  const handleSaveClick = useCallback(() => {
+    if (isDefaultBase) {
+      setSaveName('')
+      setSaveDialogOpen(true)
+    } else {
+      onSave(null)
+    }
+  }, [isDefaultBase, onSave])
+
+  const handleSaveConfirm = useCallback(() => {
+    const name = saveName.trim()
+    if (!name) return
+    setSaveDialogOpen(false)
+    onSave(name)
+  }, [saveName, onSave])
 
   const getColWidth = useCallback((col: string) => {
     return columnWidths[col] ?? DEFAULT_WIDTHS[col] ?? DEFAULT_FRONTMATTER_WIDTH
@@ -199,18 +244,23 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
   // Column resize via drag
   const resizingRef = useRef<{ col: string; startX: number; startW: number } | null>(null)
 
+  const configRef = useRef(config)
+  configRef.current = config
+
   const onResizeStart = useCallback((col: string, e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     const startX = e.clientX
-    const startW = columnWidths[col] ?? DEFAULT_WIDTHS[col] ?? DEFAULT_FRONTMATTER_WIDTH
+    const startW = configRef.current.columnWidths[col] ?? DEFAULT_WIDTHS[col] ?? DEFAULT_FRONTMATTER_WIDTH
     resizingRef.current = { col, startX, startW }
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!resizingRef.current) return
       const delta = ev.clientX - resizingRef.current.startX
       const newW = Math.max(60, resizingRef.current.startW + delta)
-      setColumnWidths((prev) => ({ ...prev, [resizingRef.current!.col]: newW }))
+      const c = configRef.current
+      const updated = { ...c, columnWidths: { ...c.columnWidths, [resizingRef.current!.col]: newW } }
+      onConfigChange(updated)
     }
 
     const onMouseUp = () => {
@@ -221,7 +271,7 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [columnWidths])
+  }, [onConfigChange])
 
   // Search
   const [searchOpen, setSearchOpen] = useState(false)
@@ -316,29 +366,34 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
   )
 
   const toggleFilter = useCallback((category: string, value: string) => {
-    setFilters((prev) => {
-      const f: ActiveFilter = { category, value }
-      if (hasFilter(prev, f)) return prev.filter((x) => !filtersEqual(x, f))
-      return [...prev, f]
-    })
-  }, [])
+    const c = configRef.current
+    const f: ActiveFilter = { category, value }
+    const next = hasFilter(c.filters, f)
+      ? c.filters.filter((x) => !filtersEqual(x, f))
+      : [...c.filters, f]
+    onConfigChange({ ...c, filters: next })
+  }, [onConfigChange])
 
-  const clearFilters = useCallback(() => { setFilters([]) }, [])
+  const clearFilters = useCallback(() => {
+    onConfigChange({ ...configRef.current, filters: [] })
+  }, [onConfigChange])
 
   const handleSort = useCallback((field: string) => {
-    if (field === sortField) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    const c = configRef.current
+    if (field === c.sort.field) {
+      onConfigChange({ ...c, sort: { field, dir: c.sort.dir === 'asc' ? 'desc' : 'asc' } })
     } else {
-      setSortField(field)
-      setSortDir(field === 'mtimeMs' ? 'desc' : 'asc')
+      onConfigChange({ ...c, sort: { field, dir: field === 'mtimeMs' ? 'desc' : 'asc' } })
     }
-  }, [sortField])
+  }, [onConfigChange])
 
   const toggleColumn = useCallback((key: string) => {
-    setVisibleColumns((prev) =>
-      prev.includes(key) ? prev.filter((c) => c !== key) : [...prev, key],
-    )
-  }, [])
+    const c = configRef.current
+    const next = c.visibleColumns.includes(key)
+      ? c.visibleColumns.filter((col) => col !== key)
+      : [...c.visibleColumns, key]
+    onConfigChange({ ...c, visibleColumns: next })
+  }, [onConfigChange])
 
   const SortIcon = ({ field }: { field: string }) => {
     if (sortField !== field) return null
@@ -393,6 +448,16 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
         >
           <Search className="size-3.5" />
           Search
+        </button>
+
+        <div className="flex-1" />
+
+        <button
+          onClick={handleSaveClick}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <Save className="size-3.5" />
+          {isDefaultBase ? 'Save As' : 'Save'}
         </button>
 
         {searchOpen && (
@@ -531,6 +596,41 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
           </div>
         )}
       </div>
+
+      {/* Save As dialog */}
+      <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+        <DialogContent className="sm:max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle>Save Base</DialogTitle>
+            <DialogDescription>Choose a name for this base view.</DialogDescription>
+          </DialogHeader>
+          <input
+            ref={saveInputRef}
+            type="text"
+            value={saveName}
+            onChange={(e) => setSaveName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSaveConfirm() }}
+            placeholder="e.g. Contacts, Projects..."
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+            autoFocus
+          />
+          <DialogFooter>
+            <button
+              onClick={() => setSaveDialogOpen(false)}
+              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveConfirm}
+              disabled={!saveName.trim()}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              Save
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
