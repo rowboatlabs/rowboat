@@ -1,11 +1,12 @@
 import * as React from 'react'
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty, CommandGroup } from '@/components/ui/command'
 import { cn } from '@/lib/utils'
 import { splitFrontmatter, extractAllFrontmatterValues } from '@/lib/frontmatter'
+import { useDebounce } from '@/hooks/use-debounce'
 
 interface TreeNode {
   path: string
@@ -222,26 +223,74 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
     document.addEventListener('mouseup', onMouseUp)
   }, [columnWidths])
 
-  // Reset page when filters change
-  useEffect(() => { setPage(0) }, [filters])
+  // Search
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery, 250)
+  const [searchMatchPaths, setSearchMatchPaths] = useState<Set<string> | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
-  // Filter
-  const filteredNotes = useMemo(() => {
-    if (filters.length === 0) return enrichedNotes
-    const byCategory = new Map<string, string[]>()
-    for (const f of filters) {
-      const vals = byCategory.get(f.category) ?? []
-      vals.push(f.value)
-      byCategory.set(f.category, vals)
+  useEffect(() => {
+    if (!debouncedSearch.trim()) {
+      setSearchMatchPaths(null)
+      return
     }
-    return enrichedNotes.filter((note) => {
-      for (const [category, requiredValues] of byCategory) {
-        const noteValues = getColumnValues(note, category)
-        if (!requiredValues.some((v) => noteValues.includes(v))) return false
+    let cancelled = false
+    window.ipc.invoke('search:query', { query: debouncedSearch, limit: 200, types: ['knowledge'] })
+      .then((res: { results: { path: string }[] }) => {
+        if (!cancelled) {
+          setSearchMatchPaths(new Set(res.results.map((r) => r.path)))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSearchMatchPaths(new Set())
+      })
+    return () => { cancelled = true }
+  }, [debouncedSearch])
+
+  const toggleSearch = useCallback(() => {
+    setSearchOpen((prev) => {
+      if (prev) {
+        setSearchQuery('')
+        setSearchMatchPaths(null)
       }
-      return true
+      return !prev
     })
-  }, [enrichedNotes, filters])
+  }, [])
+
+  // Focus input when search opens
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus()
+  }, [searchOpen])
+
+  // Reset page when filters or search change
+  useEffect(() => { setPage(0) }, [filters, searchMatchPaths])
+
+  // Filter (search + badge filters)
+  const filteredNotes = useMemo(() => {
+    let result = enrichedNotes
+    // Apply search filter
+    if (searchMatchPaths) {
+      result = result.filter((note) => searchMatchPaths.has(note.path))
+    }
+    // Apply badge filters
+    if (filters.length > 0) {
+      const byCategory = new Map<string, string[]>()
+      for (const f of filters) {
+        const vals = byCategory.get(f.category) ?? []
+        vals.push(f.value)
+        byCategory.set(f.category, vals)
+      }
+      result = result.filter((note) => {
+        for (const [category, requiredValues] of byCategory) {
+          const noteValues = getColumnValues(note, category)
+          if (!requiredValues.some((v) => noteValues.includes(v))) return false
+        }
+        return true
+      })
+    }
+    return result
+  }, [enrichedNotes, filters, searchMatchPaths])
 
   // Sort
   const sortedNotes = useMemo(() => {
@@ -277,15 +326,13 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
   const clearFilters = useCallback(() => { setFilters([]) }, [])
 
   const handleSort = useCallback((field: string) => {
-    setSortField((prev) => {
-      if (prev === field) {
-        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-        return prev
-      }
+    if (field === sortField) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortField(field)
       setSortDir(field === 'mtimeMs' ? 'desc' : 'asc')
-      return field
-    })
-  }, [])
+    }
+  }, [sortField])
 
   const toggleColumn = useCallback((key: string) => {
     setVisibleColumns((prev) =>
@@ -303,7 +350,7 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="shrink-0 border-b border-border px-4 py-2">
+      <div className="shrink-0 border-b border-border px-4 py-2 flex items-center gap-3">
         <Popover>
           <PopoverTrigger asChild>
             <button className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
@@ -336,6 +383,41 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
             </Command>
           </PopoverContent>
         </Popover>
+
+        <button
+          onClick={toggleSearch}
+          className={cn(
+            'inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground',
+            searchOpen && 'text-foreground',
+          )}
+        >
+          <Search className="size-3.5" />
+          Search
+        </button>
+
+        {searchOpen && (
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search notes..."
+              className="flex-1 min-w-0 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+            />
+            {searchQuery && (
+              <span className="text-[10px] text-muted-foreground shrink-0">
+                {searchMatchPaths ? `${searchMatchPaths.size} matches` : '...'}
+              </span>
+            )}
+            <button
+              onClick={toggleSearch}
+              className="text-muted-foreground hover:text-foreground shrink-0"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filter bar */}
