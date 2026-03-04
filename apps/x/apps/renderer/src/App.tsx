@@ -12,6 +12,7 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { ChatInputWithMentions, type StagedAttachment } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
+import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
@@ -46,7 +47,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
-import { splitFrontmatter, joinFrontmatter, extractTags } from '@/lib/frontmatter'
+import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { OnboardingModal } from '@/components/onboarding-modal'
 import { SearchDialog } from '@/components/search-dialog'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
@@ -106,6 +107,7 @@ const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 const TITLEBAR_BUTTONS_COLLAPSED = 5
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 4
 const GRAPH_TAB_PATH = '__rowboat_graph_view__'
+const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -233,6 +235,7 @@ const getAncestorDirectoryPaths = (path: string): string[] => {
 }
 
 const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
+const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
@@ -470,6 +473,7 @@ function App() {
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
   const [isGraphOpen, setIsGraphOpen] = useState(false)
   const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
+  const [baseConfigByPath, setBaseConfigByPath] = useState<Record<string, BaseConfig>>({})
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
     nodes: [],
     edges: [],
@@ -510,9 +514,8 @@ function App() {
   const initialContentRef = useRef<string>('')
   const renameInProgressRef = useRef(false)
 
-  // Frontmatter state: store raw frontmatter per file path, tags for active file
+  // Frontmatter state: store raw frontmatter per file path
   const frontmatterByPathRef = useRef<Map<string, string | null>>(new Map())
-  const [activeFileTags, setActiveFileTags] = useState<string[]>([])
 
   // Version history state
   const [versionHistoryPath, setVersionHistoryPath] = useState<string | null>(null)
@@ -621,6 +624,8 @@ function App() {
 
   const getFileTabTitle = useCallback((tab: FileTab) => {
     if (isGraphTabPath(tab.path)) return 'Graph View'
+    if (tab.path === BASES_DEFAULT_TAB_PATH) return 'Bases'
+    if (tab.path.endsWith('.base')) return tab.path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
   }, [])
 
@@ -818,18 +823,43 @@ function App() {
     }
   }, [runId, processingRunIds])
 
-  // Load directory tree
+  // Load directory tree (knowledge + bases)
   const loadDirectory = useCallback(async () => {
     try {
-      const result = await window.ipc.invoke('workspace:readdir', {
-        path: 'knowledge',
-        opts: { recursive: true, includeHidden: false }
-      })
-      return buildTree(result)
+      const [knowledgeResult, basesResult] = await Promise.all([
+        window.ipc.invoke('workspace:readdir', {
+          path: 'knowledge',
+          opts: { recursive: true, includeHidden: false, includeStats: true }
+        }),
+        window.ipc.invoke('workspace:readdir', {
+          path: 'bases',
+          opts: { recursive: false, includeHidden: false, includeStats: true }
+        }).catch(() => [] as DirEntry[]),
+      ])
+      const knowledgeTree = buildTree(knowledgeResult)
+      const basesChildren: TreeNode[] = (basesResult as DirEntry[])
+        .filter((e) => e.name.endsWith('.base'))
+        .map((e) => ({ ...e, kind: 'file' as const }))
+      if (basesChildren.length > 0) {
+        const basesFolder: TreeNode = {
+          name: 'Bases',
+          path: 'bases',
+          kind: 'dir',
+          children: basesChildren,
+        }
+        return [...knowledgeTree, basesFolder]
+      }
+      return knowledgeTree
     } catch (err) {
       console.error('Failed to load directory:', err)
       return []
     }
+  }, [])
+
+  // Ensure bases/ directory exists on startup
+  useEffect(() => {
+    window.ipc.invoke('workspace:mkdir', { path: 'bases', recursive: true })
+      .catch((err: unknown) => console.error('Failed to ensure bases directory:', err))
   }, [])
 
   // Load initial tree
@@ -905,7 +935,6 @@ function App() {
           editorPathRef.current = pathToReload
           initialContentByPathRef.current.set(pathToReload, body)
           initialContentRef.current = body
-          setActiveFileTags(extractTags(fm))
         }
       }
     })
@@ -923,6 +952,31 @@ function App() {
       setLastSaved(null)
       return
     }
+    if (selectedPath === BASES_DEFAULT_TAB_PATH) {
+      // Virtual default base — no file to load, use DEFAULT_BASE_CONFIG
+      if (!baseConfigByPath[selectedPath]) {
+        setBaseConfigByPath((prev) => ({ ...prev, [selectedPath]: { ...DEFAULT_BASE_CONFIG } }))
+      }
+      return
+    }
+    if (selectedPath.endsWith('.base')) {
+      // Load base config from file only if not already cached
+      if (!baseConfigByPath[selectedPath]) {
+        window.ipc.invoke('workspace:readFile', { path: selectedPath, encoding: 'utf8' })
+          .then((result: { data: string }) => {
+            try {
+              const parsed = JSON.parse(result.data) as BaseConfig
+              setBaseConfigByPath((prev) => ({ ...prev, [selectedPath]: parsed }))
+            } catch {
+              setBaseConfigByPath((prev) => ({ ...prev, [selectedPath]: { ...DEFAULT_BASE_CONFIG } }))
+            }
+          })
+          .catch(() => {
+            setBaseConfigByPath((prev) => ({ ...prev, [selectedPath]: { ...DEFAULT_BASE_CONFIG } }))
+          })
+      }
+      return
+    }
     if (selectedPath.endsWith('.md')) {
       const cachedContent = editorContentByPathRef.current.get(selectedPath)
       const hasBaseline = initialContentByPathRef.current.has(selectedPath)
@@ -934,7 +988,6 @@ function App() {
         editorContentRef.current = cachedContent
         editorPathRef.current = selectedPath
         initialContentRef.current = initialContentByPathRef.current.get(selectedPath) ?? cachedContent
-        setActiveFileTags(extractTags(frontmatterByPathRef.current.get(selectedPath) ?? null))
         return
       }
     }
@@ -943,42 +996,43 @@ function App() {
     let cancelled = false
     ;(async () => {
       try {
-        const stat = await window.ipc.invoke('workspace:stat', { path: pathToLoad })
-        if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
-        if (stat.kind === 'file') {
-          const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
+        // For .md files (from the knowledge tree), skip stat and read directly.
+        // For other file types, stat first to check if it's a file vs directory.
+        const isKnownFile = pathToLoad.endsWith('.md')
+        if (!isKnownFile) {
+          const stat = await window.ipc.invoke('workspace:stat', { path: pathToLoad })
           if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
-          setFileContent(result.data)
-          const { raw: fm, body } = splitFrontmatter(result.data)
-          frontmatterByPathRef.current.set(pathToLoad, fm)
-          const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
-          const isSameEditorFile = editorPathRef.current === pathToLoad
-          const knownBaseline = initialContentByPathRef.current.get(pathToLoad)
-          const hasKnownBaseline = knownBaseline !== undefined
-          const hasUnsavedEdits =
-            hasKnownBaseline
-            && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(knownBaseline)
-          const shouldPreserveActiveDraft = isSameEditorFile && hasUnsavedEdits
-          if (!shouldPreserveActiveDraft) {
-            setEditorContent(body)
-            if (pathToLoad.endsWith('.md')) {
-              setEditorCacheForPath(pathToLoad, body)
-            }
-            editorContentRef.current = body
-            editorPathRef.current = pathToLoad
-            initialContentByPathRef.current.set(pathToLoad, body)
-            initialContentRef.current = body
-            setLastSaved(null)
-            setActiveFileTags(extractTags(fm))
-          } else {
-            // Still update the editor's path so subsequent autosaves write to the correct file.
-            editorPathRef.current = pathToLoad
+          if (stat.kind !== 'file') {
+            setFileContent('')
+            setEditorContent('')
+            editorContentRef.current = ''
+            initialContentRef.current = ''
+            return
           }
+        }
+        const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
+        if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
+        setFileContent(result.data)
+        const { raw: fm, body } = splitFrontmatter(result.data)
+        frontmatterByPathRef.current.set(pathToLoad, fm)
+        const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
+        const isSameEditorFile = editorPathRef.current === pathToLoad
+        const wouldClobberActiveEdits =
+          isSameEditorFile
+          && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(body)
+        if (!wouldClobberActiveEdits) {
+          setEditorContent(body)
+          if (pathToLoad.endsWith('.md')) {
+            setEditorCacheForPath(pathToLoad, body)
+          }
+          editorContentRef.current = body
+          editorPathRef.current = pathToLoad
+          initialContentByPathRef.current.set(pathToLoad, body)
+          initialContentRef.current = body
+          setLastSaved(null)
         } else {
-          setFileContent('')
-          setEditorContent('')
-          editorContentRef.current = ''
-          initialContentRef.current = ''
+          // Still update the editor's path so subsequent autosaves write to the correct file.
+          editorPathRef.current = pathToLoad
         }
       } catch (err) {
         console.error('Failed to load file:', err)
@@ -2177,7 +2231,7 @@ function App() {
 
   const closeFileTab = useCallback((tabId: string) => {
     const closingTab = fileTabs.find(t => t.id === tabId)
-    if (closingTab && !isGraphTabPath(closingTab.path)) {
+    if (closingTab && !isGraphTabPath(closingTab.path) && !isBaseFilePath(closingTab.path)) {
       removeEditorCacheForPath(closingTab.path)
       initialContentByPathRef.current.delete(closingTab.path)
       untitledRenameReadyPathsRef.current.delete(closingTab.path)
@@ -2186,13 +2240,20 @@ function App() {
         editorPathRef.current = null
       }
     }
+    if (closingTab && isBaseFilePath(closingTab.path)) {
+      setBaseConfigByPath((prev) => {
+        const next = { ...prev }
+        delete next[closingTab.path]
+        return next
+      })
+    }
     setFileTabs(prev => {
       if (prev.length <= 1) {
         // Last file tab - close it and go back to chat
         setActiveFileTabId(null)
         setSelectedPath(null)
         setIsGraphOpen(false)
-        return []
+          return []
       }
       const idx = prev.findIndex(t => t.id === tabId)
       if (idx === -1) return prev
@@ -2206,7 +2267,7 @@ function App() {
           setIsGraphOpen(true)
         } else {
           setIsGraphOpen(false)
-          setSelectedPath(newActiveTab.path)
+              setSelectedPath(newActiveTab.path)
         }
       }
       return next
@@ -2314,7 +2375,7 @@ function App() {
 
     if (activeFileTabId) {
       const activeTab = fileTabs.find((tab) => tab.id === activeFileTabId)
-      if (activeTab && !isGraphTabPath(activeTab.path)) {
+      if (activeTab && !isGraphTabPath(activeTab.path) && !isBaseFilePath(activeTab.path)) {
         setFileTabs((prev) => prev.map((tab) => (
           tab.id === activeFileTabId ? { ...tab, path } : tab
         )))
@@ -2458,6 +2519,46 @@ function App() {
   const navigateToFile = useCallback((path: string) => {
     void navigateToView({ type: 'file', path })
   }, [navigateToView])
+
+  const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
+    setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))
+  }, [])
+
+  const handleBaseSave = useCallback(async (name: string | null) => {
+    if (!selectedPath) return
+    const isDefault = selectedPath === BASES_DEFAULT_TAB_PATH
+    const config = baseConfigByPath[selectedPath] ?? DEFAULT_BASE_CONFIG
+
+    if (isDefault && name) {
+      // Save as new base file
+      const safeName = name.replace(/[\\/]/g, '-').trim()
+      const newPath = `bases/${safeName}.base`
+      const fileConfig = { ...config, name: safeName }
+      try {
+        await window.ipc.invoke('workspace:writeFile', {
+          path: newPath,
+          data: JSON.stringify(fileConfig, null, 2),
+        })
+        setBaseConfigByPath((prev) => ({ ...prev, [newPath]: fileConfig }))
+        // Refresh tree then navigate to the new file
+        const newTree = await loadDirectory()
+        setTree(newTree)
+        void navigateToView({ type: 'file', path: newPath })
+      } catch (err) {
+        console.error('Failed to save base:', err)
+      }
+    } else if (!isDefault) {
+      // Save in place
+      try {
+        await window.ipc.invoke('workspace:writeFile', {
+          path: selectedPath,
+          data: JSON.stringify(config, null, 2),
+        })
+      } catch (err) {
+        console.error('Failed to save base:', err)
+      }
+    }
+  }, [selectedPath, baseConfigByPath, loadDirectory, navigateToView])
 
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view
@@ -2770,6 +2871,13 @@ function App() {
         setIsRightPaneMaximized(false)
       }
       void navigateToView({ type: 'graph' })
+    },
+    openBases: () => {
+      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
+        setIsChatSidebarOpen(false)
+        setIsRightPaneMaximized(false)
+      }
+      void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
     },
     expandAll: () => setExpandedPaths(new Set(collectDirPaths(tree))),
     collapseAll: () => setExpandedPaths(new Set()),
@@ -3270,7 +3378,7 @@ function App() {
                     getTabId={(t) => t.id}
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && isGraphOpen}
+                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
                   />
                 ) : (
                   <TabBar
@@ -3283,7 +3391,7 @@ function App() {
                     onCloseTab={closeChatTab}
                   />
                 )}
-                {selectedPath && (
+                {selectedPath && selectedPath.endsWith('.md') && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground self-center shrink-0 pl-2">
                     {isSaving ? (
                       <>
@@ -3372,7 +3480,18 @@ function App() {
                 )}
               </ContentHeader>
 
-              {isGraphOpen ? (
+              {selectedPath && isBaseFilePath(selectedPath) ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <BasesView
+                    tree={tree}
+                    onSelectNote={(path) => navigateToFile(path)}
+                    config={baseConfigByPath[selectedPath] ?? DEFAULT_BASE_CONFIG}
+                    onConfigChange={(cfg) => handleBaseConfigChange(selectedPath, cfg)}
+                    isDefaultBase={selectedPath === BASES_DEFAULT_TAB_PATH}
+                    onSave={(name) => void handleBaseSave(name)}
+                  />
+                </div>
+              ) : isGraphOpen ? (
                 <div className="flex-1 min-h-0">
                   <GraphView
                     nodes={graphData.nodes}
@@ -3418,7 +3537,20 @@ function App() {
                               wikiLinks={wikiLinkConfig}
                               onImageUpload={handleImageUpload}
                               editorSessionKey={editorSessionByTabId[tab.id] ?? 0}
-                              tags={isActive ? activeFileTags : undefined}
+                              frontmatter={frontmatterByPathRef.current.get(tab.path) ?? null}
+                              onFrontmatterChange={(newRaw) => {
+                                frontmatterByPathRef.current.set(tab.path, newRaw)
+                                // Write updated frontmatter to disk immediately
+                                const currentBody = editorContentRef.current
+                                const fullContent = joinFrontmatter(newRaw, currentBody)
+                                initialContentByPathRef.current.set(tab.path, splitFrontmatter(fullContent).body)
+                                initialContentRef.current = splitFrontmatter(fullContent).body
+                                void window.ipc.invoke('workspace:writeFile', {
+                                  path: tab.path,
+                                  data: fullContent,
+                                  opts: { encoding: 'utf8' },
+                                })
+                              }}
                               onHistoryHandlersChange={(handlers) => {
                                 if (handlers) {
                                   fileHistoryHandlersRef.current.set(tab.id, handlers)
