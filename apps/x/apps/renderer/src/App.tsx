@@ -821,7 +821,7 @@ function App() {
           kind: 'dir',
           children: basesChildren,
         }
-        return [basesFolder, ...knowledgeTree]
+        return [...knowledgeTree, basesFolder]
       }
       return knowledgeTree
     } catch (err) {
@@ -930,7 +930,7 @@ function App() {
       return
     }
     if (selectedPath.endsWith('.base')) {
-      // Load base config from file
+      // Load base config from file only if not already cached
       if (!baseConfigByPath[selectedPath]) {
         window.ipc.invoke('workspace:readFile', { path: selectedPath, encoding: 'utf8' })
           .then((result: { data: string }) => {
@@ -2203,6 +2203,13 @@ function App() {
         editorPathRef.current = null
       }
     }
+    if (closingTab && isBaseFilePath(closingTab.path)) {
+      setBaseConfigByPath((prev) => {
+        const next = { ...prev }
+        delete next[closingTab.path]
+        return next
+      })
+    }
     setFileTabs(prev => {
       if (prev.length <= 1) {
         // Last file tab - close it and go back to chat
@@ -3345,7 +3352,7 @@ function App() {
                     onCloseTab={closeChatTab}
                   />
                 )}
-                {selectedPath && (
+                {selectedPath && selectedPath.endsWith('.md') && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground self-center shrink-0 pl-2">
                     {isSaving ? (
                       <>
