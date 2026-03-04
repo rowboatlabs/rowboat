@@ -176,7 +176,7 @@ function getMarkdownWithBlankLines(editor: Editor): string {
   return result
 }
 import { EditorToolbar } from './editor-toolbar'
-import { TagPills } from './tag-pills'
+import { FrontmatterProperties } from './frontmatter-properties'
 import { WikiLink } from '@/extensions/wiki-link'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command'
@@ -201,7 +201,8 @@ interface MarkdownEditorProps {
   editorSessionKey?: number
   onHistoryHandlersChange?: (handlers: { undo: () => boolean; redo: () => boolean } | null) => void
   editable?: boolean
-  tags?: string[]
+  frontmatter?: string | null
+  onFrontmatterChange?: (raw: string | null) => void
 }
 
 type WikiLinkMatch = {
@@ -290,7 +291,8 @@ export function MarkdownEditor({
   editorSessionKey = 0,
   onHistoryHandlersChange,
   editable = true,
-  tags,
+  frontmatter,
+  onFrontmatterChange,
 }: MarkdownEditorProps) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -724,7 +726,13 @@ export function MarkdownEditor({
         onSelectionHighlight={setSelectionHighlight}
         onImageUpload={handleImageUploadWithPlaceholder}
       />
-      {tags && <TagPills tags={tags} />}
+      {(frontmatter !== undefined) && onFrontmatterChange && (
+        <FrontmatterProperties
+          raw={frontmatter}
+          onRawChange={onFrontmatterChange}
+          editable={editable}
+        />
+      )}
       <div className="editor-content-wrapper" ref={wrapperRef} onScroll={handleScroll}>
         <EditorContent editor={editor} />
         {wikiLinks ? (
