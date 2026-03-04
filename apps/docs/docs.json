@@ -18,36 +18,12 @@
           "group": "Getting Started",
           "pages": [
             "docs/getting-started/introduction",
-            "docs/getting-started/quickstart",
-            "docs/getting-started/license"
+            "docs/getting-started/quickstart"
           ]
-        },
-        {
-          "group": "Using Rowboat",
-          "pages": [
-            "docs/using-rowboat/rowboat-studio",
-            "docs/using-rowboat/agents",
-            "docs/using-rowboat/tools",
-            "docs/using-rowboat/rag",
-            "docs/using-rowboat/triggers",
-            "docs/using-rowboat/jobs",
-            "docs/using-rowboat/conversations",
-            {
-              "group": "Customise",
-              "icon": "sliders",
-              "pages": [
-                "docs/using-rowboat/customise/custom-llms"
-              ]
-            }
-          ]
-        },
-        {
-          "group": "API & SDK",
-          "pages": ["docs/api-sdk/using_the_api", "docs/api-sdk/using_the_sdk"]
         },
         {
           "group": "Development",
-          "pages": ["docs/development/contribution-guide", "docs/development/roadmap"]
+          "pages": ["docs/development/contribution-guide", "docs/getting-started/license"]
         }
       ]
     },

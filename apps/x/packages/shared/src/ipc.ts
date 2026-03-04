@@ -6,6 +6,7 @@ import { LlmModelConfig } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
+import { UserMessageContent } from './message.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -128,7 +129,7 @@ const ipcSchemas = {
   'runs:createMessage': {
     req: z.object({
       runId: z.string(),
-      message: z.string(),
+      message: UserMessageContent,
     }),
     res: z.object({
       messageId: z.string(),
@@ -244,7 +245,7 @@ const ipcSchemas = {
     res: z.object({
       config: z.record(z.string(), z.object({
         connected: z.boolean(),
-        error: z.string().optional(),
+        error: z.string().nullable().optional(),
       })),
     }),
   },
@@ -395,6 +396,46 @@ const ipcSchemas = {
   'shell:readFileBase64': {
     req: z.object({ path: z.string() }),
     res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
+  },
+  // Knowledge version history channels
+  'knowledge:history': {
+    req: z.object({ path: RelPath }),
+    res: z.object({
+      commits: z.array(z.object({
+        oid: z.string(),
+        message: z.string(),
+        timestamp: z.number(),
+        author: z.string(),
+      })),
+    }),
+  },
+  'knowledge:fileAtCommit': {
+    req: z.object({ path: RelPath, oid: z.string() }),
+    res: z.object({ content: z.string() }),
+  },
+  'knowledge:restore': {
+    req: z.object({ path: RelPath, oid: z.string() }),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  'knowledge:didCommit': {
+    req: z.object({}),
+    res: z.null(),
+  },
+  // Search channels
+  'search:query': {
+    req: z.object({
+      query: z.string(),
+      limit: z.number().optional(),
+      types: z.array(z.enum(['knowledge', 'chat'])).optional(),
+    }),
+    res: z.object({
+      results: z.array(z.object({
+        type: z.enum(['knowledge', 'chat']),
+        title: z.string(),
+        preview: z.string(),
+        path: z.string(),
+      })),
+    }),
   },
 } as const;
 

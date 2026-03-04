@@ -5,6 +5,8 @@ import { workspace } from '@x/shared';
 import { z } from 'zod';
 import { RemoveOptions, WriteFileOptions, WriteFileResult } from 'packages/shared/dist/workspace.js';
 import { WorkDir } from '../config/config.js';
+import { rewriteWikiLinksForRenamedKnowledgeFile } from './wiki-link-rewrite.js';
+import { commitAll } from '../knowledge/version_history.js';
 
 // ============================================================================
 // Path Utilities
@@ -56,6 +58,11 @@ export function absToRelPosix(absPath: string): string | null {
   }
   const relPath = path.relative(WorkDir, normalized);
   return relPath.split(path.sep).join('/');
+}
+
+function isKnowledgeMarkdownRelPath(relPath: string): boolean {
+  const normalized = relPath.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+  return normalized.startsWith('knowledge/') && normalized.endsWith('.md');
 }
 
 // ============================================================================
@@ -212,6 +219,21 @@ export async function readFile(
   };
 }
 
+// Debounced commit for knowledge file edits
+let knowledgeCommitTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleKnowledgeCommit(filename: string): void {
+  if (knowledgeCommitTimer) {
+    clearTimeout(knowledgeCommitTimer);
+  }
+  knowledgeCommitTimer = setTimeout(() => {
+    knowledgeCommitTimer = null;
+    commitAll(`Edit ${filename}`, 'You').catch(err => {
+      console.error('[VersionHistory] Failed to commit after edit:', err);
+    });
+  }, 3 * 60 * 1000);
+}
+
 export async function writeFile(
   relPath: string,
   data: string,
@@ -260,6 +282,11 @@ export async function writeFile(
   const stat = statToSchema(stats, 'file');
   const etag = computeEtag(stats.size, stats.mtimeMs);
 
+  // Schedule a debounced version history commit for knowledge files
+  if (relPath.startsWith('knowledge/') && relPath.endsWith('.md')) {
+    scheduleKnowledgeCommit(path.basename(relPath));
+  }
+
   return {
     path: relPath,
     stat,
@@ -286,6 +313,7 @@ export async function rename(
 
   // Check if source exists
   await fs.access(fromPath);
+  const fromStats = await fs.lstat(fromPath);
 
   // Check if destination exists (only if overwrite is false)
   if (!overwrite) {
@@ -309,6 +337,19 @@ export async function rename(
   await fs.mkdir(path.dirname(toPath), { recursive: true });
 
   await fs.rename(fromPath, toPath);
+
+  if (
+    fromStats.isFile()
+    && isKnowledgeMarkdownRelPath(from)
+    && isKnowledgeMarkdownRelPath(to)
+  ) {
+    try {
+      await rewriteWikiLinksForRenamedKnowledgeFile(WorkDir, from, to);
+    } catch (error) {
+      console.error('Failed to rewrite wiki backlinks after file rename:', error);
+    }
+  }
+
   return { ok: true as const };
 }
 

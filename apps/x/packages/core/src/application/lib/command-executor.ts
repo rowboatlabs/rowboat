@@ -1,17 +1,19 @@
 import { exec, execSync, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { getSecurityAllowList } from '../../config/security.js';
+import { getExecutionShell } from '../assistant/runtime-context.js';
 
 const execPromise = promisify(exec);
-const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n)/;
+const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n|`|\$\(|\(|\))/;
 const ENV_ASSIGNMENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
 const WRAPPER_COMMANDS = new Set(['sudo', 'env', 'time', 'command']);
+const EXECUTION_SHELL = getExecutionShell();
 
 function sanitizeToken(token: string): string {
-  return token.trim().replace(/^['"]+|['"]+$/g, '');
+  return token.trim().replace(/^['"()]+|['"()]+$/g, '');
 }
 
-function extractCommandNames(command: string): string[] {
+export function extractCommandNames(command: string): string[] {
   const discovered = new Set<string>();
   const segments = command.split(COMMAND_SPLIT_REGEX);
 
@@ -42,27 +44,21 @@ function extractCommandNames(command: string): string[] {
   return Array.from(discovered);
 }
 
-function findBlockedCommands(command: string): string[] {
+function findBlockedCommands(command: string, sessionAllowedCommands?: Set<string>): string[] {
   const invoked = extractCommandNames(command);
   if (!invoked.length) return [];
 
   const allowList = getSecurityAllowList();
-  if (!allowList.length) return invoked;
+  if (!allowList.length && (!sessionAllowedCommands || sessionAllowedCommands.size === 0)) return invoked;
 
   const allowSet = new Set(allowList);
   if (allowSet.has('*')) return [];
 
-  return invoked.filter((cmd) => !allowSet.has(cmd));
+  return invoked.filter((cmd) => !allowSet.has(cmd) && !sessionAllowedCommands?.has(cmd));
 }
 
-// export const BlockedResult = {
-//   stdout: '',
-//   stderr: `Command blocked by security policy. Update ${SECURITY_CONFIG_PATH} to allow them before retrying.`,
-//   exitCode: 126,
-// };
-
-export function isBlocked(command: string): boolean {
-  const blocked = findBlockedCommands(command);
+export function isBlocked(command: string, sessionAllowedCommands?: Set<string>): boolean {
+  const blocked = findBlockedCommands(command, sessionAllowedCommands);
   return blocked.length > 0;
 }
 
@@ -91,7 +87,7 @@ export async function executeCommand(
       cwd: options?.cwd,
       timeout: options?.timeout,
       maxBuffer: options?.maxBuffer || 1024 * 1024, // default 1MB
-      shell: '/bin/sh', // use sh for cross-platform compatibility
+      shell: EXECUTION_SHELL,
     });
 
     return {
@@ -151,7 +147,7 @@ export function executeCommandAbortable(
   // Check if already aborted before spawning
   if (options?.signal?.aborted) {
     // Return a dummy process and a resolved result
-    const dummyProc = spawn('true', { shell: true });
+    const dummyProc = spawn(process.execPath, ['-e', 'process.exit(0)']);
     dummyProc.kill();
     return {
       process: dummyProc,
@@ -165,7 +161,7 @@ export function executeCommandAbortable(
   }
 
   const proc = spawn(command, [], {
-    shell: '/bin/sh',
+    shell: EXECUTION_SHELL,
     cwd: options?.cwd,
     detached: process.platform !== 'win32', // Create process group on Unix
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -279,7 +275,7 @@ export function executeCommandSync(
       cwd: options?.cwd,
       timeout: options?.timeout,
       encoding: 'utf-8',
-      shell: '/bin/sh',
+      shell: EXECUTION_SHELL,
     });
 
     return {

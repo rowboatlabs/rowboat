@@ -343,7 +343,7 @@ export async function executeAction(
     try {
         const client = getComposioClient();
         const result = await client.tools.execute(actionSlug, {
-            userId: connectedAccountId,
+            userId: 'rowboat-user',
             arguments: input,
             connectedAccountId,
             dangerouslySkipVersionCheck: true,
@@ -352,8 +352,8 @@ export async function executeAction(
         console.log(`[Composio] Action completed successfully`);
         return { success: true, data: result.data };
     } catch (error) {
-        console.error(`[Composio] Action execution failed:`, error);
-        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`[Composio] Action execution failed:`, JSON.stringify(error, Object.getOwnPropertyNames(error ?? {}), 2));
+        const message = error instanceof Error ? error.message : (typeof error === 'object' ? JSON.stringify(error) : 'Unknown error');
         return { success: false, data: null, error: message };
     }
 }

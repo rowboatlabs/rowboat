@@ -20,6 +20,23 @@ const DEFAULT_ALLOW_LIST = [
 let cachedAllowList: string[] | null = null;
 let cachedMtimeMs: number | null = null;
 
+export async function addToSecurityConfig(commands: string[]): Promise<void> {
+    ensureSecurityConfigSync();
+    const current = readAllowList();
+    const merged = new Set(current);
+    for (const cmd of commands) {
+        const normalized = cmd.trim().toLowerCase();
+        if (normalized) merged.add(normalized);
+    }
+    await fsPromises.writeFile(
+        SECURITY_CONFIG_PATH,
+        JSON.stringify(Array.from(merged).sort(), null, 2) + "\n",
+        "utf8",
+    );
+    // Reset cache so next read picks up the new file
+    resetSecurityAllowListCache();
+}
+
 /**
  * Async function to ensure security config file exists.
  * Called explicitly at app startup via initConfigs().
@@ -102,11 +119,9 @@ export function getSecurityAllowList(): string[] {
         if (cachedAllowList && cachedMtimeMs === stats.mtimeMs) {
             return cachedAllowList;
         }
-
-        const allowList = readAllowList();
-        cachedAllowList = allowList;
+        cachedAllowList = readAllowList();
         cachedMtimeMs = stats.mtimeMs;
-        return allowList;
+        return cachedAllowList;
     } catch {
         cachedAllowList = null;
         cachedMtimeMs = null;

@@ -3,92 +3,25 @@ title: "Quickstart"
 description: "guide to getting started with rowboat"
 icon: "rocket"
 ---
----
-# Cloud Setup
+**Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/downloads)
 
-Using the open-source version of Rowboat requires more technical skill to set up and navigate. For the smoothest experience, we recommend using our [hosted version](https://dev.rowboatlabs.com/)
+**All release files:** https://github.com/rowboatlabs/rowboat/releases/latest
 
----
+## Google setup (optional)
+To connect Gmail, Calendar, and Drive, follow [Google setup](https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md).
 
-# Local Setup
+## Voice notes (optional)
+To enable voice notes, add a Deepgram API key in `~/.rowboat/config/deepgram.json`:
 
-<Note>Pre-requisite: Ensure Docker is installed on your machine. You'll also need an OpenAI account and API key to use the Copilot and agents.</Note>
+```json
+{
+  "apiKey": "<key>"
+}
+```
 
+## Web search (optional)
+To use Brave web search, add the Brave API key in `~/.rowboat/config/brave-search.json`.
 
-<Steps>
-  <Step title="Set your OpenAI key">
-    Export your OpenAI API key in your terminal:
+To use Exa research search, add the Exa API key in `~/.rowboat/config/exa-search.json`.
 
-    ```bash
-    export OPENAI_API_KEY=your-openai-api-key
-    ```
-  </Step>
-
-  <Step title="Set up Composio for tools and triggers (optional)">
-    To use external tools and triggers, export your Composio API key:
-
-    ```bash
-    export COMPOSIO_API_KEY=your-composio-api-key
-    export COMPOSIO_TRIGGERS_WEBHOOK_SECRET=your-webhook-secret
-    ```
-
-    <Note>For more detailed setup instructions, see the [Triggers](/docs/using-rowboat/triggers#local-setup) page.</Note>
-  </Step>
-
-  <Step title="Clone the repository and start Rowboat Docker">
-    Clone the Rowboat repository and start the app using Docker:
-
-    ```bash
-    git clone git@github.com:rowboatlabs/rowboat.git
-    cd rowboat
-    ./start.sh
-    ```
-  </Step>
-
-  <Step title="Access the app">
-    Once Docker is running, open your browser and go to:
-
-    [http://localhost:3000](http://localhost:3000)
-  </Step>
-</Steps>
-
-
-<Info>See the [Using custom LLM providers](#using-custom-llm-providers) section below for using custom providers like OpenRouter and LiteLLM. </Info>
-
----
-
-## Demo
-{/* (would be better to change this to a Getiing Started Tutorial) */}
-
-#### Create a multi-agent assistant with MCP tools by chatting with Rowboat
-[![Screenshot 2025-04-23 at 00 25 31](https://github.com/user-attachments/assets/c8a41622-8e0e-459f-becb-767503489866)](https://youtu.be/YRTCw9UHRbU)
-
----
-
-## Integrate with Rowboat agents
-
-There are 2 ways to integrate with the agents you create in Rowboat
-
-<Columns cols={2}>
-
-  <Card title="Using the API" icon="code" horizontal href="/docs/api-sdk/using_the_api">
-    Guide on using the HTTP API 
-  </Card>
-
-  <Card title="Using the SDK" icon="toolbox" horizontal href="/docs/api-sdk/using_the_sdk">
-    Guide on using the Python SDK
-  </Card>
-
-</Columns>
-
----
-
-## Using custom LLM providers
-By default, Rowboat uses OpenAI LLMs (gpt-4o, gpt-4.1, etc.) for both agents and copilot, when you export your OPENAI_API_KEY. 
-
-However, you can also configure custom LLM providers (e.g. LiteLLM, OpenRouter) to use any of the hundreds of available LLMs beyond OpenAI, such as Claude, DeepSeek, Ollama LLMs and so on.
-
-Check out our page on customising
-  <Card title="Customise" icon="sliders" horizontal href="/docs/using-rowboat/customise">
-    Learn more about customising your Rowboat experience here
-  </Card>
+(Use the same JSON format as above.)

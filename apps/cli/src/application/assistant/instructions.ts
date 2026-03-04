@@ -1,5 +1,8 @@
 import { skillCatalog } from "./skills/index.js";
 import { WorkDir as BASE_DIR } from "../../config/config.js";
+import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js";
+
+const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
 
 export const CopilotInstructions = `You are an intelligent workflow assistant helping users manage their workflows in ${BASE_DIR}. You can also help the user with general tasks.
 
@@ -38,6 +41,8 @@ When a user asks for ANY task that might require external capabilities (web sear
 - Explore existing files and structure before creating new assets.
 - Use relative paths (no \${BASE_DIR} prefixes) when running commands or referencing files.
 - Keep user data safe—double-check before editing or deleting important resources.
+
+${runtimeContextPrompt}
 
 ## Workspace access & scope
 - You have full read/write access inside \`${BASE_DIR}\` (this resolves to the user's \`~/.rowboat\` directory). Create folders, files, and agents there using builtin tools or allowed shell commands—don't wait for the user to do it manually.

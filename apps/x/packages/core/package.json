@@ -27,6 +27,7 @@
     "cron-parser": "^5.5.0",
     "glob": "^13.0.0",
     "google-auth-library": "^10.5.0",
+    "isomorphic-git": "^1.29.0",
     "googleapis": "^169.0.0",
     "mammoth": "^1.11.0",
     "node-html-markdown": "^2.0.0",

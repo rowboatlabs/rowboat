@@ -31,7 +31,7 @@ export class FirefliesClientFactory {
      */
     static async getClient(): Promise<Client | null> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
-        const tokens = await oauthRepo.getTokens(this.PROVIDER_NAME);
+        const { tokens } = await oauthRepo.read(this.PROVIDER_NAME);
 
         if (!tokens) {
             this.clearCache();
@@ -49,7 +49,7 @@ export class FirefliesClientFactory {
             // Token expired, try to refresh
             if (!tokens.refresh_token) {
                 console.log("[Fireflies] Token expired and no refresh token available.");
-                await oauthRepo.setError(this.PROVIDER_NAME, 'Missing refresh token. Please reconnect.');
+                await oauthRepo.upsert(this.PROVIDER_NAME, { error: 'Missing refresh token. Please reconnect.' });
                 this.clearCache();
                 return null;
             }
@@ -62,7 +62,7 @@ export class FirefliesClientFactory {
                     tokens.refresh_token,
                     existingScopes
                 );
-                await oauthRepo.saveTokens(this.PROVIDER_NAME, refreshedTokens);
+                await oauthRepo.upsert(this.PROVIDER_NAME, { tokens: refreshedTokens });
 
                 // Update cached tokens and recreate client
                 this.cache.tokens = refreshedTokens;
@@ -77,7 +77,7 @@ export class FirefliesClientFactory {
                 return this.cache.client;
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'Failed to refresh token for Fireflies';
-                await oauthRepo.setError(this.PROVIDER_NAME, message);
+                await oauthRepo.upsert(this.PROVIDER_NAME, { error: message });
                 console.error("[Fireflies] Failed to refresh token:", error);
                 this.clearCache();
                 return null;
@@ -107,7 +107,7 @@ export class FirefliesClientFactory {
      */
     static async hasValidCredentials(): Promise<boolean> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
-        const tokens = await oauthRepo.getTokens(this.PROVIDER_NAME);
+        const { tokens } = await oauthRepo.read(this.PROVIDER_NAME);
         return tokens !== null;
     }
 

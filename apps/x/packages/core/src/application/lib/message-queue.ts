@@ -1,12 +1,16 @@
 import { IMonotonicallyIncreasingIdGenerator } from "./id-gen.js";
+import { UserMessageContent } from "@x/shared/dist/message.js";
+import z from "zod";
+
+export type UserMessageContentType = z.infer<typeof UserMessageContent>;
 
 type EnqueuedMessage = {
     messageId: string;
-    message: string;
+    message: UserMessageContentType;
 };
 
 export interface IMessageQueue {
-    enqueue(runId: string, message: string): Promise<string>;
+    enqueue(runId: string, message: UserMessageContentType): Promise<string>;
     dequeue(runId: string): Promise<EnqueuedMessage | null>;
 }
 
@@ -22,7 +26,7 @@ export class InMemoryMessageQueue implements IMessageQueue {
         this.idGenerator = idGenerator;
     }
 
-    async enqueue(runId: string, message: string): Promise<string> {
+    async enqueue(runId: string, message: UserMessageContentType): Promise<string> {
         if (!this.store[runId]) {
             this.store[runId] = [];
         }

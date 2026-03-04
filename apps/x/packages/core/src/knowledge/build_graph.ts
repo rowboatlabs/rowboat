@@ -15,6 +15,7 @@ import {
 } from './graph_state.js';
 import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js';
 import { limitEventItems } from './limit_event_items.js';
+import { commitAll } from './version_history.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -320,6 +321,13 @@ async function buildGraphWithFiles(
             // Save state after each successful batch
             // This ensures partial progress is saved even if later batches fail
             saveState(state);
+
+            // Commit knowledge changes to version history
+            try {
+                await commitAll('Knowledge update', 'Rowboat');
+            } catch (err) {
+                console.error(`[GraphBuilder] Failed to commit version history:`, err);
+            }
         } catch (error) {
             hadError = true;
             console.error(`Error processing batch ${batchNumber}:`, error);
@@ -467,6 +475,13 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
 
             // Save state after each batch
             saveState(state);
+
+            // Commit knowledge changes to version history
+            try {
+                await commitAll('Knowledge update', 'Rowboat');
+            } catch (err) {
+                console.error(`[GraphBuilder] Failed to commit version history:`, err);
+            }
         } catch (error) {
             hadError = true;
             console.error(`[GraphBuilder] Error processing batch ${batchNumber}:`, error);

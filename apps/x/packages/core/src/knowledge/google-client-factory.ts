@@ -27,9 +27,9 @@ export class GoogleClientFactory {
 
     private static async resolveClientId(): Promise<string> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
-        const clientId = await oauthRepo.getClientId(this.PROVIDER_NAME);
+        const { clientId } = await oauthRepo.read(this.PROVIDER_NAME);
         if (!clientId) {
-            await oauthRepo.setError(this.PROVIDER_NAME, 'Google client ID missing. Please reconnect.');
+            await oauthRepo.upsert(this.PROVIDER_NAME, { error: 'Google client ID missing. Please reconnect.' });
             throw new Error('Google client ID missing. Please reconnect.');
         }
         return clientId;
@@ -40,7 +40,7 @@ export class GoogleClientFactory {
      */
     static async getClient(): Promise<OAuth2Client | null> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
-        const tokens = await oauthRepo.getTokens(this.PROVIDER_NAME);
+        const { tokens } = await oauthRepo.read(this.PROVIDER_NAME);
 
         if (!tokens) {
             this.clearCache();
@@ -64,7 +64,7 @@ export class GoogleClientFactory {
             // Token expired, try to refresh
             if (!tokens.refresh_token) {
                 console.log("[OAuth] Token expired and no refresh token available for Google.");
-                await oauthRepo.setError(this.PROVIDER_NAME, 'Missing refresh token. Please reconnect.');
+                await oauthRepo.upsert(this.PROVIDER_NAME, { error: 'Missing refresh token. Please reconnect.' });
                 this.clearCache();
                 return null;
             }
@@ -77,7 +77,7 @@ export class GoogleClientFactory {
                     tokens.refresh_token,
                     existingScopes
                 );
-                await oauthRepo.saveTokens(this.PROVIDER_NAME, refreshedTokens);
+                await oauthRepo.upsert(this.PROVIDER_NAME, { tokens: refreshedTokens });
 
                 // Update cached tokens and recreate client
                 this.cache.tokens = refreshedTokens;
@@ -89,7 +89,7 @@ export class GoogleClientFactory {
                 return this.cache.client;
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'Failed to refresh token for Google';
-                await oauthRepo.setError(this.PROVIDER_NAME, message);
+                await oauthRepo.upsert(this.PROVIDER_NAME, { error: message });
                 console.error("[OAuth] Failed to refresh token for Google:", error);
                 this.clearCache();
                 return null;
@@ -116,7 +116,7 @@ export class GoogleClientFactory {
      */
     static async hasValidCredentials(requiredScopes: string | string[]): Promise<boolean> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
-        const tokens = await oauthRepo.getTokens(this.PROVIDER_NAME);
+        const { tokens } = await oauthRepo.read(this.PROVIDER_NAME);
         if (!tokens) {
             return false;
         }

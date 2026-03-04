@@ -2,8 +2,14 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { AlertTriangleIcon, CheckCircleIcon, CheckIcon, XCircleIcon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckCircleIcon, CheckIcon, ChevronDownIcon, XCircleIcon, XIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { ToolCallPart } from "@x/shared/dist/message.js";
 import z from "zod";
@@ -11,6 +17,8 @@ import z from "zod";
 export type PermissionRequestProps = ComponentProps<"div"> & {
   toolCall: z.infer<typeof ToolCallPart>;
   onApprove?: () => void;
+  onApproveSession?: () => void;
+  onApproveAlways?: () => void;
   onDeny?: () => void;
   isProcessing?: boolean;
   response?: 'approve' | 'deny' | null;
@@ -20,6 +28,8 @@ export const PermissionRequest = ({
   className,
   toolCall,
   onApprove,
+  onApproveSession,
+  onApproveAlways,
   onDeny,
   isProcessing = false,
   response = null,
@@ -117,16 +127,40 @@ export const PermissionRequest = ({
         </div>
         {!isResponded && (
           <div className="flex items-center gap-2 pt-2">
-            <Button
-              variant="default"
-              size="sm"
-              onClick={onApprove}
-              disabled={isProcessing}
-              className="flex-1"
-            >
-              <CheckIcon className="size-4" />
-              Approve
-            </Button>
+            <div className="flex flex-1 items-center">
+              <Button
+                variant="default"
+                size="sm"
+                onClick={onApprove}
+                disabled={isProcessing}
+                className={cn("flex-1", command && "rounded-r-none")}
+              >
+                <CheckIcon className="size-4" />
+                Approve
+              </Button>
+              {command && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      disabled={isProcessing}
+                      className="rounded-l-none border-l border-l-primary-foreground/20 px-1.5"
+                    >
+                      <ChevronDownIcon className="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={onApproveSession}>
+                      Allow for Session
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={onApproveAlways}>
+                      Always Allow
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
             <Button
               variant="destructive"
               size="sm"
