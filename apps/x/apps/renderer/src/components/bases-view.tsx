@@ -40,6 +40,14 @@ const BUILTIN_LABELS: Record<BuiltinColumn, string> = {
 
 const DEFAULT_COLUMNS: string[] = ['name', 'folder', 'relationship', 'topic', 'status', 'mtimeMs']
 
+/** Default pixel widths for columns */
+const DEFAULT_WIDTHS: Record<string, number> = {
+  name: 200,
+  folder: 140,
+  mtimeMs: 140,
+}
+const DEFAULT_FRONTMATTER_WIDTH = 150
+
 /** Convert key to title case: `first_met` → `First Met` */
 function toTitleCase(key: string): string {
   if (key in BUILTIN_LABELS) return BUILTIN_LABELS[key as BuiltinColumn]
@@ -177,10 +185,42 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
   }, [fieldsByPath])
 
   const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_COLUMNS)
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [filters, setFilters] = useState<ActiveFilter[]>([])
   const [sortField, setSortField] = useState<string>('mtimeMs')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [page, setPage] = useState(0)
+
+  const getColWidth = useCallback((col: string) => {
+    return columnWidths[col] ?? DEFAULT_WIDTHS[col] ?? DEFAULT_FRONTMATTER_WIDTH
+  }, [columnWidths])
+
+  // Column resize via drag
+  const resizingRef = useRef<{ col: string; startX: number; startW: number } | null>(null)
+
+  const onResizeStart = useCallback((col: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startW = columnWidths[col] ?? DEFAULT_WIDTHS[col] ?? DEFAULT_FRONTMATTER_WIDTH
+    resizingRef.current = { col, startX, startW }
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizingRef.current) return
+      const delta = ev.clientX - resizingRef.current.startX
+      const newW = Math.max(60, resizingRef.current.startW + delta)
+      setColumnWidths((prev) => ({ ...prev, [resizingRef.current!.col]: newW }))
+    }
+
+    const onMouseUp = () => {
+      resizingRef.current = null
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [columnWidths])
 
   // Reset page when filters change
   useEffect(() => { setPage(0) }, [filters])
@@ -325,16 +365,27 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+          <colgroup>
+            {visibleColumns.map((col) => (
+              <col key={col} style={{ width: getColWidth(col) }} />
+            ))}
+          </colgroup>
           <thead className="sticky top-0 bg-background border-b border-border z-10">
             <tr>
               {visibleColumns.map((col) => (
                 <th
                   key={col}
-                  className="text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                  className="relative text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none group"
                   onClick={() => handleSort(col)}
                 >
-                  {toTitleCase(col)}<SortIcon field={col} />
+                  <span className="truncate block">{toTitleCase(col)}<SortIcon field={col} /></span>
+                  {/* Resize handle */}
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize opacity-0 group-hover:opacity-100 hover:!opacity-100 bg-border/60"
+                    onMouseDown={(e) => onResizeStart(col, e)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
                 </th>
               ))}
             </tr>
@@ -347,7 +398,7 @@ export function BasesView({ tree, onSelectNote }: BasesViewProps) {
                 onClick={() => onSelectNote(note.path)}
               >
                 {visibleColumns.map((col) => (
-                  <td key={col} className="px-4 py-2">
+                  <td key={col} className="px-4 py-2 overflow-hidden">
                     <CellRenderer
                       note={note}
                       column={col}
@@ -415,13 +466,13 @@ function CellRenderer({
   toggleFilter: (category: string, value: string) => void
 }) {
   if (column === 'name') {
-    return <span className="font-medium">{note.name}</span>
+    return <span className="font-medium truncate block">{note.name}</span>
   }
   if (column === 'folder') {
-    return <span className="text-muted-foreground">{note.folder}</span>
+    return <span className="text-muted-foreground truncate block">{note.folder}</span>
   }
   if (column === 'mtimeMs') {
-    return <span className="text-muted-foreground whitespace-nowrap">{formatDate(note.mtimeMs)}</span>
+    return <span className="text-muted-foreground whitespace-nowrap truncate block">{formatDate(note.mtimeMs)}</span>
   }
 
   // Frontmatter column

@@ -803,7 +803,7 @@ function App() {
     try {
       const result = await window.ipc.invoke('workspace:readdir', {
         path: 'knowledge',
-        opts: { recursive: true, includeHidden: false }
+        opts: { recursive: true, includeHidden: false, includeStats: true }
       })
       return buildTree(result)
     } catch (err) {
