@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter, Search, Save } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter, Filter, Search, Save } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty, CommandGroup } from '@/components/ui/command'
@@ -211,6 +211,29 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
     return Array.from(keys).sort()
   }, [fieldsByPath])
 
+  // Filterable categories: "folder" + all frontmatter keys
+  const filterCategories = useMemo<string[]>(() => {
+    return ['folder', ...allPropertyKeys]
+  }, [allPropertyKeys])
+
+  // All unique values per category, across all enriched notes
+  const valuesByCategory = useMemo<Record<string, string[]>>(() => {
+    const result: Record<string, Set<string>> = {}
+    for (const cat of filterCategories) result[cat] = new Set()
+    for (const note of enrichedNotes) {
+      for (const cat of filterCategories) {
+        for (const v of getColumnValues(note, cat)) {
+          if (v) result[cat]?.add(v)
+        }
+      }
+    }
+    const out: Record<string, string[]> = {}
+    for (const [cat, set] of Object.entries(result)) {
+      out[cat] = Array.from(set).sort((a, b) => a.localeCompare(b))
+    }
+    return out
+  }, [filterCategories, enrichedNotes])
+
   const visibleColumns = config.visibleColumns
   const columnWidths = config.columnWidths
   const filters = config.filters
@@ -220,6 +243,7 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
   const saveInputRef = useRef<HTMLInputElement>(null)
+  const [filterCategory, setFilterCategory] = useState<string | null>(null)
 
   const handleSaveClick = useCallback(() => {
     if (isDefaultBase) {
@@ -436,6 +460,85 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
                 </CommandGroup>
               </CommandList>
             </Command>
+          </PopoverContent>
+        </Popover>
+
+        <Popover onOpenChange={(open) => { if (!open) setFilterCategory(null) }}>
+          <PopoverTrigger asChild>
+            <button className={cn(
+              'inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground',
+              filters.length > 0 && 'text-foreground',
+            )}>
+              <Filter className="size-3.5" />
+              Filter
+              {filters.length > 0 && (
+                <span className="rounded-full bg-primary text-primary-foreground px-1.5 text-[10px] font-medium leading-tight">
+                  {filters.length}
+                </span>
+              )}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className={cn('p-0', filterCategory ? 'w-[420px]' : 'w-[200px]')}>
+            <div className="flex h-[300px]">
+              {/* Left: categories */}
+              <div className={cn('overflow-auto', filterCategory ? 'w-[160px] border-r border-border' : 'flex-1')}>
+                <div className="flex items-center justify-between px-2 py-1.5">
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Attributes</span>
+                  {filters.length > 0 && (
+                    <button
+                      onClick={clearFilters}
+                      className="text-[10px] text-muted-foreground hover:text-foreground"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                {filterCategories.map((cat) => {
+                  const activeCount = filters.filter((f) => f.category === cat).length
+                  const isSelected = filterCategory === cat
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setFilterCategory(cat)}
+                      className={cn(
+                        'w-full flex items-center gap-1.5 px-2 py-1.5 text-xs text-left hover:bg-accent transition-colors',
+                        isSelected && 'bg-accent text-foreground',
+                        !isSelected && 'text-muted-foreground',
+                      )}
+                    >
+                      <span className="flex-1 truncate">{toTitleCase(cat)}</span>
+                      {activeCount > 0 && (
+                        <span className="rounded-full bg-primary text-primary-foreground px-1.5 text-[10px] font-medium leading-tight shrink-0">
+                          {activeCount}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+              {/* Right: values for selected category */}
+              {filterCategory && (
+                <div className="flex-1 min-w-0 flex flex-col">
+                  <Command className="flex-1 flex flex-col">
+                    <CommandInput placeholder={`Search ${toTitleCase(filterCategory).toLowerCase()}...`} />
+                    <CommandList className="flex-1 overflow-auto max-h-none">
+                      <CommandEmpty>No values found.</CommandEmpty>
+                      <CommandGroup>
+                        {(valuesByCategory[filterCategory] ?? []).map((val) => {
+                          const active = hasFilter(filters, { category: filterCategory, value: val })
+                          return (
+                            <CommandItem key={val} onSelect={() => toggleFilter(filterCategory, val)}>
+                              <Check className={cn('size-3.5 mr-2 shrink-0', active ? 'opacity-100' : 'opacity-0')} />
+                              <span className="truncate">{val}</span>
+                            </CommandItem>
+                          )
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </div>
+              )}
+            </div>
           </PopoverContent>
         </Popover>
 
