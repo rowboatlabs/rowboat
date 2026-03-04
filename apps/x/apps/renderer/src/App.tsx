@@ -474,7 +474,7 @@ function App() {
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
   const [isGraphOpen, setIsGraphOpen] = useState(false)
   const [isBasesOpen, setIsBasesOpen] = useState(false)
-  const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
+  const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean; bases: boolean } | null>(null)
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
     nodes: [],
     edges: [],
@@ -916,39 +916,44 @@ function App() {
     let cancelled = false
     ;(async () => {
       try {
-        const stat = await window.ipc.invoke('workspace:stat', { path: pathToLoad })
-        if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
-        if (stat.kind === 'file') {
-          const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
+        // For .md files (from the knowledge tree), skip stat and read directly.
+        // For other file types, stat first to check if it's a file vs directory.
+        const isKnownFile = pathToLoad.endsWith('.md')
+        if (!isKnownFile) {
+          const stat = await window.ipc.invoke('workspace:stat', { path: pathToLoad })
           if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
-          setFileContent(result.data)
-          const { raw: fm, body } = splitFrontmatter(result.data)
-          frontmatterByPathRef.current.set(pathToLoad, fm)
-          const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
-          const isSameEditorFile = editorPathRef.current === pathToLoad
-          const wouldClobberActiveEdits =
-            isSameEditorFile
-            && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(body)
-          if (!wouldClobberActiveEdits) {
-            setEditorContent(body)
-            if (pathToLoad.endsWith('.md')) {
-              setEditorCacheForPath(pathToLoad, body)
-            }
-            editorContentRef.current = body
-            editorPathRef.current = pathToLoad
-            initialContentByPathRef.current.set(pathToLoad, body)
-            initialContentRef.current = body
-            setLastSaved(null)
-            setActiveFileTags(extractTags(fm))
-          } else {
-            // Still update the editor's path so subsequent autosaves write to the correct file.
-            editorPathRef.current = pathToLoad
+          if (stat.kind !== 'file') {
+            setFileContent('')
+            setEditorContent('')
+            editorContentRef.current = ''
+            initialContentRef.current = ''
+            return
           }
+        }
+        const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
+        if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
+        setFileContent(result.data)
+        const { raw: fm, body } = splitFrontmatter(result.data)
+        frontmatterByPathRef.current.set(pathToLoad, fm)
+        const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
+        const isSameEditorFile = editorPathRef.current === pathToLoad
+        const wouldClobberActiveEdits =
+          isSameEditorFile
+          && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(body)
+        if (!wouldClobberActiveEdits) {
+          setEditorContent(body)
+          if (pathToLoad.endsWith('.md')) {
+            setEditorCacheForPath(pathToLoad, body)
+          }
+          editorContentRef.current = body
+          editorPathRef.current = pathToLoad
+          initialContentByPathRef.current.set(pathToLoad, body)
+          initialContentRef.current = body
+          setLastSaved(null)
+          setActiveFileTags(extractTags(fm))
         } else {
-          setFileContent('')
-          setEditorContent('')
-          editorContentRef.current = ''
-          initialContentRef.current = ''
+          // Still update the editor's path so subsequent autosaves write to the correct file.
+          editorPathRef.current = pathToLoad
         }
       } catch (err) {
         console.error('Failed to load file:', err)
@@ -2220,7 +2225,7 @@ function App() {
     handleNewChat()
     // Left-pane "new chat" should always open full chat view.
     if (selectedPath || isGraphOpen || isBasesOpen) {
-      setExpandedFrom({ path: selectedPath, graph: isGraphOpen })
+      setExpandedFrom({ path: selectedPath, graph: isGraphOpen, bases: isBasesOpen })
     } else {
       setExpandedFrom(null)
     }
@@ -2258,7 +2263,7 @@ function App() {
   const handleOpenFullScreenChat = useCallback(() => {
     // Remember where we came from so the close button can return
     if (selectedPath || isGraphOpen || isBasesOpen) {
-      setExpandedFrom({ path: selectedPath, graph: isGraphOpen })
+      setExpandedFrom({ path: selectedPath, graph: isGraphOpen, bases: isBasesOpen })
     }
     setIsRightPaneMaximized(false)
     setSelectedPath(null)
@@ -2268,7 +2273,9 @@ function App() {
 
   const handleCloseFullScreenChat = useCallback(() => {
     if (expandedFrom) {
-      if (expandedFrom.graph) {
+      if (expandedFrom.bases) {
+        setIsBasesOpen(true)
+      } else if (expandedFrom.graph) {
         setIsGraphOpen(true)
       } else if (expandedFrom.path) {
         setSelectedPath(expandedFrom.path)
