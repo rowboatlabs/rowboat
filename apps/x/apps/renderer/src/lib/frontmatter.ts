@@ -29,6 +29,137 @@ export function joinFrontmatter(raw: string | null, body: string): string {
   return raw + '\n' + body
 }
 
+/** Structured frontmatter fields extracted from categorized YAML. */
+export type FrontmatterFields = {
+  relationship: string | null
+  relationship_sub: string[]
+  topic: string[]
+  email_type: string[]
+  action: string[]
+  status: string | null
+  source: string[]
+}
+
+/**
+ * Extract structured tag categories from raw frontmatter YAML.
+ *
+ * Handles both the new categorized format (top-level keys) and the legacy
+ * flat `tags:` list. For legacy notes the flat tags are mapped into
+ * categories using known tag values.
+ */
+export function extractFrontmatterFields(raw: string | null): FrontmatterFields {
+  const fields: FrontmatterFields = {
+    relationship: null,
+    relationship_sub: [],
+    topic: [],
+    email_type: [],
+    action: [],
+    status: null,
+    source: [],
+  }
+  if (!raw) return fields
+
+  const lines = raw.split('\n')
+  let currentKey: string | null = null
+
+  for (const line of lines) {
+    // Top-level key detection
+    const topMatch = line.match(/^(\w+):\s*(.*)$/)
+    if (topMatch || line === '---') {
+      currentKey = null
+    }
+
+    if (topMatch) {
+      const key = topMatch[1]
+      const value = topMatch[2].trim()
+
+      if (key in fields) {
+        currentKey = key
+        if (value) {
+          const field = fields[key as keyof FrontmatterFields]
+          if (Array.isArray(field)) {
+            (field as string[]).push(value)
+          } else {
+            // single-value field
+            ;(fields as Record<string, unknown>)[key] = value
+          }
+          currentKey = null // inline value, no list follows
+        }
+        continue
+      }
+
+      // Legacy flat tags: — parse and distribute into categories
+      if (key === 'tags') {
+        currentKey = '__legacy_tags'
+        continue
+      }
+    }
+
+    // List items under a categorized key
+    if (currentKey && currentKey !== '__legacy_tags') {
+      const itemMatch = line.match(/^\s+-\s+(.+)$/)
+      if (itemMatch) {
+        const value = itemMatch[1].trim()
+        const field = fields[currentKey as keyof FrontmatterFields]
+        if (Array.isArray(field)) {
+          (field as string[]).push(value)
+        } else {
+          ;(fields as Record<string, unknown>)[currentKey] = value
+        }
+      }
+      continue
+    }
+
+    // Legacy flat tag items → map into categories
+    if (currentKey === '__legacy_tags') {
+      const itemMatch = line.match(/^\s+-\s+(.+)$/)
+      if (itemMatch) {
+        const tag = itemMatch[1].trim()
+        const cat = LEGACY_TAG_TO_CATEGORY[tag]
+        if (cat) {
+          const field = fields[cat as keyof FrontmatterFields]
+          if (Array.isArray(field)) {
+            (field as string[]).push(tag)
+          } else if (!(fields as Record<string, unknown>)[cat]) {
+            ;(fields as Record<string, unknown>)[cat] = tag
+          }
+        }
+      }
+      continue
+    }
+  }
+
+  return fields
+}
+
+/** Map known tag values → category for legacy flat-list frontmatter. */
+const LEGACY_TAG_TO_CATEGORY: Record<string, string> = {
+  // relationship
+  investor: 'relationship', customer: 'relationship', prospect: 'relationship',
+  partner: 'relationship', vendor: 'relationship', product: 'relationship',
+  candidate: 'relationship', team: 'relationship', advisor: 'relationship',
+  personal: 'relationship', press: 'relationship', community: 'relationship',
+  government: 'relationship',
+  // relationship_sub
+  primary: 'relationship_sub', secondary: 'relationship_sub',
+  'executive-assistant': 'relationship_sub', cc: 'relationship_sub',
+  'referred-by': 'relationship_sub', former: 'relationship_sub',
+  champion: 'relationship_sub', blocker: 'relationship_sub',
+  // topic
+  sales: 'topic', support: 'topic', legal: 'topic', finance: 'topic',
+  hiring: 'topic', fundraising: 'topic', travel: 'topic', event: 'topic',
+  shopping: 'topic', health: 'topic', learning: 'topic', research: 'topic',
+  // email_type
+  intro: 'email_type', followup: 'email_type',
+  // action
+  'action-required': 'action', urgent: 'action', waiting: 'action',
+  // status
+  active: 'status', archived: 'status', stale: 'status',
+  // source
+  email: 'source', meeting: 'source', browser: 'source',
+  'web-search': 'source', manual: 'source', import: 'source',
+}
+
 /** Tag category keys used in the categorized frontmatter format. */
 const TAG_CATEGORY_KEYS = new Set([
   'relationship',

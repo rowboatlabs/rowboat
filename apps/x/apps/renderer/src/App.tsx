@@ -12,6 +12,7 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { ChatInputWithMentions, type StagedAttachment } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
+import { BasesView } from '@/components/bases-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
@@ -106,6 +107,7 @@ const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 const TITLEBAR_BUTTONS_COLLAPSED = 5
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 4
 const GRAPH_TAB_PATH = '__rowboat_graph_view__'
+const BASES_TAB_PATH = '__rowboat_bases_view__'
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -233,6 +235,7 @@ const getAncestorDirectoryPaths = (path: string): string[] => {
 }
 
 const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
+const isBasesTabPath = (path: string) => path === BASES_TAB_PATH
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
@@ -307,6 +310,7 @@ type ViewState =
   | { type: 'chat'; runId: string | null }
   | { type: 'file'; path: string }
   | { type: 'graph' }
+  | { type: 'bases' }
   | { type: 'task'; name: string }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
@@ -314,7 +318,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'chat' && b.type === 'chat') return a.runId === b.runId
   if (a.type === 'file' && b.type === 'file') return a.path === b.path
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
-  return true // both graph
+  return true // both graph or both bases
 }
 
 /** Sidebar toggle + back/forward nav */
@@ -469,6 +473,7 @@ function App() {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
   const [isGraphOpen, setIsGraphOpen] = useState(false)
+  const [isBasesOpen, setIsBasesOpen] = useState(false)
   const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
     nodes: [],
@@ -619,6 +624,7 @@ function App() {
 
   const getFileTabTitle = useCallback((tab: FileTab) => {
     if (isGraphTabPath(tab.path)) return 'Graph View'
+    if (isBasesTabPath(tab.path)) return 'Bases'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
   }, [])
 
@@ -2096,6 +2102,7 @@ function App() {
     activeChatTabId,
     selectedPath,
     isGraphOpen,
+    isBasesOpen,
     isChatSidebarOpen,
     isRightPaneMaximized,
     getChatScrollContainer,
@@ -2107,6 +2114,7 @@ function App() {
     if (existingTab) {
       setActiveFileTabId(existingTab.id)
       setIsGraphOpen(false)
+      setIsBasesOpen(false)
       setSelectedPath(path)
       return
     }
@@ -2114,6 +2122,7 @@ function App() {
     setFileTabs(prev => [...prev, { id, path }])
     setActiveFileTabId(id)
     setIsGraphOpen(false)
+    setIsBasesOpen(false)
     setSelectedPath(path)
   }, [fileTabs])
 
@@ -2130,15 +2139,23 @@ function App() {
     if (isGraphTabPath(tab.path)) {
       setSelectedPath(null)
       setIsGraphOpen(true)
+      setIsBasesOpen(false)
+      return
+    }
+    if (isBasesTabPath(tab.path)) {
+      setSelectedPath(null)
+      setIsGraphOpen(false)
+      setIsBasesOpen(true)
       return
     }
     setIsGraphOpen(false)
+    setIsBasesOpen(false)
     setSelectedPath(tab.path)
   }, [fileTabs, isRightPaneMaximized])
 
   const closeFileTab = useCallback((tabId: string) => {
     const closingTab = fileTabs.find(t => t.id === tabId)
-    if (closingTab && !isGraphTabPath(closingTab.path)) {
+    if (closingTab && !isGraphTabPath(closingTab.path) && !isBasesTabPath(closingTab.path)) {
       removeEditorCacheForPath(closingTab.path)
       initialContentByPathRef.current.delete(closingTab.path)
       frontmatterByPathRef.current.delete(closingTab.path)
@@ -2152,6 +2169,7 @@ function App() {
         setActiveFileTabId(null)
         setSelectedPath(null)
         setIsGraphOpen(false)
+        setIsBasesOpen(false)
         return []
       }
       const idx = prev.findIndex(t => t.id === tabId)
@@ -2164,8 +2182,14 @@ function App() {
         if (isGraphTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(true)
+          setIsBasesOpen(false)
+        } else if (isBasesTabPath(newActiveTab.path)) {
+          setSelectedPath(null)
+          setIsGraphOpen(false)
+          setIsBasesOpen(true)
         } else {
           setIsGraphOpen(false)
+          setIsBasesOpen(false)
           setSelectedPath(newActiveTab.path)
         }
       }
@@ -2195,7 +2219,7 @@ function App() {
     }
     handleNewChat()
     // Left-pane "new chat" should always open full chat view.
-    if (selectedPath || isGraphOpen) {
+    if (selectedPath || isGraphOpen || isBasesOpen) {
       setExpandedFrom({ path: selectedPath, graph: isGraphOpen })
     } else {
       setExpandedFrom(null)
@@ -2203,7 +2227,8 @@ function App() {
     setIsRightPaneMaximized(false)
     setSelectedPath(null)
     setIsGraphOpen(false)
-  }, [chatTabs, activeChatTabId, handleNewChat, selectedPath, isGraphOpen])
+    setIsBasesOpen(false)
+  }, [chatTabs, activeChatTabId, handleNewChat, selectedPath, isGraphOpen, isBasesOpen])
 
   // Sidebar variant: create/switch chat tab without leaving file/graph context.
   const handleNewChatTabInSidebar = useCallback(() => {
@@ -2232,13 +2257,14 @@ function App() {
 
   const handleOpenFullScreenChat = useCallback(() => {
     // Remember where we came from so the close button can return
-    if (selectedPath || isGraphOpen) {
+    if (selectedPath || isGraphOpen || isBasesOpen) {
       setExpandedFrom({ path: selectedPath, graph: isGraphOpen })
     }
     setIsRightPaneMaximized(false)
     setSelectedPath(null)
     setIsGraphOpen(false)
-  }, [selectedPath, isGraphOpen])
+    setIsBasesOpen(false)
+  }, [selectedPath, isGraphOpen, isBasesOpen])
 
   const handleCloseFullScreenChat = useCallback(() => {
     if (expandedFrom) {
@@ -2255,9 +2281,10 @@ function App() {
   const currentViewState = React.useMemo<ViewState>(() => {
     if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
     if (selectedPath) return { type: 'file', path: selectedPath }
+    if (isBasesOpen) return { type: 'bases' }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, selectedPath, isGraphOpen, runId])
+  }, [selectedBackgroundTask, selectedPath, isBasesOpen, isGraphOpen, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -2274,7 +2301,7 @@ function App() {
 
     if (activeFileTabId) {
       const activeTab = fileTabs.find((tab) => tab.id === activeFileTabId)
-      if (activeTab && !isGraphTabPath(activeTab.path)) {
+      if (activeTab && !isGraphTabPath(activeTab.path) && !isBasesTabPath(activeTab.path)) {
         setFileTabs((prev) => prev.map((tab) => (
           tab.id === activeFileTabId ? { ...tab, path } : tab
         )))
@@ -2303,11 +2330,23 @@ function App() {
     setActiveFileTabId(id)
   }, [fileTabs])
 
+  const ensureBasesFileTab = useCallback(() => {
+    const existingBasesTab = fileTabs.find((tab) => isBasesTabPath(tab.path))
+    if (existingBasesTab) {
+      setActiveFileTabId(existingBasesTab.id)
+      return
+    }
+    const id = newFileTabId()
+    setFileTabs((prev) => [...prev, { id, path: BASES_TAB_PATH }])
+    setActiveFileTabId(id)
+  }, [fileTabs])
+
   const applyViewState = useCallback(async (view: ViewState) => {
     switch (view.type) {
       case 'file':
         setSelectedBackgroundTask(null)
         setIsGraphOpen(false)
+        setIsBasesOpen(false)
         setExpandedFrom(null)
         // Preserve split vs knowledge-max mode when navigating knowledge files.
         // Only exit chat-only maximize, because that would hide the selected file.
@@ -2320,6 +2359,7 @@ function App() {
       case 'graph':
         setSelectedBackgroundTask(null)
         setSelectedPath(null)
+        setIsBasesOpen(false)
         setExpandedFrom(null)
         setIsGraphOpen(true)
         ensureGraphFileTab()
@@ -2327,9 +2367,21 @@ function App() {
           setIsRightPaneMaximized(false)
         }
         return
+      case 'bases':
+        setSelectedBackgroundTask(null)
+        setSelectedPath(null)
+        setIsGraphOpen(false)
+        setExpandedFrom(null)
+        setIsBasesOpen(true)
+        ensureBasesFileTab()
+        if (isRightPaneMaximized) {
+          setIsRightPaneMaximized(false)
+        }
+        return
       case 'task':
         setSelectedPath(null)
         setIsGraphOpen(false)
+        setIsBasesOpen(false)
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(view.name)
@@ -2337,6 +2389,7 @@ function App() {
       case 'chat':
         setSelectedPath(null)
         setIsGraphOpen(false)
+        setIsBasesOpen(false)
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
@@ -2347,7 +2400,7 @@ function App() {
         }
         return
     }
-  }, [ensureFileTabForPath, ensureGraphFileTab, handleNewChat, isRightPaneMaximized, loadRun])
+  }, [ensureFileTabForPath, ensureGraphFileTab, ensureBasesFileTab, handleNewChat, isRightPaneMaximized, loadRun])
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState
@@ -2471,7 +2524,7 @@ function App() {
   }, [])
 
   // Keyboard shortcut: Ctrl+L to toggle main chat view
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !selectedBackgroundTask
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !isBasesOpen && !selectedBackgroundTask
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
@@ -2544,12 +2597,12 @@ function App() {
     const handleTabKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
-      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen) && isChatSidebarOpen)
+      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen || isBasesOpen) && isChatSidebarOpen)
       const targetPane: ShortcutPane = rightPaneAvailable
         ? (isRightPaneMaximized ? 'right' : activeShortcutPane)
         : 'left'
-      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen)
-      const selectedKnowledgePath = isGraphOpen ? GRAPH_TAB_PATH : selectedPath
+      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen || isBasesOpen)
+      const selectedKnowledgePath = isBasesOpen ? BASES_TAB_PATH : isGraphOpen ? GRAPH_TAB_PATH : selectedPath
       const targetFileTabId = activeFileTabId ?? (
         selectedKnowledgePath
           ? (fileTabs.find((tab) => tab.path === selectedKnowledgePath)?.id ?? null)
@@ -2603,7 +2656,7 @@ function App() {
     }
     document.addEventListener('keydown', handleTabKeyDown)
     return () => document.removeEventListener('keydown', handleTabKeyDown)
-  }, [selectedPath, isGraphOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
+  }, [selectedPath, isGraphOpen, isBasesOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
@@ -2725,11 +2778,18 @@ function App() {
     },
     openGraph: () => {
       // From chat-only landing state, open graph directly in full knowledge view.
-      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
+      if (!selectedPath && !isGraphOpen && !isBasesOpen && !selectedBackgroundTask) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
       void navigateToView({ type: 'graph' })
+    },
+    openBases: () => {
+      if (!selectedPath && !isGraphOpen && !isBasesOpen && !selectedBackgroundTask) {
+        setIsChatSidebarOpen(false)
+        setIsRightPaneMaximized(false)
+      }
+      void navigateToView({ type: 'bases' })
     },
     expandAll: () => setExpandedPaths(new Set(collectDirPaths(tree))),
     collapseAll: () => setExpandedPaths(new Set()),
@@ -2810,7 +2870,7 @@ function App() {
     onOpenInNewTab: (path: string) => {
       openFileInNewTab(path)
     },
-  }), [tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, openFileInNewTab, fileTabs, closeFileTab, removeEditorCacheForPath])
+  }), [tree, selectedPath, isGraphOpen, isBasesOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, openFileInNewTab, fileTabs, closeFileTab, removeEditorCacheForPath])
 
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
@@ -3104,7 +3164,7 @@ function App() {
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
-  const isRightPaneContext = Boolean(selectedPath || isGraphOpen)
+  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isBasesOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const openMarkdownTabs = React.useMemo(() => {
@@ -3141,7 +3201,7 @@ function App() {
               tasksActions={{
                 onNewChat: handleNewChatTab,
                 onSelectRun: (runIdToLoad) => {
-                  if (selectedPath || isGraphOpen) {
+                  if (selectedPath || isGraphOpen || isBasesOpen) {
                     setIsChatSidebarOpen(true)
                   }
 
@@ -3152,7 +3212,7 @@ function App() {
                     return
                   }
                   // In two-pane mode, keep current knowledge/graph context and just swap chat context.
-                  if (selectedPath || isGraphOpen) {
+                  if (selectedPath || isGraphOpen || isBasesOpen) {
                     setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
                     loadRun(runIdToLoad)
                     return
@@ -3176,14 +3236,14 @@ function App() {
                       } else {
                         // Only one tab, reset it to new chat
                         setChatTabs([{ id: tabForRun.id, runId: null }])
-                        if (selectedPath || isGraphOpen) {
+                        if (selectedPath || isGraphOpen || isBasesOpen) {
                           handleNewChat()
                         } else {
                           void navigateToView({ type: 'chat', runId: null })
                         }
                       }
                     } else if (runId === runIdToDelete) {
-                      if (selectedPath || isGraphOpen) {
+                      if (selectedPath || isGraphOpen || isBasesOpen) {
                         setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: null } : t))
                         handleNewChat()
                       } else {
@@ -3220,7 +3280,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {(selectedPath || isGraphOpen) && fileTabs.length >= 1 ? (
+                {(selectedPath || isGraphOpen || isBasesOpen) && fileTabs.length >= 1 ? (
                   <TabBar
                     tabs={fileTabs}
                     activeTabId={activeFileTabId ?? ''}
@@ -3228,7 +3288,7 @@ function App() {
                     getTabId={(t) => t.id}
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && isGraphOpen}
+                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isBasesOpen)}
                   />
                 ) : (
                   <TabBar
@@ -3281,7 +3341,7 @@ function App() {
                     <TooltipContent side="bottom">Version history</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && !selectedTask && (
+                {!selectedPath && !isGraphOpen && !isBasesOpen && !selectedTask && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -3296,7 +3356,7 @@ function App() {
                     <TooltipContent side="bottom">New chat tab</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && expandedFrom && (
+                {!selectedPath && !isGraphOpen && !isBasesOpen && expandedFrom && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -3311,7 +3371,7 @@ function App() {
                     <TooltipContent side="bottom">Restore two-pane view</TooltipContent>
                   </Tooltip>
                 )}
-                {(selectedPath || isGraphOpen) && (
+                {(selectedPath || isGraphOpen || isBasesOpen) && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -3330,7 +3390,14 @@ function App() {
                 )}
               </ContentHeader>
 
-              {isGraphOpen ? (
+              {isBasesOpen ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <BasesView
+                    tree={tree}
+                    onSelectNote={(path) => navigateToFile(path)}
+                  />
+                </div>
+              ) : isGraphOpen ? (
                 <div className="flex-1 min-h-0">
                   <GraphView
                     nodes={graphData.nodes}
