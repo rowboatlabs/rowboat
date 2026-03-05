@@ -1,8 +1,22 @@
 import { exec, execSync, spawn, ChildProcess } from 'child_process';
+import { existsSync } from 'fs';
 import { promisify } from 'util';
 import { getSecurityAllowList } from '../../config/security.js';
 
 const execPromise = promisify(exec);
+
+function getShell(): string {
+  if (process.platform !== 'win32') return '/bin/sh';
+  // On Windows, try Git Bash first, then fall back to cmd.exe
+  const gitBashPaths = [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+  ];
+  for (const p of gitBashPaths) {
+    if (existsSync(p)) return p;
+  }
+  return 'cmd.exe';
+}
 const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n|`|\$\(|\(|\))/;
 const ENV_ASSIGNMENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
 const WRAPPER_COMMANDS = new Set(['sudo', 'env', 'time', 'command']);
@@ -85,7 +99,7 @@ export async function executeCommand(
       cwd: options?.cwd,
       timeout: options?.timeout,
       maxBuffer: options?.maxBuffer || 1024 * 1024, // default 1MB
-      shell: '/bin/sh', // use sh for cross-platform compatibility
+      shell: getShell(), // use sh for cross-platform compatibility
     });
 
     return {
@@ -159,7 +173,7 @@ export function executeCommandAbortable(
   }
 
   const proc = spawn(command, [], {
-    shell: '/bin/sh',
+    shell: getShell(),
     cwd: options?.cwd,
     detached: process.platform !== 'win32', // Create process group on Unix
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -273,7 +287,7 @@ export function executeCommandSync(
       cwd: options?.cwd,
       timeout: options?.timeout,
       encoding: 'utf-8',
-      shell: '/bin/sh',
+      shell: getShell(),
     });
 
     return {
