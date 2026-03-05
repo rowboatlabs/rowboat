@@ -690,7 +690,7 @@ export function MarkdownEditor({
     handleSelectWikiLinkRef.current = handleSelectWikiLink
   }, [handleSelectWikiLink])
 
-  const handleRowboatAdd = useCallback((instruction: string) => {
+  const handleRowboatAdd = useCallback(async (instruction: string) => {
     if (!editor) return
 
     if (rowboatBlockEdit) {
@@ -713,7 +713,18 @@ export function MarkdownEditor({
     }
 
     if (activeRowboatMention) {
-      const codeBlock = `\`\`\`tell-rowboat\n@rowboat ${instruction}\n\`\`\``
+      // Classify schedule intent for new blocks
+      let scheduleLine = ''
+      try {
+        const result = await window.ipc.invoke('inline-task:classifySchedule', { instruction })
+        if (result.schedule) {
+          scheduleLine = `\nschedule: ${JSON.stringify(result.schedule)}`
+        }
+      } catch (error) {
+        console.error('[RowboatAdd] Schedule classification failed:', error)
+      }
+
+      const codeBlock = `\`\`\`tell-rowboat\n@rowboat ${instruction}${scheduleLine}\n\`\`\``
       editor
         .chain()
         .focus()

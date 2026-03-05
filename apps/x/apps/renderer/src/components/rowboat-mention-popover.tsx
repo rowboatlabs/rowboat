@@ -1,22 +1,25 @@
 import { useState, useRef, useEffect } from 'react'
+import { Loader2 } from 'lucide-react'
 
 interface RowboatMentionPopoverProps {
   open: boolean
   anchor: { top: number; left: number; width: number } | null
   initialText?: string
-  onAdd: (instruction: string) => void
+  onAdd: (instruction: string) => void | Promise<void>
   onRemove?: () => void
   onClose: () => void
 }
 
 export function RowboatMentionPopover({ open, anchor, initialText = '', onAdd, onRemove, onClose }: RowboatMentionPopoverProps) {
   const [text, setText] = useState('')
+  const [loading, setLoading] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (open) {
       setText(initialText)
+      setLoading(false)
       requestAnimationFrame(() => {
         textareaRef.current?.focus()
       })
@@ -37,10 +40,15 @@ export function RowboatMentionPopover({ open, anchor, initialText = '', onAdd, o
 
   if (!open || !anchor) return null
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const trimmed = text.trim()
-    if (!trimmed) return
-    onAdd(trimmed)
+    if (!trimmed || loading) return
+    setLoading(true)
+    try {
+      await onAdd(trimmed)
+    } finally {
+      setLoading(false)
+    }
     setText('')
   }
 
@@ -60,14 +68,15 @@ export function RowboatMentionPopover({ open, anchor, initialText = '', onAdd, o
           <textarea
             ref={textareaRef}
             className="flex-1 bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none resize-none leading-[1.5]"
-            placeholder="Tell rowboat what to do..."
+            placeholder=""
             rows={2}
             value={text}
+            disabled={loading}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault()
-                handleSubmit()
+                void handleSubmit()
               }
               if (e.key === 'Escape') {
                 e.preventDefault()
@@ -81,16 +90,17 @@ export function RowboatMentionPopover({ open, anchor, initialText = '', onAdd, o
             <button
               className="inline-flex items-center justify-center rounded px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10"
               onClick={onRemove}
+              disabled={loading}
             >
               Remove
             </button>
           )}
           <button
             className="inline-flex items-center justify-center rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            disabled={!text.trim()}
-            onClick={handleSubmit}
+            disabled={!text.trim() || loading}
+            onClick={() => void handleSubmit()}
           >
-            Add
+            {loading ? <Loader2 className="size-3 animate-spin" /> : 'Add'}
           </button>
         </div>
       </div>

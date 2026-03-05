@@ -552,6 +552,10 @@
   background: rgba(255, 255, 255, 0.05);
 }
 
+.dark .tiptap-editor .ProseMirror pre code {
+  color: inherit;
+}
+
 .dark .tiptap-editor .ProseMirror code {
   background: rgba(255, 255, 255, 0.1);
   color: #ff7b72;

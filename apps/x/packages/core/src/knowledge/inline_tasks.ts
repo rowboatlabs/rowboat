@@ -1,11 +1,16 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { CronExpressionParser } from 'cron-parser';
+import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage, fetchRun } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
+import container from '../di/container.js';
+import type { IModelConfigRepo } from '../models/repo.js';
+import { createProvider } from '../models/models.js';
 
-const SYNC_INTERVAL_MS = 60 * 1000; // 60 seconds
+const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const INLINE_TASK_AGENT = 'inline_task_agent';
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
 
@@ -95,6 +100,15 @@ function buildFrontmatter(fields: Record<string, string | string[]>): string | n
 }
 
 // ---------------------------------------------------------------------------
+// Schedule types
+// ---------------------------------------------------------------------------
+
+type InlineTaskSchedule =
+    | { type: 'cron'; expression: string }
+    | { type: 'window'; cron: string; startTime: string; endTime: string }
+    | { type: 'once'; runAt: string };
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -162,6 +176,7 @@ async function extractAgentResponse(runId: string): Promise<string | null> {
 interface InlineTask {
     instruction: string;
     hash: string;
+    schedule: InlineTaskSchedule | null;
     /** Line index of the opening ```tell-rowboat fence in the body */
     startLine: number;
     /** Line index of the closing ``` fence */
@@ -169,9 +184,132 @@ interface InlineTask {
 }
 
 /**
- * Find ```tell-rowboat code blocks in a note body and return tasks not yet completed.
+ * Parse the rowboat_tasks frontmatter into a hash→lastRunAt map.
+ * Supports both formats:
+ *   - New: hash: "ISO timestamp" (value is a timestamp string)
+ *   - Old: flat list of hashes (value is just the hash itself in an array)
  */
-function findPendingTasks(body: string, completedHashes: string[]): InlineTask[] {
+function parseTaskRecords(fields: Record<string, string | string[]>): Record<string, string | null> {
+    const records: Record<string, string | null> = {};
+    const raw = fields['rowboat_tasks'];
+    if (!raw) return records;
+
+    if (Array.isArray(raw)) {
+        // Old format: list of hashes, or new format as key: value lines
+        // In the old format, each entry is just a hash string
+        // In the new key-value format parsed as list, entries look like "hash: timestamp"
+        for (const entry of raw) {
+            const kvMatch = entry.match(/^([a-f0-9]+):\s*"?(.+?)"?$/);
+            if (kvMatch) {
+                // New format: "a1b2c3d4: 2026-03-05T08:00:00"
+                records[kvMatch[1]] = kvMatch[2];
+            } else if (/^[a-f0-9]+$/.test(entry.trim())) {
+                // Old format: just a hash
+                records[entry.trim()] = null;
+            }
+        }
+    } else if (typeof raw === 'string') {
+        // Single value — old format (just a hash) or new key:value
+        const kvMatch = raw.match(/^([a-f0-9]+):\s*"?(.+?)"?$/);
+        if (kvMatch) {
+            records[kvMatch[1]] = kvMatch[2];
+        } else if (/^[a-f0-9]+$/.test(raw.trim())) {
+            records[raw.trim()] = null;
+        }
+    }
+    return records;
+}
+
+/**
+ * Build rowboat_tasks frontmatter lines from the records map.
+ * Stored as a list:
+ *   rowboat_tasks:
+ *     - a1b2c3d4: "2026-03-05T08:00:00"
+ */
+function buildTaskRecordsList(records: Record<string, string | null>): string[] {
+    const list: string[] = [];
+    for (const [hash, timestamp] of Object.entries(records)) {
+        if (timestamp) {
+            list.push(`${hash}: "${timestamp}"`);
+        } else {
+            // Legacy entry — store hash with current time
+            list.push(`${hash}: "${new Date().toISOString()}"`);
+        }
+    }
+    return list;
+}
+
+/**
+ * Parse the schedule JSON from a `schedule: {...}` line.
+ */
+function parseScheduleLine(line: string): InlineTaskSchedule | null {
+    const match = line.match(/^schedule:\s*(.+)$/);
+    if (!match) return null;
+    try {
+        const obj = JSON.parse(match[1]);
+        if (obj && typeof obj === 'object' && obj.type) {
+            return obj as InlineTaskSchedule;
+        }
+    } catch {
+        // Invalid JSON
+    }
+    return null;
+}
+
+/**
+ * Determine if a scheduled task is due to run.
+ */
+function isScheduledTaskDue(schedule: InlineTaskSchedule, lastRunAt: string | null): boolean {
+    const now = new Date();
+
+    switch (schedule.type) {
+        case 'cron': {
+            if (!lastRunAt) return true; // Never run → due
+            try {
+                const lastRun = new Date(lastRunAt);
+                const interval = CronExpressionParser.parse(schedule.expression, {
+                    currentDate: lastRun,
+                });
+                const nextRun = interval.next().toDate();
+                return now >= nextRun;
+            } catch {
+                return false;
+            }
+        }
+        case 'window': {
+            if (!lastRunAt) return true;
+            try {
+                const lastRun = new Date(lastRunAt);
+                const interval = CronExpressionParser.parse(schedule.cron, {
+                    currentDate: lastRun,
+                });
+                const nextDate = interval.next().toDate();
+
+                // Check if we're within the time window
+                const [startHour, startMin] = schedule.startTime.split(':').map(Number);
+                const [endHour, endMin] = schedule.endTime.split(':').map(Number);
+                const startMinutes = startHour * 60 + startMin;
+                const endMinutes = endHour * 60 + endMin;
+                const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+                // The cron date must have passed and we need to be in the time window
+                return now >= nextDate && nowMinutes >= startMinutes && nowMinutes <= endMinutes;
+            } catch {
+                return false;
+            }
+        }
+        case 'once': {
+            if (lastRunAt) return false; // Already ran
+            const runAt = new Date(schedule.runAt);
+            return now >= runAt;
+        }
+    }
+}
+
+/**
+ * Find ```tell-rowboat code blocks in a note body and return tasks that are pending execution.
+ */
+function findPendingTasks(body: string, taskRecords: Record<string, string | null>): InlineTask[] {
     const tasks: InlineTask[] = [];
     const lines = body.split('\n');
     let i = 0;
@@ -185,13 +323,36 @@ function findPendingTasks(body: string, completedHashes: string[]): InlineTask[]
                 i++;
             }
             const endLine = i; // line with closing ```
-            const rawInstruction = contentLines.join('\n').trim();
+
+            // Separate instruction lines from schedule line
+            let schedule: InlineTaskSchedule | null = null;
+            const instructionLines: string[] = [];
+            for (const cl of contentLines) {
+                const parsed = parseScheduleLine(cl.trim());
+                if (parsed) {
+                    schedule = parsed;
+                } else {
+                    instructionLines.push(cl);
+                }
+            }
+
+            const rawInstruction = instructionLines.join('\n').trim();
             // Strip leading @rowboat prefix if present
             const instruction = rawInstruction.replace(/^@rowboat:?\s*/, '');
             if (instruction) {
                 const hash = hashInstruction(instruction);
-                if (!completedHashes.includes(hash)) {
-                    tasks.push({ instruction, hash, startLine, endLine });
+                const lastRunAt = taskRecords[hash] ?? null;
+
+                if (schedule) {
+                    // Scheduled task — check if due
+                    if (isScheduledTaskDue(schedule, lastRunAt)) {
+                        tasks.push({ instruction, hash, schedule, startLine, endLine });
+                    }
+                } else {
+                    // One-time task — pending if not in records
+                    if (!(hash in taskRecords)) {
+                        tasks.push({ instruction, hash, schedule: null, startLine, endLine });
+                    }
                 }
             }
         }
@@ -208,6 +369,22 @@ function insertResultBelow(body: string, endLine: number, result: string): strin
     const lines = body.split('\n');
     // Insert a blank line + result after the closing ``` fence
     lines.splice(endLine + 1, 0, '', result);
+    return lines.join('\n');
+}
+
+/**
+ * Mark a completed one-time task by adding a ✓ prefix to the @rowboat instruction line.
+ */
+function markBlockDone(body: string, startLine: number, endLine: number): string {
+    const lines = body.split('\n');
+    for (let i = startLine + 1; i < endLine; i++) {
+        const line = lines[i];
+        if (line.trimStart().startsWith('schedule:') || line.includes('✓')) continue;
+        if (line.trim()) {
+            lines[i] = line.replace('@rowboat', '✓ @rowboat');
+            break;
+        }
+    }
     return lines.join('\n');
 }
 
@@ -240,15 +417,10 @@ async function processInlineTasks(): Promise<void> {
         const { raw, body } = splitFrontmatter(content);
         const fields = extractAllFrontmatterValues(raw);
 
-        // Get completed task hashes
-        const completedRaw = fields['rowboat_tasks'];
-        const completedHashes: string[] = Array.isArray(completedRaw)
-            ? completedRaw
-            : completedRaw
-                ? [completedRaw]
-                : [];
+        // Parse task records (hash → lastRunAt)
+        const taskRecords = parseTaskRecords(fields);
 
-        const tasks = findPendingTasks(body, completedHashes);
+        const tasks = findPendingTasks(body, taskRecords);
         if (tasks.length === 0) continue;
 
         const relativePath = path.relative(WorkDir, filePath);
@@ -282,8 +454,13 @@ async function processInlineTasks(): Promise<void> {
 
                 const result = await extractAgentResponse(run.id);
                 if (result) {
+                    // Strike through one-time tasks so user knows it's done
+                    if (!task.schedule) {
+                        currentBody = markBlockDone(currentBody, task.startLine, task.endLine);
+                    }
                     currentBody = insertResultBelow(currentBody, task.endLine, result);
-                    completedHashes.push(task.hash);
+                    // Record with current timestamp
+                    taskRecords[task.hash] = new Date().toISOString();
                     totalProcessed++;
                     console.log(`[InlineTasks] Task ${task.hash} completed`);
                 } else {
@@ -294,8 +471,8 @@ async function processInlineTasks(): Promise<void> {
             }
         }
 
-        // Update frontmatter with completed hashes
-        fields['rowboat_tasks'] = completedHashes;
+        // Update frontmatter with task records
+        fields['rowboat_tasks'] = buildTaskRecordsList(taskRecords);
         const newRaw = buildFrontmatter(fields);
         const newContent = joinFrontmatter(newRaw, currentBody);
 
@@ -311,6 +488,60 @@ async function processInlineTasks(): Promise<void> {
         console.log(`[InlineTasks] Done. Processed ${totalProcessed} task(s).`);
     } else {
         console.log('[InlineTasks] No pending tasks found');
+    }
+}
+
+/**
+ * Classify whether an instruction contains a scheduling intent using the user's configured LLM.
+ * Returns a schedule object or null for one-time tasks.
+ */
+export async function classifySchedule(instruction: string): Promise<InlineTaskSchedule | null> {
+    const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+    const config = await repo.getConfig();
+    const provider = createProvider(config.provider);
+    const model = provider.languageModel(config.model);
+
+    const systemPrompt = `You classify whether a user instruction contains a scheduling intent.
+
+If the instruction implies a recurring or future-scheduled task, return a JSON object with the schedule.
+If the instruction is a one-time immediate task, return null.
+
+Schedule types:
+1. "cron" — recurring schedule. Return: {"type":"cron","expression":"<cron expression>"}
+   Use standard 5-field cron (minute hour day-of-month month day-of-week).
+   Examples: "every morning at 8am" → "0 8 * * *", "every Monday at 9am" → "0 9 * * 1"
+
+2. "window" — recurring with a time window. Return: {"type":"window","cron":"<cron for the day pattern>","startTime":"HH:MM","endTime":"HH:MM"}
+   Use when the user specifies a range like "between 8am and 10am".
+
+3. "once" — run once at a specific future time. Return: {"type":"once","runAt":"<ISO 8601 datetime>"}
+   Use when the user says "tomorrow at 3pm", "next Friday", etc.
+
+Current date/time: ${new Date().toISOString()}
+
+Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
+
+    try {
+        const result = await generateText({
+            model,
+            system: systemPrompt,
+            prompt: instruction,
+        });
+
+        const text = result.text.trim();
+        if (text === 'null' || text === '') {
+            return null;
+        }
+
+        const parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== 'object' || !parsed.type) {
+            return null;
+        }
+
+        return parsed as InlineTaskSchedule;
+    } catch (error) {
+        console.error('[classifySchedule] Error:', error);
+        return null;
     }
 }
 
