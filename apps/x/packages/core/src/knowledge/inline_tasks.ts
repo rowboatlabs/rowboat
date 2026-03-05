@@ -162,38 +162,52 @@ async function extractAgentResponse(runId: string): Promise<string | null> {
 interface InlineTask {
     instruction: string;
     hash: string;
-    /** Character offset of the @rowboat: line in the body (after frontmatter) */
-    lineIndex: number;
+    /** Line index of the opening ```tell-rowboat fence in the body */
+    startLine: number;
+    /** Line index of the closing ``` fence */
+    endLine: number;
 }
 
 /**
- * Find @rowboat: mentions in a note body and return tasks not yet completed.
+ * Find ```tell-rowboat code blocks in a note body and return tasks not yet completed.
  */
 function findPendingTasks(body: string, completedHashes: string[]): InlineTask[] {
     const tasks: InlineTask[] = [];
     const lines = body.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(/^@rowboat:?\s+(.+)$/);
-        if (match) {
-            const instruction = match[1].trim();
-            const hash = hashInstruction(instruction);
-            if (!completedHashes.includes(hash)) {
-                tasks.push({ instruction, hash, lineIndex: i });
+    let i = 0;
+    while (i < lines.length) {
+        if (lines[i].trim() === '```tell-rowboat') {
+            const startLine = i;
+            i++;
+            const contentLines: string[] = [];
+            while (i < lines.length && lines[i].trim() !== '```') {
+                contentLines.push(lines[i]);
+                i++;
+            }
+            const endLine = i; // line with closing ```
+            const rawInstruction = contentLines.join('\n').trim();
+            // Strip leading @rowboat prefix if present
+            const instruction = rawInstruction.replace(/^@rowboat:?\s*/, '');
+            if (instruction) {
+                const hash = hashInstruction(instruction);
+                if (!completedHashes.includes(hash)) {
+                    tasks.push({ instruction, hash, startLine, endLine });
+                }
             }
         }
+        i++;
     }
     return tasks;
 }
 
 /**
- * Insert the agent result below the @rowboat: instruction line in the body.
+ * Insert the agent result below the tell-rowboat code block in the body.
  * Returns the updated body string.
  */
-function insertResultBelow(body: string, lineIndex: number, result: string): string {
+function insertResultBelow(body: string, endLine: number, result: string): string {
     const lines = body.split('\n');
-    // Insert a blank line + italicized result after the instruction line
-    const italicResult = result.split('\n').map(line => line ? `*${line}*` : '').join('\n');
-    lines.splice(lineIndex + 1, 0, '', italicResult);
+    // Insert a blank line + result after the closing ``` fence
+    lines.splice(endLine + 1, 0, '', result);
     return lines.join('\n');
 }
 
@@ -202,7 +216,7 @@ function insertResultBelow(body: string, lineIndex: number, result: string): str
 // ---------------------------------------------------------------------------
 
 async function processInlineTasks(): Promise<void> {
-    console.log('[InlineTasks] Checking for @rowboat mentions...');
+    console.log('[InlineTasks] Checking for tell-rowboat blocks...');
 
     if (!fs.existsSync(KNOWLEDGE_DIR)) {
         console.log('[InlineTasks] Knowledge directory not found');
@@ -220,8 +234,8 @@ async function processInlineTasks(): Promise<void> {
             continue;
         }
 
-        // Quick check — skip files with no mention
-        if (!content.includes('@rowboat')) continue;
+        // Quick check — skip files with no tell-rowboat block
+        if (!content.includes('```tell-rowboat')) continue;
 
         const { raw, body } = splitFrontmatter(content);
         const fields = extractAllFrontmatterValues(raw);
@@ -242,7 +256,7 @@ async function processInlineTasks(): Promise<void> {
 
         // Process tasks one at a time, bottom-up so line indices stay valid
         // (inserting content shifts lines below, so process from bottom to top)
-        const sortedTasks = [...tasks].sort((a, b) => b.lineIndex - a.lineIndex);
+        const sortedTasks = [...tasks].sort((a, b) => b.endLine - a.endLine);
 
         let currentBody = body;
 
@@ -253,7 +267,7 @@ async function processInlineTasks(): Promise<void> {
                 const run = await createRun({ agentId: INLINE_TASK_AGENT });
 
                 const message = [
-                    `Execute the following @rowboat instruction from the note "${relativePath}":`,
+                    `Execute the following instruction from the note "${relativePath}":`,
                     '',
                     `**Instruction:** ${task.instruction}`,
                     '',
@@ -268,7 +282,7 @@ async function processInlineTasks(): Promise<void> {
 
                 const result = await extractAgentResponse(run.id);
                 if (result) {
-                    currentBody = insertResultBelow(currentBody, task.lineIndex, result);
+                    currentBody = insertResultBelow(currentBody, task.endLine, result);
                     completedHashes.push(task.hash);
                     totalProcessed++;
                     console.log(`[InlineTasks] Task ${task.hash} completed`);
@@ -305,7 +319,7 @@ async function processInlineTasks(): Promise<void> {
  */
 export async function init() {
     console.log('[InlineTasks] Starting Inline Task Service...');
-    console.log(`[InlineTasks] Will check for @rowboat mentions every ${SYNC_INTERVAL_MS / 1000} seconds`);
+    console.log(`[InlineTasks] Will check for tell-rowboat blocks every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run
     await processInlineTasks();
