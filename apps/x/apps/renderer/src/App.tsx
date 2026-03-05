@@ -491,6 +491,7 @@ function App() {
   const editorPathRef = useRef<string | null>(null)
   const fileLoadRequestIdRef = useRef(0)
   const initialContentByPathRef = useRef<Map<string, string>>(new Map())
+  const recentLocalMarkdownWritesRef = useRef<Map<string, number>>(new Map())
 
   // Global navigation history (back/forward) across views (chat/file/graph/task)
   const historyRef = useRef<{ back: ViewState[]; forward: ViewState[] }>({ back: [], forward: [] })
@@ -746,6 +747,29 @@ function App() {
     })
   }, [])
 
+  const markRecentLocalMarkdownWrite = useCallback((path: string) => {
+    if (!path.endsWith('.md')) return
+    const now = Date.now()
+    recentLocalMarkdownWritesRef.current.set(path, now)
+    if (recentLocalMarkdownWritesRef.current.size > 200) {
+      for (const [knownPath, timestamp] of recentLocalMarkdownWritesRef.current.entries()) {
+        if (now - timestamp > 10_000) {
+          recentLocalMarkdownWritesRef.current.delete(knownPath)
+        }
+      }
+    }
+  }, [])
+
+  const consumeRecentLocalMarkdownWrite = useCallback((path: string, windowMs: number = 2_500) => {
+    const timestamp = recentLocalMarkdownWritesRef.current.get(path)
+    if (timestamp === undefined) return false
+    const isRecent = Date.now() - timestamp <= windowMs
+    if (!isRecent) {
+      recentLocalMarkdownWritesRef.current.delete(path)
+    }
+    return isRecent
+  }, [])
+
   const handleEditorChange = useCallback((path: string, markdown: string) => {
     setEditorCacheForPath(path, markdown)
     const nextSelectedPath = selectedPathRef.current
@@ -856,6 +880,10 @@ function App() {
         changedPath === pathToReload || changedPaths.includes(pathToReload)
 
       if (isCurrentFileChanged) {
+        // Ignore immediate watcher echoes of our own autosaves to preserve undo history.
+        if (consumeRecentLocalMarkdownWrite(pathToReload)) {
+          return
+        }
         // Only reload if no unsaved edits
         const baseline = initialContentByPathRef.current.get(pathToReload) ?? initialContentRef.current
         if (editorContentRef.current === baseline) {
@@ -887,7 +915,10 @@ function App() {
     }
     if (selectedPath.endsWith('.md')) {
       const cachedContent = editorContentByPathRef.current.get(selectedPath)
-      if (cachedContent !== undefined) {
+      const hasBaseline = initialContentByPathRef.current.has(selectedPath)
+      // Only trust cache after we've loaded/saved this file at least once.
+      // This avoids a first-open race where an early empty editor update can poison the cache.
+      if (cachedContent !== undefined && hasBaseline) {
         setFileContent(cachedContent)
         setEditorContent(cachedContent)
         editorContentRef.current = cachedContent
@@ -909,10 +940,13 @@ function App() {
           setFileContent(result.data)
           const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
           const isSameEditorFile = editorPathRef.current === pathToLoad
-          const wouldClobberActiveEdits =
-            isSameEditorFile
-            && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(result.data)
-          if (!wouldClobberActiveEdits) {
+          const knownBaseline = initialContentByPathRef.current.get(pathToLoad)
+          const hasKnownBaseline = knownBaseline !== undefined
+          const hasUnsavedEdits =
+            hasKnownBaseline
+            && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(knownBaseline)
+          const shouldPreserveActiveDraft = isSameEditorFile && hasUnsavedEdits
+          if (!shouldPreserveActiveDraft) {
             setEditorContent(result.data)
             if (pathToLoad.endsWith('.md')) {
               setEditorCacheForPath(pathToLoad, result.data)
@@ -1044,6 +1078,7 @@ function App() {
           data: contentToSave,
           opts: { encoding: 'utf8' }
         })
+        markRecentLocalMarkdownWrite(pathToSave)
         initialContentByPathRef.current.set(pathToSave, contentToSave)
 
         // If we renamed the active file, update state/history AFTER the write completes so the editor
@@ -1078,7 +1113,7 @@ function App() {
       }
     }
     saveFile()
-  }, [debouncedContent, setHistory])
+  }, [debouncedContent, markRecentLocalMarkdownWrite, setHistory])
 
   // Close version history panel when switching files
   useEffect(() => {
