@@ -1,6 +1,6 @@
 import { useEditor, EditorContent, Extension, Editor } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
-import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { Decoration, DecorationSet, EditorView } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
@@ -192,6 +192,8 @@ type WikiLinkConfig = {
 interface MarkdownEditorProps {
   content: string
   onChange: (markdown: string) => void
+  onPrimaryHeadingCommit?: () => void
+  preserveUntitledTitleHeading?: boolean
   placeholder?: string
   wikiLinks?: WikiLinkConfig
   onImageUpload?: (file: File) => Promise<string | null>
@@ -278,6 +280,8 @@ const TabIndentExtension = Extension.create({
 export function MarkdownEditor({
   content,
   onChange,
+  onPrimaryHeadingCommit,
+  preserveUntitledTitleHeading = false,
   placeholder = 'Start writing...',
   wikiLinks,
   onImageUpload,
@@ -292,6 +296,7 @@ export function MarkdownEditor({
   const [selectionHighlight, setSelectionHighlight] = useState<SelectionHighlightRange>(null)
   const selectionHighlightRef = useRef<SelectionHighlightRange>(null)
   const [wikiCommandValue, setWikiCommandValue] = useState<string>('')
+  const onPrimaryHeadingCommitRef = useRef(onPrimaryHeadingCommit)
   const wikiKeyStateRef = useRef<{ open: boolean; options: string[]; value: string }>({ open: false, options: [], value: '' })
   const handleSelectWikiLinkRef = useRef<(path: string) => void>(() => {})
 
@@ -303,6 +308,68 @@ export function MarkdownEditor({
     () => createSelectionHighlightExtension(() => selectionHighlightRef.current),
     []
   )
+
+  useEffect(() => {
+    onPrimaryHeadingCommitRef.current = onPrimaryHeadingCommit
+  }, [onPrimaryHeadingCommit])
+
+  const maybeCommitPrimaryHeading = useCallback((view: EditorView) => {
+    const onCommit = onPrimaryHeadingCommitRef.current
+    if (!onCommit) return
+    const { selection, doc } = view.state
+    if (!selection.empty) return
+
+    const { $from } = selection
+    if ($from.depth < 1 || $from.index(0) !== 0) return
+    if (!['heading', 'paragraph'].includes($from.parent.type.name)) return
+
+    const firstNode = doc.firstChild
+    if (!firstNode || !['heading', 'paragraph'].includes(firstNode.type.name)) return
+
+    onCommit()
+  }, [])
+
+  const preventTitleHeadingDemotion = useCallback((view: EditorView, event: KeyboardEvent) => {
+    if (!preserveUntitledTitleHeading) return false
+    if (event.key !== 'Backspace' || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false
+
+    const { selection } = view.state
+    if (!selection.empty) return false
+
+    const { $from } = selection
+    if ($from.depth < 1 || $from.index(0) !== 0) return false
+    if ($from.parent.type.name !== 'heading') return false
+
+    const headingLevel = ((
+      $from.parent.attrs as { level?: number } | null | undefined
+    )?.level) ?? 0
+    if (headingLevel !== 1) return false
+    if ($from.parentOffset !== 0) return false
+    if ($from.parent.textContent.length > 0) return false
+
+    event.preventDefault()
+    return true
+  }, [preserveUntitledTitleHeading])
+
+  const promoteFirstParagraphToTitleHeading = useCallback((view: EditorView) => {
+    if (!preserveUntitledTitleHeading) return
+
+    const { state, dispatch } = view
+    const { selection } = state
+    if (!selection.empty) return
+
+    const { $from } = selection
+    if ($from.depth < 1 || $from.index(0) !== 0) return
+    if ($from.parent.type.name !== 'paragraph') return
+    if ($from.parentOffset !== 0) return
+    if ($from.parent.textContent.length > 0) return
+
+    const headingType = state.schema.nodes.heading
+    if (!headingType) return
+
+    const tr = state.tr.setNodeMarkup($from.before(1), headingType, { level: 1 })
+    dispatch(tr)
+  }, [preserveUntitledTitleHeading])
 
   const editor = useEditor({
     editable,
@@ -359,11 +426,14 @@ export function MarkdownEditor({
       markdown = postprocessMarkdown(markdown)
       onChange(markdown)
     },
+    onBlur: ({ editor }) => {
+      maybeCommitPrimaryHeading(editor.view)
+    },
     editorProps: {
       attributes: {
         class: 'prose prose-sm max-w-none focus:outline-none',
       },
-      handleKeyDown: (_view, event) => {
+      handleKeyDown: (view, event) => {
         const state = wikiKeyStateRef.current
         if (state.open) {
           if (event.key === 'Escape') {
@@ -396,6 +466,25 @@ export function MarkdownEditor({
           }
         }
 
+        if (preventTitleHeadingDemotion(view, event)) {
+          return true
+        }
+
+        const isPrintableKey = event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey
+        if (isPrintableKey) {
+          promoteFirstParagraphToTitleHeading(view)
+        }
+
+        if (
+          event.key === 'Enter'
+          && !event.shiftKey
+          && !event.ctrlKey
+          && !event.metaKey
+          && !event.altKey
+        ) {
+          maybeCommitPrimaryHeading(view)
+        }
+
         return false
       },
       handleClickOn: (_view, _pos, node, _nodePos, event) => {
@@ -407,7 +496,12 @@ export function MarkdownEditor({
         return false
       },
     },
-  }, [editorSessionKey])
+  }, [
+    editorSessionKey,
+    maybeCommitPrimaryHeading,
+    preventTitleHeadingDemotion,
+    promoteFirstParagraphToTitleHeading,
+  ])
 
   const orderedFiles = useMemo(() => {
     if (!wikiLinks) return []

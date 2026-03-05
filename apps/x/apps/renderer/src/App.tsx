@@ -492,6 +492,7 @@ function App() {
   const fileLoadRequestIdRef = useRef(0)
   const initialContentByPathRef = useRef<Map<string, string>>(new Map())
   const recentLocalMarkdownWritesRef = useRef<Map<string, number>>(new Map())
+  const untitledRenameReadyPathsRef = useRef<Set<string>>(new Set())
 
   // Global navigation history (back/forward) across views (chat/file/graph/task)
   const historyRef = useRef<{ back: ViewState[]; forward: ViewState[] }>({ back: [], forward: [] })
@@ -739,6 +740,7 @@ function App() {
 
   const removeEditorCacheForPath = useCallback((path: string) => {
     editorContentByPathRef.current.delete(path)
+    untitledRenameReadyPathsRef.current.delete(path)
     setEditorContentByPath((prev) => {
       if (!(path in prev)) return prev
       const next = { ...prev }
@@ -1019,7 +1021,8 @@ function App() {
           if (isUntitledPlaceholderName(currentBase)) {
             const headingTitle = getHeadingTitle(debouncedContent)
             const desiredName = headingTitle ? sanitizeHeadingForFilename(headingTitle) : null
-            if (desiredName && desiredName !== currentBase) {
+            const shouldAutoRename = untitledRenameReadyPathsRef.current.has(pathAtStart)
+            if (shouldAutoRename && desiredName && desiredName !== currentBase) {
               const parentDir = pathAtStart.split('/').slice(0, -1).join('/')
               let targetPath = `${parentDir}/${desiredName}.md`
               if (targetPath !== pathAtStart) {
@@ -1041,6 +1044,7 @@ function App() {
                 renamedFrom = pathAtStart
                 renamedTo = targetPath
                 editorPathRef.current = targetPath
+                untitledRenameReadyPathsRef.current.delete(pathAtStart)
                 setFileTabs(prev => prev.map(tab => (tab.path === pathAtStart ? { ...tab, path: targetPath } : tab)))
                 initialContentByPathRef.current.delete(pathAtStart)
                 const cachedContent = editorContentByPathRef.current.get(pathAtStart)
@@ -2157,6 +2161,7 @@ function App() {
     if (closingTab && !isGraphTabPath(closingTab.path)) {
       removeEditorCacheForPath(closingTab.path)
       initialContentByPathRef.current.delete(closingTab.path)
+      untitledRenameReadyPathsRef.current.delete(closingTab.path)
       if (editorPathRef.current === closingTab.path) {
         editorPathRef.current = null
       }
@@ -2756,6 +2761,7 @@ function App() {
         parts[parts.length - 1] = finalName
         const newPath = parts.join('/')
         await window.ipc.invoke('workspace:rename', { from: oldPath, to: newPath })
+        untitledRenameReadyPathsRef.current.delete(oldPath)
         const rewriteForRename = (content: string) =>
           isDir ? content : rewriteWikiLinksForRenamedFileInMarkdown(content, oldPath, newPath)
         setFileTabs(prev => prev.map(tab => (tab.path === oldPath ? { ...tab, path: newPath } : tab)))
@@ -2798,6 +2804,7 @@ function App() {
         if (path.endsWith('.md')) {
           removeEditorCacheForPath(path)
           initialContentByPathRef.current.delete(path)
+          untitledRenameReadyPathsRef.current.delete(path)
         }
         // Close any file tab showing the deleted file
         const tabForFile = fileTabs.find(t => t.path === path)
@@ -3376,6 +3383,10 @@ function App() {
                             <MarkdownEditor
                               content={tabContent}
                               onChange={(markdown) => { if (!isViewingHistory) handleEditorChange(tab.path, markdown) }}
+                              onPrimaryHeadingCommit={() => {
+                                untitledRenameReadyPathsRef.current.add(tab.path)
+                              }}
+                              preserveUntitledTitleHeading={isUntitledPlaceholderName(getBaseName(tab.path))}
                               placeholder="Start writing..."
                               wikiLinks={wikiLinkConfig}
                               onImageUpload={handleImageUpload}
