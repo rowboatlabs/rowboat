@@ -25,6 +25,8 @@ import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection } from '@x/core/dist/models/models.js';
+import { isSignedIn } from '@x/core/dist/account/account.js';
+import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
@@ -375,6 +377,9 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'models:list': async () => {
+      if (await isSignedIn()) {
+        return await listGatewayModels();
+      }
       return await listOnboardingModels();
     },
     'models:test': async (_event, args) => {
