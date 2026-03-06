@@ -1,6 +1,6 @@
 import { mergeAttributes, Node } from '@tiptap/react'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
-import { Bot, CalendarClock } from 'lucide-react'
+import { CalendarClock } from 'lucide-react'
 import { inlineTask } from '@x/shared'
 
 function TaskBlockView({ node }: { node: { attrs: { data: string } } }) {
@@ -20,11 +20,8 @@ function TaskBlockView({ node }: { node: { attrs: { data: string } } }) {
   return (
     <NodeViewWrapper className="task-block-wrapper" data-type="task-block">
       <div className="task-block-card">
-        <div className="task-block-icon">
-          <Bot size={16} />
-        </div>
         <div className="task-block-content">
-          <span className="task-block-instruction">{instruction}</span>
+          <span className="task-block-instruction"><span className="task-block-prefix">@rowboat</span> {instruction}</span>
           {scheduleLabel && (
             <span className="task-block-schedule">
               <CalendarClock size={12} />

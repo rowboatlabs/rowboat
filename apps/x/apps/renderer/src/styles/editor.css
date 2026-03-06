@@ -537,9 +537,6 @@
 }
 
 .tiptap-editor .ProseMirror .task-block-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -557,17 +554,16 @@
   outline-offset: 1px;
 }
 
-.tiptap-editor .ProseMirror .task-block-icon {
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--primary);
-}
-
 .tiptap-editor .ProseMirror .task-block-content {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+.tiptap-editor .ProseMirror .task-block-prefix {
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .tiptap-editor .ProseMirror .task-block-instruction {
