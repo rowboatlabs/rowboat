@@ -74,7 +74,7 @@ export function RowboatMentionPopover({ open, anchor, initialText = '', onAdd, o
             disabled={loading}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || e.shiftKey)) {
                 e.preventDefault()
                 void handleSubmit()
               }

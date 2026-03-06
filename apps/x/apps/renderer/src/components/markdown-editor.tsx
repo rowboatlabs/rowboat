@@ -419,7 +419,7 @@ export function MarkdownEditor({
 
         // Block typing inside tell-rowboat code blocks
         const { $from } = view.state.selection
-        if ($from.parent.type.name === 'codeBlock' && $from.parent.attrs.language === 'tell-rowboat') {
+        if ($from.parent.type.name === 'codeBlock' && ($from.parent.attrs.language as string)?.startsWith('tell-rowboat')) {
           // Allow arrow keys and escape
           if (!event.key.startsWith('Arrow') && event.key !== 'Escape') {
             event.preventDefault()
@@ -435,10 +435,12 @@ export function MarkdownEditor({
           wikiLinks?.onOpen?.(node.attrs.path)
           return true
         }
-        if (node.type.name === 'codeBlock' && node.attrs.language === 'tell-rowboat') {
+        if (node.type.name === 'codeBlock' && (node.attrs.language as string)?.startsWith('tell-rowboat')) {
           event.preventDefault()
           const rawText = node.textContent
-          const instruction = rawText.replace(/^@rowboat:?\s*/, '')
+          // Extract just the instruction line (first line, strip @rowboat prefix)
+          const firstLine = rawText.split('\n')[0] || ''
+          const instruction = firstLine.replace(/^@rowboat:?\s*/, '')
           rowboatBlockEditRef.current = { nodePos, existingText: instruction }
           setRowboatBlockEdit({ nodePos, existingText: instruction })
           return true
@@ -558,7 +560,7 @@ export function MarkdownEditor({
     const proseMirrorEl = wrapper.querySelector('.ProseMirror') as HTMLElement | null
     const pmRect = proseMirrorEl?.getBoundingClientRect()
     setRowboatAnchorTop({
-      top: coords.top - wrapperRect.top,
+      top: coords.top - wrapperRect.top + wrapper.scrollTop,
       left: pmRect ? pmRect.left - wrapperRect.left : 0,
       width: pmRect ? pmRect.width : wrapperRect.width,
     })
@@ -594,7 +596,7 @@ export function MarkdownEditor({
     const proseMirrorEl = wrapper.querySelector('.ProseMirror') as HTMLElement | null
     const pmRect = proseMirrorEl?.getBoundingClientRect()
     setRowboatAnchorTop({
-      top: coords.top - wrapperRect.top,
+      top: coords.top - wrapperRect.top + wrapper.scrollTop,
       left: pmRect ? pmRect.left - wrapperRect.left : 0,
       width: pmRect ? pmRect.width : wrapperRect.width,
     })
@@ -714,17 +716,20 @@ export function MarkdownEditor({
 
     if (activeRowboatMention) {
       // Classify schedule intent for new blocks
-      let scheduleLine = ''
+      let langSuffix = ''
+      let labelLine = ''
       try {
         const result = await window.ipc.invoke('inline-task:classifySchedule', { instruction })
         if (result.schedule) {
-          scheduleLine = `\nschedule: ${JSON.stringify(result.schedule)}`
+          const { label, ...rest } = result.schedule
+          langSuffix = ` ${JSON.stringify(rest)}`
+          labelLine = `\nschedule: ${label}`
         }
       } catch (error) {
         console.error('[RowboatAdd] Schedule classification failed:', error)
       }
 
-      const codeBlock = `\`\`\`tell-rowboat\n@rowboat ${instruction}${scheduleLine}\n\`\`\``
+      const codeBlock = `\`\`\`tell-rowboat${langSuffix}\n@rowboat ${instruction}${labelLine}\n\`\`\``
       editor
         .chain()
         .focus()

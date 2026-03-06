@@ -104,9 +104,9 @@ function buildFrontmatter(fields: Record<string, string | string[]>): string | n
 // ---------------------------------------------------------------------------
 
 type InlineTaskSchedule =
-    | { type: 'cron'; expression: string }
-    | { type: 'window'; cron: string; startTime: string; endTime: string }
-    | { type: 'once'; runAt: string };
+    | { type: 'cron'; expression: string; startDate: string; endDate: string; label: string }
+    | { type: 'window'; cron: string; startTime: string; endTime: string; startDate: string; endDate: string; label: string }
+    | { type: 'once'; runAt: string; label: string };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -262,6 +262,12 @@ function parseScheduleLine(line: string): InlineTaskSchedule | null {
 function isScheduledTaskDue(schedule: InlineTaskSchedule, lastRunAt: string | null): boolean {
     const now = new Date();
 
+    // Check startDate/endDate bounds for cron and window
+    if (schedule.type === 'cron' || schedule.type === 'window') {
+        if (schedule.startDate && now < new Date(schedule.startDate)) return false;
+        if (schedule.endDate && now > new Date(schedule.endDate)) return false;
+    }
+
     switch (schedule.type) {
         case 'cron': {
             if (!lastRunAt) return true; // Never run → due
@@ -307,6 +313,24 @@ function isScheduledTaskDue(schedule: InlineTaskSchedule, lastRunAt: string | nu
 }
 
 /**
+ * Parse schedule JSON from the code block header.
+ * e.g. the opening fence line: tell-rowboat {"type":"cron","expression":"..."}
+ */
+function parseScheduleFromHeader(headerLine: string): InlineTaskSchedule | null {
+    const match = headerLine.match(/^```tell-rowboat\s+(\{.+\})\s*$/);
+    if (!match) return null;
+    try {
+        const obj = JSON.parse(match[1]);
+        if (obj && typeof obj === 'object' && obj.type) {
+            return obj as InlineTaskSchedule;
+        }
+    } catch {
+        // Invalid JSON
+    }
+    return null;
+}
+
+/**
  * Find ```tell-rowboat code blocks in a note body and return tasks that are pending execution.
  */
 function findPendingTasks(body: string, taskRecords: Record<string, string | null>): InlineTask[] {
@@ -314,8 +338,14 @@ function findPendingTasks(body: string, taskRecords: Record<string, string | nul
     const lines = body.split('\n');
     let i = 0;
     while (i < lines.length) {
-        if (lines[i].trim() === '```tell-rowboat') {
+        const trimmed = lines[i].trim();
+        if (trimmed.startsWith('```tell-rowboat')) {
             const startLine = i;
+            // Parse schedule from header (if present)
+            const schedule = parseScheduleFromHeader(trimmed);
+            // Also support legacy schedule: line inside block
+            let legacySchedule: InlineTaskSchedule | null = null;
+
             i++;
             const contentLines: string[] = [];
             while (i < lines.length && lines[i].trim() !== '```') {
@@ -324,29 +354,32 @@ function findPendingTasks(body: string, taskRecords: Record<string, string | nul
             }
             const endLine = i; // line with closing ```
 
-            // Separate instruction lines from schedule line
-            let schedule: InlineTaskSchedule | null = null;
+            // Extract instruction (first @rowboat line), skip label/schedule lines
             const instructionLines: string[] = [];
             for (const cl of contentLines) {
                 const parsed = parseScheduleLine(cl.trim());
                 if (parsed) {
-                    schedule = parsed;
+                    legacySchedule = parsed;
                 } else {
                     instructionLines.push(cl);
                 }
             }
 
-            const rawInstruction = instructionLines.join('\n').trim();
-            // Strip leading @rowboat prefix if present
+            // Use the first @rowboat line as the instruction
+            const firstRowboatLine = instructionLines.find(l => l.trim().startsWith('@rowboat'));
+            const rawInstruction = firstRowboatLine?.trim() ?? instructionLines.join('\n').trim();
             const instruction = rawInstruction.replace(/^@rowboat:?\s*/, '');
+
+            const effectiveSchedule = schedule ?? legacySchedule;
+
             if (instruction) {
                 const hash = hashInstruction(instruction);
                 const lastRunAt = taskRecords[hash] ?? null;
 
-                if (schedule) {
+                if (effectiveSchedule) {
                     // Scheduled task — check if due
-                    if (isScheduledTaskDue(schedule, lastRunAt)) {
-                        tasks.push({ instruction, hash, schedule, startLine, endLine });
+                    if (isScheduledTaskDue(effectiveSchedule, lastRunAt)) {
+                        tasks.push({ instruction, hash, schedule: effectiveSchedule, startLine, endLine });
                     }
                 } else {
                     // One-time task — pending if not in records
@@ -501,23 +534,32 @@ export async function classifySchedule(instruction: string): Promise<InlineTaskS
     const provider = createProvider(config.provider);
     const model = provider.languageModel(config.model);
 
+    const now = new Date();
+    const defaultEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const nowISO = now.toISOString();
+    const defaultEndISO = defaultEnd.toISOString();
+
     const systemPrompt = `You classify whether a user instruction contains a scheduling intent.
 
 If the instruction implies a recurring or future-scheduled task, return a JSON object with the schedule.
 If the instruction is a one-time immediate task, return null.
 
+Every schedule object MUST include a "label" field: a short, plain-English description starting with "runs" that includes the end date (e.g. "runs every 2 minutes until Mar 12", "runs daily at 8 AM until Mar 12").
+
 Schedule types:
-1. "cron" — recurring schedule. Return: {"type":"cron","expression":"<cron expression>"}
+1. "cron" — recurring schedule. Return: {"type":"cron","expression":"<cron>","startDate":"<ISO>","endDate":"<ISO>","label":"<human readable>"}
    Use standard 5-field cron (minute hour day-of-month month day-of-week).
-   Examples: "every morning at 8am" → "0 8 * * *", "every Monday at 9am" → "0 9 * * 1"
+   "startDate" defaults to now (${nowISO}). "endDate" defaults to 7 days from now (${defaultEndISO}).
+   Override these if the user specifies a duration (e.g. "for the next 3 days" → endDate = now + 3 days) or a start (e.g. "starting next Monday").
+   Example: "every morning at 8am" → {"type":"cron","expression":"0 8 * * *","startDate":"${nowISO}","endDate":"${defaultEndISO}","label":"runs daily at 8 AM until Mar 12"}
 
-2. "window" — recurring with a time window. Return: {"type":"window","cron":"<cron for the day pattern>","startTime":"HH:MM","endTime":"HH:MM"}
-   Use when the user specifies a range like "between 8am and 10am".
+2. "window" — recurring with a time window. Return: {"type":"window","cron":"<cron>","startTime":"HH:MM","endTime":"HH:MM","startDate":"<ISO>","endDate":"<ISO>","label":"<human readable>"}
+   Use when the user specifies a range like "between 8am and 10am". Same startDate/endDate defaults and override rules as cron.
 
-3. "once" — run once at a specific future time. Return: {"type":"once","runAt":"<ISO 8601 datetime>"}
-   Use when the user says "tomorrow at 3pm", "next Friday", etc.
+3. "once" — run once at a specific future time. Return: {"type":"once","runAt":"<ISO 8601 datetime>","label":"<human readable>"}
+   Use when the user says "tomorrow at 3pm", "next Friday", etc. No startDate/endDate for once.
 
-Current date/time: ${new Date().toISOString()}
+Current date/time: ${nowISO}
 
 Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
 
