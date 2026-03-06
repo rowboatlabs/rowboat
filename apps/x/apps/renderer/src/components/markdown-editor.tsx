@@ -8,6 +8,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
+import { TaskBlockExtension } from '@/extensions/task-block'
 import { Markdown } from 'tiptap-markdown'
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
 
@@ -133,6 +134,8 @@ function getMarkdownWithBlankLines(editor: Editor): string {
         })
       })
       blocks.push(listLines.join('\n'))
+    } else if (node.type === 'taskBlock') {
+      blocks.push('```task\n' + (node.attrs?.data as string || '{}') + '\n```')
     } else if (node.type === 'codeBlock') {
       const lang = (node.attrs?.language as string) || ''
       blocks.push('```' + lang + '\n' + nodeToText(node) + '\n```')
@@ -190,9 +193,9 @@ type RowboatMentionMatch = {
 }
 
 type RowboatBlockEdit = {
-  /** ProseMirror position of the codeBlock node */
+  /** ProseMirror position of the taskBlock node */
   nodePos: number
-  /** Existing instruction text (without @rowboat prefix) */
+  /** Existing instruction text */
   existingText: string
 }
 
@@ -349,6 +352,7 @@ export function MarkdownEditor({
         },
       }),
       ImageUploadPlaceholderExtension,
+      TaskBlockExtension,
       WikiLink.configure({
         onCreate: wikiLinks?.onCreate
           ? (path) => {
@@ -418,16 +422,6 @@ export function MarkdownEditor({
           }
         }
 
-        // Block typing inside tell-rowboat code blocks
-        const { $from } = view.state.selection
-        if ($from.parent.type.name === 'codeBlock' && ($from.parent.attrs.language as string)?.startsWith('tell-rowboat')) {
-          // Allow arrow keys and escape
-          if (!event.key.startsWith('Arrow') && event.key !== 'Escape') {
-            event.preventDefault()
-            return true
-          }
-        }
-
         return false
       },
       handleClickOn: (_view, _pos, node, nodePos, event) => {
@@ -436,17 +430,14 @@ export function MarkdownEditor({
           wikiLinks?.onOpen?.(node.attrs.path)
           return true
         }
-        if (node.type.name === 'codeBlock' && (node.attrs.language as string)?.startsWith('tell-rowboat')) {
+        if (node.type.name === 'taskBlock') {
           event.preventDefault()
-          const rawText = node.textContent.trim()
           let instruction = ''
           try {
-            const data = JSON.parse(rawText)
+            const data = JSON.parse(node.attrs.data || '{}')
             instruction = data.instruction || ''
           } catch {
-            // Legacy format: first line is @rowboat instruction
-            const firstLine = rawText.split('\n')[0] || ''
-            instruction = firstLine.replace(/^@rowboat:?\s*/, '')
+            instruction = ''
           }
           rowboatBlockEditRef.current = { nodePos, existingText: instruction }
           setRowboatBlockEdit({ nodePos, existingText: instruction })
@@ -703,26 +694,20 @@ export function MarkdownEditor({
     if (!editor) return
 
     if (rowboatBlockEdit) {
-      // Editing existing tell-rowboat block — replace its text content
+      // Editing existing taskBlock — update its data attribute
       const { nodePos } = rowboatBlockEdit
       const node = editor.state.doc.nodeAt(nodePos)
-      if (node && node.type.name === 'codeBlock') {
-        const from = nodePos + 1 // inside the code block
-        const to = nodePos + node.nodeSize - 1
-        // Try to preserve existing schedule data
-        let newContent = JSON.stringify({ instruction })
+      if (node && node.type.name === 'taskBlock') {
+        // Preserve existing schedule data
+        let updated: Record<string, unknown> = { instruction }
         try {
-          const existing = JSON.parse(node.textContent.trim())
-          existing.instruction = instruction
-          newContent = JSON.stringify(existing)
+          const existing = JSON.parse(node.attrs.data || '{}')
+          updated = { ...existing, instruction }
         } catch {
-          // Legacy format — just write new JSON
+          // Invalid JSON — just write new
         }
-        editor
-          .chain()
-          .focus()
-          .insertContentAt({ from, to }, newContent)
-          .run()
+        const tr = editor.state.tr.setNodeMarkup(nodePos, undefined, { data: JSON.stringify(updated) })
+        editor.view.dispatch(tr)
       }
       setRowboatBlockEdit(null)
       rowboatBlockEditRef.current = null
@@ -744,13 +729,12 @@ export function MarkdownEditor({
         console.error('[RowboatAdd] Schedule classification failed:', error)
       }
 
-      const codeBlock = `\`\`\`tell-rowboat\n${JSON.stringify(blockData)}\n\`\`\``
       editor
         .chain()
         .focus()
         .insertContentAt(
           { from: activeRowboatMention.range.from, to: activeRowboatMention.range.to },
-          codeBlock,
+          { type: 'taskBlock', attrs: { data: JSON.stringify(blockData) } },
         )
         .run()
 

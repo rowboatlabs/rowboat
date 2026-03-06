@@ -9,6 +9,7 @@ import { bus } from '../runs/bus.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
 import { createProvider } from '../models/models.js';
+import { inlineTask } from '@x/shared';
 
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const INLINE_TASK_AGENT = 'inline_task_agent';
@@ -177,7 +178,7 @@ interface InlineTask {
     instruction: string;
     hash: string;
     schedule: InlineTaskSchedule | null;
-    /** Line index of the opening ```tell-rowboat fence in the body */
+    /** Line index of the opening ```task fence in the body */
     startLine: number;
     /** Line index of the closing ``` fence */
     endLine: number;
@@ -248,6 +249,14 @@ function parseBlockContent(contentLines: string[]): { instruction: string; sched
     const raw = contentLines.join('\n').trim();
     try {
         const data = JSON.parse(raw);
+        const parsed = inlineTask.InlineTaskBlockSchema.safeParse(data);
+        if (parsed.success) {
+            return {
+                instruction: parsed.data.instruction,
+                schedule: parsed.data.schedule ? { ...parsed.data.schedule, label: parsed.data['schedule-label'] ?? '' } as InlineTaskSchedule : null,
+            };
+        }
+        // Fallback for blocks that have instruction but don't fully match schema
         if (data && typeof data === 'object' && data.instruction) {
             return {
                 instruction: data.instruction,
@@ -347,7 +356,7 @@ function findPendingTasks(body: string, taskRecords: Record<string, string | nul
     let i = 0;
     while (i < lines.length) {
         const trimmed = lines[i].trim();
-        if (trimmed.startsWith('```tell-rowboat')) {
+        if (trimmed.startsWith('```task') || trimmed.startsWith('```tell-rowboat')) {
             const startLine = i;
             i++;
             const contentLines: string[] = [];
@@ -404,7 +413,7 @@ function hasLiveTasks(body: string, taskRecords: Record<string, string | null>):
     let i = 0;
     while (i < lines.length) {
         const trimmed = lines[i].trim();
-        if (trimmed.startsWith('```tell-rowboat')) {
+        if (trimmed.startsWith('```task') || trimmed.startsWith('```tell-rowboat')) {
             i++;
             const contentLines: string[] = [];
             while (i < lines.length && lines[i].trim() !== '```') {
@@ -633,7 +642,7 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
  */
 export async function init() {
     console.log('[InlineTasks] Starting Inline Task Service...');
-    console.log(`[InlineTasks] Will check for tell-rowboat blocks every ${SYNC_INTERVAL_MS / 1000} seconds`);
+    console.log(`[InlineTasks] Will check for task blocks every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run
     await processInlineTasks();
