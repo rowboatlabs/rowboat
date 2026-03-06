@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { AlertTriangle, Loader2, Mic, Mail, MessageSquare } from "lucide-react"
+import { AlertTriangle, Loader2, Mic, Mail, MessageSquare, User } from "lucide-react"
 
 import {
   Popover,
@@ -505,6 +505,17 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
             </div>
           ) : (
             <>
+              {/* Rowboat Account */}
+              {providers.includes('rowboat') && (
+                <>
+                  <div className="px-2 py-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">Account</span>
+                  </div>
+                  {renderOAuthProvider('rowboat', 'Rowboat', <User className="size-4" />, 'Connect your Rowboat account')}
+                  <Separator className="my-2" />
+                </>
+              )}
+
               {/* Email & Calendar Section - Google */}
               {providers.includes('google') && (
                 <>
