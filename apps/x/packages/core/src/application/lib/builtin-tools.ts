@@ -13,10 +13,11 @@ import * as workspace from "../../workspace/workspace.js";
 import { IAgentsRepo } from "../../agents/repo.js";
 import { WorkDir } from "../../config/config.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
+import { composioEnabledToolsRepo } from "../../composio/enabled-tools-repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, listToolkitTools } from "../../composio/client.js";
 import { slackToolCatalog } from "../assistant/skills/slack/tool-catalog.js";
 import type { ToolContext } from "./exec-tool.js";
-import { generateText } from "ai";
+import { generateText, jsonSchema } from "ai";
 import { createProvider } from "../../models/models.js";
 import { IModelConfigRepo } from "../../models/repo.js";
 // Parser libraries are loaded dynamically inside parseFile.execute()
@@ -1478,3 +1479,76 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 };
+
+// ============================================================================
+// Dynamic Composio Tool Registration
+// ============================================================================
+
+const COMPOSIO_TOOL_PREFIX = 'composio-';
+
+/**
+ * Unregister all dynamically registered Composio tools
+ */
+function unregisterComposioTools(): void {
+    for (const key of Object.keys(BuiltinTools)) {
+        if (key.startsWith(COMPOSIO_TOOL_PREFIX)) {
+            delete BuiltinTools[key];
+        }
+    }
+}
+
+/**
+ * Register enabled Composio tools as builtin tools.
+ * Each enabled tool gets a generic execute function that routes
+ * to the Composio API via the connected account.
+ */
+function registerComposioTools(): void {
+    const enabledTools = composioEnabledToolsRepo.getAll();
+
+    for (const [slug, tool] of Object.entries(enabledTools)) {
+        const toolKey = `${COMPOSIO_TOOL_PREFIX}${slug}`;
+        const toolkitSlug = tool.toolkitSlug;
+
+        const inputParams = tool.inputParameters ?? { type: 'object', properties: {} };
+
+        BuiltinTools[toolKey] = {
+            description: `[${tool.toolkitSlug}] ${tool.description}`,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            inputSchema: jsonSchema({
+                type: 'object',
+                properties: (inputParams.properties ?? {}) as any,
+                ...(inputParams.required ? { required: inputParams.required } : {}),
+            } as any) as unknown as ZodType,
+            execute: async (input: Record<string, unknown>) => {
+                const account = composioAccountsRepo.getAccount(toolkitSlug);
+                if (!account || account.status !== 'ACTIVE') {
+                    return {
+                        success: false,
+                        error: `Toolkit "${toolkitSlug}" is not connected. Please connect it in Settings > Tools Library.`,
+                    };
+                }
+                return executeComposioAction(slug, account.id, input);
+            },
+            isAvailable: async () => {
+                return isComposioConfigured() && composioAccountsRepo.isConnected(toolkitSlug);
+            },
+        };
+    }
+
+    const count = Object.keys(enabledTools).length;
+    if (count > 0) {
+        console.log(`[Composio] Registered ${count} dynamic tool(s)`);
+    }
+}
+
+/**
+ * Refresh dynamic Composio tools by unregistering all and re-registering from the repo.
+ * Called after enabling/disabling tools or disconnecting a toolkit.
+ */
+export function refreshComposioTools(): void {
+    unregisterComposioTools();
+    registerComposioTools();
+}
+
+// Register on module load
+refreshComposioTools();

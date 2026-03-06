@@ -46,8 +46,10 @@ export const ZToolkit = z.object({
     name: z.string(),
     meta: ZToolkitMeta,
     no_auth: z.boolean(),
-    auth_schemes: z.array(ZAuthScheme),
-    composio_managed_auth_schemes: z.array(ZAuthScheme),
+    // Use z.string() instead of ZAuthScheme to be resilient against
+    // new auth types added by the Composio API over time.
+    auth_schemes: z.array(z.string()),
+    composio_managed_auth_schemes: z.array(z.string()),
 });
 
 /**

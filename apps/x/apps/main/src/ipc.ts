@@ -443,6 +443,22 @@ export function setupIpcHandlers() {
     'composio:execute-action': async (_event, args) => {
       return composioHandler.executeAction(args.actionSlug, args.toolkitSlug, args.input);
     },
+    // Composio Tools Library handlers
+    'composio:list-toolkits': async (_event, args) => {
+      return composioHandler.listToolkits(args.cursor);
+    },
+    'composio:list-toolkit-tools': async (_event, args) => {
+      return composioHandler.listToolkitToolsDetailed(args.toolkitSlug, args.search);
+    },
+    'composio:get-enabled-tools': async () => {
+      return composioHandler.getEnabledTools();
+    },
+    'composio:enable-tools': async (_event, args) => {
+      return composioHandler.enableTools(args.tools);
+    },
+    'composio:disable-tools': async (_event, args) => {
+      return composioHandler.disableTools(args.toolSlugs);
+    },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
       const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');

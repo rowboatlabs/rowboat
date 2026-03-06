@@ -331,6 +331,55 @@ export async function listToolkitTools(
 }
 
 /**
+ * List available tools for a toolkit with full details including input_parameters
+ */
+export async function listToolkitToolsDetailed(
+    toolkitSlug: string,
+    searchQuery: string | null = null,
+): Promise<{ items: Array<{ slug: string; name: string; description: string; toolkitSlug: string; inputParameters: { type: 'object'; properties: Record<string, unknown>; required?: string[] } }> }> {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+        throw new Error('Composio API key not configured');
+    }
+
+    const url = new URL(`${BASE_URL}/tools`);
+    url.searchParams.set('toolkit_slug', toolkitSlug);
+    url.searchParams.set('limit', '200');
+    if (searchQuery) {
+        url.searchParams.set('search', searchQuery);
+    }
+
+    console.log(`[Composio] Listing tools (detailed) for toolkit: ${toolkitSlug}`);
+
+    const response = await fetch(url.toString(), {
+        headers: { "x-api-key": apiKey },
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to list tools: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json() as { items?: Array<Record<string, unknown>> };
+
+    return {
+        items: (data.items || []).map((item) => {
+            const inputParams = item.input_parameters as Record<string, unknown> | undefined;
+            return {
+                slug: String(item.slug ?? ''),
+                name: String(item.name ?? ''),
+                description: String(item.description ?? ''),
+                toolkitSlug,
+                inputParameters: {
+                    type: 'object' as const,
+                    properties: (inputParams?.properties as Record<string, unknown>) ?? {},
+                    required: Array.isArray(inputParams?.required) ? inputParams.required as string[] : undefined,
+                },
+            };
+        }),
+    };
+}
+
+/**
  * Execute a tool action using Composio SDK
  */
 export async function executeAction(

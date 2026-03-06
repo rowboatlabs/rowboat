@@ -2,7 +2,10 @@ import { shell, BrowserWindow } from 'electron';
 import { createAuthServer } from './auth-server.js';
 import * as composioClient from '@x/core/dist/composio/client.js';
 import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
+import { composioEnabledToolsRepo } from '@x/core/dist/composio/enabled-tools-repo.js';
+import type { EnabledTool } from '@x/core/dist/composio/enabled-tools-repo.js';
 import type { LocalConnectedAccount } from '@x/core/dist/composio/types.js';
+import { refreshComposioTools } from '@x/core/dist/application/lib/builtin-tools.js';
 
 const REDIRECT_URI = 'http://localhost:8081/oauth/callback';
 
@@ -249,11 +252,16 @@ export async function disconnect(toolkitSlug: string): Promise<{ success: boolea
             // Delete local record
             composioAccountsRepo.deleteAccount(toolkitSlug);
         }
+        // Clean up enabled tools for this toolkit
+        composioEnabledToolsRepo.disableAllForToolkit(toolkitSlug);
+        refreshComposioTools();
         return { success: true };
     } catch (error) {
         console.error('[Composio] Disconnect failed:', error);
         // Still delete local record even if API call fails
         composioAccountsRepo.deleteAccount(toolkitSlug);
+        composioEnabledToolsRepo.disableAllForToolkit(toolkitSlug);
+        refreshComposioTools();
         return { success: true };
     }
 }
@@ -293,4 +301,96 @@ export async function executeAction(
             error: error instanceof Error ? error.message : 'Unknown error',
         };
     }
+}
+
+/**
+ * List available Composio toolkits
+ */
+export async function listToolkits(cursor?: string): Promise<{
+    items: Array<{
+        slug: string;
+        name: string;
+        meta: { description: string; logo: string; tools_count: number; triggers_count: number };
+        no_auth: boolean;
+        auth_schemes: string[];
+        composio_managed_auth_schemes: string[];
+    }>;
+    nextCursor: string | null;
+    totalItems: number;
+}> {
+    const result = await composioClient.listToolkits(cursor || null);
+    return {
+        items: result.items,
+        nextCursor: result.next_cursor,
+        totalItems: result.total_items,
+    };
+}
+
+/**
+ * List tools for a toolkit with full details
+ */
+export async function listToolkitToolsDetailed(toolkitSlug: string, search?: string): Promise<{
+    items: Array<{
+        slug: string;
+        name: string;
+        description: string;
+        toolkitSlug: string;
+        inputParameters?: { type?: string; properties?: Record<string, unknown>; required?: string[] };
+    }>;
+}> {
+    return composioClient.listToolkitToolsDetailed(toolkitSlug, search || null);
+}
+
+/**
+ * Get all enabled tools
+ */
+export function getEnabledTools(): {
+    tools: Record<string, { slug: string; name: string; description: string; toolkitSlug: string }>;
+} {
+    const all = composioEnabledToolsRepo.getAll();
+    const tools: Record<string, { slug: string; name: string; description: string; toolkitSlug: string }> = {};
+    for (const [slug, tool] of Object.entries(all)) {
+        tools[slug] = {
+            slug: tool.slug,
+            name: tool.name,
+            description: tool.description,
+            toolkitSlug: tool.toolkitSlug,
+        };
+    }
+    return { tools };
+}
+
+/**
+ * Enable specific tools from a toolkit
+ */
+export function enableTools(tools: Array<{
+    slug: string;
+    name: string;
+    description: string;
+    toolkitSlug: string;
+    inputParameters?: { type?: string; properties?: Record<string, unknown>; required?: string[] };
+}>): { success: boolean } {
+    const enabledTools: EnabledTool[] = tools.map(t => ({
+        slug: t.slug,
+        name: t.name,
+        description: t.description,
+        toolkitSlug: t.toolkitSlug,
+        inputParameters: {
+            type: 'object' as const,
+            properties: t.inputParameters?.properties ?? {},
+            required: t.inputParameters?.required,
+        },
+    }));
+    composioEnabledToolsRepo.enableBatch(enabledTools);
+    refreshComposioTools();
+    return { success: true };
+}
+
+/**
+ * Disable specific tools
+ */
+export function disableTools(toolSlugs: string[]): { success: boolean } {
+    composioEnabledToolsRepo.disableBatch(toolSlugs);
+    refreshComposioTools();
+    return { success: true };
 }

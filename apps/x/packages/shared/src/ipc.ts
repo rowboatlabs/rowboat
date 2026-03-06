@@ -362,6 +362,81 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // Composio Tools Library channels
+  'composio:list-toolkits': {
+    req: z.object({
+      cursor: z.string().optional(),
+    }),
+    res: z.object({
+      items: z.array(z.object({
+        slug: z.string(),
+        name: z.string(),
+        meta: z.object({
+          description: z.string(),
+          logo: z.string(),
+          tools_count: z.number(),
+          triggers_count: z.number(),
+        }),
+        no_auth: z.boolean(),
+        auth_schemes: z.array(z.string()),
+        composio_managed_auth_schemes: z.array(z.string()),
+      })),
+      nextCursor: z.string().nullable(),
+      totalItems: z.number(),
+    }),
+  },
+  'composio:list-toolkit-tools': {
+    req: z.object({
+      toolkitSlug: z.string(),
+      search: z.string().optional(),
+    }),
+    res: z.object({
+      items: z.array(z.object({
+        slug: z.string(),
+        name: z.string(),
+        description: z.string(),
+        toolkitSlug: z.string(),
+        inputParameters: z.object({
+          type: z.string().optional(),
+          properties: z.record(z.string(), z.unknown()).optional(),
+          required: z.array(z.string()).optional(),
+        }).optional(),
+      })),
+    }),
+  },
+  'composio:get-enabled-tools': {
+    req: z.null(),
+    res: z.object({
+      tools: z.record(z.string(), z.object({
+        slug: z.string(),
+        name: z.string(),
+        description: z.string(),
+        toolkitSlug: z.string(),
+      })),
+    }),
+  },
+  'composio:enable-tools': {
+    req: z.object({
+      tools: z.array(z.object({
+        slug: z.string(),
+        name: z.string(),
+        description: z.string(),
+        toolkitSlug: z.string(),
+        inputParameters: z.object({
+          type: z.string().optional(),
+          properties: z.record(z.string(), z.unknown()).optional(),
+          required: z.array(z.string()).optional(),
+        }).optional(),
+      })),
+    }),
+    res: z.object({ success: z.boolean() }),
+  },
+  'composio:disable-tools': {
+    req: z.object({
+      toolSlugs: z.array(z.string()),
+    }),
+    res: z.object({ success: z.boolean() }),
+  },
   // Agent schedule channels
   'agent-schedule:getConfig': {
     req: z.null(),

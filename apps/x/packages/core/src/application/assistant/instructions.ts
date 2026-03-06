@@ -1,8 +1,55 @@
 import { skillCatalog } from "./skills/index.js";
 import { WorkDir as BASE_DIR } from "../../config/config.js";
 import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js";
+import { composioEnabledToolsRepo } from "../../composio/enabled-tools-repo.js";
+import { composioAccountsRepo } from "../../composio/repo.js";
+import { isConfigured as isComposioConfigured } from "../../composio/client.js";
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
+
+/**
+ * Generate dynamic instructions section for Composio tools.
+ * Returns empty string if no tools are enabled.
+ */
+function getComposioToolsPrompt(): string {
+    if (!isComposioConfigured()) return '';
+
+    const enabledTools = composioEnabledToolsRepo.getAll();
+    const toolEntries = Object.values(enabledTools);
+    if (toolEntries.length === 0) return '';
+
+    // Group tools by toolkit
+    const byToolkit: Record<string, Array<{ slug: string; name: string; description: string }>> = {};
+    for (const tool of toolEntries) {
+        if (!byToolkit[tool.toolkitSlug]) {
+            byToolkit[tool.toolkitSlug] = [];
+        }
+        byToolkit[tool.toolkitSlug].push(tool);
+    }
+
+    // Check which toolkits are connected
+    const connectedToolkits = new Set(composioAccountsRepo.getConnectedToolkits());
+
+    let prompt = `\n## Composio Integration Tools\n\n`;
+    prompt += `You have access to external service integrations via Composio. These tools are prefixed with \`composio-\` and connect to third-party services on the user's behalf. The user has enabled these tools in Settings > Tools Library.\n\n`;
+    prompt += `**How to use Composio tools:**\n`;
+    prompt += `- Each tool is named \`composio-{ACTION_SLUG}\` (e.g., \`composio-GMAIL_SEND_EMAIL\`)\n`;
+    prompt += `- Call them like any other builtin tool — pass the required parameters and they execute via the connected account\n`;
+    prompt += `- If a tool returns an error about the toolkit not being connected, inform the user they need to connect it in Settings > Tools Library\n`;
+    prompt += `- Always confirm with the user before taking actions that send messages, create items, or modify data in external services\n\n`;
+
+    for (const [toolkitSlug, tools] of Object.entries(byToolkit)) {
+        const isConnected = connectedToolkits.has(toolkitSlug);
+        const statusBadge = isConnected ? '(Connected)' : '(Not Connected)';
+        prompt += `### ${toolkitSlug.charAt(0).toUpperCase() + toolkitSlug.slice(1)} ${statusBadge}\n`;
+        for (const tool of tools) {
+            prompt += `- \`composio-${tool.slug}\` — ${tool.description}\n`;
+        }
+        prompt += `\n`;
+    }
+
+    return prompt;
+}
 
 export const CopilotInstructions = `You are Rowboat Copilot - an AI assistant for everyday work. You help users with anything they want. For instance, drafting emails, prepping for meetings, tracking projects, or answering questions - with memory that compounds from their emails, calendar, and notes. Everything runs locally on the user's machine. The nerdy coworker who remembers everything.
 
@@ -184,6 +231,7 @@ ${runtimeContextPrompt}
 - \`loadSkill\` - Skill loading
 - \`slack-checkConnection\`, \`slack-listAvailableTools\`, \`slack-executeAction\` - Slack integration (requires Slack to be connected via Composio). Use \`slack-listAvailableTools\` first to discover available tool slugs, then \`slack-executeAction\` to execute them.
 - \`web-search\` and \`research-search\` - Web and research search tools (available when configured). **You MUST load the \`web-search\` skill before using either of these tools.** It tells you which tool to pick and how many searches to do.
+- **Composio tools** (\`composio-*\`) — External service integrations enabled by the user in Settings > Tools Library. These connect to third-party apps like Gmail, GitHub, Linear, Notion, etc. See the "Composio Integration Tools" section below for available tools.
 
 **Prefer these tools whenever possible** — they work instantly with zero friction. For file operations inside \`~/.rowboat/\`, always use these instead of \`executeCommand\`.
 
@@ -223,3 +271,13 @@ This renders as an interactive card in the UI that the user can click to open th
 **IMPORTANT:** Only use filepath blocks for files that already exist. The card is clickable and opens the file, so it must point to a real file. If you are proposing a path for a file that hasn't been created yet (e.g., "Shall I save it at ~/Documents/report.pdf?"), use inline code (\`~/Documents/report.pdf\`) instead of a filepath block. Use the filepath block only after the file has been written/created successfully.
 
 Never output raw file paths in plain text when they could be wrapped in a filepath block — unless the file does not exist yet.`;
+
+/**
+ * Build full copilot instructions with dynamic Composio tools section.
+ * Called each time the agent is loaded to reflect currently enabled tools.
+ */
+export function buildCopilotInstructions(): string {
+    const composioPrompt = getComposioToolsPrompt();
+    if (!composioPrompt) return CopilotInstructions;
+    return CopilotInstructions + '\n' + composioPrompt;
+}
