@@ -181,6 +181,7 @@ import { WikiLink } from '@/extensions/wiki-link'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command'
 import { ensureMarkdownExtension, normalizeWikiPath, wikiLabel } from '@/lib/wiki-links'
+import { extractAllFrontmatterValues, buildFrontmatter } from '@/lib/frontmatter'
 import { RowboatMentionPopover } from './rowboat-mention-popover'
 import '@/styles/editor.css'
 
@@ -437,10 +438,16 @@ export function MarkdownEditor({
         }
         if (node.type.name === 'codeBlock' && (node.attrs.language as string)?.startsWith('tell-rowboat')) {
           event.preventDefault()
-          const rawText = node.textContent
-          // Extract just the instruction line (first line, strip @rowboat prefix)
-          const firstLine = rawText.split('\n')[0] || ''
-          const instruction = firstLine.replace(/^@rowboat:?\s*/, '')
+          const rawText = node.textContent.trim()
+          let instruction = ''
+          try {
+            const data = JSON.parse(rawText)
+            instruction = data.instruction || ''
+          } catch {
+            // Legacy format: first line is @rowboat instruction
+            const firstLine = rawText.split('\n')[0] || ''
+            instruction = firstLine.replace(/^@rowboat:?\s*/, '')
+          }
           rowboatBlockEditRef.current = { nodePos, existingText: instruction }
           setRowboatBlockEdit({ nodePos, existingText: instruction })
           return true
@@ -702,10 +709,19 @@ export function MarkdownEditor({
       if (node && node.type.name === 'codeBlock') {
         const from = nodePos + 1 // inside the code block
         const to = nodePos + node.nodeSize - 1
+        // Try to preserve existing schedule data
+        let newContent = JSON.stringify({ instruction })
+        try {
+          const existing = JSON.parse(node.textContent.trim())
+          existing.instruction = instruction
+          newContent = JSON.stringify(existing)
+        } catch {
+          // Legacy format — just write new JSON
+        }
         editor
           .chain()
           .focus()
-          .insertContentAt({ from, to }, `@rowboat ${instruction}`)
+          .insertContentAt({ from, to }, newContent)
           .run()
       }
       setRowboatBlockEdit(null)
@@ -716,20 +732,19 @@ export function MarkdownEditor({
 
     if (activeRowboatMention) {
       // Classify schedule intent for new blocks
-      let langSuffix = ''
-      let labelLine = ''
+      const blockData: Record<string, unknown> = { instruction }
       try {
         const result = await window.ipc.invoke('inline-task:classifySchedule', { instruction })
         if (result.schedule) {
           const { label, ...rest } = result.schedule
-          langSuffix = ` ${JSON.stringify(rest)}`
-          labelLine = `\nschedule: ${label}`
+          blockData.schedule = rest
+          blockData['schedule-label'] = label
         }
       } catch (error) {
         console.error('[RowboatAdd] Schedule classification failed:', error)
       }
 
-      const codeBlock = `\`\`\`tell-rowboat${langSuffix}\n@rowboat ${instruction}${labelLine}\n\`\`\``
+      const codeBlock = `\`\`\`tell-rowboat\n${JSON.stringify(blockData)}\n\`\`\``
       editor
         .chain()
         .focus()
@@ -738,10 +753,18 @@ export function MarkdownEditor({
           codeBlock,
         )
         .run()
+
+      // Mark note as live
+      if (onFrontmatterChange) {
+        const fields = extractAllFrontmatterValues(frontmatter ?? null)
+        fields['live_note'] = 'true'
+        onFrontmatterChange(buildFrontmatter(fields))
+      }
+
       setActiveRowboatMention(null)
       setRowboatAnchorTop(null)
     }
-  }, [editor, activeRowboatMention, rowboatBlockEdit])
+  }, [editor, activeRowboatMention, rowboatBlockEdit, frontmatter, onFrontmatterChange])
 
   const handleRowboatRemove = useCallback(() => {
     if (!editor || !rowboatBlockEdit) return

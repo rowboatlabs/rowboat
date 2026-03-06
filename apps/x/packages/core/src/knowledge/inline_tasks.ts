@@ -240,20 +240,45 @@ function buildTaskRecordsList(records: Record<string, string | null>): string[] 
 }
 
 /**
- * Parse the schedule JSON from a `schedule: {...}` line.
+ * Parse the tell-rowboat block content (JSON format).
+ * Returns { instruction, schedule } or null if not valid JSON.
+ * Also supports legacy @rowboat format.
  */
-function parseScheduleLine(line: string): InlineTaskSchedule | null {
-    const match = line.match(/^schedule:\s*(.+)$/);
-    if (!match) return null;
+function parseBlockContent(contentLines: string[]): { instruction: string; schedule: InlineTaskSchedule | null } | null {
+    const raw = contentLines.join('\n').trim();
     try {
-        const obj = JSON.parse(match[1]);
-        if (obj && typeof obj === 'object' && obj.type) {
-            return obj as InlineTaskSchedule;
+        const data = JSON.parse(raw);
+        if (data && typeof data === 'object' && data.instruction) {
+            return {
+                instruction: data.instruction,
+                schedule: data.schedule ?? null,
+            };
         }
     } catch {
-        // Invalid JSON
+        // Legacy format: @rowboat lines + optional schedule: JSON line
     }
-    return null;
+
+    // Legacy fallback: parse @rowboat instruction and schedule: line
+    let schedule: InlineTaskSchedule | null = null;
+    const instructionLines: string[] = [];
+    for (const cl of contentLines) {
+        const schedMatch = cl.trim().match(/^schedule:\s*(.+)$/);
+        if (schedMatch) {
+            try {
+                const obj = JSON.parse(schedMatch[1]);
+                if (obj && typeof obj === 'object' && obj.type) {
+                    schedule = obj as InlineTaskSchedule;
+                }
+            } catch { /* not JSON schedule, skip */ }
+        } else if (!/^schedule-config:\s/.test(cl.trim())) {
+            instructionLines.push(cl);
+        }
+    }
+    const firstRowboatLine = instructionLines.find(l => l.trim().startsWith('@rowboat'));
+    const rawInstruction = firstRowboatLine?.trim() ?? instructionLines.join('\n').trim();
+    const instruction = rawInstruction.replace(/^@rowboat:?\s*/, '');
+    if (!instruction) return null;
+    return { instruction, schedule };
 }
 
 /**
@@ -312,23 +337,6 @@ function isScheduledTaskDue(schedule: InlineTaskSchedule, lastRunAt: string | nu
     }
 }
 
-/**
- * Parse schedule JSON from the code block header.
- * e.g. the opening fence line: tell-rowboat {"type":"cron","expression":"..."}
- */
-function parseScheduleFromHeader(headerLine: string): InlineTaskSchedule | null {
-    const match = headerLine.match(/^```tell-rowboat\s+(\{.+\})\s*$/);
-    if (!match) return null;
-    try {
-        const obj = JSON.parse(match[1]);
-        if (obj && typeof obj === 'object' && obj.type) {
-            return obj as InlineTaskSchedule;
-        }
-    } catch {
-        // Invalid JSON
-    }
-    return null;
-}
 
 /**
  * Find ```tell-rowboat code blocks in a note body and return tasks that are pending execution.
@@ -341,11 +349,6 @@ function findPendingTasks(body: string, taskRecords: Record<string, string | nul
         const trimmed = lines[i].trim();
         if (trimmed.startsWith('```tell-rowboat')) {
             const startLine = i;
-            // Parse schedule from header (if present)
-            const schedule = parseScheduleFromHeader(trimmed);
-            // Also support legacy schedule: line inside block
-            let legacySchedule: InlineTaskSchedule | null = null;
-
             i++;
             const contentLines: string[] = [];
             while (i < lines.length && lines[i].trim() !== '```') {
@@ -354,35 +357,17 @@ function findPendingTasks(body: string, taskRecords: Record<string, string | nul
             }
             const endLine = i; // line with closing ```
 
-            // Extract instruction (first @rowboat line), skip label/schedule lines
-            const instructionLines: string[] = [];
-            for (const cl of contentLines) {
-                const parsed = parseScheduleLine(cl.trim());
-                if (parsed) {
-                    legacySchedule = parsed;
-                } else {
-                    instructionLines.push(cl);
-                }
-            }
-
-            // Use the first @rowboat line as the instruction
-            const firstRowboatLine = instructionLines.find(l => l.trim().startsWith('@rowboat'));
-            const rawInstruction = firstRowboatLine?.trim() ?? instructionLines.join('\n').trim();
-            const instruction = rawInstruction.replace(/^@rowboat:?\s*/, '');
-
-            const effectiveSchedule = schedule ?? legacySchedule;
-
-            if (instruction) {
+            const parsed = parseBlockContent(contentLines);
+            if (parsed) {
+                const { instruction, schedule } = parsed;
                 const hash = hashInstruction(instruction);
                 const lastRunAt = taskRecords[hash] ?? null;
 
-                if (effectiveSchedule) {
-                    // Scheduled task — check if due
-                    if (isScheduledTaskDue(effectiveSchedule, lastRunAt)) {
-                        tasks.push({ instruction, hash, schedule: effectiveSchedule, startLine, endLine });
+                if (schedule) {
+                    if (isScheduledTaskDue(schedule, lastRunAt)) {
+                        tasks.push({ instruction, hash, schedule, startLine, endLine });
                     }
                 } else {
-                    // One-time task — pending if not in records
                     if (!(hash in taskRecords)) {
                         tasks.push({ instruction, hash, schedule: null, startLine, endLine });
                     }
@@ -405,20 +390,54 @@ function insertResultBelow(body: string, endLine: number, result: string): strin
     return lines.join('\n');
 }
 
+
 /**
- * Mark a completed one-time task by adding a ✓ prefix to the @rowboat instruction line.
+ * Determine if a note has any "live" tell-rowboat tasks.
+ * A task is live if:
+ *   - It's a one-time task that hasn't been completed yet
+ *   - It's a scheduled task whose endDate hasn't passed (or has no endDate)
+ *   - It's a scheduled task before its startDate (will run in the future)
  */
-function markBlockDone(body: string, startLine: number, endLine: number): string {
+function hasLiveTasks(body: string, taskRecords: Record<string, string | null>): boolean {
+    const now = new Date();
     const lines = body.split('\n');
-    for (let i = startLine + 1; i < endLine; i++) {
-        const line = lines[i];
-        if (line.trimStart().startsWith('schedule:') || line.includes('✓')) continue;
-        if (line.trim()) {
-            lines[i] = line.replace('@rowboat', '✓ @rowboat');
-            break;
+    let i = 0;
+    while (i < lines.length) {
+        const trimmed = lines[i].trim();
+        if (trimmed.startsWith('```tell-rowboat')) {
+            i++;
+            const contentLines: string[] = [];
+            while (i < lines.length && lines[i].trim() !== '```') {
+                contentLines.push(lines[i]);
+                i++;
+            }
+
+            const parsed = parseBlockContent(contentLines);
+            if (!parsed) { i++; continue; }
+
+            const { instruction, schedule } = parsed;
+            const hash = hashInstruction(instruction);
+
+            if (schedule) {
+                if (schedule.type === 'cron' || schedule.type === 'window') {
+                    const endDate = schedule.endDate;
+                    if (!endDate || now <= new Date(endDate)) {
+                        return true;
+                    }
+                } else if (schedule.type === 'once') {
+                    if (!(hash in taskRecords)) {
+                        return true;
+                    }
+                }
+            } else {
+                if (!(hash in taskRecords)) {
+                    return true;
+                }
+            }
         }
+        i++;
     }
-    return lines.join('\n');
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -426,7 +445,7 @@ function markBlockDone(body: string, startLine: number, endLine: number): string
 // ---------------------------------------------------------------------------
 
 async function processInlineTasks(): Promise<void> {
-    console.log('[InlineTasks] Checking for tell-rowboat blocks...');
+    console.log('[InlineTasks] Checking live notes...');
 
     if (!fs.existsSync(KNOWLEDGE_DIR)) {
         console.log('[InlineTasks] Knowledge directory not found');
@@ -444,17 +463,32 @@ async function processInlineTasks(): Promise<void> {
             continue;
         }
 
-        // Quick check — skip files with no tell-rowboat block
-        if (!content.includes('```tell-rowboat')) continue;
-
         const { raw, body } = splitFrontmatter(content);
         const fields = extractAllFrontmatterValues(raw);
+
+        // Only process files marked as live
+        if (fields['live_note'] !== 'true') continue;
 
         // Parse task records (hash → lastRunAt)
         const taskRecords = parseTaskRecords(fields);
 
         const tasks = findPendingTasks(body, taskRecords);
-        if (tasks.length === 0) continue;
+
+        if (tasks.length === 0) {
+            // No pending tasks — check if still live, update if not
+            const live = hasLiveTasks(body, taskRecords);
+            if (!live) {
+                fields['live_note'] = 'false';
+                const newRaw = buildFrontmatter(fields);
+                const newContent = joinFrontmatter(newRaw, body);
+                try {
+                    fs.writeFileSync(filePath, newContent, 'utf-8');
+                    const rel = path.relative(WorkDir, filePath);
+                    console.log(`[InlineTasks] Marked ${rel} as no longer live`);
+                } catch { /* ignore */ }
+            }
+            continue;
+        }
 
         const relativePath = path.relative(WorkDir, filePath);
         console.log(`[InlineTasks] Found ${tasks.length} pending task(s) in ${relativePath}`);
@@ -487,10 +521,6 @@ async function processInlineTasks(): Promise<void> {
 
                 const result = await extractAgentResponse(run.id);
                 if (result) {
-                    // Strike through one-time tasks so user knows it's done
-                    if (!task.schedule) {
-                        currentBody = markBlockDone(currentBody, task.startLine, task.endLine);
-                    }
                     currentBody = insertResultBelow(currentBody, task.endLine, result);
                     // Record with current timestamp
                     taskRecords[task.hash] = new Date().toISOString();
@@ -504,8 +534,10 @@ async function processInlineTasks(): Promise<void> {
             }
         }
 
-        // Update frontmatter with task records
+        // Update frontmatter with task records and live_note status
         fields['rowboat_tasks'] = buildTaskRecordsList(taskRecords);
+        const live = hasLiveTasks(currentBody, taskRecords);
+        fields['live_note'] = live ? 'true' : 'false';
         const newRaw = buildFrontmatter(fields);
         const newContent = joinFrontmatter(newRaw, currentBody);
 
@@ -536,6 +568,9 @@ export async function classifySchedule(instruction: string): Promise<InlineTaskS
 
     const now = new Date();
     const defaultEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const localNow = now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'long' });
+    const localEnd = defaultEnd.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'long' });
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const nowISO = now.toISOString();
     const defaultEndISO = defaultEnd.toISOString();
 
@@ -559,7 +594,10 @@ Schedule types:
 3. "once" — run once at a specific future time. Return: {"type":"once","runAt":"<ISO 8601 datetime>","label":"<human readable>"}
    Use when the user says "tomorrow at 3pm", "next Friday", etc. No startDate/endDate for once.
 
-Current date/time: ${nowISO}
+Current local time: ${localNow}
+Timezone: ${tz}
+Current UTC time: ${nowISO}
+Default end time (local): ${localEnd}
 
 Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
 
@@ -570,7 +608,10 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
             prompt: instruction,
         });
 
-        const text = result.text.trim();
+        let text = result.text.trim();
+        console.log('[classifySchedule] LLM response:', text);
+        // Strip markdown code fences if the LLM wraps the JSON
+        text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
         if (text === 'null' || text === '') {
             return null;
         }
