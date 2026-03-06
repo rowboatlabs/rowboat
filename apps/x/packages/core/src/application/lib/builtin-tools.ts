@@ -19,6 +19,8 @@ import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
 import { createProvider } from "../../models/models.js";
 import { IModelConfigRepo } from "../../models/repo.js";
+import { isSignedIn } from "../../account/account.js";
+import { getGatewayProvider } from "../../models/gateway.js";
 // Parser libraries are loaded dynamically inside parseFile.execute()
 // to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
 // Import paths are computed so esbuild cannot statically resolve them.
@@ -861,7 +863,9 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 // Resolve model config from DI container
                 const modelConfigRepo = container.resolve<IModelConfigRepo>('modelConfigRepo');
                 const modelConfig = await modelConfigRepo.getConfig();
-                const provider = createProvider(modelConfig.provider);
+                const provider = await isSignedIn()
+                    ? await getGatewayProvider()
+                    : createProvider(modelConfig.provider);
                 const model = provider.languageModel(modelConfig.model);
 
                 const userPrompt = prompt || 'Convert this file to well-structured markdown.';

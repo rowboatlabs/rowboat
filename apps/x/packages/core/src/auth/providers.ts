@@ -1,6 +1,5 @@
 import { z } from 'zod';
-
-const SUPABASE_PROJECT_URL = 'http://127.0.0.1:54321';
+import { SUPABASE_PROJECT_URL } from '../config/env.js';
 
 /**
  * Discovery configuration - how to get OAuth endpoints
@@ -56,7 +55,7 @@ const providerConfigs: ProviderConfig = {
   rowboat: {
     discovery: {
       mode: 'issuer',
-      issuer: `${SUPABASE_PROJECT_URL}/.well-known/oauth-authorization-server`,
+      issuer: `${SUPABASE_PROJECT_URL}/auth/v1/.well-known/oauth-authorization-server`,
     },
     client: {
       mode: 'dcr',

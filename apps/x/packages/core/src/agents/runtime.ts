@@ -16,6 +16,8 @@ import { isBlocked, extractCommandNames } from "../application/lib/command-execu
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createProvider } from "../models/models.js";
+import { isSignedIn } from "../account/account.js";
+import { getGatewayProvider } from "../models/gateway.js";
 import { IAgentsRepo } from "./repo.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { IBus } from "../application/lib/bus.js";
@@ -705,7 +707,9 @@ export async function* streamAgent({
     const tools = await buildTools(agent);
 
     // set up provider + model
-    const provider = createProvider(modelConfig.provider);
+    const provider = await isSignedIn()
+        ? await getGatewayProvider()
+        : createProvider(modelConfig.provider);
     const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep"];
     const modelId = (knowledgeGraphAgents.includes(state.agentName!) && modelConfig.knowledgeGraphModel)
         ? modelConfig.knowledgeGraphModel
