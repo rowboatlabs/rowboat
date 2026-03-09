@@ -63,6 +63,13 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
                 baseURL,
                 headers,
             });
+        case "minimax":
+            return createOpenAICompatible({
+                name: "minimax",
+                apiKey,
+                baseURL: baseURL || "https://api.minimax.io/v1",
+                headers,
+            });
         default:
             throw new Error(`Unsupported provider flavor: ${config.flavor}`);
     }
