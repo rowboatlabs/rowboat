@@ -325,6 +325,13 @@ export function MarkdownEditor({
   const [rowboatAnchorTop, setRowboatAnchorTop] = useState<{ top: number; left: number; width: number } | null>(null)
   const rowboatBlockEditRef = useRef<RowboatBlockEdit | null>(null)
 
+  // @ mention autocomplete state (analogous to wiki-link state)
+  const [activeAtMention, setActiveAtMention] = useState<{ range: { from: number; to: number }; query: string } | null>(null)
+  const [atAnchorPosition, setAtAnchorPosition] = useState<{ left: number; top: number } | null>(null)
+  const [atCommandValue, setAtCommandValue] = useState<string>('')
+  const atKeyStateRef = useRef<{ open: boolean; options: string[]; value: string }>({ open: false, options: [], value: '' })
+  const handleSelectAtMentionRef = useRef<(value: string) => void>(() => {})
+
   // Keep ref in sync with state for the plugin to access
   selectionHighlightRef.current = selectionHighlight
 
@@ -492,6 +499,39 @@ export function MarkdownEditor({
           }
         }
 
+        // @ mention autocomplete keyboard handling
+        const atState = atKeyStateRef.current
+        if (atState.open) {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            event.stopPropagation()
+            setActiveAtMention(null)
+            setAtAnchorPosition(null)
+            setAtCommandValue('')
+            return true
+          }
+
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            if (atState.options.length === 0) return true
+            event.preventDefault()
+            event.stopPropagation()
+            const currentIndex = Math.max(0, atState.options.indexOf(atState.value))
+            const delta = event.key === 'ArrowDown' ? 1 : -1
+            const nextIndex = (currentIndex + delta + atState.options.length) % atState.options.length
+            setAtCommandValue(atState.options[nextIndex])
+            return true
+          }
+
+          if (event.key === 'Enter' || event.key === 'Tab') {
+            if (atState.options.length === 0) return true
+            event.preventDefault()
+            event.stopPropagation()
+            const selected = atState.options.includes(atState.value) ? atState.value : atState.options[0]
+            handleSelectAtMentionRef.current(selected)
+            return true
+          }
+        }
+
         if (preventTitleHeadingDemotion(view, event)) {
           return true
         }
@@ -645,6 +685,69 @@ export function MarkdownEditor({
     })
   }, [editor])
 
+  // Detect @ trigger for autocomplete popover (similar to [[ detection)
+  const updateAtMentionState = useCallback(() => {
+    if (!editor) return
+    const { selection } = editor.state
+    if (!selection.empty) {
+      setActiveAtMention(null)
+      setAtAnchorPosition(null)
+      return
+    }
+
+    const { $from } = selection
+    // Skip code blocks
+    if ($from.parent.type.spec.code) {
+      setActiveAtMention(null)
+      setAtAnchorPosition(null)
+      return
+    }
+    // Skip inline code marks
+    if ($from.marks().some((mark) => mark.type.spec.code)) {
+      setActiveAtMention(null)
+      setAtAnchorPosition(null)
+      return
+    }
+
+    const text = $from.parent.textBetween(0, $from.parent.content.size, '\n', '\n')
+    const textBefore = text.slice(0, $from.parentOffset)
+
+    // Find @ at a word boundary (start of line or preceded by whitespace)
+    const atMatch = textBefore.match(/(^|[\s])@([a-zA-Z0-9]*)$/)
+    if (!atMatch) {
+      setActiveAtMention(null)
+      setAtAnchorPosition(null)
+      return
+    }
+
+    const query = atMatch[2] // text after @
+
+    // If the full "@rowboat" is already typed, let updateRowboatMentionState handle it
+    if (query === 'rowboat') {
+      setActiveAtMention(null)
+      setAtAnchorPosition(null)
+      return
+    }
+
+    const atSymbolOffset = textBefore.lastIndexOf('@')
+    const matchText = textBefore.slice(atSymbolOffset)
+    const range = { from: selection.from - matchText.length, to: selection.from }
+    setActiveAtMention({ range, query })
+
+    const wrapper = wrapperRef.current
+    if (!wrapper) {
+      setAtAnchorPosition(null)
+      return
+    }
+
+    const coords = editor.view.coordsAtPos(selection.from)
+    const wrapperRect = wrapper.getBoundingClientRect()
+    setAtAnchorPosition({
+      left: coords.left - wrapperRect.left,
+      top: coords.bottom - wrapperRect.top,
+    })
+  }, [editor])
+
   useEffect(() => {
     if (!editor || !wikiLinks) return
     editor.on('update', updateWikiLinkState)
@@ -664,6 +767,16 @@ export function MarkdownEditor({
       editor.off('selectionUpdate', updateRowboatMentionState)
     }
   }, [editor, updateRowboatMentionState])
+
+  useEffect(() => {
+    if (!editor) return
+    editor.on('update', updateAtMentionState)
+    editor.on('selectionUpdate', updateAtMentionState)
+    return () => {
+      editor.off('update', updateAtMentionState)
+      editor.off('selectionUpdate', updateAtMentionState)
+    }
+  }, [editor, updateAtMentionState])
 
   // When a tell-rowboat block is clicked, compute anchor and open popover
   useEffect(() => {
@@ -852,7 +965,8 @@ export function MarkdownEditor({
 
   const handleScroll = useCallback(() => {
     updateWikiLinkState()
-  }, [updateWikiLinkState])
+    updateAtMentionState()
+  }, [updateWikiLinkState, updateAtMentionState])
 
   const showWikiPopover = Boolean(wikiLinks && activeWikiLink && anchorPosition)
   const wikiOptions = useMemo(() => {
@@ -879,6 +993,63 @@ export function MarkdownEditor({
     }
     setWikiCommandValue((prev) => (wikiOptions.includes(prev) ? prev : wikiOptions[0]))
   }, [showWikiPopover, wikiOptions])
+
+  // @ mention autocomplete options
+  const atMentionOptions = useMemo(() => [
+    { value: 'rowboat', label: '@rowboat', description: 'Research, schedule, or run tasks with AI' },
+  ], [])
+
+  const filteredAtOptions = useMemo(() => {
+    if (!activeAtMention) return []
+    const q = activeAtMention.query.toLowerCase()
+    if (!q) return atMentionOptions
+    return atMentionOptions.filter((opt) => opt.value.toLowerCase().startsWith(q))
+  }, [activeAtMention, atMentionOptions])
+
+  const atOptionValues = useMemo(() => filteredAtOptions.map((o) => o.value), [filteredAtOptions])
+  const showAtPopover = Boolean(activeAtMention && atAnchorPosition && filteredAtOptions.length > 0)
+
+  useEffect(() => {
+    atKeyStateRef.current = { open: showAtPopover, options: atOptionValues, value: atCommandValue }
+  }, [showAtPopover, atOptionValues, atCommandValue])
+
+  // Keep @ cmdk selection in sync
+  useEffect(() => {
+    if (!showAtPopover) {
+      setAtCommandValue('')
+      return
+    }
+    if (atOptionValues.length === 0) {
+      setAtCommandValue('')
+      return
+    }
+    setAtCommandValue((prev) => (atOptionValues.includes(prev) ? prev : atOptionValues[0]))
+  }, [showAtPopover, atOptionValues])
+
+  // @ mention selection handler
+  const handleSelectAtMention = useCallback((value: string) => {
+    if (!editor || !activeAtMention) return
+
+    if (value === 'rowboat') {
+      // Replace "@<partial>" with "@rowboat" — this triggers updateRowboatMentionState
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(
+          { from: activeAtMention.range.from, to: activeAtMention.range.to },
+          '@rowboat'
+        )
+        .run()
+    }
+
+    setActiveAtMention(null)
+    setAtAnchorPosition(null)
+    setAtCommandValue('')
+  }, [editor, activeAtMention])
+
+  useEffect(() => {
+    handleSelectAtMentionRef.current = handleSelectAtMention
+  }, [handleSelectAtMention])
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
@@ -964,6 +1135,51 @@ export function MarkdownEditor({
             </PopoverContent>
           </Popover>
         ) : null}
+        {/* @ mention autocomplete popover */}
+        <Popover
+          open={showAtPopover}
+          onOpenChange={(open) => {
+            if (!open) {
+              setActiveAtMention(null)
+              setAtAnchorPosition(null)
+              setAtCommandValue('')
+            }
+          }}
+        >
+          <PopoverAnchor asChild>
+            <span
+              className="wiki-link-anchor"
+              style={
+                atAnchorPosition
+                  ? { left: atAnchorPosition.left, top: atAnchorPosition.top }
+                  : undefined
+              }
+            />
+          </PopoverAnchor>
+          <PopoverContent
+            className="w-72 p-1"
+            align="start"
+            side="bottom"
+            onOpenAutoFocus={(event) => event.preventDefault()}
+          >
+            <Command shouldFilter={false} value={atCommandValue} onValueChange={setAtCommandValue}>
+              <CommandList>
+                {filteredAtOptions.map((opt) => (
+                  <CommandItem
+                    key={opt.value}
+                    value={opt.value}
+                    onSelect={() => handleSelectAtMention(opt.value)}
+                  >
+                    <div className="flex flex-col">
+                      <span className="font-medium">{opt.label}</span>
+                      <span className="text-xs text-muted-foreground">{opt.description}</span>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
         <RowboatMentionPopover
           open={Boolean((activeRowboatMention || rowboatBlockEdit) && rowboatAnchorTop)}
           anchor={rowboatAnchorTop}
