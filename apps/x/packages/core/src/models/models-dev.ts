@@ -110,7 +110,7 @@ function scoreProvider(flavor: string, id: string, name: string): number {
 
 function pickProvider(
   data: z.infer<typeof ModelsDevResponse>,
-  flavor: "openai" | "anthropic" | "google",
+  flavor: "openai" | "anthropic" | "google" | "minimax",
 ): z.infer<typeof ModelsDevProvider> | null {
   if (data[flavor]) return data[flavor];
   let best: { score: number; provider: z.infer<typeof ModelsDevProvider> } | null = null;
@@ -158,7 +158,7 @@ function normalizeModels(models: Record<string, z.infer<typeof ModelsDevModel>>)
 export async function listOnboardingModels(): Promise<{ providers: ProviderSummary[]; lastUpdated?: string }> {
   const { data, fetchedAt } = await getModelsDevData();
   const providers: ProviderSummary[] = [];
-  const flavors: Array<"openai" | "anthropic" | "google"> = ["openai", "anthropic", "google"];
+  const flavors: Array<"openai" | "anthropic" | "google" | "minimax"> = ["openai", "anthropic", "google", "minimax"];
 
   for (const flavor of flavors) {
     const provider = pickProvider(data, flavor);
