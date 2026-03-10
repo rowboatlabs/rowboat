@@ -1,4 +1,5 @@
 import { renderNoteTypesBlock } from './note_system.js';
+import { renderNoteEffectRules } from './tag_system.js';
 
 export function getRaw(): string {
   return `---
@@ -141,18 +142,7 @@ Either:
 
 **For emails, read the YAML frontmatter labels and apply these rules:**
 
-**CREATE/UPDATE notes if the email has ANY of these labels:**
-- **Relationship:** Investor, Customer, Prospect, Partner, Vendor, Candidate, Team, Advisor, Personal, Press, Community, Government
-- **Topic:** Sales, Support, Legal, Finance, Hiring, Fundraising, Event, Research
-- **Type:** Intro, Followup
-- **Action:** Action Required, Urgent, Waiting
-
-**SKIP if the email ONLY has these labels (and none from above):**
-- **Relationship:** Product
-- **Topic:** Travel, Shopping, Health, Learning
-- **Type:** Scheduling, Cold Outreach, Newsletter, Notification
-- **Filter:** Spam, Promotion, Social, Forums
-- **Action:** FYI
+${renderNoteEffectRules()}
 
 ---
 
@@ -247,22 +237,7 @@ labeled_at: "2026-02-28T12:00:00Z"
 
 ## Decision Rules
 
-Check the labels against the create/skip lists:
-
-**CREATE/UPDATE notes if ANY label matches:**
-- relationship: Investor, Customer, Prospect, Partner, Vendor, Candidate, Team, Advisor, Personal, Press, Community, Government
-- topics: Sales, Support, Legal, Finance, Hiring, Fundraising, Event, Research
-- type: Intro, Followup
-- action: Action Required, Urgent, Waiting
-
-**SKIP if labels ONLY match:**
-- relationship: Product
-- topics: Travel, Shopping, Health, Learning
-- type: Scheduling, Cold Outreach, Newsletter, Notification
-- filter: Spam, Promotion, Social, Forums
-- action: FYI
-
-**Logic:** If even one label falls in the "create" list, process the email. Only skip if ALL labels fall in the "skip" list.
+${renderNoteEffectRules()}
 
 ## Filter Decision Output
 
