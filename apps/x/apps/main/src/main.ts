@@ -17,6 +17,9 @@ import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.j
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
+import { init as initEmailLabeling } from "@x/core/dist/knowledge/label_emails.js";
+import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
+import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
@@ -169,6 +172,15 @@ app.whenReady().then(async () => {
 
   // start knowledge graph builder
   initGraphBuilder();
+
+  // start email labeling service
+  initEmailLabeling();
+
+  // start note tagging service
+  initNoteTagging();
+
+  // start inline task service (@rowboat: mentions)
+  initInlineTasks();
 
   // start background agent runner (scheduled agents)
   initAgentRunner();

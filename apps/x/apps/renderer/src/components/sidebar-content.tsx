@@ -16,6 +16,7 @@ import {
   Mic,
   Network,
   Pencil,
+  Table2,
   Plug,
   LoaderIcon,
   Settings,
@@ -101,6 +102,7 @@ type KnowledgeActions = {
   createNote: (parentPath?: string) => void
   createFolder: (parentPath?: string) => void
   openGraph: () => void
+  openBases: () => void
   expandAll: () => void
   collapseAll: () => void
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
@@ -855,6 +857,7 @@ function KnowledgeSection({
     { icon: FilePlus, label: "New Note", action: () => actions.createNote() },
     { icon: FolderPlus, label: "New Folder", action: () => actions.createFolder() },
     { icon: Network, label: "Graph View", action: () => actions.openGraph() },
+    { icon: Table2, label: "Bases", action: () => actions.openBases() },
   ]
 
   return (

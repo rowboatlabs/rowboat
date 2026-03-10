@@ -1,6 +1,6 @@
 import z from "zod";
 import container from "../di/container.js";
-import { IMessageQueue } from "../application/lib/message-queue.js";
+import { IMessageQueue, UserMessageContentType } from "../application/lib/message-queue.js";
 import { AskHumanResponseEvent, ToolPermissionRequestEvent, ToolPermissionResponseEvent, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload, AskHumanResponsePayload } from "@x/shared/dist/runs.js";
 import { IRunsRepo } from "./repo.js";
 import { IAgentRuntime } from "../agents/runtime.js";
@@ -19,7 +19,7 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
     return run;
 }
 
-export async function createMessage(runId: string, message: string): Promise<string> {
+export async function createMessage(runId: string, message: UserMessageContentType): Promise<string> {
     const queue = container.resolve<IMessageQueue>('messageQueue');
     const id = await queue.enqueue(runId, message);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');

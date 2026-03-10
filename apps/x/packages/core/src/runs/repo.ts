@@ -46,10 +46,18 @@ export class FSRunsRepo implements IRunsRepo {
                 const messageEvent = event as z.infer<typeof MessageEvent>;
                 if (messageEvent.message.role === 'user') {
                     const content = messageEvent.message.content;
-                    if (typeof content === 'string' && content.trim()) {
-                        // Clean attached-files XML and @mentions, then truncate to 100 chars
-                        const cleaned = cleanContentForTitle(content);
-                        if (!cleaned) continue; // Skip if only attached files/mentions
+                    let textContent: string | undefined;
+                    if (typeof content === 'string') {
+                        textContent = content;
+                    } else {
+                        textContent = content
+                            .filter(p => p.type === 'text')
+                            .map(p => p.text)
+                            .join('');
+                    }
+                    if (textContent && textContent.trim()) {
+                        const cleaned = cleanContentForTitle(textContent);
+                        if (!cleaned) continue;
                         return cleaned.length > 100 ? cleaned.substring(0, 100) : cleaned;
                     }
                 }
@@ -90,9 +98,17 @@ export class FSRunsRepo implements IRunsRepo {
                             if (msg.role === 'user') {
                                 // Found first user message - use as title
                                 const content = msg.content;
-                                if (typeof content === 'string' && content.trim()) {
-                                    // Clean attached-files XML and @mentions, then truncate
-                                    const cleaned = cleanContentForTitle(content);
+                                let textContent: string | undefined;
+                                if (typeof content === 'string') {
+                                    textContent = content;
+                                } else {
+                                    textContent = content
+                                        .filter(p => p.type === 'text')
+                                        .map(p => p.text)
+                                        .join('');
+                                }
+                                if (textContent && textContent.trim()) {
+                                    const cleaned = cleanContentForTitle(textContent);
                                     if (cleaned) {
                                         title = cleaned.length > 100 ? cleaned.substring(0, 100) : cleaned;
                                     }

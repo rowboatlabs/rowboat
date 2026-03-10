@@ -1,6 +1,6 @@
 import { useEditor, EditorContent, Extension, Editor } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
-import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { Decoration, DecorationSet, EditorView } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
@@ -8,6 +8,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
+import { TaskBlockExtension } from '@/extensions/task-block'
 import { Markdown } from 'tiptap-markdown'
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
 
@@ -133,6 +134,8 @@ function getMarkdownWithBlankLines(editor: Editor): string {
         })
       })
       blocks.push(listLines.join('\n'))
+    } else if (node.type === 'taskBlock') {
+      blocks.push('```task\n' + (node.attrs?.data as string || '{}') + '\n```')
     } else if (node.type === 'codeBlock') {
       const lang = (node.attrs?.language as string) || ''
       blocks.push('```' + lang + '\n' + nodeToText(node) + '\n```')
@@ -176,11 +179,25 @@ function getMarkdownWithBlankLines(editor: Editor): string {
   return result
 }
 import { EditorToolbar } from './editor-toolbar'
+import { FrontmatterProperties } from './frontmatter-properties'
 import { WikiLink } from '@/extensions/wiki-link'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command'
 import { ensureMarkdownExtension, normalizeWikiPath, wikiLabel } from '@/lib/wiki-links'
+import { extractAllFrontmatterValues, buildFrontmatter } from '@/lib/frontmatter'
+import { RowboatMentionPopover } from './rowboat-mention-popover'
 import '@/styles/editor.css'
+
+type RowboatMentionMatch = {
+  range: { from: number; to: number }
+}
+
+type RowboatBlockEdit = {
+  /** ProseMirror position of the taskBlock node */
+  nodePos: number
+  /** Existing instruction text */
+  existingText: string
+}
 
 type WikiLinkConfig = {
   files: string[]
@@ -192,9 +209,16 @@ type WikiLinkConfig = {
 interface MarkdownEditorProps {
   content: string
   onChange: (markdown: string) => void
+  onPrimaryHeadingCommit?: () => void
+  preserveUntitledTitleHeading?: boolean
   placeholder?: string
   wikiLinks?: WikiLinkConfig
   onImageUpload?: (file: File) => Promise<string | null>
+  editorSessionKey?: number
+  onHistoryHandlersChange?: (handlers: { undo: () => boolean; redo: () => boolean } | null) => void
+  editable?: boolean
+  frontmatter?: string | null
+  onFrontmatterChange?: (raw: string | null) => void
 }
 
 type WikiLinkMatch = {
@@ -275,9 +299,16 @@ const TabIndentExtension = Extension.create({
 export function MarkdownEditor({
   content,
   onChange,
+  onPrimaryHeadingCommit,
+  preserveUntitledTitleHeading = false,
   placeholder = 'Start writing...',
   wikiLinks,
   onImageUpload,
+  editorSessionKey = 0,
+  onHistoryHandlersChange,
+  editable = true,
+  frontmatter,
+  onFrontmatterChange,
 }: MarkdownEditorProps) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -286,8 +317,20 @@ export function MarkdownEditor({
   const [selectionHighlight, setSelectionHighlight] = useState<SelectionHighlightRange>(null)
   const selectionHighlightRef = useRef<SelectionHighlightRange>(null)
   const [wikiCommandValue, setWikiCommandValue] = useState<string>('')
+  const onPrimaryHeadingCommitRef = useRef(onPrimaryHeadingCommit)
   const wikiKeyStateRef = useRef<{ open: boolean; options: string[]; value: string }>({ open: false, options: [], value: '' })
   const handleSelectWikiLinkRef = useRef<(path: string) => void>(() => {})
+  const [activeRowboatMention, setActiveRowboatMention] = useState<RowboatMentionMatch | null>(null)
+  const [rowboatBlockEdit, setRowboatBlockEdit] = useState<RowboatBlockEdit | null>(null)
+  const [rowboatAnchorTop, setRowboatAnchorTop] = useState<{ top: number; left: number; width: number } | null>(null)
+  const rowboatBlockEditRef = useRef<RowboatBlockEdit | null>(null)
+
+  // @ mention autocomplete state (analogous to wiki-link state)
+  const [activeAtMention, setActiveAtMention] = useState<{ range: { from: number; to: number }; query: string } | null>(null)
+  const [atAnchorPosition, setAtAnchorPosition] = useState<{ left: number; top: number } | null>(null)
+  const [atCommandValue, setAtCommandValue] = useState<string>('')
+  const atKeyStateRef = useRef<{ open: boolean; options: string[]; value: string }>({ open: false, options: [], value: '' })
+  const handleSelectAtMentionRef = useRef<(value: string) => void>(() => {})
 
   // Keep ref in sync with state for the plugin to access
   selectionHighlightRef.current = selectionHighlight
@@ -298,7 +341,70 @@ export function MarkdownEditor({
     []
   )
 
+  useEffect(() => {
+    onPrimaryHeadingCommitRef.current = onPrimaryHeadingCommit
+  }, [onPrimaryHeadingCommit])
+
+  const maybeCommitPrimaryHeading = useCallback((view: EditorView) => {
+    const onCommit = onPrimaryHeadingCommitRef.current
+    if (!onCommit) return
+    const { selection, doc } = view.state
+    if (!selection.empty) return
+
+    const { $from } = selection
+    if ($from.depth < 1 || $from.index(0) !== 0) return
+    if (!['heading', 'paragraph'].includes($from.parent.type.name)) return
+
+    const firstNode = doc.firstChild
+    if (!firstNode || !['heading', 'paragraph'].includes(firstNode.type.name)) return
+
+    onCommit()
+  }, [])
+
+  const preventTitleHeadingDemotion = useCallback((view: EditorView, event: KeyboardEvent) => {
+    if (!preserveUntitledTitleHeading) return false
+    if (event.key !== 'Backspace' || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false
+
+    const { selection } = view.state
+    if (!selection.empty) return false
+
+    const { $from } = selection
+    if ($from.depth < 1 || $from.index(0) !== 0) return false
+    if ($from.parent.type.name !== 'heading') return false
+
+    const headingLevel = ((
+      $from.parent.attrs as { level?: number } | null | undefined
+    )?.level) ?? 0
+    if (headingLevel !== 1) return false
+    if ($from.parentOffset !== 0) return false
+    if ($from.parent.textContent.length > 0) return false
+
+    event.preventDefault()
+    return true
+  }, [preserveUntitledTitleHeading])
+
+  const promoteFirstParagraphToTitleHeading = useCallback((view: EditorView) => {
+    if (!preserveUntitledTitleHeading) return
+
+    const { state, dispatch } = view
+    const { selection } = state
+    if (!selection.empty) return
+
+    const { $from } = selection
+    if ($from.depth < 1 || $from.index(0) !== 0) return
+    if ($from.parent.type.name !== 'paragraph') return
+    if ($from.parentOffset !== 0) return
+    if ($from.parent.textContent.length > 0) return
+
+    const headingType = state.schema.nodes.heading
+    if (!headingType) return
+
+    const tr = state.tr.setNodeMarkup($from.before(1), headingType, { level: 1 })
+    dispatch(tr)
+  }, [preserveUntitledTitleHeading])
+
   const editor = useEditor({
+    editable,
     extensions: [
       StarterKit.configure({
         heading: {
@@ -320,6 +426,7 @@ export function MarkdownEditor({
         },
       }),
       ImageUploadPlaceholderExtension,
+      TaskBlockExtension,
       WikiLink.configure({
         onCreate: wikiLinks?.onCreate
           ? (path) => {
@@ -352,11 +459,14 @@ export function MarkdownEditor({
       markdown = postprocessMarkdown(markdown)
       onChange(markdown)
     },
+    onBlur: ({ editor }) => {
+      maybeCommitPrimaryHeading(editor.view)
+    },
     editorProps: {
       attributes: {
         class: 'prose prose-sm max-w-none focus:outline-none',
       },
-      handleKeyDown: (_view, event) => {
+      handleKeyDown: (view, event) => {
         const state = wikiKeyStateRef.current
         if (state.open) {
           if (event.key === 'Escape') {
@@ -389,9 +499,61 @@ export function MarkdownEditor({
           }
         }
 
+        // @ mention autocomplete keyboard handling
+        const atState = atKeyStateRef.current
+        if (atState.open) {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            event.stopPropagation()
+            setActiveAtMention(null)
+            setAtAnchorPosition(null)
+            setAtCommandValue('')
+            return true
+          }
+
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            if (atState.options.length === 0) return true
+            event.preventDefault()
+            event.stopPropagation()
+            const currentIndex = Math.max(0, atState.options.indexOf(atState.value))
+            const delta = event.key === 'ArrowDown' ? 1 : -1
+            const nextIndex = (currentIndex + delta + atState.options.length) % atState.options.length
+            setAtCommandValue(atState.options[nextIndex])
+            return true
+          }
+
+          if (event.key === 'Enter' || event.key === 'Tab') {
+            if (atState.options.length === 0) return true
+            event.preventDefault()
+            event.stopPropagation()
+            const selected = atState.options.includes(atState.value) ? atState.value : atState.options[0]
+            handleSelectAtMentionRef.current(selected)
+            return true
+          }
+        }
+
+        if (preventTitleHeadingDemotion(view, event)) {
+          return true
+        }
+
+        const isPrintableKey = event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey
+        if (isPrintableKey) {
+          promoteFirstParagraphToTitleHeading(view)
+        }
+
+        if (
+          event.key === 'Enter'
+          && !event.shiftKey
+          && !event.ctrlKey
+          && !event.metaKey
+          && !event.altKey
+        ) {
+          maybeCommitPrimaryHeading(view)
+        }
+
         return false
       },
-      handleClickOn: (_view, _pos, node, _nodePos, event) => {
+      handleClickOn: (_view, _pos, node, nodePos, event) => {
         if (node.type.name === 'wikiLink') {
           event.preventDefault()
           wikiLinks?.onOpen?.(node.attrs.path)
@@ -400,7 +562,12 @@ export function MarkdownEditor({
         return false
       },
     },
-  })
+  }, [
+    editorSessionKey,
+    maybeCommitPrimaryHeading,
+    preventTitleHeadingDemotion,
+    promoteFirstParagraphToTitleHeading,
+  ])
 
   const orderedFiles = useMemo(() => {
     if (!wikiLinks) return []
@@ -469,6 +636,118 @@ export function MarkdownEditor({
     })
   }, [editor, wikiLinks])
 
+  const updateRowboatMentionState = useCallback(() => {
+    if (!editor) return
+    const { selection } = editor.state
+    if (!selection.empty) {
+      setActiveRowboatMention(null)
+      setRowboatAnchorTop(null)
+      return
+    }
+
+    const { $from } = selection
+    if ($from.parent.type.spec.code) {
+      setActiveRowboatMention(null)
+      setRowboatAnchorTop(null)
+      return
+    }
+
+    const text = $from.parent.textBetween(0, $from.parent.content.size, '\n', '\n')
+    const textBefore = text.slice(0, $from.parentOffset)
+
+    // Match @rowboat at a word boundary (preceded by nothing or whitespace)
+    const match = textBefore.match(/(^|\s)@rowboat$/)
+    if (!match) {
+      setActiveRowboatMention(null)
+      setRowboatAnchorTop(null)
+      return
+    }
+
+    const triggerStart = textBefore.length - '@rowboat'.length
+    const from = selection.from - (textBefore.length - triggerStart)
+    const to = selection.from
+    setActiveRowboatMention({ range: { from, to } })
+
+    const wrapper = wrapperRef.current
+    if (!wrapper) {
+      setRowboatAnchorTop(null)
+      return
+    }
+
+    const coords = editor.view.coordsAtPos(selection.from)
+    const wrapperRect = wrapper.getBoundingClientRect()
+    const proseMirrorEl = wrapper.querySelector('.ProseMirror') as HTMLElement | null
+    const pmRect = proseMirrorEl?.getBoundingClientRect()
+    setRowboatAnchorTop({
+      top: coords.top - wrapperRect.top + wrapper.scrollTop,
+      left: pmRect ? pmRect.left - wrapperRect.left : 0,
+      width: pmRect ? pmRect.width : wrapperRect.width,
+    })
+  }, [editor])
+
+  // Detect @ trigger for autocomplete popover (similar to [[ detection)
+  const updateAtMentionState = useCallback(() => {
+    if (!editor) return
+    const { selection } = editor.state
+    if (!selection.empty) {
+      setActiveAtMention(null)
+      setAtAnchorPosition(null)
+      return
+    }
+
+    const { $from } = selection
+    // Skip code blocks
+    if ($from.parent.type.spec.code) {
+      setActiveAtMention(null)
+      setAtAnchorPosition(null)
+      return
+    }
+    // Skip inline code marks
+    if ($from.marks().some((mark) => mark.type.spec.code)) {
+      setActiveAtMention(null)
+      setAtAnchorPosition(null)
+      return
+    }
+
+    const text = $from.parent.textBetween(0, $from.parent.content.size, '\n', '\n')
+    const textBefore = text.slice(0, $from.parentOffset)
+
+    // Find @ at a word boundary (start of line or preceded by whitespace)
+    const atMatch = textBefore.match(/(^|[\s])@([a-zA-Z0-9]*)$/)
+    if (!atMatch) {
+      setActiveAtMention(null)
+      setAtAnchorPosition(null)
+      return
+    }
+
+    const query = atMatch[2] // text after @
+
+    // If the full "@rowboat" is already typed, let updateRowboatMentionState handle it
+    if (query === 'rowboat') {
+      setActiveAtMention(null)
+      setAtAnchorPosition(null)
+      return
+    }
+
+    const atSymbolOffset = textBefore.lastIndexOf('@')
+    const matchText = textBefore.slice(atSymbolOffset)
+    const range = { from: selection.from - matchText.length, to: selection.from }
+    setActiveAtMention({ range, query })
+
+    const wrapper = wrapperRef.current
+    if (!wrapper) {
+      setAtAnchorPosition(null)
+      return
+    }
+
+    const coords = editor.view.coordsAtPos(selection.from)
+    const wrapperRect = wrapper.getBoundingClientRect()
+    setAtAnchorPosition({
+      left: coords.left - wrapperRect.left,
+      top: coords.bottom - wrapperRect.top,
+    })
+  }, [editor])
+
   useEffect(() => {
     if (!editor || !wikiLinks) return
     editor.on('update', updateWikiLinkState)
@@ -478,6 +757,42 @@ export function MarkdownEditor({
       editor.off('selectionUpdate', updateWikiLinkState)
     }
   }, [editor, wikiLinks, updateWikiLinkState])
+
+  useEffect(() => {
+    if (!editor) return
+    editor.on('update', updateRowboatMentionState)
+    editor.on('selectionUpdate', updateRowboatMentionState)
+    return () => {
+      editor.off('update', updateRowboatMentionState)
+      editor.off('selectionUpdate', updateRowboatMentionState)
+    }
+  }, [editor, updateRowboatMentionState])
+
+  useEffect(() => {
+    if (!editor) return
+    editor.on('update', updateAtMentionState)
+    editor.on('selectionUpdate', updateAtMentionState)
+    return () => {
+      editor.off('update', updateAtMentionState)
+      editor.off('selectionUpdate', updateAtMentionState)
+    }
+  }, [editor, updateAtMentionState])
+
+  // When a tell-rowboat block is clicked, compute anchor and open popover
+  useEffect(() => {
+    if (!rowboatBlockEdit || !editor) return
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
+    const coords = editor.view.coordsAtPos(rowboatBlockEdit.nodePos)
+    const wrapperRect = wrapper.getBoundingClientRect()
+    const proseMirrorEl = wrapper.querySelector('.ProseMirror') as HTMLElement | null
+    const pmRect = proseMirrorEl?.getBoundingClientRect()
+    setRowboatAnchorTop({
+      top: coords.top - wrapperRect.top + wrapper.scrollTop,
+      left: pmRect ? pmRect.left - wrapperRect.left : 0,
+      width: pmRect ? pmRect.width : wrapperRect.width,
+    })
+  }, [editor, rowboatBlockEdit])
 
   // Update editor content when prop changes (e.g., file selection changes)
   useEffect(() => {
@@ -489,11 +804,36 @@ export function MarkdownEditor({
         isInternalUpdate.current = true
         // Pre-process to preserve blank lines
         const preprocessed = preprocessMarkdown(content)
-        editor.commands.setContent(preprocessed)
+        // Treat tab-open content as baseline: do not add hydration to undo history.
+        editor.chain().setMeta('addToHistory', false).setContent(preprocessed).run()
         isInternalUpdate.current = false
       }
     }
   }, [editor, content])
+
+  useEffect(() => {
+    if (!onHistoryHandlersChange) return
+    if (!editor) {
+      onHistoryHandlersChange(null)
+      return
+    }
+
+    onHistoryHandlersChange({
+      undo: () => editor.chain().focus().undo().run(),
+      redo: () => editor.chain().focus().redo().run(),
+    })
+
+    return () => {
+      onHistoryHandlersChange(null)
+    }
+  }, [editor, onHistoryHandlersChange])
+
+  // Update editable state when prop changes
+  useEffect(() => {
+    if (editor) {
+      editor.setEditable(editable)
+    }
+  }, [editor, editable])
 
   // Force re-render decorations when selection highlight changes
   useEffect(() => {
@@ -544,9 +884,89 @@ export function MarkdownEditor({
     handleSelectWikiLinkRef.current = handleSelectWikiLink
   }, [handleSelectWikiLink])
 
+  const handleRowboatAdd = useCallback(async (instruction: string) => {
+    if (!editor) return
+
+    if (rowboatBlockEdit) {
+      // Editing existing taskBlock — update its data attribute
+      const { nodePos } = rowboatBlockEdit
+      const node = editor.state.doc.nodeAt(nodePos)
+      if (node && node.type.name === 'taskBlock') {
+        // Preserve existing schedule data
+        let updated: Record<string, unknown> = { instruction }
+        try {
+          const existing = JSON.parse(node.attrs.data || '{}')
+          updated = { ...existing, instruction }
+        } catch {
+          // Invalid JSON — just write new
+        }
+        const tr = editor.state.tr.setNodeMarkup(nodePos, undefined, { data: JSON.stringify(updated) })
+        editor.view.dispatch(tr)
+      }
+      setRowboatBlockEdit(null)
+      rowboatBlockEditRef.current = null
+      setRowboatAnchorTop(null)
+      return
+    }
+
+    if (activeRowboatMention) {
+      // Classify schedule intent for new blocks
+      const blockData: Record<string, unknown> = { instruction }
+      try {
+        const result = await window.ipc.invoke('inline-task:classifySchedule', { instruction })
+        if (result.schedule) {
+          const { label, ...rest } = result.schedule
+          blockData.schedule = rest
+          blockData['schedule-label'] = label
+        }
+      } catch (error) {
+        console.error('[RowboatAdd] Schedule classification failed:', error)
+      }
+
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(
+          { from: activeRowboatMention.range.from, to: activeRowboatMention.range.to },
+          [
+            { type: 'taskBlock', attrs: { data: JSON.stringify(blockData) } },
+            { type: 'paragraph' },
+          ],
+        )
+        .run()
+
+      // Mark note as live
+      if (onFrontmatterChange) {
+        const fields = extractAllFrontmatterValues(frontmatter ?? null)
+        fields['live_note'] = 'true'
+        onFrontmatterChange(buildFrontmatter(fields))
+      }
+
+      setActiveRowboatMention(null)
+      setRowboatAnchorTop(null)
+    }
+  }, [editor, activeRowboatMention, rowboatBlockEdit, frontmatter, onFrontmatterChange])
+
+  const handleRowboatRemove = useCallback(() => {
+    if (!editor || !rowboatBlockEdit) return
+    const { nodePos } = rowboatBlockEdit
+    const node = editor.state.doc.nodeAt(nodePos)
+    if (node) {
+      editor
+        .chain()
+        .focus()
+        .deleteRange({ from: nodePos, to: nodePos + node.nodeSize })
+        .run()
+    }
+    setRowboatBlockEdit(null)
+    rowboatBlockEditRef.current = null
+    setRowboatAnchorTop(null)
+  }, [editor, rowboatBlockEdit])
+
   const handleScroll = useCallback(() => {
     updateWikiLinkState()
-  }, [updateWikiLinkState])
+    updateAtMentionState()
+  }, [updateWikiLinkState, updateAtMentionState])
 
   const showWikiPopover = Boolean(wikiLinks && activeWikiLink && anchorPosition)
   const wikiOptions = useMemo(() => {
@@ -574,6 +994,63 @@ export function MarkdownEditor({
     setWikiCommandValue((prev) => (wikiOptions.includes(prev) ? prev : wikiOptions[0]))
   }, [showWikiPopover, wikiOptions])
 
+  // @ mention autocomplete options
+  const atMentionOptions = useMemo(() => [
+    { value: 'rowboat', label: '@rowboat', description: 'Research, schedule, or run tasks with AI' },
+  ], [])
+
+  const filteredAtOptions = useMemo(() => {
+    if (!activeAtMention) return []
+    const q = activeAtMention.query.toLowerCase()
+    if (!q) return atMentionOptions
+    return atMentionOptions.filter((opt) => opt.value.toLowerCase().startsWith(q))
+  }, [activeAtMention, atMentionOptions])
+
+  const atOptionValues = useMemo(() => filteredAtOptions.map((o) => o.value), [filteredAtOptions])
+  const showAtPopover = Boolean(activeAtMention && atAnchorPosition && filteredAtOptions.length > 0)
+
+  useEffect(() => {
+    atKeyStateRef.current = { open: showAtPopover, options: atOptionValues, value: atCommandValue }
+  }, [showAtPopover, atOptionValues, atCommandValue])
+
+  // Keep @ cmdk selection in sync
+  useEffect(() => {
+    if (!showAtPopover) {
+      setAtCommandValue('')
+      return
+    }
+    if (atOptionValues.length === 0) {
+      setAtCommandValue('')
+      return
+    }
+    setAtCommandValue((prev) => (atOptionValues.includes(prev) ? prev : atOptionValues[0]))
+  }, [showAtPopover, atOptionValues])
+
+  // @ mention selection handler
+  const handleSelectAtMention = useCallback((value: string) => {
+    if (!editor || !activeAtMention) return
+
+    if (value === 'rowboat') {
+      // Replace "@<partial>" with "@rowboat" — this triggers updateRowboatMentionState
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(
+          { from: activeAtMention.range.from, to: activeAtMention.range.to },
+          '@rowboat'
+        )
+        .run()
+    }
+
+    setActiveAtMention(null)
+    setAtAnchorPosition(null)
+    setAtCommandValue('')
+  }, [editor, activeAtMention])
+
+  useEffect(() => {
+    handleSelectAtMentionRef.current = handleSelectAtMention
+  }, [handleSelectAtMention])
+
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key === 's' && (event.metaKey || event.ctrlKey)) {
@@ -595,6 +1072,13 @@ export function MarkdownEditor({
         onSelectionHighlight={setSelectionHighlight}
         onImageUpload={handleImageUploadWithPlaceholder}
       />
+      {(frontmatter !== undefined) && onFrontmatterChange && (
+        <FrontmatterProperties
+          raw={frontmatter}
+          onRawChange={onFrontmatterChange}
+          editable={editable}
+        />
+      )}
       <div className="editor-content-wrapper" ref={wrapperRef} onScroll={handleScroll}>
         <EditorContent editor={editor} />
         {wikiLinks ? (
@@ -651,6 +1135,64 @@ export function MarkdownEditor({
             </PopoverContent>
           </Popover>
         ) : null}
+        {/* @ mention autocomplete popover */}
+        <Popover
+          open={showAtPopover}
+          onOpenChange={(open) => {
+            if (!open) {
+              setActiveAtMention(null)
+              setAtAnchorPosition(null)
+              setAtCommandValue('')
+            }
+          }}
+        >
+          <PopoverAnchor asChild>
+            <span
+              className="wiki-link-anchor"
+              style={
+                atAnchorPosition
+                  ? { left: atAnchorPosition.left, top: atAnchorPosition.top }
+                  : undefined
+              }
+            />
+          </PopoverAnchor>
+          <PopoverContent
+            className="w-72 p-1"
+            align="start"
+            side="bottom"
+            onOpenAutoFocus={(event) => event.preventDefault()}
+          >
+            <Command shouldFilter={false} value={atCommandValue} onValueChange={setAtCommandValue}>
+              <CommandList>
+                {filteredAtOptions.map((opt) => (
+                  <CommandItem
+                    key={opt.value}
+                    value={opt.value}
+                    onSelect={() => handleSelectAtMention(opt.value)}
+                  >
+                    <div className="flex flex-col">
+                      <span className="font-medium">{opt.label}</span>
+                      <span className="text-xs text-muted-foreground">{opt.description}</span>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+        <RowboatMentionPopover
+          open={Boolean((activeRowboatMention || rowboatBlockEdit) && rowboatAnchorTop)}
+          anchor={rowboatAnchorTop}
+          initialText={rowboatBlockEdit?.existingText ?? ''}
+          onAdd={handleRowboatAdd}
+          onRemove={rowboatBlockEdit ? handleRowboatRemove : undefined}
+          onClose={() => {
+            setActiveRowboatMention(null)
+            setRowboatBlockEdit(null)
+            rowboatBlockEditRef.current = null
+            setRowboatAnchorTop(null)
+          }}
+        />
       </div>
     </div>
   )

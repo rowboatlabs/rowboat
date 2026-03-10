@@ -36,6 +36,8 @@ import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 import { search } from '@x/core/dist/search/search.js';
+import { versionHistory } from '@x/core';
+import { classifySchedule } from '@x/core/dist/knowledge/inline_tasks.js';
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -109,6 +111,18 @@ function getVersions(): {
 let watcher: FSWatcher | null = null;
 const changeQueue = new Set<string>();
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Emit knowledge commit event to all renderer windows
+ */
+function emitKnowledgeCommitEvent(): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('knowledge:didCommit', {});
+    }
+  }
+}
 
 /**
  * Emit workspace change event to all renderer windows
@@ -288,6 +302,9 @@ export function stopServicesWatcher(): void {
  * Add new handlers here as you add channels to IPCChannels
  */
 export function setupIpcHandlers() {
+  // Forward knowledge commit events to renderer for panel refresh
+  versionHistory.onCommit(() => emitKnowledgeCommitEvent());
+
   registerIpcHandlers({
     'app:getVersions': async () => {
       // args is null for this channel (no request payload)
@@ -527,9 +544,27 @@ export function setupIpcHandlers() {
       const mimeType = mimeMap[ext] || 'application/octet-stream';
       return { data: buffer.toString('base64'), mimeType, size: stat.size };
     },
+    // Knowledge version history handlers
+    'knowledge:history': async (_event, args) => {
+      const commits = await versionHistory.getFileHistory(args.path);
+      return { commits };
+    },
+    'knowledge:fileAtCommit': async (_event, args) => {
+      const content = await versionHistory.getFileAtCommit(args.path, args.oid);
+      return { content };
+    },
+    'knowledge:restore': async (_event, args) => {
+      await versionHistory.restoreFile(args.path, args.oid);
+      return { ok: true };
+    },
     // Search handler
     'search:query': async (_event, args) => {
       return search(args.query, args.limit, args.types);
+    },
+    // Inline task schedule classification
+    'inline-task:classifySchedule': async (_event, args) => {
+      const schedule = await classifySchedule(args.instruction);
+      return { schedule };
     },
   });
 }

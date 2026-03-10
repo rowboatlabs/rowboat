@@ -2,7 +2,6 @@ import { jsonSchema, ModelMessage } from "ai";
 import fs from "fs";
 import path from "path";
 import { WorkDir } from "../config/config.js";
-import { getNoteCreationStrictness } from "../config/note_creation_config.js";
 import { Agent, ToolAttachment } from "@x/shared/dist/agent.js";
 import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage } from "@x/shared/dist/message.js";
 import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
@@ -25,9 +24,10 @@ import { IRunsLock } from "../runs/lock.js";
 import { IAbortRegistry } from "../runs/abort-registry.js";
 import { PrefixLogger } from "@x/shared";
 import { parse } from "yaml";
-import { raw as noteCreationMediumRaw } from "../knowledge/note_creation_medium.js";
-import { raw as noteCreationLowRaw } from "../knowledge/note_creation_low.js";
-import { raw as noteCreationHighRaw } from "../knowledge/note_creation_high.js";
+import { getRaw as getNoteCreationRaw } from "../knowledge/note_creation.js";
+import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
+import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
+import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -316,19 +316,7 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     }
 
     if (id === 'note_creation') {
-        const strictness = getNoteCreationStrictness();
-        let raw = '';
-        switch (strictness) {
-            case 'medium':
-                raw = noteCreationMediumRaw;
-                break;
-            case 'low':
-                raw = noteCreationLowRaw;
-                break;
-            case 'high':
-                raw = noteCreationHighRaw;
-                break;
-        }
+        const raw = getNoteCreationRaw();
         let agent: z.infer<typeof Agent> = {
             name: id,
             instructions: raw,
@@ -353,8 +341,89 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
         return agent;
     }
 
+    if (id === 'labeling_agent') {
+        const labelingAgentRaw = getLabelingAgentRaw();
+        let agent: z.infer<typeof Agent> = {
+            name: id,
+            instructions: labelingAgentRaw,
+        };
+
+        if (labelingAgentRaw.startsWith("---")) {
+            const end = labelingAgentRaw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = labelingAgentRaw.slice(3, end).trim();
+                const content = labelingAgentRaw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
+    if (id === 'note_tagging_agent') {
+        const noteTaggingAgentRaw = getNoteTaggingAgentRaw();
+        let agent: z.infer<typeof Agent> = {
+            name: id,
+            instructions: noteTaggingAgentRaw,
+        };
+
+        if (noteTaggingAgentRaw.startsWith("---")) {
+            const end = noteTaggingAgentRaw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = noteTaggingAgentRaw.slice(3, end).trim();
+                const content = noteTaggingAgentRaw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
+    if (id === 'inline_task_agent') {
+        const inlineTaskAgentRaw = getInlineTaskAgentRaw();
+        let agent: z.infer<typeof Agent> = {
+            name: id,
+            instructions: inlineTaskAgentRaw,
+        };
+
+        if (inlineTaskAgentRaw.startsWith("---")) {
+            const end = inlineTaskAgentRaw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = inlineTaskAgentRaw.slice(3, end).trim();
+                const content = inlineTaskAgentRaw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
     const repo = container.resolve<IAgentsRepo>('agentsRepo');
     return await repo.fetch(id);
+}
+
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
@@ -400,11 +469,37 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                 });
                 break;
             case "user":
-                result.push({
-                    role: "user",
-                    content: msg.content,
-                    providerOptions,
-                });
+                if (typeof msg.content === 'string') {
+                    // Legacy string — pass through unchanged
+                    result.push({
+                        role: "user",
+                        content: msg.content,
+                        providerOptions,
+                    });
+                } else {
+                    // New content parts array — collapse to text for LLM
+                    const textSegments: string[] = [];
+                    const attachmentLines: string[] = [];
+
+                    for (const part of msg.content) {
+                        if (part.type === "attachment") {
+                            const sizeStr = part.size ? `, ${formatBytes(part.size)}` : '';
+                            attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}`);
+                        } else {
+                            textSegments.push(part.text);
+                        }
+                    }
+
+                    if (attachmentLines.length > 0) {
+                        textSegments.unshift("User has attached the following files:", ...attachmentLines, "");
+                    }
+
+                    result.push({
+                        role: "user",
+                        content: textSegments.join("\n"),
+                        providerOptions,
+                    });
+                }
                 break;
             case "tool":
                 result.push({
@@ -674,7 +769,12 @@ export async function* streamAgent({
 
     // set up provider + model
     const provider = createProvider(modelConfig.provider);
-    const model = provider.languageModel(modelConfig.model);
+    const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep", "labeling_agent", "note_tagging_agent"];
+    const modelId = (knowledgeGraphAgents.includes(state.agentName!) && modelConfig.knowledgeGraphModel)
+        ? modelConfig.knowledgeGraphModel
+        : modelConfig.model;
+    const model = provider.languageModel(modelId);
+    logger.log(`using model: ${modelId}`);
 
     let loopCounter = 0;
     while (true) {

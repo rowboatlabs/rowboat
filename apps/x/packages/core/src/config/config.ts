@@ -23,7 +23,7 @@ function ensureDefaultConfigs() {
     const noteCreationConfig = path.join(WorkDir, "config", "note_creation.json");
     if (!fs.existsSync(noteCreationConfig)) {
         fs.writeFileSync(noteCreationConfig, JSON.stringify({
-            strictness: "high",
+            strictness: "medium",
             configured: false
         }, null, 2));
     }
@@ -92,3 +92,8 @@ function ensureWelcomeFile() {
 ensureDirs();
 ensureDefaultConfigs();
 ensureWelcomeFile();
+
+// Initialize version history repo (async, fire-and-forget on startup)
+import('../knowledge/version_history.js').then(m => m.initRepo()).catch(err => {
+    console.error('[VersionHistory] Failed to init repo:', err);
+});
