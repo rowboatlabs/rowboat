@@ -39,7 +39,9 @@ interface OnboardingModalProps {
   onComplete: () => void
 }
 
-type Step = 0 | 1 | 2
+type Step = 0 | 1 | 2 | 3
+
+type OnboardingPath = 'rowboat' | 'byok' | null
 
 type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
@@ -51,6 +53,7 @@ interface LlmModelOption {
 
 export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [currentStep, setCurrentStep] = useState<Step>(0)
+  const [onboardingPath, setOnboardingPath] = useState<OnboardingPath>(null)
 
   // LLM setup state
   const [llmProvider, setLlmProvider] = useState<LlmProviderFlavor>("openai")
@@ -271,7 +274,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   }, [startSlackConnect])
 
   const handleNext = () => {
-    if (currentStep < 2) {
+    if (currentStep < 3) {
       setCurrentStep((prev) => (prev + 1) as Step)
     }
   }
@@ -383,6 +386,19 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     return cleanup
   }, [])
 
+  // Auto-advance from Rowboat sign-in step when OAuth completes
+  useEffect(() => {
+    if (onboardingPath !== 'rowboat' || currentStep !== 1) return
+
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      if (event.provider === 'rowboat' && event.success) {
+        setCurrentStep(2 as Step)
+      }
+    })
+
+    return cleanup
+  }, [onboardingPath, currentStep])
+
   // Listen for Composio connection events
   useEffect(() => {
     const cleanup = window.ipc.on('composio:didConnect', (event) => {
@@ -453,7 +469,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   // Step indicator
   const renderStepIndicator = () => (
     <div className="flex gap-2 justify-center mb-6">
-      {[0, 1, 2].map((step) => (
+      {[0, 1, 2, 3].map((step) => (
         <div
           key={step}
           className={cn(
@@ -591,7 +607,98 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   )
   */
 
-  // Step 0: LLM Setup
+  // Step 0: Path Choice (Rowboat vs BYOK)
+  const renderPathChoiceStep = () => (
+    <div className="flex flex-col">
+      <div className="flex items-center justify-center gap-3 mb-3">
+        <span className="text-lg font-medium text-muted-foreground">Your AI coworker, with memory</span>
+      </div>
+      <DialogHeader className="text-center mb-6">
+        <DialogTitle className="text-2xl">Get Started</DialogTitle>
+        <DialogDescription className="text-base">
+          Choose how you'd like to set up Rowboat
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <button
+          onClick={() => {
+            setOnboardingPath('rowboat')
+            setCurrentStep(1 as Step)
+          }}
+          className="rounded-lg border-2 border-border hover:border-primary px-6 py-6 text-left transition-colors hover:bg-accent"
+        >
+          <div className="text-base font-semibold">Rowboat Account</div>
+          <div className="text-sm text-muted-foreground mt-2">
+            Sign in for instant access to all models — no API keys needed
+          </div>
+        </button>
+
+        <button
+          onClick={() => {
+            setOnboardingPath('byok')
+            setCurrentStep(1 as Step)
+          }}
+          className="rounded-lg border-2 border-border hover:border-primary px-6 py-6 text-left transition-colors hover:bg-accent"
+        >
+          <div className="text-base font-semibold">Bring Your Own Key</div>
+          <div className="text-sm text-muted-foreground mt-2">
+            Use your own API keys from OpenAI, Anthropic, Google, and more
+          </div>
+        </button>
+      </div>
+    </div>
+  )
+
+  // Step 1 (Rowboat path): Sign in to Rowboat
+  const renderRowboatSignInStep = () => {
+    const rowboatState = providerStates['rowboat'] || { isConnected: false, isLoading: false, isConnecting: false }
+
+    return (
+      <div className="flex flex-col items-center text-center">
+        <DialogHeader className="space-y-3 mb-8">
+          <DialogTitle className="text-2xl">Sign in to Rowboat</DialogTitle>
+          <DialogDescription className="text-base max-w-md mx-auto">
+            Connect your Rowboat account for instant access to all models through our gateway — no API keys needed.
+          </DialogDescription>
+        </DialogHeader>
+
+        {rowboatState.isConnected ? (
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex items-center gap-2 text-green-600">
+              <CheckCircle2 className="size-5" />
+              <span className="text-sm font-medium">Connected to Rowboat</span>
+            </div>
+            <Button onClick={handleNext} size="lg" className="w-full max-w-xs">
+              Continue
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-4 w-full max-w-xs">
+            <Button
+              onClick={() => startConnect('rowboat')}
+              size="lg"
+              className="w-full"
+              disabled={rowboatState.isConnecting}
+            >
+              {rowboatState.isConnecting ? (
+                <><Loader2 className="size-4 animate-spin mr-2" />Waiting for sign in...</>
+              ) : (
+                "Sign in with Rowboat"
+              )}
+            </Button>
+            {rowboatState.isConnecting && (
+              <p className="text-xs text-muted-foreground">
+                Complete sign in in your browser, then return here.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Step 1 (BYOK path): LLM Setup
   const renderLlmSetupStep = () => {
     const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
       { id: "openai", name: "OpenAI", description: "Use your OpenAI API key" },
@@ -918,9 +1025,11 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         onEscapeKeyDown={(e) => e.preventDefault()}
       >
         {renderStepIndicator()}
-        {currentStep === 0 && renderLlmSetupStep()}
-        {currentStep === 1 && renderAccountConnectionStep()}
-        {currentStep === 2 && renderCompletionStep()}
+        {currentStep === 0 && renderPathChoiceStep()}
+        {currentStep === 1 && onboardingPath === 'rowboat' && renderRowboatSignInStep()}
+        {currentStep === 1 && onboardingPath === 'byok' && renderLlmSetupStep()}
+        {currentStep === 2 && renderAccountConnectionStep()}
+        {currentStep === 3 && renderCompletionStep()}
       </DialogContent>
     </Dialog>
     </>
