@@ -276,11 +276,7 @@ export function executeCommandSync(
       cwd: options?.cwd,
       timeout: options?.timeout,
       encoding: 'utf-8',
-<<<<<<< HEAD
-      shell: getShell(),
-=======
       shell: EXECUTION_SHELL,
->>>>>>> dev
     });
 
     return {
