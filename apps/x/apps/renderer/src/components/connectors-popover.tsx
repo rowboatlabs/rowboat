@@ -17,7 +17,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
 import { getGoogleClientId, setGoogleClientId, clearGoogleClientId } from "@/lib/google-client-id-store"
 import { toast } from "sonner"
@@ -55,11 +54,15 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
   const [granolaEnabled, setGranolaEnabled] = useState(false)
   const [granolaLoading, setGranolaLoading] = useState(true)
 
-  // Composio/Slack state
-  const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
-  const [slackConnected, setSlackConnected] = useState(false)
+  // Slack state (agent-slack CLI)
+  const [slackEnabled, setSlackEnabled] = useState(false)
   const [slackLoading, setSlackLoading] = useState(true)
-  const [slackConnecting, setSlackConnecting] = useState(false)
+  const [slackWorkspaces, setSlackWorkspaces] = useState<Array<{ url: string; name: string }>>([])
+  const [slackAvailableWorkspaces, setSlackAvailableWorkspaces] = useState<Array<{ url: string; name: string }>>([])
+  const [slackSelectedUrls, setSlackSelectedUrls] = useState<Set<string>>(new Set())
+  const [slackPickerOpen, setSlackPickerOpen] = useState(false)
+  const [slackDiscovering, setSlackDiscovering] = useState(false)
+  const [slackDiscoverError, setSlackDiscoverError] = useState<string | null>(null)
 
   // Load available providers on mount
   useEffect(() => {
@@ -107,76 +110,76 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     }
   }, [])
 
-  // Load Slack connection status
-  const refreshSlackStatus = useCallback(async () => {
+  // Load Slack config
+  const refreshSlackConfig = useCallback(async () => {
     try {
       setSlackLoading(true)
-      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'slack' })
-      setSlackConnected(result.isConnected)
+      const result = await window.ipc.invoke('slack:getConfig', null)
+      setSlackEnabled(result.enabled)
+      setSlackWorkspaces(result.workspaces || [])
     } catch (error) {
-      console.error('Failed to load Slack status:', error)
-      setSlackConnected(false)
+      console.error('Failed to load Slack config:', error)
+      setSlackEnabled(false)
+      setSlackWorkspaces([])
     } finally {
       setSlackLoading(false)
     }
   }, [])
 
-  // Connect to Slack via Composio
-  const startSlackConnect = useCallback(async () => {
+  // Enable Slack: discover workspaces
+  const handleSlackEnable = useCallback(async () => {
+    setSlackDiscovering(true)
+    setSlackDiscoverError(null)
     try {
-      setSlackConnecting(true)
-      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'slack' })
-      if (!result.success) {
-        toast.error(result.error || 'Failed to connect to Slack')
-        setSlackConnecting(false)
+      const result = await window.ipc.invoke('slack:listWorkspaces', null)
+      if (result.error || result.workspaces.length === 0) {
+        setSlackDiscoverError(result.error || 'No Slack workspaces found. Set up with: agent-slack auth import-desktop')
+        setSlackAvailableWorkspaces([])
+        setSlackPickerOpen(true)
+      } else {
+        setSlackAvailableWorkspaces(result.workspaces)
+        setSlackSelectedUrls(new Set(result.workspaces.map((w: { url: string }) => w.url)))
+        setSlackPickerOpen(true)
       }
-      // Success will be handled by composio:didConnect event
     } catch (error) {
-      console.error('Failed to connect to Slack:', error)
-      toast.error('Failed to connect to Slack')
-      setSlackConnecting(false)
+      console.error('Failed to discover Slack workspaces:', error)
+      setSlackDiscoverError('Failed to discover Slack workspaces')
+      setSlackPickerOpen(true)
+    } finally {
+      setSlackDiscovering(false)
     }
   }, [])
 
-  // Handle Slack connect button click
-  const handleConnectSlack = useCallback(async () => {
-    // Check if Composio is configured
-    const configResult = await window.ipc.invoke('composio:is-configured', null)
-    if (!configResult.configured) {
-      setComposioApiKeyOpen(true)
-      return
-    }
-    await startSlackConnect()
-  }, [startSlackConnect])
-
-  // Handle Composio API key submission
-  const handleComposioApiKeySubmit = useCallback(async (apiKey: string) => {
-    try {
-      await window.ipc.invoke('composio:set-api-key', { apiKey })
-      setComposioApiKeyOpen(false)
-      toast.success('Composio API key saved')
-      // Now start the Slack connection
-      await startSlackConnect()
-    } catch (error) {
-      console.error('Failed to save Composio API key:', error)
-      toast.error('Failed to save API key')
-    }
-  }, [startSlackConnect])
-
-  // Disconnect from Slack
-  const handleDisconnectSlack = useCallback(async () => {
+  // Save selected Slack workspaces
+  const handleSlackSaveWorkspaces = useCallback(async () => {
+    const selected = slackAvailableWorkspaces.filter(w => slackSelectedUrls.has(w.url))
     try {
       setSlackLoading(true)
-      const result = await window.ipc.invoke('composio:disconnect', { toolkitSlug: 'slack' })
-      if (result.success) {
-        setSlackConnected(false)
-        toast.success('Disconnected from Slack')
-      } else {
-        toast.error('Failed to disconnect from Slack')
-      }
+      await window.ipc.invoke('slack:setConfig', { enabled: true, workspaces: selected })
+      setSlackEnabled(true)
+      setSlackWorkspaces(selected)
+      setSlackPickerOpen(false)
+      toast.success('Slack enabled')
     } catch (error) {
-      console.error('Failed to disconnect from Slack:', error)
-      toast.error('Failed to disconnect from Slack')
+      console.error('Failed to save Slack config:', error)
+      toast.error('Failed to save Slack settings')
+    } finally {
+      setSlackLoading(false)
+    }
+  }, [slackAvailableWorkspaces, slackSelectedUrls])
+
+  // Disable Slack
+  const handleSlackDisable = useCallback(async () => {
+    try {
+      setSlackLoading(true)
+      await window.ipc.invoke('slack:setConfig', { enabled: false, workspaces: [] })
+      setSlackEnabled(false)
+      setSlackWorkspaces([])
+      setSlackPickerOpen(false)
+      toast.success('Slack disabled')
+    } catch (error) {
+      console.error('Failed to update Slack config:', error)
+      toast.error('Failed to update Slack settings')
     } finally {
       setSlackLoading(false)
     }
@@ -187,8 +190,8 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     // Refresh Granola
     refreshGranolaConfig()
 
-    // Refresh Slack status
-    refreshSlackStatus()
+    // Refresh Slack config
+    refreshSlackConfig()
 
     // Refresh OAuth providers
     if (providers.length === 0) return
@@ -226,7 +229,7 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     }
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackStatus])
+  }, [providers, refreshGranolaConfig, refreshSlackConfig])
 
   // Refresh statuses when popover opens or providers list changes
   useEffect(() => {
@@ -269,26 +272,6 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
 
     return cleanup
   }, [refreshAllStatuses])
-
-  // Listen for Composio connection events
-  useEffect(() => {
-    const cleanup = window.ipc.on('composio:didConnect', (event) => {
-      const { toolkitSlug, success, error } = event
-
-      if (toolkitSlug === 'slack') {
-        setSlackConnected(success)
-        setSlackConnecting(false)
-
-        if (success) {
-          toast.success('Connected to Slack')
-        } else {
-          toast.error(error || 'Failed to connect to Slack')
-        }
-      }
-    })
-
-    return cleanup
-  }, [])
 
   const startConnect = useCallback(async (provider: string, clientId?: string) => {
     setProviderStates(prev => ({
@@ -574,62 +557,90 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
               </div>
 
               {/* Slack */}
-              <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                    <MessageSquare className="size-4" />
+              <div className="rounded-md px-3 py-2 hover:bg-accent">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                      <MessageSquare className="size-4" />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-sm font-medium truncate">Slack</span>
+                      {slackEnabled && slackWorkspaces.length > 0 ? (
+                        <span className="text-xs text-muted-foreground truncate">
+                          {slackWorkspaces.map(w => w.name).join(', ')}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground truncate">
+                          Send messages and view channels
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-sm font-medium truncate">Slack</span>
-                    {slackLoading ? (
-                      <span className="text-xs text-muted-foreground">Checking...</span>
+                  <div className="shrink-0 flex items-center gap-2">
+                    {(slackLoading || slackDiscovering) && (
+                      <Loader2 className="size-3 animate-spin" />
+                    )}
+                    {slackEnabled ? (
+                      <Switch
+                        checked={true}
+                        onCheckedChange={() => handleSlackDisable()}
+                        disabled={slackLoading}
+                      />
                     ) : (
-                      <span className="text-xs text-muted-foreground truncate">
-                        Send messages and view channels
-                      </span>
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={handleSlackEnable}
+                        disabled={slackLoading || slackDiscovering}
+                        className="h-7 px-2 text-xs"
+                      >
+                        Enable
+                      </Button>
                     )}
                   </div>
                 </div>
-                <div className="shrink-0">
-                  {slackLoading ? (
-                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                  ) : slackConnected ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleDisconnectSlack}
-                      className="h-7 px-2 text-xs"
-                    >
-                      Disconnect
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={handleConnectSlack}
-                      disabled={slackConnecting}
-                      className="h-7 px-2 text-xs"
-                    >
-                      {slackConnecting ? (
-                        <Loader2 className="size-3 animate-spin" />
-                      ) : (
-                        "Connect"
-                      )}
-                    </Button>
-                  )}
-                </div>
+                {slackPickerOpen && (
+                  <div className="mt-2 ml-11 space-y-2">
+                    {slackDiscoverError ? (
+                      <p className="text-xs text-muted-foreground">{slackDiscoverError}</p>
+                    ) : (
+                      <>
+                        {slackAvailableWorkspaces.map(w => (
+                          <label key={w.url} className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={slackSelectedUrls.has(w.url)}
+                              onChange={(e) => {
+                                setSlackSelectedUrls(prev => {
+                                  const next = new Set(prev)
+                                  if (e.target.checked) next.add(w.url)
+                                  else next.delete(w.url)
+                                  return next
+                                })
+                              }}
+                              className="rounded border-border"
+                            />
+                            <span className="truncate">{w.name}</span>
+                          </label>
+                        ))}
+                        <Button
+                          size="sm"
+                          onClick={handleSlackSaveWorkspaces}
+                          disabled={slackSelectedUrls.size === 0 || slackLoading}
+                          className="h-7 px-3 text-xs"
+                        >
+                          Save
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </>
           )}
         </div>
       </PopoverContent>
     </Popover>
-    <ComposioApiKeyModal
-      open={composioApiKeyOpen}
-      onOpenChange={setComposioApiKeyOpen}
-      onSubmit={handleComposioApiKeySubmit}
-      isSubmitting={slackConnecting}
-    />
     </>
   )
 }
