@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, Mic, Mail, CheckCircle2 } from "lucide-react"
+import { Loader2, Mic, Mail, CheckCircle2, ArrowLeft } from "lucide-react"
 // import { MessageSquare } from "lucide-react"
 
 import {
@@ -39,7 +39,7 @@ interface OnboardingModalProps {
   onComplete: () => void
 }
 
-type Step = 0 | 1 | 2 | 3
+type Step = 0 | 1 | 2 | 3 | 4
 
 type OnboardingPath = 'rowboat' | 'byok' | null
 
@@ -274,8 +274,26 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   }, [startSlackConnect])
 
   const handleNext = () => {
-    if (currentStep < 3) {
+    if (currentStep < 4) {
       setCurrentStep((prev) => (prev + 1) as Step)
+    }
+  }
+
+  const handleBack = () => {
+    if (currentStep === 1) {
+      // BYOK upsell → back to sign-in page
+      setOnboardingPath(null)
+      setCurrentStep(0 as Step)
+    } else if (currentStep === 2) {
+      // LLM setup → back to BYOK upsell
+      setCurrentStep(1 as Step)
+    } else if (currentStep === 3) {
+      // Connect accounts → back depends on path
+      if (onboardingPath === 'rowboat') {
+        setCurrentStep(0 as Step)
+      } else {
+        setCurrentStep(2 as Step)
+      }
     }
   }
 
@@ -388,11 +406,11 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Auto-advance from Rowboat sign-in step when OAuth completes
   useEffect(() => {
-    if (onboardingPath !== 'rowboat' || currentStep !== 1) return
+    if (onboardingPath !== 'rowboat' || currentStep !== 0) return
 
     const cleanup = window.ipc.on('oauth:didConnect', (event) => {
       if (event.provider === 'rowboat' && event.success) {
-        setCurrentStep(2 as Step)
+        setCurrentStep(3 as Step)
       }
     })
 
@@ -466,20 +484,30 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     startConnect('google', clientId)
   }, [startConnect])
 
-  // Step indicator
-  const renderStepIndicator = () => (
-    <div className="flex gap-2 justify-center mb-6">
-      {[0, 1, 2, 3].map((step) => (
-        <div
-          key={step}
-          className={cn(
-            "w-2 h-2 rounded-full transition-colors",
-            currentStep >= step ? "bg-primary" : "bg-muted"
-          )}
-        />
-      ))}
-    </div>
-  )
+  // Step indicator - dynamic based on path
+  const renderStepIndicator = () => {
+    // Rowboat path: Sign In (0), Connect (3), Done (4) = 3 dots
+    // BYOK path: Sign In (0), Upsell (1), Model (2), Connect (3), Done (4) = 5 dots
+    // Before path is chosen: show 3 dots (minimal)
+    const rowboatSteps = [0, 3, 4]
+    const byokSteps = [0, 1, 2, 3, 4]
+    const steps = onboardingPath === 'byok' ? byokSteps : rowboatSteps
+    const currentIndex = steps.indexOf(currentStep)
+
+    return (
+      <div className="flex gap-2 justify-center mb-6">
+        {steps.map((_, i) => (
+          <div
+            key={i}
+            className={cn(
+              "w-2 h-2 rounded-full transition-colors",
+              currentIndex >= i ? "bg-primary" : "bg-muted"
+            )}
+          />
+        ))}
+      </div>
+    )
+  }
 
   // Helper to render an OAuth provider row
   const renderOAuthProvider = (provider: string, displayName: string, icon: React.ReactNode, description: string) => {
@@ -607,55 +635,15 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   )
   */
 
-  // Step 0: Path Choice (Rowboat vs BYOK)
-  const renderPathChoiceStep = () => (
-    <div className="flex flex-col">
-      <div className="flex items-center justify-center gap-3 mb-3">
-        <span className="text-lg font-medium text-muted-foreground">Your AI coworker, with memory</span>
-      </div>
-      <DialogHeader className="text-center mb-6">
-        <DialogTitle className="text-2xl">Get Started</DialogTitle>
-        <DialogDescription className="text-base">
-          Choose how you'd like to set up Rowboat
-        </DialogDescription>
-      </DialogHeader>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <button
-          onClick={() => {
-            setOnboardingPath('rowboat')
-            setCurrentStep(1 as Step)
-          }}
-          className="rounded-lg border-2 border-border hover:border-primary px-6 py-6 text-left transition-colors hover:bg-accent"
-        >
-          <div className="text-base font-semibold">Rowboat Account</div>
-          <div className="text-sm text-muted-foreground mt-2">
-            Sign in for instant access to all models — no API keys needed
-          </div>
-        </button>
-
-        <button
-          onClick={() => {
-            setOnboardingPath('byok')
-            setCurrentStep(1 as Step)
-          }}
-          className="rounded-lg border-2 border-border hover:border-primary px-6 py-6 text-left transition-colors hover:bg-accent"
-        >
-          <div className="text-base font-semibold">Bring Your Own Key</div>
-          <div className="text-sm text-muted-foreground mt-2">
-            Use your own API keys from OpenAI, Anthropic, Google, and more
-          </div>
-        </button>
-      </div>
-    </div>
-  )
-
-  // Step 1 (Rowboat path): Sign in to Rowboat
-  const renderRowboatSignInStep = () => {
+  // Step 0: Sign in to Rowboat (with BYOK option)
+  const renderSignInStep = () => {
     const rowboatState = providerStates['rowboat'] || { isConnected: false, isLoading: false, isConnecting: false }
 
     return (
       <div className="flex flex-col items-center text-center">
+        <div className="flex items-center justify-center gap-3 mb-3">
+          <span className="text-lg font-medium text-muted-foreground">Your AI coworker, with memory</span>
+        </div>
         <DialogHeader className="space-y-3 mb-8">
           <DialogTitle className="text-2xl">Sign in to Rowboat</DialogTitle>
           <DialogDescription className="text-base max-w-md mx-auto">
@@ -669,14 +657,17 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
               <CheckCircle2 className="size-5" />
               <span className="text-sm font-medium">Connected to Rowboat</span>
             </div>
-            <Button onClick={handleNext} size="lg" className="w-full max-w-xs">
+            <Button onClick={() => setCurrentStep(3 as Step)} size="lg" className="w-full max-w-xs">
               Continue
             </Button>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-4 w-full max-w-xs">
             <Button
-              onClick={() => startConnect('rowboat')}
+              onClick={() => {
+                setOnboardingPath('rowboat')
+                startConnect('rowboat')
+              }}
               size="lg"
               className="w-full"
               disabled={rowboatState.isConnecting}
@@ -694,11 +685,73 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
             )}
           </div>
         )}
+
+        <div className="w-full flex justify-end mt-8">
+          <button
+            onClick={() => {
+              setOnboardingPath('byok')
+              setCurrentStep(1 as Step)
+            }}
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Bring your own key
+          </button>
+        </div>
       </div>
     )
   }
 
-  // Step 1 (BYOK path): LLM Setup
+  // Step 1: BYOK upsell — explain benefits of Rowboat before continuing with BYOK
+  const renderByokUpsellStep = () => (
+    <div className="flex flex-col">
+      <DialogHeader className="text-center mb-6">
+        <DialogTitle className="text-2xl">Before you continue</DialogTitle>
+        <DialogDescription className="text-base max-w-md mx-auto">
+          With a Rowboat account, you get:
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-3 mb-8">
+        <div className="flex items-start gap-3 rounded-md border px-4 py-3">
+          <CheckCircle2 className="size-5 text-green-600 mt-0.5 shrink-0" />
+          <div>
+            <div className="text-sm font-medium">Instant access to all models</div>
+            <div className="text-xs text-muted-foreground">GPT, Claude, Gemini, and more — no separate API keys needed</div>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 rounded-md border px-4 py-3">
+          <CheckCircle2 className="size-5 text-green-600 mt-0.5 shrink-0" />
+          <div>
+            <div className="text-sm font-medium">Simplified billing</div>
+            <div className="text-xs text-muted-foreground">One account for everything — no juggling multiple provider subscriptions</div>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 rounded-md border px-4 py-3">
+          <CheckCircle2 className="size-5 text-green-600 mt-0.5 shrink-0" />
+          <div>
+            <div className="text-sm font-medium">Automatic updates</div>
+            <div className="text-xs text-muted-foreground">New models are available as soon as they launch, with no configuration changes</div>
+          </div>
+        </div>
+      </div>
+
+      <p className="text-sm text-muted-foreground text-center mb-6">
+        By continuing, you'll set up your own API keys instead of using Rowboat's managed gateway.
+      </p>
+
+      <div className="flex items-center justify-between">
+        <Button variant="ghost" onClick={handleBack} className="gap-1">
+          <ArrowLeft className="size-4" />
+          Back
+        </Button>
+        <Button onClick={handleNext}>
+          I understand
+        </Button>
+      </div>
+    </div>
+  )
+
+  // Step 2 (BYOK path): LLM Setup
   const renderLlmSetupStep = () => {
     const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
       { id: "openai", name: "OpenAI", description: "Use your OpenAI API key" },
@@ -874,10 +927,13 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           </div>
         )}
 
-        <div className="flex flex-col gap-3 mt-4">
+        <div className="flex items-center justify-between mt-4">
+          <Button variant="ghost" onClick={handleBack} className="gap-1">
+            <ArrowLeft className="size-4" />
+            Back
+          </Button>
           <Button
             onClick={handleTestAndSaveLlmConfig}
-            size="lg"
             disabled={!canTest || testState.status === "testing"}
           >
             {testState.status === "testing" ? (
@@ -891,7 +947,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     )
   }
 
-  // Step 1: Connect Accounts
+  // Step 3: Connect Accounts
   const renderAccountConnectionStep = () => (
     <div className="flex flex-col">
       <DialogHeader className="text-center mb-6">
@@ -935,14 +991,20 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         <Button onClick={handleNext} size="lg">
           Continue
         </Button>
-        <Button variant="ghost" onClick={handleNext} className="text-muted-foreground">
-          Skip for now
-        </Button>
+        <div className="flex items-center justify-between">
+          <Button variant="ghost" onClick={handleBack} className="gap-1">
+            <ArrowLeft className="size-4" />
+            Back
+          </Button>
+          <Button variant="ghost" onClick={handleNext} className="text-muted-foreground">
+            Skip for now
+          </Button>
+        </div>
       </div>
     </div>
   )
 
-  // Step 2: Completion
+  // Step 4: Completion
   const renderCompletionStep = () => {
     const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackConnected
 
@@ -1025,11 +1087,11 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         onEscapeKeyDown={(e) => e.preventDefault()}
       >
         {renderStepIndicator()}
-        {currentStep === 0 && renderPathChoiceStep()}
-        {currentStep === 1 && onboardingPath === 'rowboat' && renderRowboatSignInStep()}
-        {currentStep === 1 && onboardingPath === 'byok' && renderLlmSetupStep()}
-        {currentStep === 2 && renderAccountConnectionStep()}
-        {currentStep === 3 && renderCompletionStep()}
+        {currentStep === 0 && renderSignInStep()}
+        {currentStep === 1 && renderByokUpsellStep()}
+        {currentStep === 2 && renderLlmSetupStep()}
+        {currentStep === 3 && renderAccountConnectionStep()}
+        {currentStep === 4 && renderCompletionStep()}
       </DialogContent>
     </Dialog>
     </>
