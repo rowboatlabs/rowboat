@@ -7,7 +7,7 @@ import { getProviderConfig } from '../auth/providers.js';
 import * as oauthClient from '../auth/oauth-client.js';
 import { API_URL } from '../config/env.js';
 
-async function getAccessToken(): Promise<string> {
+export async function getAccessToken(): Promise<string> {
     const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
     const { tokens } = await oauthRepo.read('rowboat');
     if (!tokens) {

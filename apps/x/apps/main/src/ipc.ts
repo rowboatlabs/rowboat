@@ -40,6 +40,7 @@ import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedu
 import { search } from '@x/core/dist/search/search.js';
 import { versionHistory } from '@x/core';
 import { classifySchedule } from '@x/core/dist/knowledge/inline_tasks.js';
+import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -570,6 +571,10 @@ export function setupIpcHandlers() {
     'inline-task:classifySchedule': async (_event, args) => {
       const schedule = await classifySchedule(args.instruction);
       return { schedule };
+    },
+    // Billing handler
+    'billing:getInfo': async () => {
+      return await getBillingInfo();
     },
   });
 }

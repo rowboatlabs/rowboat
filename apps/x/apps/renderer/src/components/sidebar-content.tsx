@@ -87,6 +87,7 @@ import { ConnectorsPopover } from "@/components/connectors-popover"
 import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
+import { useBilling } from "@/hooks/useBilling"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
 
@@ -401,6 +402,8 @@ export function SidebarContentPanel({
   const [connectorsOpen, setConnectorsOpen] = useState(false)
   const [openConnectorsAfterClose, setOpenConnectorsAfterClose] = useState(false)
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [isRowboatConnected, setIsRowboatConnected] = useState(false)
+  const { billing } = useBilling(isRowboatConnected)
 
   useEffect(() => {
     let mounted = true
@@ -412,6 +415,7 @@ export function SidebarContentPanel({
         const hasError = Object.values(config).some((entry) => Boolean(entry?.error))
         if (mounted) {
           setHasOauthError(hasError)
+          setIsRowboatConnected(config['rowboat']?.connected ?? false)
           if (!hasError) {
             setShowOauthAlert(true)
           }
@@ -420,6 +424,7 @@ export function SidebarContentPanel({
         console.error('Failed to fetch OAuth state:', error)
         if (mounted) {
           setHasOauthError(false)
+          setIsRowboatConnected(false)
           setShowOauthAlert(true)
         }
       }
@@ -483,6 +488,24 @@ export function SidebarContentPanel({
           />
         )}
       </SidebarContent>
+      {/* Billing status */}
+      {isRowboatConnected && billing && (
+        <div className="px-3 py-2">
+          <div className="flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent/30 px-2.5 py-1.5">
+            <div className="flex flex-col">
+              <span className="text-xs font-medium capitalize text-sidebar-foreground">
+                {billing.subscriptionPlan ?? 'Free'}
+              </span>
+              <span className="text-[10px] text-sidebar-foreground/50">
+                8 days left
+              </span>
+            </div>
+            <button className="rounded-md bg-sidebar-accent px-2.5 py-1 text-[10px] font-medium text-sidebar-foreground hover:bg-sidebar-accent/80 transition-colors">
+              Upgrade
+            </button>
+          </div>
+        </div>
+      )}
       {/* Bottom actions */}
       <div className="border-t border-sidebar-border px-2 py-2">
         <div className="flex flex-col gap-1">
