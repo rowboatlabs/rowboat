@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
   AudioLines,
@@ -9,7 +10,9 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
+  Headphones,
   LoaderIcon,
+  Mic,
   Plus,
   Square,
   X,
@@ -102,6 +105,18 @@ interface ChatInputInnerProps {
   runId?: string | null
   initialDraft?: string
   onDraftChange?: (text: string) => void
+  isRecording?: boolean
+  recordingText?: string
+  recordingState?: 'connecting' | 'listening'
+  onStartRecording?: () => void
+  onSubmitRecording?: () => void
+  onCancelRecording?: () => void
+  voiceAvailable?: boolean
+  ttsAvailable?: boolean
+  ttsEnabled?: boolean
+  ttsMode?: 'summary' | 'full'
+  onToggleTts?: () => void
+  onTtsModeChange?: (mode: 'summary' | 'full') => void
 }
 
 function ChatInputInner({
@@ -115,6 +130,18 @@ function ChatInputInner({
   runId,
   initialDraft,
   onDraftChange,
+  isRecording,
+  recordingText,
+  recordingState,
+  onStartRecording,
+  onSubmitRecording,
+  onCancelRecording,
+  voiceAvailable,
+  ttsAvailable,
+  ttsEnabled,
+  ttsMode,
+  onToggleTts,
+  onTtsModeChange,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -367,6 +394,40 @@ function ChatInputInner({
           e.target.value = ''
         }}
       />
+      {isRecording ? (
+        /* ── Recording bar ── */
+        <div className="flex items-center gap-3 px-4 py-3">
+          <button
+            type="button"
+            onClick={onCancelRecording}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Cancel recording"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <div className="flex flex-1 items-center gap-2 overflow-hidden">
+            <VoiceWaveform />
+            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+              {recordingState === 'connecting' ? 'Connecting...' : recordingText || 'Listening...'}
+            </span>
+          </div>
+          <Button
+            size="icon"
+            onClick={onSubmitRecording}
+            disabled={!recordingText?.trim()}
+            className={cn(
+              'h-7 w-7 shrink-0 rounded-full transition-all',
+              recordingText?.trim()
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : 'bg-muted text-muted-foreground'
+            )}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        /* ── Normal input ── */
+        <>
       <div className="px-4 pt-4 pb-2">
         <PromptInputTextarea
           placeholder="Type your message..."
@@ -414,6 +475,63 @@ function ChatInputInner({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+        {onToggleTts && ttsAvailable && (
+          <div className="flex shrink-0 items-center">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onToggleTts}
+                  className={cn(
+                    'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
+                    ttsEnabled
+                      ? 'text-foreground hover:bg-muted'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  )}
+                  aria-label={ttsEnabled ? 'Disable voice output' : 'Enable voice output'}
+                >
+                  <Headphones className="h-4 w-4" />
+                  {!ttsEnabled && (
+                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <span className="block h-[1.5px] w-5 -rotate-45 rounded-full bg-muted-foreground" />
+                    </span>
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {ttsEnabled ? 'Voice output on' : 'Voice output off'}
+              </TooltipContent>
+            </Tooltip>
+            {ttsEnabled && onTtsModeChange && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-7 w-4 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuRadioGroup value={ttsMode ?? 'summary'} onValueChange={(v) => onTtsModeChange(v as 'summary' | 'full')}>
+                    <DropdownMenuRadioItem value="summary">Speak summary</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="full">Speak full response</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        )}
+        {voiceAvailable && onStartRecording && (
+          <button
+            type="button"
+            onClick={onStartRecording}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Voice input"
+          >
+            <Mic className="h-4 w-4" />
+          </button>
+        )}
         {isProcessing ? (
           <Button
             size="icon"
@@ -448,6 +566,31 @@ function ChatInputInner({
           </Button>
         )}
       </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Animated waveform bars for the recording indicator */
+function VoiceWaveform() {
+  return (
+    <div className="flex items-center gap-[3px] h-5">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <span
+          key={i}
+          className="w-[3px] rounded-full bg-primary"
+          style={{
+            animation: `voice-wave 1.2s ease-in-out ${i * 0.15}s infinite`,
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes voice-wave {
+          0%, 100% { height: 4px; }
+          50% { height: 16px; }
+        }
+      `}</style>
     </div>
   )
 }
@@ -466,6 +609,18 @@ export interface ChatInputWithMentionsProps {
   runId?: string | null
   initialDraft?: string
   onDraftChange?: (text: string) => void
+  isRecording?: boolean
+  recordingText?: string
+  recordingState?: 'connecting' | 'listening'
+  onStartRecording?: () => void
+  onSubmitRecording?: () => void
+  onCancelRecording?: () => void
+  voiceAvailable?: boolean
+  ttsAvailable?: boolean
+  ttsEnabled?: boolean
+  ttsMode?: 'summary' | 'full'
+  onToggleTts?: () => void
+  onTtsModeChange?: (mode: 'summary' | 'full') => void
 }
 
 export function ChatInputWithMentions({
@@ -482,6 +637,18 @@ export function ChatInputWithMentions({
   runId,
   initialDraft,
   onDraftChange,
+  isRecording,
+  recordingText,
+  recordingState,
+  onStartRecording,
+  onSubmitRecording,
+  onCancelRecording,
+  voiceAvailable,
+  ttsAvailable,
+  ttsEnabled,
+  ttsMode,
+  onToggleTts,
+  onTtsModeChange,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -496,6 +663,18 @@ export function ChatInputWithMentions({
         runId={runId}
         initialDraft={initialDraft}
         onDraftChange={onDraftChange}
+        isRecording={isRecording}
+        recordingText={recordingText}
+        recordingState={recordingState}
+        onStartRecording={onStartRecording}
+        onSubmitRecording={onSubmitRecording}
+        onCancelRecording={onCancelRecording}
+        voiceAvailable={voiceAvailable}
+        ttsAvailable={ttsAvailable}
+        ttsEnabled={ttsEnabled}
+        ttsMode={ttsMode}
+        onToggleTts={onToggleTts}
+        onTtsModeChange={onTtsModeChange}
       />
     </PromptInputProvider>
   )

@@ -885,6 +885,145 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     // ============================================================================
+    // App Navigation
+    // ============================================================================
+
+    'app-navigation': {
+        description: 'Control the app UI - navigate to notes, switch views, filter/search the knowledge base, and manage saved views.',
+        inputSchema: z.object({
+            action: z.enum(["open-note", "open-view", "update-base-view", "get-base-state", "create-base"]).describe("The navigation action to perform"),
+            // open-note
+            path: z.string().optional().describe("Knowledge file path for open-note, e.g. knowledge/People/John.md"),
+            // open-view
+            view: z.enum(["bases", "graph"]).optional().describe("Which view to open (for open-view action)"),
+            // update-base-view
+            filters: z.object({
+                set: z.array(z.object({ category: z.string(), value: z.string() })).optional().describe("Replace all filters with these"),
+                add: z.array(z.object({ category: z.string(), value: z.string() })).optional().describe("Add these filters"),
+                remove: z.array(z.object({ category: z.string(), value: z.string() })).optional().describe("Remove these filters"),
+                clear: z.boolean().optional().describe("Clear all filters"),
+            }).optional().describe("Filter modifications (for update-base-view)"),
+            columns: z.object({
+                set: z.array(z.string()).optional().describe("Replace visible columns with these"),
+                add: z.array(z.string()).optional().describe("Add these columns"),
+                remove: z.array(z.string()).optional().describe("Remove these columns"),
+            }).optional().describe("Column modifications (for update-base-view)"),
+            sort: z.object({
+                field: z.string(),
+                dir: z.enum(["asc", "desc"]),
+            }).optional().describe("Sort configuration (for update-base-view)"),
+            search: z.string().optional().describe("Search query to filter notes (for update-base-view)"),
+            // get-base-state
+            base_name: z.string().optional().describe("Name of a saved base to inspect (for get-base-state). Omit for the current/default view."),
+            // create-base
+            name: z.string().optional().describe("Name for the saved base view (for create-base)"),
+        }),
+        execute: async (input: {
+            action: string;
+            [key: string]: unknown;
+        }) => {
+            switch (input.action) {
+                case 'open-note': {
+                    const filePath = input.path as string;
+                    try {
+                        const result = await workspace.exists(filePath);
+                        if (!result.exists) {
+                            return { success: false, error: `File not found: ${filePath}` };
+                        }
+                        return { success: true, action: 'open-note', path: filePath };
+                    } catch {
+                        return { success: false, error: `Could not access file: ${filePath}` };
+                    }
+                }
+
+                case 'open-view': {
+                    const view = input.view as string;
+                    return { success: true, action: 'open-view', view };
+                }
+
+                case 'update-base-view': {
+                    const updates: Record<string, unknown> = {};
+                    if (input.filters) updates.filters = input.filters;
+                    if (input.columns) updates.columns = input.columns;
+                    if (input.sort) updates.sort = input.sort;
+                    if (input.search !== undefined) updates.search = input.search;
+                    return { success: true, action: 'update-base-view', updates };
+                }
+
+                case 'get-base-state': {
+                    // Scan knowledge/ files and extract frontmatter properties
+                    try {
+                        const { parseFrontmatter } = await import("@x/shared/dist/frontmatter.js");
+                        const entries = await workspace.readdir("knowledge", { recursive: true, allowedExtensions: [".md"] });
+                        const files = entries.filter(e => e.kind === 'file');
+                        const properties = new Map<string, Set<string>>();
+                        let noteCount = 0;
+
+                        for (const file of files) {
+                            try {
+                                const { data } = await workspace.readFile(file.path);
+                                const { fields } = parseFrontmatter(data);
+                                noteCount++;
+                                for (const [key, value] of Object.entries(fields)) {
+                                    if (!value) continue;
+                                    let set = properties.get(key);
+                                    if (!set) { set = new Set(); properties.set(key, set); }
+                                    const values = Array.isArray(value) ? value : [value];
+                                    for (const v of values) {
+                                        const trimmed = v.trim();
+                                        if (trimmed) set.add(trimmed);
+                                    }
+                                }
+                            } catch {
+                                // skip unreadable files
+                            }
+                        }
+
+                        const availableProperties: Record<string, string[]> = {};
+                        for (const [key, values] of properties) {
+                            availableProperties[key] = [...values].sort();
+                        }
+
+                        return {
+                            success: true,
+                            action: 'get-base-state',
+                            noteCount,
+                            availableProperties,
+                        };
+                    } catch (error) {
+                        return {
+                            success: false,
+                            error: error instanceof Error ? error.message : 'Failed to read knowledge base',
+                        };
+                    }
+                }
+
+                case 'create-base': {
+                    const name = input.name as string;
+                    const safeName = name.replace(/[^a-zA-Z0-9_\- ]/g, '').trim();
+                    if (!safeName) {
+                        return { success: false, error: 'Invalid base name' };
+                    }
+                    const basePath = `bases/${safeName}.base`;
+                    try {
+                        const config = { name: safeName, filters: [], columns: [] };
+                        await workspace.writeFile(basePath, JSON.stringify(config, null, 2), { mkdirp: true });
+                        return { success: true, action: 'create-base', name: safeName, path: basePath };
+                    } catch (error) {
+                        return {
+                            success: false,
+                            error: error instanceof Error ? error.message : 'Failed to create base',
+                        };
+                    }
+                }
+
+                default:
+                    return { success: false, error: `Unknown action: ${input.action}` };
+            }
+        },
+    },
+
+    // ============================================================================
     // Web Search (Brave Search API)
     // ============================================================================
 

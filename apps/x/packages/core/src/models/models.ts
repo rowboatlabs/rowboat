@@ -64,7 +64,7 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
                 apiKey,
                 baseURL,
                 headers,
-            });
+            }) as unknown as ProviderV2;
         default:
             throw new Error(`Unsupported provider flavor: ${config.flavor}`);
     }

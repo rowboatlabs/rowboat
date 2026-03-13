@@ -108,6 +108,19 @@ interface ChatSidebarProps {
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
   onOpenKnowledgeFile?: (path: string) => void
   onActivate?: () => void
+  // Voice / TTS props
+  isRecording?: boolean
+  recordingText?: string
+  recordingState?: 'connecting' | 'listening'
+  onStartRecording?: () => void
+  onSubmitRecording?: () => void
+  onCancelRecording?: () => void
+  voiceAvailable?: boolean
+  ttsAvailable?: boolean
+  ttsEnabled?: boolean
+  ttsMode?: 'summary' | 'full'
+  onToggleTts?: () => void
+  onTtsModeChange?: (mode: 'summary' | 'full') => void
 }
 
 export function ChatSidebar({
@@ -146,6 +159,18 @@ export function ChatSidebar({
   onToolOpenChangeForTab,
   onOpenKnowledgeFile,
   onActivate,
+  isRecording,
+  recordingText,
+  recordingState,
+  onStartRecording,
+  onSubmitRecording,
+  onCancelRecording,
+  voiceAvailable,
+  ttsAvailable,
+  ttsEnabled,
+  ttsMode,
+  onToggleTts,
+  onTtsModeChange,
 }: ChatSidebarProps) {
   const [width, setWidth] = useState(() => getInitialPaneWidth(defaultWidth))
   const [isResizing, setIsResizing] = useState(false)
@@ -542,6 +567,18 @@ export function ChatSidebar({
                           runId={tabState.runId}
                           initialDraft={getInitialDraft?.(tab.id)}
                           onDraftChange={onDraftChangeForTab ? (text) => onDraftChangeForTab(tab.id, text) : undefined}
+                          isRecording={isActive && isRecording}
+                          recordingText={isActive ? recordingText : undefined}
+                          recordingState={isActive ? recordingState : undefined}
+                          onStartRecording={isActive ? onStartRecording : undefined}
+                          onSubmitRecording={isActive ? onSubmitRecording : undefined}
+                          onCancelRecording={isActive ? onCancelRecording : undefined}
+                          voiceAvailable={isActive && voiceAvailable}
+                          ttsAvailable={isActive && ttsAvailable}
+                          ttsEnabled={ttsEnabled}
+                          ttsMode={ttsMode}
+                          onToggleTts={isActive ? onToggleTts : undefined}
+                          onTtsModeChange={isActive ? onTtsModeChange : undefined}
                         />
                       </div>
                     )

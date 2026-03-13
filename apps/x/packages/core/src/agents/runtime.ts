@@ -894,10 +894,18 @@ export async function* streamAgent({
         }
 
         // get any queued user messages
+        let voiceInput = false;
+        let voiceOutput: 'summary' | 'full' | null = null;
         while (true) {
             const msg = await messageQueue.dequeue(runId);
             if (!msg) {
                 break;
+            }
+            if (msg.voiceInput) {
+                voiceInput = true;
+            }
+            if (msg.voiceOutput) {
+                voiceOutput = msg.voiceOutput;
             }
             loopLogger.log('dequeued user message', msg.messageId);
             yield* processEvent({
@@ -938,7 +946,18 @@ export async function* streamAgent({
             minute: '2-digit',
             timeZoneName: 'short'
         });
-        const instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
+        let instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
+        if (voiceInput) {
+            loopLogger.log('voice input enabled, injecting voice input prompt');
+            instructionsWithDateTime += `\n\n# Voice Input\nThe user's message was transcribed from speech. Be aware that:\n- There may be transcription errors. Silently correct obvious ones (e.g. homophones, misheard words). If an error is genuinely ambiguous, briefly mention your interpretation (e.g. "I'm assuming you meant X").\n- Spoken messages are often long-winded. The user may ramble, repeat themselves, or correct something they said earlier in the same message. Focus on their final intent, not every word verbatim.`;
+        }
+        if (voiceOutput === 'summary') {
+            loopLogger.log('voice output enabled (summary mode), injecting voice output prompt');
+            instructionsWithDateTime += `\n\n# Voice Output (MANDATORY)\nThe user has voice output enabled. You MUST start your response with <voice></voice> tags that provide a spoken summary and guide to your written response. This is NOT optional — every response MUST begin with <voice> tags.\n\nRules:\n1. ALWAYS start your response with one or more <voice> tags. Never skip them.\n2. Place ALL <voice> tags at the BEGINNING of your response, before any detailed content. Do NOT intersperse <voice> tags throughout the response.\n3. Wrap EACH spoken sentence in its own separate <voice> tag so it can be spoken incrementally. Do NOT wrap everything in a single <voice> block.\n4. Use voice as a TL;DR and navigation aid — do NOT read the entire response aloud.\n\nExample — if the user asks "what happened in my meeting with Sarah yesterday?":\n<voice>Your meeting with Sarah covered three main things: the Q2 roadmap timeline, hiring for the backend role, and the client demo next week.</voice>\n<voice>I've pulled out the key details and action items below — the demo prep notes are at the end.</voice>\n\n## Meeting with Sarah — March 11\n(Then the full detailed written response follows without any more <voice> tags.)\n\nAny text outside <voice> tags is shown visually but not spoken.`;
+        } else if (voiceOutput === 'full') {
+            loopLogger.log('voice output enabled (full mode), injecting voice output prompt');
+            instructionsWithDateTime += `\n\n# Voice Output — Full Read-Aloud (MANDATORY)\nThe user wants your ENTIRE response spoken aloud. You MUST wrap your full response in <voice></voice> tags. This is NOT optional.\n\nRules:\n1. Wrap EACH sentence in its own separate <voice> tag so it can be spoken incrementally.\n2. Write your response in a natural, conversational style suitable for listening — no markdown headings, bullet points, or formatting symbols. Use plain spoken language.\n3. Structure the content as if you are speaking to the user directly. Use transitions like "first", "also", "one more thing" instead of visual formatting.\n4. Every sentence MUST be inside a <voice> tag. Do not leave any content outside <voice> tags.\n\nExample:\n<voice>Your meeting with Sarah covered three main things.</voice>\n<voice>First, you discussed the Q2 roadmap timeline and agreed to push the launch to April.</voice>\n<voice>Second, you talked about hiring for the backend role — Sarah will send over two candidates by Friday.</voice>\n<voice>And lastly, the client demo is next week on Thursday at 2pm, and you're handling the intro slides.</voice>`;
+        }
         let streamError: string | null = null;
         for await (const event of streamLlm(
             model,
