@@ -40,6 +40,7 @@ import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedu
 import { search } from '@x/core/dist/search/search.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule } from '@x/core/dist/knowledge/inline_tasks.js';
+import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -709,6 +710,10 @@ export function setupIpcHandlers() {
     },
     'voice:getDeepgramToken': async () => {
       return voice.getDeepgramToken();
+    },
+    // Billing handler
+    'billing:getInfo': async () => {
+      return await getBillingInfo();
     },
   });
 }

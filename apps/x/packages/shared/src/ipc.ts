@@ -516,6 +516,17 @@ const ipcSchemas = {
       ]).nullable(),
     }),
   },
+  // Billing channels
+  'billing:getInfo': {
+    req: z.null(),
+    res: z.object({
+      subscriptionPlan: z.string().nullable(),
+      subscriptionStatus: z.string().nullable(),
+      trialUsed: z.boolean(),
+      sanctionedCredits: z.number(),
+      availableCredits: z.number(),
+    }),
+  },
 } as const;
 
 // ============================================================================
