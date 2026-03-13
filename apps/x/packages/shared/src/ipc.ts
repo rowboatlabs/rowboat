@@ -481,6 +481,17 @@ const ipcSchemas = {
     }),
   },
   // Inline task schedule classification
+  'export:note': {
+    req: z.object({
+      markdown: z.string(),
+      format: z.enum(['md', 'pdf', 'docx']),
+      title: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
   'inline-task:classifySchedule': {
     req: z.object({
       instruction: z.string(),

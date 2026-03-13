@@ -25,18 +25,30 @@ import {
   ExternalLinkIcon,
   Trash2Icon,
   ImageIcon,
+  DownloadIcon,
+  FileTextIcon,
+  FileIcon,
+  FileTypeIcon,
 } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 interface EditorToolbarProps {
   editor: Editor | null
   onSelectionHighlight?: (range: { from: number; to: number } | null) => void
   onImageUpload?: (file: File) => Promise<void> | void
+  onExport?: (format: 'md' | 'pdf' | 'docx') => void
 }
 
 export function EditorToolbar({
   editor,
   onSelectionHighlight,
   onImageUpload,
+  onExport,
 }: EditorToolbarProps) {
   const [linkUrl, setLinkUrl] = useState('')
   const [isLinkPopoverOpen, setIsLinkPopoverOpen] = useState(false)
@@ -339,6 +351,38 @@ export function EditorToolbar({
           >
             <ImageIcon className="size-4" />
           </Button>
+        </>
+      )}
+
+      {/* Export */}
+      {onExport && (
+        <>
+          <div className="separator" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                title="Export"
+              >
+                <DownloadIcon className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onExport('md')}>
+                <FileTextIcon className="size-4 mr-2" />
+                Markdown (.md)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onExport('pdf')}>
+                <FileIcon className="size-4 mr-2" />
+                PDF (.pdf)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onExport('docx')}>
+                <FileTypeIcon className="size-4 mr-2" />
+                Word (.docx)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </>
       )}
     </div>

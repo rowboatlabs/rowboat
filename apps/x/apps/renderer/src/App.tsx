@@ -3806,6 +3806,15 @@ function App() {
                                 }
                               }}
                               editable={!isViewingHistory}
+                              onExport={async (format) => {
+                                const markdown = tabContent
+                                const title = getBaseName(tab.path)
+                                try {
+                                  await window.ipc.invoke('export:note', { markdown, format, title })
+                                } catch (err) {
+                                  console.error('Export failed:', err)
+                                }
+                              }}
                             />
                           </div>
                         )

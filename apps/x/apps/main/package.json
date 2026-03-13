@@ -17,6 +17,7 @@
         "@x/shared": "workspace:*",
         "chokidar": "^4.0.3",
         "electron-squirrel-startup": "^1.0.1",
+        "html-to-docx": "^1.8.0",
         "mammoth": "^1.11.0",
         "papaparse": "^5.5.3",
         "pdf-parse": "^2.4.5",
