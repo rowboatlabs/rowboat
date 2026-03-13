@@ -18,6 +18,8 @@ import { createProvider } from "../../models/models.js";
 import { IModelConfigRepo } from "../../models/repo.js";
 import { isSignedIn } from "../../account/account.js";
 import { getGatewayProvider } from "../../models/gateway.js";
+import { getAccessToken } from "../../auth/tokens.js";
+import { API_URL } from "../../config/env.js";
 // Parser libraries are loaded dynamically inside parseFile.execute()
 // to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
 // Import paths are computed so esbuild cannot statically resolve them.
@@ -1035,9 +1037,9 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             freshness: z.string().optional().describe('Filter by freshness: pd (past day), pw (past week), pm (past month), py (past year)'),
         }),
         isAvailable: async () => {
+            if (await isSignedIn()) return true;
             try {
-                const homedir = process.env.HOME || process.env.USERPROFILE || '';
-                const braveConfigPath = path.join(homedir, '.rowboat', 'config', 'brave-search.json');
+                const braveConfigPath = path.join(WorkDir, 'config', 'brave-search.json');
                 const raw = await fs.readFile(braveConfigPath, 'utf8');
                 const config = JSON.parse(raw);
                 return !!config.apiKey;
@@ -1047,30 +1049,6 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
         execute: async ({ query, count, freshness }: { query: string; count?: number; freshness?: string }) => {
             try {
-                // Read API key from config
-                const homedir = process.env.HOME || process.env.USERPROFILE || '';
-                const braveConfigPath = path.join(homedir, '.rowboat', 'config', 'brave-search.json');
-
-                let apiKey: string;
-                try {
-                    const raw = await fs.readFile(braveConfigPath, 'utf8');
-                    const config = JSON.parse(raw);
-                    apiKey = config.apiKey;
-                } catch {
-                    return {
-                        success: false,
-                        error: 'Brave Search API key not configured. Create ~/.rowboat/config/brave-search.json with { "apiKey": "<your-key>" }',
-                    };
-                }
-
-                if (!apiKey) {
-                    return {
-                        success: false,
-                        error: 'Brave Search API key is empty. Set "apiKey" in ~/.rowboat/config/brave-search.json',
-                    };
-                }
-
-                // Build query params
                 const resultCount = Math.min(Math.max(count || 5, 1), 20);
                 const params = new URLSearchParams({
                     q: query,
@@ -1080,13 +1058,47 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     params.set('freshness', freshness);
                 }
 
-                const url = `https://api.search.brave.com/res/v1/web/search?${params.toString()}`;
-                const response = await fetch(url, {
-                    headers: {
-                        'X-Subscription-Token': apiKey,
-                        'Accept': 'application/json',
-                    },
-                });
+                let response: Response;
+
+                if (await isSignedIn()) {
+                    // Use proxy
+                    const accessToken = await getAccessToken();
+                    response = await fetch(`${API_URL}/v1/search/brave?${params.toString()}`, {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Accept': 'application/json',
+                        },
+                    });
+                } else {
+                    // Read API key from config
+                    const braveConfigPath = path.join(WorkDir, 'config', 'brave-search.json');
+
+                    let apiKey: string;
+                    try {
+                        const raw = await fs.readFile(braveConfigPath, 'utf8');
+                        const config = JSON.parse(raw);
+                        apiKey = config.apiKey;
+                    } catch {
+                        return {
+                            success: false,
+                            error: 'Brave Search API key not configured. Create ~/.rowboat/config/brave-search.json with { "apiKey": "<your-key>" }',
+                        };
+                    }
+
+                    if (!apiKey) {
+                        return {
+                            success: false,
+                            error: 'Brave Search API key is empty. Set "apiKey" in ~/.rowboat/config/brave-search.json',
+                        };
+                    }
+
+                    response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params.toString()}`, {
+                        headers: {
+                            'X-Subscription-Token': apiKey,
+                            'Accept': 'application/json',
+                        },
+                    });
+                }
 
                 if (!response.ok) {
                     const body = await response.text();
@@ -1133,9 +1145,9 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             category: z.enum(['company', 'research paper', 'news', 'tweet', 'personal site', 'financial report', 'people']).optional().describe('Filter results by category'),
         }),
         isAvailable: async () => {
+            if (await isSignedIn()) return true;
             try {
-                const homedir = process.env.HOME || process.env.USERPROFILE || '';
-                const exaConfigPath = path.join(homedir, '.rowboat', 'config', 'exa-search.json');
+                const exaConfigPath = path.join(WorkDir, 'config', 'exa-search.json');
                 const raw = await fs.readFile(exaConfigPath, 'utf8');
                 const config = JSON.parse(raw);
                 return !!config.apiKey;
@@ -1145,31 +1157,9 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
         execute: async ({ query, numResults, category }: { query: string; numResults?: number; category?: string }) => {
             try {
-                const homedir = process.env.HOME || process.env.USERPROFILE || '';
-                const exaConfigPath = path.join(homedir, '.rowboat', 'config', 'exa-search.json');
-
-                let apiKey: string;
-                try {
-                    const raw = await fs.readFile(exaConfigPath, 'utf8');
-                    const config = JSON.parse(raw);
-                    apiKey = config.apiKey;
-                } catch {
-                    return {
-                        success: false,
-                        error: 'Exa Search API key not configured. Create ~/.rowboat/config/exa-search.json with { "apiKey": "<your-key>" }',
-                    };
-                }
-
-                if (!apiKey) {
-                    return {
-                        success: false,
-                        error: 'Exa Search API key is empty. Set "apiKey" in ~/.rowboat/config/exa-search.json',
-                    };
-                }
-
                 const resultCount = Math.min(Math.max(numResults || 5, 1), 20);
 
-                const body: Record<string, unknown> = {
+                const reqBody: Record<string, unknown> = {
                     query,
                     numResults: resultCount,
                     type: 'auto',
@@ -1179,17 +1169,54 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     },
                 };
                 if (category) {
-                    body.category = category;
+                    reqBody.category = category;
                 }
 
-                const response = await fetch('https://api.exa.ai/search', {
-                    method: 'POST',
-                    headers: {
-                        'x-api-key': apiKey,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(body),
-                });
+                let response: Response;
+
+                if (await isSignedIn()) {
+                    // Use proxy
+                    const accessToken = await getAccessToken();
+                    response = await fetch(`${API_URL}/v1/search/exa`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(reqBody),
+                    });
+                } else {
+                    // Read API key from config
+                    const exaConfigPath = path.join(WorkDir, 'config', 'exa-search.json');
+
+                    let apiKey: string;
+                    try {
+                        const raw = await fs.readFile(exaConfigPath, 'utf8');
+                        const config = JSON.parse(raw);
+                        apiKey = config.apiKey;
+                    } catch {
+                        return {
+                            success: false,
+                            error: 'Exa Search API key not configured. Create ~/.rowboat/config/exa-search.json with { "apiKey": "<your-key>" }',
+                        };
+                    }
+
+                    if (!apiKey) {
+                        return {
+                            success: false,
+                            error: 'Exa Search API key is empty. Set "apiKey" in ~/.rowboat/config/exa-search.json',
+                        };
+                    }
+
+                    response = await fetch('https://api.exa.ai/search', {
+                        method: 'POST',
+                        headers: {
+                            'x-api-key': apiKey,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(reqBody),
+                    });
+                }
 
                 if (!response.ok) {
                     const text = await response.text();
