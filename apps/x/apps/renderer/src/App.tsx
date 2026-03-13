@@ -570,9 +570,13 @@ function App() {
 
   // Check if voice is available on mount
   useEffect(() => {
-    window.ipc.invoke('voice:getConfig', null).then(config => {
+    Promise.all([
+      window.ipc.invoke('voice:getConfig', null),
+      window.ipc.invoke('oauth:getState', null),
+    ]).then(([config, oauthState]) => {
+      const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
       setVoiceAvailable(!!config.deepgram)
-      setTtsAvailable(!!config.elevenlabs)
+      setTtsAvailable(!!config.elevenlabs || rowboatConnected)
     }).catch(() => {
       setVoiceAvailable(false)
       setTtsAvailable(false)

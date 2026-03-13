@@ -1,5 +1,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { isSignedIn } from '../account/account.js';
+import { getAccessToken } from '../auth/tokens.js';
+import { API_URL } from '../config/env.js';
 
 const homedir = process.env.HOME || process.env.USERPROFILE || '';
 
@@ -32,21 +35,36 @@ export async function getVoiceConfig(): Promise<VoiceConfig> {
 
 export async function synthesizeSpeech(text: string): Promise<{ audioBase64: string; mimeType: string }> {
     const config = await getVoiceConfig();
-    if (!config.elevenlabs) {
-        throw new Error('ElevenLabs not configured. Create ~/.rowboat/config/elevenlabs.json with { "apiKey": "<your-key>" }');
+    const signedIn = await isSignedIn();
+
+    let url: string;
+    let headers: Record<string, string>;
+
+    if (signedIn) {
+        const voiceId = config.elevenlabs?.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
+        const accessToken = await getAccessToken();
+        url = `${API_URL}/v1/voice/text-to-speech/${voiceId}`;
+        headers = {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        };
+        console.log('[voice] synthesizing speech via Rowboat proxy, text length:', text.length, 'voiceId:', voiceId);
+    } else {
+        if (!config.elevenlabs) {
+            throw new Error('ElevenLabs not configured. Create ~/.rowboat/config/elevenlabs.json with { "apiKey": "<your-key>" }');
+        }
+        const voiceId = config.elevenlabs.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
+        url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+        headers = {
+            'xi-api-key': config.elevenlabs.apiKey,
+            'Content-Type': 'application/json',
+        };
+        console.log('[voice] synthesizing speech via ElevenLabs, text length:', text.length, 'voiceId:', voiceId);
     }
-
-    const voiceId = config.elevenlabs.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
-    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
-
-    console.log('[voice] synthesizing speech, text length:', text.length, 'voiceId:', voiceId);
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: {
-            'xi-api-key': config.elevenlabs.apiKey,
-            'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
             text,
             model_id: 'eleven_flash_v2_5',
@@ -59,8 +77,8 @@ export async function synthesizeSpeech(text: string): Promise<{ audioBase64: str
 
     if (!response.ok) {
         const errText = await response.text().catch(() => 'Unknown error');
-        console.error('[voice] ElevenLabs API error:', response.status, errText);
-        throw new Error(`ElevenLabs API error ${response.status}: ${errText}`);
+        console.error('[voice] TTS API error:', response.status, errText);
+        throw new Error(`TTS API error ${response.status}: ${errText}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
