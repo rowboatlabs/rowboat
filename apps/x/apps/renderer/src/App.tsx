@@ -1896,7 +1896,8 @@ function App() {
   const handlePromptSubmit = async (
     message: PromptInputMessage,
     mentions?: FileMention[],
-    stagedAttachments: StagedAttachment[] = []
+    stagedAttachments: StagedAttachment[] = [],
+    searchEnabled?: boolean,
   ) => {
     if (isProcessing) return
 
@@ -1994,6 +1995,7 @@ function App() {
           message: attachmentPayload,
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
+          searchEnabled: searchEnabled || undefined,
         })
       } else {
         // Legacy path: plain string with optional XML-formatted @mentions.
@@ -2024,6 +2026,7 @@ function App() {
           message: formattedMessage,
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
+          searchEnabled: searchEnabled || undefined,
         })
 
         titleSource = formattedMessage

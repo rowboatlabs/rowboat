@@ -10,6 +10,7 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
+  Globe,
   Headphones,
   LoaderIcon,
   Mic,
@@ -56,6 +57,7 @@ export type StagedAttachment = {
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024 // 10MB
 
+
 const providerDisplayNames: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
@@ -95,7 +97,7 @@ function getAttachmentIcon(kind: AttachmentIconKind) {
 }
 
 interface ChatInputInnerProps {
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[]) => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean) => void
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean
@@ -152,6 +154,8 @@ function ChatInputInner({
 
   const [configuredModels, setConfiguredModels] = useState<ConfiguredModel[]>([])
   const [activeModelKey, setActiveModelKey] = useState('')
+  const [searchEnabled, setSearchEnabled] = useState(false)
+  const [searchAvailable, setSearchAvailable] = useState(false)
 
   // Load model config from disk (on mount and whenever tab becomes active)
   const loadModelConfig = useCallback(async () => {
@@ -208,6 +212,27 @@ function ChatInputInner({
     window.addEventListener('models-config-changed', handler)
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
+
+  // Check search tool availability (brave or exa)
+  useEffect(() => {
+    const checkSearch = async () => {
+      let available = false
+      try {
+        const raw = await window.ipc.invoke('workspace:readFile', { path: 'config/brave-search.json' })
+        const config = JSON.parse(raw.data)
+        if (config.apiKey) available = true
+      } catch { /* not configured */ }
+      if (!available) {
+        try {
+          const raw = await window.ipc.invoke('workspace:readFile', { path: 'config/exa-search.json' })
+          const config = JSON.parse(raw.data)
+          if (config.apiKey) available = true
+        } catch { /* not configured */ }
+      }
+      setSearchAvailable(available)
+    }
+    checkSearch()
+  }, [isActive])
 
   const handleModelChange = useCallback(async (key: string) => {
     const entry = configuredModels.find((m) => `${m.flavor}/${m.model}` === key)
@@ -290,11 +315,12 @@ function ChatInputInner({
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return
-    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments)
+    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined)
     controller.textInput.clear()
     controller.mentions.clearMentions()
     setAttachments([])
-  }, [attachments, canSubmit, controller, message, onSubmit])
+    setSearchEnabled(false)
+  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -446,6 +472,28 @@ function ChatInputInner({
         >
           <Plus className="h-4 w-4" />
         </button>
+        {searchAvailable && (
+          searchEnabled ? (
+            <button
+              type="button"
+              onClick={() => setSearchEnabled(false)}
+              className="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 text-blue-600 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
+            >
+              <Globe className="h-3.5 w-3.5" />
+              <span className="text-xs font-medium">Search</span>
+              <X className="h-3 w-3" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSearchEnabled(true)}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Search"
+            >
+              <Globe className="h-4 w-4" />
+            </button>
+          )
+        )}
         <div className="flex-1" />
         {configuredModels.length > 0 && (
           <DropdownMenu>

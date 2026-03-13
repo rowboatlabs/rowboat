@@ -132,6 +132,7 @@ const ipcSchemas = {
       message: UserMessageContent,
       voiceInput: z.boolean().optional(),
       voiceOutput: z.enum(['summary', 'full']).optional(),
+      searchEnabled: z.boolean().optional(),
     }),
     res: z.object({
       messageId: z.string(),

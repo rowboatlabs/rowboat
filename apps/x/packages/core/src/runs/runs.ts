@@ -19,9 +19,9 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
     return run;
 }
 
-export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode): Promise<string> {
+export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean): Promise<string> {
     const queue = container.resolve<IMessageQueue>('messageQueue');
-    const id = await queue.enqueue(runId, message, voiceInput, voiceOutput);
+    const id = await queue.enqueue(runId, message, voiceInput, voiceOutput, searchEnabled);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');
     runtime.trigger(runId);
     return id;

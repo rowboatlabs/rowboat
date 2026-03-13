@@ -896,6 +896,7 @@ export async function* streamAgent({
         // get any queued user messages
         let voiceInput = false;
         let voiceOutput: 'summary' | 'full' | null = null;
+        let searchEnabled = false;
         while (true) {
             const msg = await messageQueue.dequeue(runId);
             if (!msg) {
@@ -903,6 +904,9 @@ export async function* streamAgent({
             }
             if (msg.voiceInput) {
                 voiceInput = true;
+            }
+            if (msg.searchEnabled) {
+                searchEnabled = true;
             }
             if (msg.voiceOutput) {
                 voiceOutput = msg.voiceOutput;
@@ -957,6 +961,10 @@ export async function* streamAgent({
         } else if (voiceOutput === 'full') {
             loopLogger.log('voice output enabled (full mode), injecting voice output prompt');
             instructionsWithDateTime += `\n\n# Voice Output — Full Read-Aloud (MANDATORY)\nThe user wants your ENTIRE response spoken aloud. You MUST wrap your full response in <voice></voice> tags. This is NOT optional.\n\nRules:\n1. Wrap EACH sentence in its own separate <voice> tag so it can be spoken incrementally.\n2. Write your response in a natural, conversational style suitable for listening — no markdown headings, bullet points, or formatting symbols. Use plain spoken language.\n3. Structure the content as if you are speaking to the user directly. Use transitions like "first", "also", "one more thing" instead of visual formatting.\n4. Every sentence MUST be inside a <voice> tag. Do not leave any content outside <voice> tags.\n\nExample:\n<voice>Your meeting with Sarah covered three main things.</voice>\n<voice>First, you discussed the Q2 roadmap timeline and agreed to push the launch to April.</voice>\n<voice>Second, you talked about hiring for the backend role — Sarah will send over two candidates by Friday.</voice>\n<voice>And lastly, the client demo is next week on Thursday at 2pm, and you're handling the intro slides.</voice>`;
+        }
+        if (searchEnabled) {
+            loopLogger.log('search enabled, injecting search prompt');
+            instructionsWithDateTime += `\n\n# Search\nThe user has requested a search. Load the search skill and use web search or research search as needed to answer their query.`;
         }
         let streamError: string | null = null;
         for await (const event of streamLlm(

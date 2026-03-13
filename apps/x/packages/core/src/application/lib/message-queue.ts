@@ -10,10 +10,11 @@ type EnqueuedMessage = {
     message: UserMessageContentType;
     voiceInput?: boolean;
     voiceOutput?: VoiceOutputMode;
+    searchEnabled?: boolean;
 };
 
 export interface IMessageQueue {
-    enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode): Promise<string>;
+    enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean): Promise<string>;
     dequeue(runId: string): Promise<EnqueuedMessage | null>;
 }
 
@@ -29,7 +30,7 @@ export class InMemoryMessageQueue implements IMessageQueue {
         this.idGenerator = idGenerator;
     }
 
-    async enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode): Promise<string> {
+    async enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean): Promise<string> {
         if (!this.store[runId]) {
             this.store[runId] = [];
         }
@@ -39,6 +40,7 @@ export class InMemoryMessageQueue implements IMessageQueue {
             message,
             voiceInput,
             voiceOutput,
+            searchEnabled,
         });
         return id;
     }
