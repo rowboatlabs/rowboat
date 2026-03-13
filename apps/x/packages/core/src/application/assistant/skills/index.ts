@@ -11,6 +11,7 @@ import slackSkill from "./slack/skill.js";
 import backgroundAgentsSkill from "./background-agents/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
 import webSearchSkill from "./web-search/skill.js";
+import appNavigationSkill from "./app-navigation/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
@@ -94,6 +95,12 @@ const definitions: SkillDefinition[] = [
     title: "Deletion Guardrails",
     summary: "Following the confirmation process before removing workflows or agents and their dependencies.",
     content: deletionGuardrailsSkill,
+  },
+  {
+    id: "app-navigation",
+    title: "App Navigation",
+    summary: "Navigate the app UI - open notes, switch views, filter/search the knowledge base, and manage saved views.",
+    content: appNavigationSkill,
   },
 ];
 

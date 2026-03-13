@@ -87,6 +87,10 @@ type BasesViewProps = {
   onConfigChange: (config: BaseConfig) => void
   isDefaultBase: boolean
   onSave: (name: string | null) => void
+  /** Search query set externally (e.g. by app-navigation tool). */
+  externalSearch?: string
+  /** Called after the external search has been consumed (applied to internal state). */
+  onExternalSearchConsumed?: () => void
 }
 
 function collectFiles(nodes: TreeNode[]): { path: string; name: string; mtimeMs: number }[] {
@@ -142,7 +146,7 @@ function getSortValue(note: NoteEntry, column: string): string | number {
 const isBuiltin = (col: string): col is BuiltinColumn =>
   (BUILTIN_COLUMNS as readonly string[]).includes(col)
 
-export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaultBase, onSave }: BasesViewProps) {
+export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaultBase, onSave, externalSearch, onExternalSearchConsumed }: BasesViewProps) {
   // Build notes instantly from tree
   const notes = useMemo<NoteEntry[]>(() => {
     return collectFiles(tree).map((f) => ({
@@ -300,6 +304,15 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
   // Search
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+
+  // Apply external search from app-navigation tool
+  useEffect(() => {
+    if (externalSearch !== undefined) {
+      setSearchQuery(externalSearch)
+      setSearchOpen(true)
+      onExternalSearchConsumed?.()
+    }
+  }, [externalSearch, onExternalSearchConsumed])
   const debouncedSearch = useDebounce(searchQuery, 250)
   const [searchMatchPaths, setSearchMatchPaths] = useState<Set<string> | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
