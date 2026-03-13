@@ -47,7 +47,14 @@ import { classifySchedule } from '@x/core/dist/knowledge/inline_tasks.js';
 function markdownToHtml(markdown: string, title: string): string {
   // Simple markdown to HTML conversion for export purposes
   let html = markdown
-    // Escape HTML entities first (but preserve markdown syntax)
+    // Resolve wiki links [[Folder/Note Name]] or [[Folder/Note Name|Display]] to plain text
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, (_match, _path, display) => display.trim())
+    .replace(/\[\[([^\]]+)\]\]/g, (_match, linkPath: string) => {
+      // Use the last segment (filename) as the display name
+      const segments = linkPath.trim().split('/')
+      return segments[segments.length - 1]
+    })
+    // Escape HTML entities (but preserve markdown syntax)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
