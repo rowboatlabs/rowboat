@@ -38,7 +38,7 @@ import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 import { search } from '@x/core/dist/search/search.js';
-import { versionHistory } from '@x/core';
+import { versionHistory, voice } from '@x/core';
 import { classifySchedule } from '@x/core/dist/knowledge/inline_tasks.js';
 
 type InvokeChannels = ipc.InvokeChannels;
@@ -352,7 +352,7 @@ export function setupIpcHandlers() {
       return runsCore.createRun(args);
     },
     'runs:createMessage': async (_event, args) => {
-      return { messageId: await runsCore.createMessage(args.runId, args.message) };
+      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput) };
     },
     'runs:authorizePermission': async (_event, args) => {
       await runsCore.authorizePermission(args.runId, args.authorization);
@@ -570,6 +570,12 @@ export function setupIpcHandlers() {
     'inline-task:classifySchedule': async (_event, args) => {
       const schedule = await classifySchedule(args.instruction);
       return { schedule };
+    },
+    'voice:getConfig': async () => {
+      return voice.getVoiceConfig();
+    },
+    'voice:synthesize': async (_event, args) => {
+      return voice.synthesizeSpeech(args.text);
     },
   });
 }

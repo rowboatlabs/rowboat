@@ -130,6 +130,8 @@ const ipcSchemas = {
     req: z.object({
       runId: z.string(),
       message: UserMessageContent,
+      voiceInput: z.boolean().optional(),
+      voiceOutput: z.enum(['summary', 'full']).optional(),
     }),
     res: z.object({
       messageId: z.string(),
@@ -458,6 +460,23 @@ const ipcSchemas = {
         preview: z.string(),
         path: z.string(),
       })),
+    }),
+  },
+  // Voice mode channels
+  'voice:getConfig': {
+    req: z.null(),
+    res: z.object({
+      deepgram: z.object({ apiKey: z.string() }).nullable(),
+      elevenlabs: z.object({ apiKey: z.string(), voiceId: z.string().optional() }).nullable(),
+    }),
+  },
+  'voice:synthesize': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      audioBase64: z.string(),
+      mimeType: z.string(),
     }),
   },
   // Inline task schedule classification

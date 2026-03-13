@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol, net, shell } from "electron";
+import { app, BrowserWindow, protocol, net, shell, session } from "electron";
 import path from "node:path";
 import {
   setupIpcHandlers,
@@ -90,6 +90,15 @@ function createWindow() {
       sandbox: true,
       preload: preloadPath,
     },
+  });
+
+  // Grant microphone permission for voice mode
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (permission === 'media') {
+      callback(true);
+    } else {
+      callback(false);
+    }
   });
 
   // Show window when content is ready to prevent blank screen

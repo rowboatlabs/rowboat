@@ -44,6 +44,7 @@ Change filters, columns, sort order, or search in the bases (table) view.
 - If unsure what categories/values are available, call ` + "`get-base-state`" + ` first.
 - For "show me X", prefer ` + "`filters.set`" + ` to start fresh rather than ` + "`filters.add`" + `.
 - Categories come from frontmatter keys (e.g., relationship, status, topic, type).
+- **CRITICAL: Do NOT pass ` + "`columns`" + ` unless the user explicitly asks to show/hide specific columns.** Omit the ` + "`columns`" + ` parameter entirely when only filtering, sorting, or searching. Passing ` + "`columns`" + ` will override the user's current column layout and can make the view appear empty.
 
 ### get-base-state
 Retrieve information about what's in the knowledge base — available filter categories, values, and note count.
@@ -75,6 +76,7 @@ Save the current view configuration as a named base.
 - The ` + "`update-base-view`" + ` action will automatically navigate to the bases view if the user isn't already there.
 - ` + "`open-note`" + ` validates that the file exists before navigating.
 - Filter categories and values come from frontmatter in knowledge files.
+- **Never send ` + "`columns`" + ` or ` + "`sort`" + ` with ` + "`update-base-view`" + ` unless the user specifically asks to change them.** Only pass the parameters you intend to change — omitted parameters are left untouched.
 `;
 
 export default skill;

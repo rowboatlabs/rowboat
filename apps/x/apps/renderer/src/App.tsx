@@ -76,6 +76,8 @@ import {
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
+import { useVoiceMode } from '@/hooks/useVoiceMode'
+import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -545,6 +547,87 @@ function App() {
   const [stopClickedAt, setStopClickedAt] = useState<number | null>(null)
   const [agentId] = useState<string>('copilot')
   const [presetMessage, setPresetMessage] = useState<string | undefined>(undefined)
+
+  // Voice mode state
+  const [voiceAvailable, setVoiceAvailable] = useState(false)
+  const [ttsAvailable, setTtsAvailable] = useState(false)
+  const [ttsEnabled, setTtsEnabled] = useState(false)
+  const ttsEnabledRef = useRef(false)
+  const [ttsMode, setTtsMode] = useState<'summary' | 'full'>('summary')
+  const ttsModeRef = useRef<'summary' | 'full'>('summary')
+  const [isRecording, setIsRecording] = useState(false)
+  const voiceTextBufferRef = useRef('')
+  const spokenIndexRef = useRef(0)
+  const isRecordingRef = useRef(false)
+
+  const tts = useVoiceTTS()
+  const ttsRef = useRef(tts)
+  ttsRef.current = tts
+
+  const voice = useVoiceMode()
+  const voiceRef = useRef(voice)
+  voiceRef.current = voice
+
+  // Check if voice is available on mount
+  useEffect(() => {
+    window.ipc.invoke('voice:getConfig', null).then(config => {
+      setVoiceAvailable(!!config.deepgram)
+      setTtsAvailable(!!config.elevenlabs)
+    }).catch(() => {
+      setVoiceAvailable(false)
+      setTtsAvailable(false)
+    })
+  }, [])
+
+  const handleStartRecording = useCallback(() => {
+    setIsRecording(true)
+    isRecordingRef.current = true
+    voice.start()
+  }, [voice])
+
+  const handlePromptSubmitRef = useRef<((msg: { text: string }) => void) | null>(null)
+  const pendingVoiceInputRef = useRef(false)
+
+  const handleSubmitRecording = useCallback(() => {
+    const text = voice.submit()
+    setIsRecording(false)
+    isRecordingRef.current = false
+    if (text) {
+      pendingVoiceInputRef.current = true
+      handlePromptSubmitRef.current?.({ text })
+    }
+  }, [voice])
+
+  const handleToggleTts = useCallback(() => {
+    setTtsEnabled(prev => {
+      const next = !prev
+      ttsEnabledRef.current = next
+      if (!next) {
+        ttsRef.current.cancel()
+      }
+      return next
+    })
+  }, [])
+
+  const handleTtsModeChange = useCallback((mode: 'summary' | 'full') => {
+    setTtsMode(mode)
+    ttsModeRef.current = mode
+  }, [])
+
+  const handleCancelRecording = useCallback(() => {
+    voice.cancel()
+    setIsRecording(false)
+    isRecordingRef.current = false
+  }, [voice])
+
+  // Helper to cancel recording from any navigation handler
+  const cancelRecordingIfActive = useCallback(() => {
+    if (isRecordingRef.current) {
+      voiceRef.current.cancel()
+      setIsRecording(false)
+      isRecordingRef.current = false
+    }
+  }, [])
 
   // Runs history state
   type RunListItem = { id: string; title?: string; createdAt: string; agentId: string }
@@ -1496,6 +1579,9 @@ function App() {
         if (!isActiveRun) return
         setIsProcessing(true)
         setModelUsage(null)
+        // Reset voice buffer for new response
+        voiceTextBufferRef.current = ''
+        spokenIndexRef.current = 0
         break
 
       case 'run-processing-end':
@@ -1545,6 +1631,20 @@ function App() {
           if (llmEvent.type === 'text-delta' && llmEvent.delta) {
             appendStreamingBuffer(event.runId, llmEvent.delta)
             setCurrentAssistantMessage(prev => prev + llmEvent.delta)
+
+            // Extract <voice> tags and send to TTS when enabled
+            voiceTextBufferRef.current += llmEvent.delta
+            const remaining = voiceTextBufferRef.current.substring(spokenIndexRef.current)
+            const voiceRegex = /<voice>([\s\S]*?)<\/voice>/g
+            let voiceMatch: RegExpExecArray | null
+            while ((voiceMatch = voiceRegex.exec(remaining)) !== null) {
+              const voiceContent = voiceMatch[1].trim()
+              console.log('[voice] extracted voice tag:', voiceContent)
+              if (voiceContent && ttsEnabledRef.current) {
+                ttsRef.current.speak(voiceContent)
+              }
+              spokenIndexRef.current += voiceMatch.index + voiceMatch[0].length
+            }
           } else if (llmEvent.type === 'tool-call') {
             setConversation(prev => [...prev, {
               id: llmEvent.toolCallId || `tool-${Date.now()}`,
@@ -1584,6 +1684,7 @@ function App() {
           if (msg.role === 'assistant') {
             setCurrentAssistantMessage(currentMsg => {
               if (currentMsg) {
+                const cleanedContent = currentMsg.replace(/<\/?voice>/g, '')
                 setConversation(prev => {
                   const exists = prev.some(m =>
                     m.id === event.messageId && 'role' in m && m.role === 'assistant'
@@ -1592,7 +1693,7 @@ function App() {
                   return [...prev, {
                     id: event.messageId,
                     role: 'assistant',
-                    content: currentMsg,
+                    content: cleanedContent,
                     timestamp: Date.now(),
                   }]
                 })
@@ -1887,6 +1988,8 @@ function App() {
         await window.ipc.invoke('runs:createMessage', {
           runId: currentRunId,
           message: attachmentPayload,
+          voiceInput: pendingVoiceInputRef.current || undefined,
+          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
         })
       } else {
         // Legacy path: plain string with optional XML-formatted @mentions.
@@ -1915,10 +2018,14 @@ function App() {
         await window.ipc.invoke('runs:createMessage', {
           runId: currentRunId,
           message: formattedMessage,
+          voiceInput: pendingVoiceInputRef.current || undefined,
+          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
         })
 
         titleSource = formattedMessage
       }
+
+      pendingVoiceInputRef.current = false
 
       if (isNewRun) {
         const inferredTitle = inferRunTitleFromMessage(titleSource)
@@ -1936,6 +2043,7 @@ function App() {
       console.error('Failed to send message:', error)
     }
   }
+  handlePromptSubmitRef.current = handlePromptSubmit
 
   const handleStop = useCallback(async () => {
     if (!runId) return
@@ -2065,6 +2173,7 @@ function App() {
   }, [])
 
   const openChatInNewTab = useCallback((targetRunId: string) => {
+    cancelRecordingIfActive()
     const existingTab = chatTabs.find(t => t.runId === targetRunId)
     if (existingTab) {
       // Cancel stale in-flight loads from previously focused tabs.
@@ -2080,12 +2189,18 @@ function App() {
     setChatTabs(prev => [...prev, { id, runId: targetRunId }])
     setActiveChatTabId(id)
     loadRun(targetRunId)
-  }, [chatTabs, loadRun, restoreChatTabState])
+  }, [chatTabs, loadRun, restoreChatTabState, cancelRecordingIfActive])
 
   const switchChatTab = useCallback((tabId: string) => {
     const tab = chatTabs.find(t => t.id === tabId)
     if (!tab) return
     if (tabId === activeChatTabId) return
+    // Cancel any active recording when switching tabs
+    if (isRecordingRef.current) {
+      voiceRef.current.cancel()
+      setIsRecording(false)
+      isRecordingRef.current = false
+    }
     saveChatScrollForTab(activeChatTabId)
     // Cancel stale in-flight loads from previously focused tabs.
     loadRunRequestIdRef.current += 1
@@ -2471,13 +2586,14 @@ function App() {
     const current = currentViewState
     if (viewStatesEqual(current, nextView)) return
 
+    cancelRecordingIfActive()
     const nextHistory = {
       back: appendUnique(historyRef.current.back, current),
       forward: [] as ViewState[],
     }
     setHistory(nextHistory)
     await applyViewState(nextView)
-  }, [appendUnique, applyViewState, currentViewState, setHistory])
+  }, [appendUnique, applyViewState, cancelRecordingIfActive, currentViewState, setHistory])
 
   const navigateBack = useCallback(async () => {
     const { back, forward } = historyRef.current
@@ -3412,6 +3528,7 @@ function App() {
               tasksActions={{
                 onNewChat: handleNewChatTab,
                 onSelectRun: (runIdToLoad) => {
+                  cancelRecordingIfActive()
                   if (selectedPath || isGraphOpen) {
                     setIsChatSidebarOpen(true)
                   }
@@ -3814,7 +3931,7 @@ function App() {
                                 {tabState.currentAssistantMessage && (
                                   <Message from="assistant">
                                     <MessageContent>
-                                      <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
+                                      <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')}</MessageResponse>
                                     </MessageContent>
                                   </Message>
                                 )}
@@ -3865,6 +3982,18 @@ function App() {
                             runId={tabState.runId}
                             initialDraft={chatDraftsRef.current.get(tab.id)}
                             onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
+                            isRecording={isActive && isRecording}
+                            recordingText={isActive ? voice.interimText : undefined}
+                            recordingState={isActive ? (voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
+                            onStartRecording={isActive ? handleStartRecording : undefined}
+                            onSubmitRecording={isActive ? handleSubmitRecording : undefined}
+                            onCancelRecording={isActive ? handleCancelRecording : undefined}
+                            voiceAvailable={isActive && voiceAvailable}
+                            ttsAvailable={isActive && ttsAvailable}
+                            ttsEnabled={ttsEnabled}
+                            ttsMode={ttsMode}
+                            onToggleTts={isActive ? handleToggleTts : undefined}
+                            onTtsModeChange={isActive ? handleTtsModeChange : undefined}
                           />
                         </div>
                       )
@@ -3914,6 +4043,18 @@ function App() {
                 onToolOpenChangeForTab={setToolOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
                 onActivate={() => setActiveShortcutPane('right')}
+                isRecording={isRecording}
+                recordingText={voice.interimText}
+                recordingState={voice.state === 'connecting' ? 'connecting' : 'listening'}
+                onStartRecording={handleStartRecording}
+                onSubmitRecording={handleSubmitRecording}
+                onCancelRecording={handleCancelRecording}
+                voiceAvailable={voiceAvailable}
+                ttsAvailable={ttsAvailable}
+                ttsEnabled={ttsEnabled}
+                ttsMode={ttsMode}
+                onToggleTts={handleToggleTts}
+                onTtsModeChange={handleTtsModeChange}
               />
             )}
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}

@@ -33,6 +33,8 @@ Rowboat is an agentic assistant for everyday work - emails, meetings, projects, 
 
 **Document Collaboration:** When users ask you to work on a document, collaborate on writing, create a new document, edit/refine existing notes, or say things like "let's work on [X]", "help me write [X]", "create a doc for [X]", or "let's draft [X]", you MUST load the \`doc-collab\` skill first. This is required for any document creation or editing task. The skill provides structured guidance for creating, editing, and refining documents in the knowledge base.
 
+**App Control:** When users ask you to open notes, show the bases or graph view, filter or search notes, or manage saved views, load the \`app-navigation\` skill first. It provides structured guidance for navigating the app UI and controlling the knowledge base view.
+
 **Slack:** When users ask about Slack messages, want to send messages to teammates, check channel conversations, or find someone on Slack, load the \`slack\` skill. You can send messages, view channel history, search conversations, and find users. Always show message drafts to the user before sending.
 
 ## Memory That Compounds
@@ -184,6 +186,7 @@ ${runtimeContextPrompt}
 - \`loadSkill\` - Skill loading
 - \`slack-checkConnection\`, \`slack-listAvailableTools\`, \`slack-executeAction\` - Slack integration (requires Slack to be connected via Composio). Use \`slack-listAvailableTools\` first to discover available tool slugs, then \`slack-executeAction\` to execute them.
 - \`web-search\` and \`research-search\` - Web and research search tools (available when configured). **You MUST load the \`web-search\` skill before using either of these tools.** It tells you which tool to pick and how many searches to do.
+- \`app-navigation\` - Control the app UI: open notes, switch views, filter/search the knowledge base, manage saved views. **Load the \`app-navigation\` skill before using this tool.**
 
 **Prefer these tools whenever possible** — they work instantly with zero friction. For file operations inside \`~/.rowboat/\`, always use these instead of \`executeCommand\`.
 
