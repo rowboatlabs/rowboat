@@ -35,6 +35,7 @@ import {
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
+import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
@@ -62,6 +63,7 @@ import {
   type ToolCall,
   createEmptyChatTabViewState,
   getWebSearchCardData,
+  getAppActionCardData,
   inferRunTitleFromMessage,
   isChatMessage,
   isErrorMessage,
@@ -498,6 +500,9 @@ function App() {
   const initialContentByPathRef = useRef<Map<string, string>>(new Map())
   const recentLocalMarkdownWritesRef = useRef<Map<string, number>>(new Map())
   const untitledRenameReadyPathsRef = useRef<Set<string>>(new Set())
+
+  // Pending app-navigation result to process once navigation functions are ready
+  const pendingAppNavRef = useRef<Record<string, unknown> | null>(null)
 
   // Global navigation history (back/forward) across views (chat/file/graph/task)
   const historyRef = useRef<{ back: ViewState[]; forward: ViewState[] }>({ back: [], forward: [] })
@@ -1660,6 +1665,15 @@ function App() {
             }
             return next
           })
+
+          // Handle app-navigation tool results — trigger UI side effects
+          if (event.toolName === 'app-navigation') {
+            const result = event.result as { success?: boolean; action?: string; [key: string]: unknown } | undefined
+            if (result?.success) {
+              pendingAppNavRef.current = result
+            }
+          }
+
           break
         }
 
@@ -2563,6 +2577,106 @@ function App() {
     }
   }, [selectedPath, baseConfigByPath, loadDirectory, navigateToView])
 
+  // External search set by app-navigation tool (passed to BasesView)
+  const [externalBaseSearch, setExternalBaseSearch] = useState<string | undefined>(undefined)
+
+  // Process pending app-navigation results
+  useEffect(() => {
+    const result = pendingAppNavRef.current
+    if (!result) return
+    pendingAppNavRef.current = null
+
+    switch (result.action) {
+      case 'open-note':
+        navigateToFile(result.path as string)
+        break
+      case 'open-view':
+        if (result.view === 'graph') void navigateToView({ type: 'graph' })
+        if (result.view === 'bases') {
+          void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+        }
+        break
+      case 'update-base-view': {
+        // Navigate to bases if not already there
+        const targetPath = selectedPath && isBaseFilePath(selectedPath) ? selectedPath : BASES_DEFAULT_TAB_PATH
+        if (!selectedPath || !isBaseFilePath(selectedPath)) {
+          void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+        }
+
+        // Apply updates to the base config
+        const updates = result.updates as Record<string, unknown> | undefined
+        if (updates) {
+          setBaseConfigByPath(prev => {
+            const current = prev[targetPath] ?? { ...DEFAULT_BASE_CONFIG }
+            const next = { ...current }
+
+            // Apply filter updates
+            const filterUpdates = updates.filters as Record<string, unknown> | undefined
+            if (filterUpdates) {
+              if (filterUpdates.clear) {
+                next.filters = []
+              }
+              if (filterUpdates.set) {
+                next.filters = filterUpdates.set as Array<{ category: string; value: string }>
+              }
+              if (filterUpdates.add) {
+                const toAdd = filterUpdates.add as Array<{ category: string; value: string }>
+                const existing = next.filters
+                for (const f of toAdd) {
+                  if (!existing.some(e => e.category === f.category && e.value === f.value)) {
+                    existing.push(f)
+                  }
+                }
+              }
+              if (filterUpdates.remove) {
+                const toRemove = filterUpdates.remove as Array<{ category: string; value: string }>
+                next.filters = next.filters.filter(
+                  e => !toRemove.some(r => r.category === e.category && r.value === e.value)
+                )
+              }
+            }
+
+            // Apply column updates
+            const colUpdates = updates.columns as Record<string, unknown> | undefined
+            if (colUpdates) {
+              if (colUpdates.set) {
+                next.visibleColumns = colUpdates.set as string[]
+              }
+              if (colUpdates.add) {
+                const toAdd = colUpdates.add as string[]
+                for (const col of toAdd) {
+                  if (!next.visibleColumns.includes(col)) next.visibleColumns.push(col)
+                }
+              }
+              if (colUpdates.remove) {
+                const toRemove = new Set(colUpdates.remove as string[])
+                next.visibleColumns = next.visibleColumns.filter(c => !toRemove.has(c))
+              }
+            }
+
+            // Apply sort
+            if (updates.sort) {
+              next.sort = updates.sort as { field: string; dir: 'asc' | 'desc' }
+            }
+
+            return { ...prev, [targetPath]: next }
+          })
+
+          // Apply search externally
+          if (updates.search !== undefined) {
+            setExternalBaseSearch(updates.search as string || undefined)
+          }
+        }
+        break
+      }
+      case 'create-base':
+        if (result.path) {
+          navigateToFile(result.path as string)
+        }
+        break
+    }
+  })
+
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view
     if (currentViewState.type !== 'chat') {
@@ -3184,6 +3298,10 @@ function App() {
     }
 
     if (isToolCall(item)) {
+      const appActionData = getAppActionCardData(item)
+      if (appActionData) {
+        return <AppActionCard key={item.id} data={appActionData} status={item.status} />
+      }
       const webSearchData = getWebSearchCardData(item)
       if (webSearchData) {
         return (
@@ -3492,6 +3610,8 @@ function App() {
                     onConfigChange={(cfg) => handleBaseConfigChange(selectedPath, cfg)}
                     isDefaultBase={selectedPath === BASES_DEFAULT_TAB_PATH}
                     onSave={(name) => void handleBaseSave(name)}
+                    externalSearch={externalBaseSearch}
+                    onExternalSearchConsumed={() => setExternalBaseSearch(undefined)}
                   />
                 </div>
               ) : isGraphOpen ? (
