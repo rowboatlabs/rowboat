@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback } from 'react'
 interface BillingInfo {
   subscriptionPlan: string
   subscriptionStatus: string
-  trialUsed: boolean
   sanctionedCredits: number
   availableCredits: number
 }

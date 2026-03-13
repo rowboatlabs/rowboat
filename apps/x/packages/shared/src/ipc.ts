@@ -479,7 +479,6 @@ const ipcSchemas = {
     res: z.object({
       subscriptionPlan: z.string().nullable(),
       subscriptionStatus: z.string().nullable(),
-      trialUsed: z.boolean(),
       sanctionedCredits: z.number(),
       availableCredits: z.number(),
     }),
