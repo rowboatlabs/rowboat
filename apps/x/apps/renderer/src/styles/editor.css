@@ -237,6 +237,200 @@
   flex-shrink: 0;
 }
 
+/* Frontmatter properties panel between toolbar and editor content */
+.frontmatter-properties {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--background);
+  font-size: 13px;
+  color: var(--foreground);
+}
+
+.frontmatter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--foreground) 60%, transparent);
+  font-size: 12px;
+  user-select: none;
+}
+
+.frontmatter-toggle:hover {
+  color: var(--foreground);
+  background-color: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+
+.frontmatter-chevron {
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.frontmatter-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.frontmatter-label {
+  font-weight: 500;
+}
+
+.frontmatter-fields {
+  padding: 2px 12px 6px 30px;
+}
+
+.frontmatter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.frontmatter-key {
+  flex-shrink: 0;
+  width: 110px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 60%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frontmatter-value-area {
+  flex: 1;
+  min-width: 0;
+}
+
+.frontmatter-input {
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  padding: 2px 4px;
+  font-size: 13px;
+  color: var(--foreground);
+  outline: none;
+}
+
+.frontmatter-input:focus {
+  border-bottom-color: var(--primary);
+}
+
+.frontmatter-input:read-only {
+  cursor: default;
+}
+
+.frontmatter-new-key-input {
+  width: 110px;
+  flex-shrink: 0;
+}
+
+.frontmatter-remove {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--foreground) 40%, transparent);
+  opacity: 0;
+}
+
+.frontmatter-row:hover .frontmatter-remove {
+  opacity: 1;
+}
+
+.frontmatter-remove:hover {
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+}
+
+.frontmatter-add {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px;
+  margin-top: 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+}
+
+.frontmatter-add:hover {
+  color: var(--foreground);
+}
+
+/* Array field chips */
+.frontmatter-array {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+
+.frontmatter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.dark .frontmatter-chip {
+  background-color: color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
+.frontmatter-chip-text {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.frontmatter-chip-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+  margin-left: 2px;
+}
+
+.frontmatter-chip-remove:hover {
+  color: var(--foreground);
+}
+
+.frontmatter-chip-input {
+  background: none;
+  border: none;
+  outline: none;
+  font-size: 12px;
+  color: var(--foreground);
+  width: 60px;
+  padding: 2px 0;
+}
+
+.frontmatter-chip-input::placeholder {
+  color: color-mix(in srgb, var(--foreground) 30%, transparent);
+}
+
 .editor-toolbar .separator {
   width: 1px;
   height: 1.5rem;
@@ -337,6 +531,83 @@
   transition: width 0.3s ease;
 }
 
+/* Task block */
+.tiptap-editor .ProseMirror .task-block-wrapper {
+  margin: 8px 0;
+}
+
+.tiptap-editor .ProseMirror .task-block-card {
+  position: relative;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  cursor: default;
+  transition: background-color 0.15s ease;
+}
+
+.tiptap-editor .ProseMirror .task-block-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--foreground) 40%, transparent);
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.tiptap-editor .ProseMirror .task-block-card:hover .task-block-delete {
+  opacity: 1;
+}
+
+.tiptap-editor .ProseMirror .task-block-delete:hover {
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .task-block-card:hover {
+  background-color: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.tiptap-editor .ProseMirror .task-block-wrapper.ProseMirror-selectednode .task-block-card {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.tiptap-editor .ProseMirror .task-block-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tiptap-editor .ProseMirror .task-block-prefix {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.tiptap-editor .ProseMirror .task-block-instruction {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .task-block-schedule {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+}
+
 /* Dark mode overrides */
 .dark .tiptap-editor .ProseMirror {
   color: rgba(255, 255, 255, 0.9);
@@ -356,6 +627,10 @@
 
 .dark .tiptap-editor .ProseMirror pre {
   background: rgba(255, 255, 255, 0.05);
+}
+
+.dark .tiptap-editor .ProseMirror pre code {
+  color: inherit;
 }
 
 .dark .tiptap-editor .ProseMirror code {
