@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening';
 
-// Cache the API key so we skip the IPC call after first use
-let cachedApiKey: string | null = null;
-let apiKeyFetched = false;
+const DEEPGRAM_PARAMS = new URLSearchParams({
+    model: 'nova-3',
+    encoding: 'linear16',
+    sample_rate: '16000',
+    channels: '1',
+    interim_results: 'true',
+    smart_format: 'true',
+    punctuate: 'true',
+    language: 'en',
+});
+const DEEPGRAM_LISTEN_URL = `wss://api.deepgram.com/v1/listen?${DEEPGRAM_PARAMS.toString()}`;
 
 export function useVoiceMode() {
     const [state, setState] = useState<VoiceState>('idle');
@@ -15,19 +23,24 @@ export function useVoiceMode() {
     const audioCtxRef = useRef<AudioContext | null>(null);
     const transcriptBufferRef = useRef('');
     const interimRef = useRef('');
-    const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const mountedRef = useRef(true);
 
     // Connect (or reconnect) the Deepgram WebSocket.
-    // The WS stays open while the hook is mounted; only audio capture starts/stops per recording.
-    const connectWs = useCallback(() => {
-        if (!cachedApiKey) return;
+    // Fetches a fresh token on each connect — temp tokens have short TTL.
+    const connectWs = useCallback(async () => {
         if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return;
 
-        const ws = new WebSocket(
-            `wss://api.deepgram.com/v1/listen?model=nova-3&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&smart_format=true&punctuate=true&language=en`,
-            ['token', cachedApiKey]
-        );
+        let ws: WebSocket;
+
+        // Try signed-in proxy token first (passed as query param for JWTs)
+        const result = await window.ipc.invoke('voice:getDeepgramToken', null);
+        if (result) {
+            ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['bearer', result.token]);
+        } else {
+            // Fall back to local API key (passed as subprotocol)
+            const config = await window.ipc.invoke('voice:getConfig', null);
+            if (!config?.deepgram) return;
+            ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['token', config.deepgram.apiKey]);
+        }
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -58,49 +71,10 @@ export function useVoiceMode() {
         ws.onclose = () => {
             console.log('[voice] WebSocket closed');
             wsRef.current = null;
-            // Auto-reconnect after 3 seconds if still mounted
-            if (mountedRef.current && cachedApiKey) {
-                reconnectTimerRef.current = setTimeout(() => {
-                    if (mountedRef.current) connectWs();
-                }, 3000);
-            }
         };
     }, []);
 
-    // Fetch API key on mount and establish persistent WebSocket
-    useEffect(() => {
-        mountedRef.current = true;
-
-        const init = async () => {
-            if (!apiKeyFetched) {
-                apiKeyFetched = true;
-                try {
-                    const config = await window.ipc.invoke('voice:getConfig', null);
-                    cachedApiKey = config.deepgram?.apiKey ?? null;
-                } catch { /* ignore */ }
-            }
-            if (cachedApiKey && mountedRef.current) {
-                connectWs();
-            }
-        };
-        void init();
-
-        return () => {
-            mountedRef.current = false;
-            if (reconnectTimerRef.current) {
-                clearTimeout(reconnectTimerRef.current);
-                reconnectTimerRef.current = null;
-            }
-            // Close WS on unmount, suppress reconnect by nulling onclose
-            if (wsRef.current) {
-                wsRef.current.onclose = null;
-                wsRef.current.close();
-                wsRef.current = null;
-            }
-        };
-    }, [connectWs]);
-
-    // Stop only audio capture (mic + processor), leaving WS open
+    // Stop audio capture and close WS
     const stopAudioCapture = useCallback(() => {
         if (processorRef.current) {
             processorRef.current.disconnect();
@@ -114,6 +88,11 @@ export function useVoiceMode() {
             mediaStreamRef.current.getTracks().forEach(t => t.stop());
             mediaStreamRef.current = null;
         }
+        if (wsRef.current) {
+            wsRef.current.onclose = null;
+            wsRef.current.close();
+            wsRef.current = null;
+        }
         setInterimText('');
         transcriptBufferRef.current = '';
         interimRef.current = '';
@@ -122,18 +101,6 @@ export function useVoiceMode() {
 
     const start = useCallback(async () => {
         if (state !== 'idle') return;
-
-        // Ensure we have an API key
-        if (!cachedApiKey) {
-            try {
-                const config = await window.ipc.invoke('voice:getConfig', null);
-                cachedApiKey = config.deepgram?.apiKey ?? null;
-            } catch { /* ignore */ }
-        }
-        if (!cachedApiKey) {
-            console.error('Deepgram not configured');
-            return;
-        }
 
         transcriptBufferRef.current = '';
         interimRef.current = '';

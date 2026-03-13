@@ -480,6 +480,12 @@ const ipcSchemas = {
       mimeType: z.string(),
     }),
   },
+  'voice:getDeepgramToken': {
+    req: z.null(),
+    res: z.object({
+      token: z.string(),
+    }).nullable(),
+  },
   // Inline task schedule classification
   'inline-task:classifySchedule': {
     req: z.object({

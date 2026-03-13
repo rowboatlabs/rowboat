@@ -575,7 +575,7 @@ function App() {
       window.ipc.invoke('oauth:getState', null),
     ]).then(([config, oauthState]) => {
       const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
-      setVoiceAvailable(!!config.deepgram)
+      setVoiceAvailable(!!config.deepgram || rowboatConnected)
       setTtsAvailable(!!config.elevenlabs || rowboatConnected)
     }).catch(() => {
       setVoiceAvailable(false)

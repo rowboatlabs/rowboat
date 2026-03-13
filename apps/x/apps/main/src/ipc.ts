@@ -577,5 +577,8 @@ export function setupIpcHandlers() {
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
     },
+    'voice:getDeepgramToken': async () => {
+      return voice.getDeepgramToken();
+    },
   });
 }

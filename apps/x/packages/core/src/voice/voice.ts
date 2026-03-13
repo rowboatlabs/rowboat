@@ -33,6 +33,23 @@ export async function getVoiceConfig(): Promise<VoiceConfig> {
     };
 }
 
+export async function getDeepgramToken(): Promise<{ token: string } | null> {
+    const signedIn = await isSignedIn();
+    if (!signedIn) return null;
+
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_URL}/v1/voice/deepgram-token`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+        console.error('[voice] Deepgram token error:', response.status);
+        return null;
+    }
+    const data = await response.json();
+    return { token: data.token };
+}
+
 export async function synthesizeSpeech(text: string): Promise<{ audioBase64: string; mimeType: string }> {
     const config = await getVoiceConfig();
     const signedIn = await isSignedIn();
