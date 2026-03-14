@@ -1,4 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
+import posthog from 'posthog-js';
+import * as analytics from '@/lib/analytics';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening';
 
@@ -130,6 +132,8 @@ export function useVoiceMode() {
         }
 
         setState('listening');
+        analytics.voiceInputStarted();
+        posthog.people.set_once({ has_used_voice: true });
 
         // Start mic
         let stream: MediaStream | null = null;
