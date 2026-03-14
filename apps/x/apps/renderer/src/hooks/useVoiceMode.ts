@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
 import { buildDeepgramListenUrl } from '@/lib/deepgram-listen-url';
 import { useRowboatAccount } from '@/hooks/useRowboatAccount';
+import posthog from 'posthog-js';
+import * as analytics from '@/lib/analytics';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening';
 
@@ -146,6 +148,8 @@ export function useVoiceMode() {
 
         // Show listening immediately — don't wait for WebSocket
         setState('listening');
+        analytics.voiceInputStarted();
+        posthog.people.set_once({ has_used_voice: true });
 
         // Kick off mic + WebSocket in parallel, don't await WebSocket
         const [stream] = await Promise.all([
