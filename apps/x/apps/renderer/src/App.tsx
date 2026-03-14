@@ -78,6 +78,8 @@ import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
+import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
+import * as analytics from '@/lib/analytics'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -464,6 +466,8 @@ function ContentHeader({
 function App() {
   type ShortcutPane = 'left' | 'right'
   type MarkdownHistoryHandlers = { undo: () => boolean; redo: () => boolean }
+
+  useAnalyticsIdentity()
 
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -1937,6 +1941,7 @@ function App() {
         currentRunId = run.id
         newRunCreatedAt = run.createdAt
         setRunId(currentRunId)
+        analytics.chatSessionCreated(currentRunId)
         // Update active chat tab's runId to the new run
         setChatTabs((prev) => prev.map((tab) => (
           tab.id === activeChatTabId
@@ -1997,6 +2002,11 @@ function App() {
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
         })
+        analytics.chatMessageSent({
+          voiceInput: pendingVoiceInputRef.current || undefined,
+          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
+          searchEnabled: searchEnabled || undefined,
+        })
       } else {
         // Legacy path: plain string with optional XML-formatted @mentions.
         let formattedMessage = userMessage
@@ -2024,6 +2034,11 @@ function App() {
         await window.ipc.invoke('runs:createMessage', {
           runId: currentRunId,
           message: formattedMessage,
+          voiceInput: pendingVoiceInputRef.current || undefined,
+          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
+          searchEnabled: searchEnabled || undefined,
+        })
+        analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
@@ -3811,6 +3826,7 @@ function App() {
                                 const title = getBaseName(tab.path)
                                 try {
                                   await window.ipc.invoke('export:note', { markdown, format, title })
+                                  analytics.noteExported(format)
                                 } catch (err) {
                                   console.error('Export failed:', err)
                                 }
