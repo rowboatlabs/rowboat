@@ -219,6 +219,7 @@ interface MarkdownEditorProps {
   editable?: boolean
   frontmatter?: string | null
   onFrontmatterChange?: (raw: string | null) => void
+  onExport?: (format: 'md' | 'pdf' | 'docx') => void
 }
 
 type WikiLinkMatch = {
@@ -309,6 +310,7 @@ export function MarkdownEditor({
   editable = true,
   frontmatter,
   onFrontmatterChange,
+  onExport,
 }: MarkdownEditorProps) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -1071,6 +1073,7 @@ export function MarkdownEditor({
         editor={editor}
         onSelectionHighlight={setSelectionHighlight}
         onImageUpload={handleImageUploadWithPlaceholder}
+        onExport={onExport}
       />
       {(frontmatter !== undefined) && onFrontmatterChange && (
         <FrontmatterProperties

@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
@@ -40,6 +40,71 @@ import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedu
 import { search } from '@x/core/dist/search/search.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule } from '@x/core/dist/knowledge/inline_tasks.js';
+
+/**
+ * Convert markdown to a styled HTML document for PDF/DOCX export.
+ */
+function markdownToHtml(markdown: string, title: string): string {
+  // Simple markdown to HTML conversion for export purposes
+  let html = markdown
+    // Resolve wiki links [[Folder/Note Name]] or [[Folder/Note Name|Display]] to plain text
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, (_match, _path, display) => display.trim())
+    .replace(/\[\[([^\]]+)\]\]/g, (_match, linkPath: string) => {
+      // Use the last segment (filename) as the display name
+      const segments = linkPath.trim().split('/')
+      return segments[segments.length - 1]
+    })
+    // Escape HTML entities (but preserve markdown syntax)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  // Headings (must come before other processing)
+  html = html.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>')
+  html = html.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>')
+  html = html.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>')
+  html = html.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
+  html = html.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
+  html = html.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>')
+
+  // Bold and italic
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
+
+  // Horizontal rules
+  html = html.replace(/^---$/gm, '<hr>')
+
+  // Unordered lists
+  html = html.replace(/^[-*]\s+(.+)$/gm, '<li>$1</li>')
+
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+
+  // Blockquotes
+  html = html.replace(/^&gt;\s+(.+)$/gm, '<blockquote>$1</blockquote>')
+
+  // Paragraphs: wrap remaining lines that aren't already wrapped in HTML tags
+  html = html.replace(/^(?!<[a-z/])((?!^\s*$).+)$/gm, '<p>$1</p>')
+
+  // Clean up consecutive list items into lists
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${title}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; line-height: 1.6; font-size: 14px; }
+  h1 { font-size: 1.8em; margin-top: 1em; } h2 { font-size: 1.4em; margin-top: 1em; } h3 { font-size: 1.2em; }
+  code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+  blockquote { border-left: 3px solid #ddd; margin: 1em 0; padding: 0.5em 1em; color: #555; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
+  ul { padding-left: 1.5em; }
+  a { color: #0066cc; }
+</style></head><body>${html}</body></html>`
+}
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -567,6 +632,68 @@ export function setupIpcHandlers() {
       return search(args.query, args.limit, args.types);
     },
     // Inline task schedule classification
+    'export:note': async (event, args) => {
+      const { markdown, format, title } = args;
+      const sanitizedTitle = title.replace(/[/\\?%*:|"<>]/g, '-').trim() || 'Untitled';
+
+      const filterMap: Record<string, Electron.FileFilter[]> = {
+        md: [{ name: 'Markdown', extensions: ['md'] }],
+        pdf: [{ name: 'PDF', extensions: ['pdf'] }],
+        docx: [{ name: 'Word Document', extensions: ['docx'] }],
+      };
+
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showSaveDialog(win!, {
+        defaultPath: `${sanitizedTitle}.${format}`,
+        filters: filterMap[format],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { success: false };
+      }
+
+      const filePath = result.filePath;
+
+      if (format === 'md') {
+        await fs.writeFile(filePath, markdown, 'utf8');
+        return { success: true };
+      }
+
+      if (format === 'pdf') {
+        // Render markdown as HTML in a hidden window, then print to PDF
+        const htmlContent = markdownToHtml(markdown, sanitizedTitle);
+        const hiddenWin = new BrowserWindow({
+          show: false,
+          width: 800,
+          height: 600,
+          webPreferences: { offscreen: true },
+        });
+        await hiddenWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+        // Small delay to ensure CSS/fonts render
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const pdfBuffer = await hiddenWin.webContents.printToPDF({
+          printBackground: true,
+          pageSize: 'A4',
+        });
+        hiddenWin.destroy();
+        await fs.writeFile(filePath, pdfBuffer);
+        return { success: true };
+      }
+
+      if (format === 'docx') {
+        const htmlContent = markdownToHtml(markdown, sanitizedTitle);
+        const { default: htmlToDocx } = await import('html-to-docx');
+        const docxBuffer = await htmlToDocx(htmlContent, undefined, {
+          table: { row: { cantSplit: true } },
+          footer: false,
+          header: false,
+        });
+        await fs.writeFile(filePath, Buffer.from(docxBuffer as ArrayBuffer));
+        return { success: true };
+      }
+
+      return { success: false, error: 'Unknown format' };
+    },
     'inline-task:classifySchedule': async (_event, args) => {
       const schedule = await classifySchedule(args.instruction);
       return { schedule };
