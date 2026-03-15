@@ -200,18 +200,19 @@ export const ZListResponse = <T extends z.ZodTypeAny>(schema: T) => z.object({
  * Execute action request
  */
 export const ZExecuteActionRequest = z.object({
-    action: z.string(),
     connected_account_id: z.string(),
-    input: z.record(z.string(), z.unknown()),
+    user_id: z.string(),
+    version: z.string(),
+    arguments: z.any().optional(),
 });
 
 /**
  * Execute action response
  */
 export const ZExecuteActionResponse = z.object({
-    success: z.boolean(),
     data: z.unknown(),
-    error: z.string().optional(),
+    successful: z.boolean(),
+    error: z.string().nullable(),
 });
 
 /**

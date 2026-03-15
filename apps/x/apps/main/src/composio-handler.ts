@@ -2,7 +2,8 @@ import { shell, BrowserWindow } from 'electron';
 import { createAuthServer } from './auth-server.js';
 import * as composioClient from '@x/core/dist/composio/client.js';
 import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
-import type { LocalConnectedAccount } from '@x/core/dist/composio/types.js';
+import type { LocalConnectedAccount, ZExecuteActionResponse } from '@x/core/dist/composio/types.js';
+import { z } from 'zod';
 
 const REDIRECT_URI = 'http://localhost:8081/oauth/callback';
 
@@ -28,8 +29,8 @@ export function emitComposioEvent(event: { toolkitSlug: string; success: boolean
 /**
  * Check if Composio is configured with an API key
  */
-export function isConfigured(): { configured: boolean } {
-    return { configured: composioClient.isConfigured() };
+export async function isConfigured(): Promise<{ configured: boolean }> {
+    return { configured: await composioClient.isConfigured() };
 }
 
 /**
@@ -272,23 +273,28 @@ export async function executeAction(
     actionSlug: string,
     toolkitSlug: string,
     input: Record<string, unknown>
-): Promise<{ success: boolean; data: unknown; error?: string }> {
+): Promise<z.infer<typeof ZExecuteActionResponse>> {
     try {
         const account = composioAccountsRepo.getAccount(toolkitSlug);
         if (!account || account.status !== 'ACTIVE') {
             return {
-                success: false,
                 data: null,
+                successful: false,
                 error: `Toolkit ${toolkitSlug} is not connected`,
             };
         }
 
-        const result = await composioClient.executeAction(actionSlug, account.id, input);
+        const result = await composioClient.executeAction(actionSlug, {
+            connected_account_id: account.id,
+            user_id: 'rowboat-user',
+            version: 'latest',
+            arguments: input,
+        });
         return result;
     } catch (error) {
         console.error('[Composio] Action execution failed:', error);
         return {
-            success: false,
+            successful: false,
             data: null,
             error: error instanceof Error ? error.message : 'Unknown error',
         };

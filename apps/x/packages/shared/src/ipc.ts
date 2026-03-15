@@ -375,9 +375,9 @@ const ipcSchemas = {
       input: z.record(z.string(), z.unknown()),
     }),
     res: z.object({
-      success: z.boolean(),
       data: z.unknown(),
-      error: z.string().optional(),
+      successful: z.boolean(),
+      error: z.string().nullable(),
     }),
   },
   'composio:didConnect': {
