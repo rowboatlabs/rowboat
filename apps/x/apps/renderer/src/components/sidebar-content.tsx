@@ -488,19 +488,14 @@ export function SidebarContentPanel({
           />
         )}
       </SidebarContent>
-      {/* Billing status */}
+      {/* Billing / upgrade CTA */}
       {isRowboatConnected && billing && (
         <div className="px-3 py-2">
-          <div className="flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent/30 px-2.5 py-1.5">
-            <div className="flex flex-col">
-              <span className="text-xs font-medium capitalize text-sidebar-foreground">
-                {billing.subscriptionPlan ?? 'Free'}
-              </span>
-              <span className="text-[10px] text-sidebar-foreground/50">
-                8 days left
-              </span>
-            </div>
-            <button className="upgrade-btn rounded-md bg-sidebar-accent px-2.5 py-1 text-[10px] font-medium text-sidebar-foreground transition-colors">
+          <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
+            <span className="text-xs font-medium capitalize text-sidebar-foreground">
+              {billing.subscriptionPlan ?? 'Free'} plan
+            </span>
+            <button className="rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20">
               Upgrade
             </button>
           </div>

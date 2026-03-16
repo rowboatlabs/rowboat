@@ -568,8 +568,8 @@ function App() {
   const voiceRef = useRef(voice)
   voiceRef.current = voice
 
-  // Check if voice is available on mount
-  useEffect(() => {
+  // Check if voice is available on mount and when OAuth state changes
+  const refreshVoiceAvailability = useCallback(() => {
     Promise.all([
       window.ipc.invoke('voice:getConfig', null),
       window.ipc.invoke('oauth:getState', null),
@@ -582,6 +582,14 @@ function App() {
       setTtsAvailable(false)
     })
   }, [])
+
+  useEffect(() => {
+    refreshVoiceAvailability()
+    const cleanup = window.ipc.on('oauth:didConnect', () => {
+      refreshVoiceAvailability()
+    })
+    return cleanup
+  }, [refreshVoiceAvailability])
 
   const handleStartRecording = useCallback(() => {
     setIsRecording(true)
