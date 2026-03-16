@@ -271,6 +271,49 @@ function sortNodes(nodes: TreeNode[]): TreeNode[] {
   })
 }
 
+/**
+ * Flatten date-based folder hierarchy under Meetings/ source folders.
+ * Turns Meetings/granola/2026/03/15/Title.md into a flat list under
+ * Meetings/granola/ with display name "2026-03-15 Title".
+ */
+function flattenMeetingsTree(nodes: TreeNode[]): TreeNode[] {
+  return nodes.flatMap(node => {
+    if (node.kind !== 'dir' || node.name !== 'Meetings') return [node]
+
+    const flattenedSourceChildren = (node.children ?? []).flatMap(sourceNode => {
+      if (sourceNode.kind !== 'dir') return [sourceNode]
+
+      // Collect all files recursively from the date hierarchy
+      const files: TreeNode[] = []
+      function collectFiles(n: TreeNode, dateParts: string[]) {
+        for (const child of n.children ?? []) {
+          if (child.kind === 'file') {
+            const dateStr = dateParts.join('-')
+            const displayName = dateStr ? `${dateStr} ${child.name}` : child.name
+            files.push({ ...child, name: displayName })
+          } else if (child.kind === 'dir') {
+            collectFiles(child, [...dateParts, child.name])
+          }
+        }
+      }
+      collectFiles(sourceNode, [])
+
+      // Hide empty source folders
+      if (files.length === 0) return []
+
+      // Sort files reverse chronologically (newest first)
+      files.sort((a, b) => b.name.localeCompare(a.name))
+
+      return [{ ...sourceNode, children: files }]
+    })
+
+    // Hide Meetings folder entirely if no source folders have files
+    if (flattenedSourceChildren.length === 0) return []
+
+    return [{ ...node, children: flattenedSourceChildren }]
+  })
+}
+
 // Build tree structure from flat entries
 function buildTree(entries: DirEntry[]): TreeNode[] {
   const treeMap = new Map<string, TreeNode>()
@@ -928,7 +971,7 @@ function App() {
           opts: { recursive: false, includeHidden: false, includeStats: true }
         }).catch(() => [] as DirEntry[]),
       ])
-      const knowledgeTree = buildTree(knowledgeResult)
+      const knowledgeTree = flattenMeetingsTree(buildTree(knowledgeResult))
       const basesChildren: TreeNode[] = (basesResult as DirEntry[])
         .filter((e) => e.name.endsWith('.base'))
         .map((e) => ({ ...e, kind: 'file' as const }))
