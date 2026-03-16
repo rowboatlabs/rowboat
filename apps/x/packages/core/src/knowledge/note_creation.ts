@@ -165,8 +165,8 @@ workspace-readFile({ path: "{source_file}" })
 - Email signature
 
 **Voice memo indicators:**
-- Has \`**Type:** voice memo\` field
-- Has \`**Path:**\` field with path like \`Voice Memos/YYYY-MM-DD/...\`
+- Has YAML frontmatter with \`type: voice memo\`
+- Has frontmatter \`path:\` field like \`Voice Memos/YYYY-MM-DD/...\`
 - Has \`## Transcript\` section
 
 **Set processing mode:**

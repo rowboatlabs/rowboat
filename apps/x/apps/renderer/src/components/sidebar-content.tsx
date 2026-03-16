@@ -608,6 +608,9 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
   const notePathRef = React.useRef<string | null>(null)
   const timestampRef = React.useRef<string | null>(null)
   const relativePathRef = React.useRef<string | null>(null)
+  // Keep a ref to always call the latest onNoteCreated (avoids stale closure in recorder.onstop)
+  const onNoteCreatedRef = React.useRef(onNoteCreated)
+  React.useEffect(() => { onNoteCreatedRef.current = onNoteCreated }, [onNoteCreated])
 
   React.useEffect(() => {
     window.ipc.invoke('workspace:readFile', {
@@ -642,11 +645,12 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
         recursive: true,
       })
 
-      const initialContent = `# Voice Memo
-
-**Type:** voice memo
-**Recorded:** ${now.toLocaleString()}
-**Path:** ${relativePath}
+      const initialContent = `---
+type: voice memo
+recorded: "${now.toISOString()}"
+path: ${relativePath}
+---
+# Voice Memo
 
 ## Transcript
 
@@ -659,7 +663,7 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
       })
 
       // Select the note so the user can see it
-      onNoteCreated?.(notePath)
+      onNoteCreatedRef.current?.(notePath)
 
       // Start actual recording
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -707,11 +711,12 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
         const currentNotePath = notePathRef.current
         const currentRelativePath = relativePathRef.current
         if (currentNotePath && currentRelativePath) {
-          const transcribingContent = `# Voice Memo
-
-**Type:** voice memo
-**Recorded:** ${new Date().toLocaleString()}
-**Path:** ${currentRelativePath}
+          const transcribingContent = `---
+type: voice memo
+recorded: "${new Date().toISOString()}"
+path: ${currentRelativePath}
+---
+# Voice Memo
 
 ## Transcript
 
@@ -728,21 +733,23 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
         const transcript = await transcribeWithDeepgram(blob)
         if (currentNotePath && currentRelativePath) {
           const finalContent = transcript
-            ? `# Voice Memo
-
-**Type:** voice memo
-**Recorded:** ${new Date().toLocaleString()}
-**Path:** ${currentRelativePath}
+            ? `---
+type: voice memo
+recorded: "${new Date().toISOString()}"
+path: ${currentRelativePath}
+---
+# Voice Memo
 
 ## Transcript
 
 ${transcript}
 `
-            : `# Voice Memo
-
-**Type:** voice memo
-**Recorded:** ${new Date().toLocaleString()}
-**Path:** ${currentRelativePath}
+            : `---
+type: voice memo
+recorded: "${new Date().toISOString()}"
+path: ${currentRelativePath}
+---
+# Voice Memo
 
 ## Transcript
 
@@ -755,7 +762,7 @@ ${transcript}
           })
 
           // Re-select to trigger refresh
-          onNoteCreated?.(currentNotePath)
+          onNoteCreatedRef.current?.(currentNotePath)
 
           if (transcript) {
             toast('Voice note transcribed', 'success')

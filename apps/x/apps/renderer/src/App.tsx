@@ -3263,9 +3263,38 @@ function App() {
       return newSet
     })
 
-    // Select the file to show it in the editor
+    // If tab already exists for this path (e.g. second call after transcription),
+    // force a content reload instead of creating a duplicate tab.
+    const existingTab = fileTabs.find(tab => tab.path === notePath)
+    if (existingTab) {
+      setActiveFileTabId(existingTab.id)
+      // Read fresh content from disk and update the editor
+      try {
+        const result = await window.ipc.invoke('workspace:readFile', { path: notePath, encoding: 'utf8' })
+        const { raw: fm, body } = splitFrontmatter(result.data)
+        frontmatterByPathRef.current.set(notePath, fm)
+        setFileContent(body)
+        setEditorContent(body)
+        editorContentRef.current = body
+        editorPathRef.current = notePath
+        initialContentRef.current = body
+        initialContentByPathRef.current.set(notePath, body)
+        setEditorContentByPath(prev => ({ ...prev, [notePath]: body }))
+        editorContentByPathRef.current.set(notePath, body)
+        // Bump editor session to force TipTap to pick up the new content
+        setEditorSessionByTabId(prev => ({
+          ...prev,
+          [existingTab.id]: (prev[existingTab.id] ?? 0) + 1,
+        }))
+      } catch {
+        // File read failed — ignore
+      }
+      return
+    }
+
+    // First call — open the file in a tab
     navigateToFile(notePath)
-  }, [loadDirectory, navigateToFile])
+  }, [loadDirectory, navigateToFile, fileTabs])
 
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
