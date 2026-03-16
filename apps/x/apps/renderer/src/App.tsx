@@ -258,10 +258,18 @@ const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageMod
   }
 }
 
-// Sort nodes (dirs first, then alphabetically)
+// Pinned folders appear first in the sidebar (in this order)
+const PINNED_FOLDERS = ['Notes']
+
+// Sort nodes (dirs first, pinned folders at top, then alphabetically)
 function sortNodes(nodes: TreeNode[]): TreeNode[] {
   return nodes.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
+    const aPinned = PINNED_FOLDERS.indexOf(a.name)
+    const bPinned = PINNED_FOLDERS.indexOf(b.name)
+    if (aPinned !== -1 && bPinned !== -1) return aPinned - bPinned
+    if (aPinned !== -1) return -1
+    if (bPinned !== -1) return 1
     return a.name.localeCompare(b.name)
   }).map(node => {
     if (node.children) {
@@ -991,10 +999,12 @@ function App() {
     }
   }, [])
 
-  // Ensure bases/ directory exists on startup
+  // Ensure bases/ and knowledge/Notes/ directories exist on startup
   useEffect(() => {
     window.ipc.invoke('workspace:mkdir', { path: 'bases', recursive: true })
       .catch((err: unknown) => console.error('Failed to ensure bases directory:', err))
+    window.ipc.invoke('workspace:mkdir', { path: 'knowledge/Notes', recursive: true })
+      .catch((err: unknown) => console.error('Failed to ensure Notes directory:', err))
   }, [])
 
   // Load initial tree
@@ -3113,7 +3123,7 @@ function App() {
   }, [])
 
   const knowledgeActions = React.useMemo(() => ({
-    createNote: async (parentPath: string = 'knowledge') => {
+    createNote: async (parentPath: string = 'knowledge/Notes') => {
       try {
         let index = 0
         let name = untitledBaseName
@@ -3136,7 +3146,7 @@ function App() {
         throw err
       }
     },
-    createFolder: async (parentPath: string = 'knowledge') => {
+    createFolder: async (parentPath: string = 'knowledge/Notes') => {
       try {
         await window.ipc.invoke('workspace:mkdir', {
           path: `${parentPath}/new-folder-${Date.now()}`,
