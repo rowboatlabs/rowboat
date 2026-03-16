@@ -1,4 +1,4 @@
-import { getAccessToken } from '../models/gateway.js';
+import { getAccessToken } from '../auth/tokens.js';
 import { API_URL } from '../config/env.js';
 
 export interface BillingInfo {
