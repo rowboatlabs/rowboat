@@ -66,6 +66,7 @@ const providerDisplayNames: Record<string, string> = {
   openrouter: 'OpenRouter',
   aigateway: 'AI Gateway',
   'openai-compatible': 'OpenAI-Compatible',
+  rowboat: 'Rowboat',
 }
 
 interface ConfiguredModel {
@@ -156,51 +157,103 @@ function ChatInputInner({
   const [activeModelKey, setActiveModelKey] = useState('')
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
+  const [isRowboatConnected, setIsRowboatConnected] = useState(false)
 
-  // Load model config from disk (on mount and whenever tab becomes active)
+  // Check Rowboat sign-in state
+  useEffect(() => {
+    window.ipc.invoke('oauth:getState', null).then((result) => {
+      setIsRowboatConnected(result.config?.rowboat?.connected ?? false)
+    }).catch(() => setIsRowboatConnected(false))
+  }, [isActive])
+
+  // Update sign-in state when OAuth events fire
+  useEffect(() => {
+    const cleanup = window.ipc.on('oauth:didConnect', () => {
+      window.ipc.invoke('oauth:getState', null).then((result) => {
+        setIsRowboatConnected(result.config?.rowboat?.connected ?? false)
+      }).catch(() => setIsRowboatConnected(false))
+    })
+    return cleanup
+  }, [])
+
+  // Load model config (gateway when signed in, local config when BYOK)
   const loadModelConfig = useCallback(async () => {
     try {
-      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
-      const parsed = JSON.parse(result.data)
-      const models: ConfiguredModel[] = []
-      if (parsed?.providers) {
-        for (const [flavor, entry] of Object.entries(parsed.providers)) {
-          const e = entry as Record<string, unknown>
-          const modelList: string[] = Array.isArray(e.models) ? e.models as string[] : []
-          const singleModel = typeof e.model === 'string' ? e.model : ''
-          const allModels = modelList.length > 0 ? modelList : singleModel ? [singleModel] : []
-          for (const model of allModels) {
-            if (model) {
-              models.push({
-                flavor,
-                model,
-                apiKey: (e.apiKey as string) || undefined,
-                baseURL: (e.baseURL as string) || undefined,
-                headers: (e.headers as Record<string, string>) || undefined,
-                knowledgeGraphModel: (e.knowledgeGraphModel as string) || undefined,
-              })
+      if (isRowboatConnected) {
+        // Fetch gateway models
+        const listResult = await window.ipc.invoke('models:list', null)
+        const rowboatProvider = listResult.providers?.find(
+          (p: { id: string }) => p.id === 'rowboat'
+        )
+        const models: ConfiguredModel[] = (rowboatProvider?.models || []).map(
+          (m: { id: string }) => ({ flavor: 'rowboat', model: m.id })
+        )
+
+        // Read current default from config
+        let defaultModel = ''
+        try {
+          const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
+          const parsed = JSON.parse(result.data)
+          defaultModel = parsed?.model || ''
+        } catch { /* no config yet */ }
+
+        if (defaultModel) {
+          models.sort((a, b) => {
+            if (a.model === defaultModel) return -1
+            if (b.model === defaultModel) return 1
+            return 0
+          })
+        }
+
+        setConfiguredModels(models)
+        const activeKey = defaultModel
+          ? `rowboat/${defaultModel}`
+          : models[0] ? `rowboat/${models[0].model}` : ''
+        if (activeKey) setActiveModelKey(activeKey)
+      } else {
+        // BYOK: read from local models.json
+        const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
+        const parsed = JSON.parse(result.data)
+        const models: ConfiguredModel[] = []
+        if (parsed?.providers) {
+          for (const [flavor, entry] of Object.entries(parsed.providers)) {
+            const e = entry as Record<string, unknown>
+            const modelList: string[] = Array.isArray(e.models) ? e.models as string[] : []
+            const singleModel = typeof e.model === 'string' ? e.model : ''
+            const allModels = modelList.length > 0 ? modelList : singleModel ? [singleModel] : []
+            for (const model of allModels) {
+              if (model) {
+                models.push({
+                  flavor,
+                  model,
+                  apiKey: (e.apiKey as string) || undefined,
+                  baseURL: (e.baseURL as string) || undefined,
+                  headers: (e.headers as Record<string, string>) || undefined,
+                  knowledgeGraphModel: (e.knowledgeGraphModel as string) || undefined,
+                })
+              }
             }
           }
         }
-      }
-      const defaultKey = parsed?.provider?.flavor && parsed?.model
-        ? `${parsed.provider.flavor}/${parsed.model}`
-        : ''
-      models.sort((a, b) => {
-        const aKey = `${a.flavor}/${a.model}`
-        const bKey = `${b.flavor}/${b.model}`
-        if (aKey === defaultKey) return -1
-        if (bKey === defaultKey) return 1
-        return 0
-      })
-      setConfiguredModels(models)
-      if (defaultKey) {
-        setActiveModelKey(defaultKey)
+        const defaultKey = parsed?.provider?.flavor && parsed?.model
+          ? `${parsed.provider.flavor}/${parsed.model}`
+          : ''
+        models.sort((a, b) => {
+          const aKey = `${a.flavor}/${a.model}`
+          const bKey = `${b.flavor}/${b.model}`
+          if (aKey === defaultKey) return -1
+          if (bKey === defaultKey) return 1
+          return 0
+        })
+        setConfiguredModels(models)
+        if (defaultKey) {
+          setActiveModelKey(defaultKey)
+        }
       }
     } catch {
       // No config yet
     }
-  }, [])
+  }, [isRowboatConnected])
 
   useEffect(() => {
     loadModelConfig()
@@ -238,22 +291,32 @@ function ChatInputInner({
     const entry = configuredModels.find((m) => `${m.flavor}/${m.model}` === key)
     if (!entry) return
     setActiveModelKey(key)
-    // Collect all models for this provider so the full list is preserved
-    const providerModels = configuredModels
-      .filter((m) => m.flavor === entry.flavor)
-      .map((m) => m.model)
+
     try {
-      await window.ipc.invoke('models:saveConfig', {
-        provider: {
-          flavor: entry.flavor,
-          apiKey: entry.apiKey,
-          baseURL: entry.baseURL,
-          headers: entry.headers,
-        },
-        model: entry.model,
-        models: providerModels,
-        knowledgeGraphModel: entry.knowledgeGraphModel,
-      })
+      if (entry.flavor === 'rowboat') {
+        // Gateway model — save with valid Zod flavor, no credentials
+        await window.ipc.invoke('models:saveConfig', {
+          provider: { flavor: 'openrouter' as const },
+          model: entry.model,
+          knowledgeGraphModel: entry.knowledgeGraphModel,
+        })
+      } else {
+        // BYOK — preserve full provider config
+        const providerModels = configuredModels
+          .filter((m) => m.flavor === entry.flavor)
+          .map((m) => m.model)
+        await window.ipc.invoke('models:saveConfig', {
+          provider: {
+            flavor: entry.flavor,
+            apiKey: entry.apiKey,
+            baseURL: entry.baseURL,
+            headers: entry.headers,
+          },
+          model: entry.model,
+          models: providerModels,
+          knowledgeGraphModel: entry.knowledgeGraphModel,
+        })
+      }
     } catch {
       toast.error('Failed to switch model')
     }

@@ -448,6 +448,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
       if (result.success) {
         setTestState({ status: "success" })
         await window.ipc.invoke("models:saveConfig", providerConfig)
+        window.dispatchEvent(new Event('models-config-changed'))
         handleNext()
       } else {
         setTestState({ status: "error", error: result.error })
