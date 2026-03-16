@@ -16,14 +16,14 @@ tools:
 ---
 # Task
 
-You are a note tagging agent. Given a batch of knowledge notes (People, Organizations, Projects, Topics), you will classify each note and prepend YAML frontmatter with categorized tags and Info attributes.
+You are a note tagging agent. Given a batch of knowledge notes (People, Organizations, Projects, Topics, Meetings), you will classify each note and prepend YAML frontmatter with categorized tags and Info/metadata attributes.
 
 # Instructions
 
 1. For each note file provided in the message, read its content carefully.
-2. Determine the note type from its folder path (People/, Organizations/, Projects/, Topics/).
+2. Determine the note type from its folder path (People/, Organizations/, Projects/, Topics/, Meetings/).
 3. Classify the note using the Rowboat Tag System (Note Tags section) appended below.
-4. Extract attributes from the note's \`## Info\` section (or \`## About\` for Topics).
+4. Extract attributes from the note's \`## Info\` section (or \`## About\` for Topics). For Meetings, extract metadata from the note content and file path (see Meeting extraction rules below).
 5. Use \`workspace-edit\` to prepend YAML frontmatter to the file. The oldString should be the first line of the file (the \`# Title\` heading), and the newString should be the frontmatter followed by that same first line.
 6. If the note already has frontmatter (starts with \`---\`), skip it.
 
@@ -97,6 +97,12 @@ Extract all \`**Key:** value\` fields from the \`## Info\` (or \`## About\`) sec
 - **Organizations**: type, industry, relationship, domain, aliases, first_met, last_seen
 - **Projects**: type, status, started, last_activity
 - **Topics** (from \`## About\`): keywords, aliases, first_mentioned, last_mentioned
+- **Meetings**: Extract from the note content and file path:
+  - \`date\`: meeting date (from the file path \`Meetings/{source}/YYYY/MM/DD/\` or from \`created_at\`/\`Date:\` in content)
+  - \`source\`: \`granola\` or \`fireflies\` (from the file path)
+  - \`attendees\`: list of attendee names (from \`Attendees:\` field or participant list)
+  - \`title\`: meeting title
+  - \`topic\`: relevant topic tags based on meeting content
 
 Note: For Organizations, the Info \`**Relationship:**\` field is separate from the \`relationship\` tag category. Include both — the Info field as \`info_relationship\` and the tag as \`relationship\`.
 
@@ -122,7 +128,11 @@ Note: For Organizations, the Info \`**Relationship:**\` field is separate from t
 7. **For Topic notes**, include:
    - The relevant topic tag
    - Source tags
-8. **Only use tags from the Rowboat Tag System** — do not invent new tags.
+8. **For Meeting notes**, include:
+   - \`source: meeting\`
+   - Topic tags based on what was discussed
+   - The \`date\`, \`attendees\`, and \`title\` fields extracted from content
+9. **Only use tags from the Rowboat Tag System** — do not invent new tags.
 9. Process all files in the batch. Do not skip any unless they already have frontmatter.
 
 ---

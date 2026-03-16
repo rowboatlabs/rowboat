@@ -3514,7 +3514,11 @@ function App() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <SidebarSectionProvider defaultSection="tasks">
+      <SidebarSectionProvider defaultSection="tasks" onSectionChange={(section) => {
+        if (section === 'knowledge' && !selectedPath && !isGraphOpen) {
+          void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+        }
+      }}>
         <div className="flex h-svh w-full overflow-hidden">
           {/* Content sidebar with SidebarProvider for collapse functionality */}
           <SidebarProvider

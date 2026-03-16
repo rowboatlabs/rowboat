@@ -157,6 +157,7 @@ workspace-readFile({ path: "{source_file}" })
 - Has \`Attendees:\` field
 - Has \`Meeting:\` title
 - Transcript format with speaker labels
+- Source file path is under \`knowledge/Meetings/\` (e.g. \`knowledge/Meetings/granola/...\` or \`knowledge/Meetings/fireflies/...\`)
 
 **Email indicators:**
 - Has \`From:\` and \`To:\` fields
@@ -680,6 +681,16 @@ One line summarizing this source's relevance to the entity:
 **{YYYY-MM-DD}** ({meeting|email|voice memo}): {Summary with [[links]]}
 \`\`\`
 
+**For meetings:** Include a link to the source meeting note. Derive the wiki-link path from the source file path (strip the \`.md\` extension):
+\`\`\`
+**2025-01-15** (meeting): Discussed [[Projects/Acme Integration]] timeline with [[People/David Kim]]. See [[Meetings/granola/abc123_Weekly Sync]]
+\`\`\`
+
+**For emails:** Include a Gmail web link to the thread. Extract the thread ID from the \`**Thread ID:**\` field in the email source file, then construct the URL as \`https://mail.google.com/mail/#inbox/{threadId}\`:
+\`\`\`
+**2025-01-15** (email): [[People/Sarah Chen]] sent pricing proposal for [[Projects/Acme Integration]]. [View thread](https://mail.google.com/mail/#inbox/18d5a3b2c1e4f567)
+\`\`\`
+
 **For voice memos:** Include a link to the voice memo file using the Path field:
 \`\`\`
 **2025-01-15** (voice memo): Discussed [[Projects/Acme Integration]] timeline. See [[Voice Memos/2025-01-15/voice-memo-2025-01-15T10-30-00-000Z]]
@@ -687,11 +698,13 @@ One line summarizing this source's relevance to the entity:
 
 **Important:** Use canonical names with absolute paths from resolution map in all summaries:
 \`\`\`
-# Correct (uses absolute paths):
-**2025-01-15** (meeting): [[People/Sarah Chen]] confirmed timeline with [[People/David Kim]]. Blocked on [[Topics/Security Compliance]].
+# Correct (uses absolute paths and source links):
+**2025-01-15** (meeting): [[People/Sarah Chen]] confirmed timeline with [[People/David Kim]]. Blocked on [[Topics/Security Compliance]]. See [[Meetings/fireflies/abc_Team Sync]]
+**2025-01-15** (email): [[People/Sarah Chen]] shared the contract draft. [View thread](https://mail.google.com/mail/#inbox/18d5a3b2c1e4f567)
 
-# Incorrect (uses variants or relative links):
+# Incorrect (uses variants or relative links, missing source links):
 **2025-01-15** (meeting): Sarah confirmed timeline with David. Blocked on SOC 2.
+**2025-01-15** (email): Sarah shared the contract draft.
 \`\`\`
 
 ---
@@ -887,6 +900,16 @@ ${renderNoteTypesBlock()}
 | Voice memo | Yes | Yes | Yes |
 | Email (has create label) | Yes | Yes | Yes |
 | Email (only skip labels) | No (SKIP) | No | No |
+
+**Meeting activity format:** Always include a link to the source meeting note:
+\`\`\`
+**2025-01-15** (meeting): Discussed project timeline with [[People/Sarah Chen]]. See [[Meetings/granola/abc123_Weekly Sync]]
+\`\`\`
+
+**Email activity format:** Always include a Gmail web link using the Thread ID from the source:
+\`\`\`
+**2025-01-15** (email): [[People/Sarah Chen]] sent pricing proposal. [View thread](https://mail.google.com/mail/#inbox/18d5a3b2c1e4f567)
+\`\`\`
 
 **Voice memo activity format:** Always include a link to the source voice memo:
 \`\`\`

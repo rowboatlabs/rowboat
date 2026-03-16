@@ -153,6 +153,13 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
     extractionGuide:
       "Look for: topic name, keywords, related people/orgs/projects, decisions, key facts",
   },
+  {
+    type: "Meetings",
+    folder: "Meetings",
+    template: "",
+    extractionGuide:
+      "Look for: meeting title, date, attendees, source (granola or fireflies), duration, topics discussed",
+  },
 ];
 
 // ── Disk-backed config with mtime caching ──────────────────────────────────
