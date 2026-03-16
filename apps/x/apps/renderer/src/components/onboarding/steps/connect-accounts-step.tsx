@@ -1,4 +1,4 @@
-import { Loader2, CheckCircle2, ArrowLeft } from "lucide-react"
+import { Loader2, CheckCircle2, ArrowLeft, Calendar } from "lucide-react"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -91,6 +91,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
     slackDiscovering, slackDiscoverError,
     handleSlackEnable, handleSlackSaveWorkspaces, handleSlackDisable,
     useComposioForGoogle, gmailConnected, gmailLoading, gmailConnecting, handleConnectGmail,
+    useComposioForGoogleCalendar, googleCalendarConnected, googleCalendarLoading, googleCalendarConnecting, handleConnectGoogleCalendar,
     handleNext, handleBack,
   } = state
 
@@ -112,11 +113,11 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Email / Email & Calendar */}
-          {(useComposioForGoogle || providers.includes('google')) && (
+          {/* Email & Calendar */}
+          {(useComposioForGoogle || useComposioForGoogleCalendar || providers.includes('google')) && (
             <div className="space-y-3">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                {useComposioForGoogle ? 'Email' : 'Email & Calendar'}
+                Email & Calendar
               </span>
               {useComposioForGoogle ? (
                 <ProviderCard
@@ -138,6 +139,18 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                   iconColor="text-red-500"
                   providerState={providerStates['google']}
                   onConnect={() => handleConnect('google')}
+                  index={cardIndex++}
+                />
+              )}
+              {useComposioForGoogleCalendar && (
+                <ProviderCard
+                  name="Google Calendar"
+                  description="Sync calendar events for scheduling awareness"
+                  icon={<Calendar className="size-5" />}
+                  iconBg="bg-blue-500/10"
+                  iconColor="text-blue-500"
+                  providerState={{ isConnected: googleCalendarConnected, isLoading: googleCalendarLoading, isConnecting: googleCalendarConnecting }}
+                  onConnect={handleConnectGoogleCalendar}
                   index={cardIndex++}
                 />
               )}

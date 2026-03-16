@@ -74,6 +74,12 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
   const [composioApiKeyTarget, setComposioApiKeyTarget] = useState<'slack' | 'gmail'>('gmail')
 
+  // Composio/Google Calendar state
+  const [useComposioForGoogleCalendar, setUseComposioForGoogleCalendar] = useState(false)
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false)
+  const [googleCalendarLoading, setGoogleCalendarLoading] = useState(true)
+  const [googleCalendarConnecting, setGoogleCalendarConnecting] = useState(false)
+
   const updateProviderConfig = useCallback(
     (provider: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string }>) => {
       setProviderConfigs(prev => ({
@@ -125,8 +131,17 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
         console.error('Failed to check composio-for-google flag:', error)
       }
     }
+    async function loadComposioForGoogleCalendarFlag() {
+      try {
+        const result = await window.ipc.invoke('composio:use-composio-for-google-calendar', null)
+        setUseComposioForGoogleCalendar(result.enabled)
+      } catch (error) {
+        console.error('Failed to check composio-for-google-calendar flag:', error)
+      }
+    }
     loadProviders()
     loadComposioForGoogleFlag()
+    loadComposioForGoogleCalendarFlag()
   }, [open])
 
   // Load LLM models catalog on open
@@ -337,6 +352,47 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     }
   }, [startGmailConnect])
 
+  // Load Google Calendar connection status (Composio)
+  const refreshGoogleCalendarStatus = useCallback(async () => {
+    try {
+      setGoogleCalendarLoading(true)
+      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'googlecalendar' })
+      setGoogleCalendarConnected(result.isConnected)
+    } catch (error) {
+      console.error('Failed to load Google Calendar status:', error)
+      setGoogleCalendarConnected(false)
+    } finally {
+      setGoogleCalendarLoading(false)
+    }
+  }, [])
+
+  // Connect to Google Calendar via Composio
+  const startGoogleCalendarConnect = useCallback(async () => {
+    try {
+      setGoogleCalendarConnecting(true)
+      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'googlecalendar' })
+      if (!result.success) {
+        toast.error(result.error || 'Failed to connect to Google Calendar')
+        setGoogleCalendarConnecting(false)
+      }
+    } catch (error) {
+      console.error('Failed to connect to Google Calendar:', error)
+      toast.error('Failed to connect to Google Calendar')
+      setGoogleCalendarConnecting(false)
+    }
+  }, [])
+
+  // Handle Google Calendar connect button click
+  const handleConnectGoogleCalendar = useCallback(async () => {
+    const configResult = await window.ipc.invoke('composio:is-configured', null)
+    if (!configResult.configured) {
+      setComposioApiKeyTarget('gmail')
+      setComposioApiKeyOpen(true)
+      return
+    }
+    await startGoogleCalendarConnect()
+  }, [startGoogleCalendarConnect])
+
   // New step flow:
   // Rowboat path: 0 (welcome) → 2 (connect) → 3 (done)
   // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (done)
@@ -414,6 +470,11 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
       refreshGmailStatus()
     }
 
+    // Refresh Google Calendar Composio status if enabled
+    if (useComposioForGoogleCalendar) {
+      refreshGoogleCalendarStatus()
+    }
+
     if (providers.length === 0) return
 
     const newStates: Record<string, ProviderState> = {}
@@ -440,7 +501,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     }
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshGmailStatus, useComposioForGoogle])
+  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshGmailStatus, useComposioForGoogle, refreshGoogleCalendarStatus, useComposioForGoogleCalendar])
 
   // Refresh statuses when modal opens or providers list changes
   useEffect(() => {
@@ -480,12 +541,16 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
 
     const cleanup = window.ipc.on('oauth:didConnect', async (event) => {
       if (event.provider === 'rowboat' && event.success) {
-        // Re-check the composio-for-google flag now that the account is connected
+        // Re-check composio flags now that the account is connected
         try {
-          const result = await window.ipc.invoke('composio:use-composio-for-google', null)
-          setUseComposioForGoogle(result.enabled)
+          const [googleResult, calendarResult] = await Promise.all([
+            window.ipc.invoke('composio:use-composio-for-google', null),
+            window.ipc.invoke('composio:use-composio-for-google-calendar', null),
+          ])
+          setUseComposioForGoogle(googleResult.enabled)
+          setUseComposioForGoogleCalendar(calendarResult.enabled)
         } catch (error) {
-          console.error('Failed to re-check composio-for-google flag:', error)
+          console.error('Failed to re-check composio flags:', error)
         }
         setCurrentStep(2) // Go to Connect Accounts
       }
@@ -517,6 +582,17 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
           toast.success('Connected to Gmail')
         } else {
           toast.error(error || 'Failed to connect to Gmail')
+        }
+      }
+
+      if (toolkitSlug === 'googlecalendar') {
+        setGoogleCalendarConnected(success)
+        setGoogleCalendarConnecting(false)
+
+        if (success) {
+          toast.success('Connected to Google Calendar')
+        } else {
+          toast.error(error || 'Failed to connect to Google Calendar')
         }
       }
     })
@@ -649,6 +725,13 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     composioApiKeyTarget,
     handleConnectGmail,
     handleComposioApiKeySubmit,
+
+    // Composio/Google Calendar state
+    useComposioForGoogleCalendar,
+    googleCalendarConnected,
+    googleCalendarLoading,
+    googleCalendarConnecting,
+    handleConnectGoogleCalendar,
 
     // Navigation
     handleNext,
