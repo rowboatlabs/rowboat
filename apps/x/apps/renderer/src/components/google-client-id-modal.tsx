@@ -47,19 +47,37 @@ export function GoogleClientIdModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Enter Google Client ID</DialogTitle>
-          <DialogDescription>
-            {description ?? "Enter the client ID for your Google OAuth app to continue."}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground" htmlFor="google-client-id">
-            Client ID
-          </label>
-          <div className="text-xs text-muted-foreground">
-            Need help setting this up?{" "}
+      <DialogContent className="w-[min(28rem,calc(100%-2rem))] max-w-md p-0 gap-0 overflow-hidden rounded-xl">
+        <div className="p-6 pb-0">
+          <DialogHeader className="space-y-1.5">
+            <DialogTitle className="text-lg font-semibold">Google Client ID</DialogTitle>
+            <DialogDescription className="text-sm">
+              {description ?? "Enter the client ID for your Google OAuth app to connect."}
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+        <div className="px-6 py-4 space-y-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block" htmlFor="google-client-id">
+              Client ID
+            </label>
+            <Input
+              id="google-client-id"
+              placeholder="xxxxxxxxxxxx-xxxx.apps.googleusercontent.com"
+              value={clientId}
+              onChange={(event) => setClientId(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  handleSubmit()
+                }
+              }}
+              className="font-mono text-xs"
+              autoFocus
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Need help?{" "}
             <a
               className="text-primary underline underline-offset-4 hover:text-primary/80"
               href={GOOGLE_CLIENT_ID_SETUP_GUIDE_URL}
@@ -68,31 +86,18 @@ export function GoogleClientIdModal({
             >
               Read the setup guide
             </a>
-            .
-          </div>
-          <Input
-            id="google-client-id"
-            placeholder="xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com"
-            value={clientId}
-            onChange={(event) => setClientId(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault()
-                handleSubmit()
-              }
-            }}
-            autoFocus
-          />
+          </p>
         </div>
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t bg-muted/30">
           <Button
             variant="ghost"
+            size="sm"
             onClick={() => onOpenChange(false)}
             disabled={isSubmitting}
           >
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={!isValid || isSubmitting}>
+          <Button size="sm" onClick={handleSubmit} disabled={!isValid || isSubmitting}>
             Continue
           </Button>
         </div>
