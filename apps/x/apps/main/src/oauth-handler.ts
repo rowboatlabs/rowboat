@@ -286,6 +286,8 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
   try {
     const oauthRepo = getOAuthRepo();
     await oauthRepo.delete(provider);
+    // Notify renderer so sidebar, voice, and billing re-check state
+    emitOAuthEvent({ provider, success: false });
     return { success: true };
   } catch (error) {
     console.error('OAuth disconnect failed:', error);

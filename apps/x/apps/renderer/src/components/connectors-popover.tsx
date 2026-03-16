@@ -422,10 +422,10 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     }
   }, [open, providers, refreshAllStatuses])
 
-  // Listen for OAuth completion events
+  // Listen for OAuth state change events (connect + disconnect)
   useEffect(() => {
     const cleanup = window.ipc.on('oauth:didConnect', async (event) => {
-      const { provider, success, error } = event
+      const { provider, success } = event
 
       setProviderStates(prev => ({
         ...prev,
@@ -464,9 +464,9 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
 
         // Refresh status to ensure consistency
         refreshAllStatuses()
-      } else {
-        toast.error(error || `Failed to connect to ${provider}`)
       }
+      // Note: error toasts for failed connections are handled by startConnect/handleConnect.
+      // Disconnect events (success: false) are handled by handleDisconnect which shows its own toast.
     })
 
     return cleanup
