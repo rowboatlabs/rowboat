@@ -273,8 +273,8 @@ export function listConnected(): { toolkits: string[] } {
 /**
  * Check if Composio should be used for Google services (Gmail, etc.)
  */
-export function useComposioForGoogle(): { enabled: boolean } {
-    return { enabled: composioClient.useComposioForGoogle() };
+export async function useComposioForGoogle(): Promise<{ enabled: boolean }> {
+    return { enabled: await composioClient.useComposioForGoogle() };
 }
 
 /**

@@ -107,7 +107,8 @@ export async function isConfigured(): Promise<boolean> {
 /**
  * Check if Composio should be used for Google services (Gmail, etc.)
  */
-export function useComposioForGoogle(): boolean {
+export async function useComposioForGoogle(): Promise<boolean> {
+    if (await isSignedIn()) return true;
     const config = loadConfig();
     return config.use_composio_for_google === true;
 }
