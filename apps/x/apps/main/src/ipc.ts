@@ -455,6 +455,10 @@ export function setupIpcHandlers() {
       await repo.setConfig(args);
       return { success: true };
     },
+    'models:getConfiguredModels': async () => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      return repo.getAllConfiguredModels();
+    },
     'oauth:connect': async (_event, args) => {
       return await connectProvider(args.provider, args.clientId?.trim());
     },

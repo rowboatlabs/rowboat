@@ -13,3 +13,17 @@ export const LlmModelConfig = z.object({
   models: z.array(z.string()).optional(),
   knowledgeGraphModel: z.string().optional(),
 });
+
+export const ConfiguredModelEntry = z.object({
+  flavor: LlmProvider.shape.flavor,
+  model: z.string(),
+  apiKey: z.string().optional(),
+  baseURL: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  knowledgeGraphModel: z.string().optional(),
+});
+
+export const ConfiguredModelsResult = z.object({
+  models: z.array(ConfiguredModelEntry),
+  activeModelKey: z.string(),
+});
