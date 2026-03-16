@@ -8,7 +8,7 @@ import { limitEventItems } from './limit_event_items.js';
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'knowledge', 'Meetings', 'fireflies');
 const SYNC_INTERVAL_MS = 30 * 60 * 1000; // Check every 30 minutes (reduced from 1 minute)
-const STATE_FILE = path.join(SYNC_DIR, 'sync_state.json');
+const STATE_FILE = path.join(WorkDir, 'fireflies_sync_state.json');
 const LOOKBACK_DAYS = 30; // Last 1 month
 const API_DELAY_MS = 2000; // 2 second delay between API calls
 const RATE_LIMIT_RETRY_DELAY_MS = 60 * 1000; // Wait 1 minute on rate limit
