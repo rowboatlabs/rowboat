@@ -500,7 +500,7 @@ export function SidebarContentPanel({
                 8 days left
               </span>
             </div>
-            <button className="rounded-md bg-sidebar-accent px-2.5 py-1 text-[10px] font-medium text-sidebar-foreground hover:bg-sidebar-accent/80 transition-colors">
+            <button className="upgrade-btn rounded-md bg-sidebar-accent px-2.5 py-1 text-[10px] font-medium text-sidebar-foreground transition-colors">
               Upgrade
             </button>
           </div>

@@ -48,7 +48,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
-import { OnboardingModal } from '@/components/onboarding-modal'
+import { OnboardingModal } from '@/components/onboarding'
 import { SearchDialog } from '@/components/search-dialog'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
