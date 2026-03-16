@@ -6,7 +6,7 @@ import { serviceLogger, type ServiceRunContext } from '../services/service_logge
 import { limitEventItems } from './limit_event_items.js';
 
 // Configuration
-const SYNC_DIR = path.join(WorkDir, 'fireflies_transcripts');
+const SYNC_DIR = path.join(WorkDir, 'knowledge', 'Meetings', 'fireflies');
 const SYNC_INTERVAL_MS = 30 * 60 * 1000; // Check every 30 minutes (reduced from 1 minute)
 const STATE_FILE = path.join(SYNC_DIR, 'sync_state.json');
 const LOOKBACK_DAYS = 30; // Last 1 month
@@ -569,8 +569,16 @@ async function syncMeetings() {
                 
                 // Convert to markdown and save
                 const markdown = meetingToMarkdown(meetingData);
-                const filename = `${meetingId}_${cleanFilename(meetingData.title || 'untitled')}.md`;
-                const filePath = path.join(SYNC_DIR, filename);
+                const meetingDate = new Date(meetingData.dateString || meetingData.date || Date.now());
+                const dateDir = path.join(
+                    SYNC_DIR,
+                    String(meetingDate.getFullYear()),
+                    String(meetingDate.getMonth() + 1).padStart(2, '0'),
+                    String(meetingDate.getDate()).padStart(2, '0')
+                );
+                fs.mkdirSync(dateDir, { recursive: true });
+                const filename = `${cleanFilename(meetingData.title || 'untitled')}.md`;
+                const filePath = path.join(dateDir, filename);
                 
                 fs.writeFileSync(filePath, markdown);
                 console.log(`[Fireflies] Saved: ${filename}`);

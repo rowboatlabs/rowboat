@@ -30,16 +30,16 @@ function getUntaggedNotes(state: NoteTaggingState): string[] {
     const untagged: string[] = [];
     const noteFolders = getNoteTypeDefinitions().map(d => d.folder);
 
-    for (const folder of noteFolders) {
-        const folderPath = path.join(KNOWLEDGE_DIR, folder);
-        if (!fs.existsSync(folderPath)) {
-            continue;
-        }
-
-        const entries = fs.readdirSync(folderPath);
+    function scanDir(dir: string) {
+        const entries = fs.readdirSync(dir);
         for (const entry of entries) {
-            const fullPath = path.join(folderPath, entry);
+            const fullPath = path.join(dir, entry);
             const stat = fs.statSync(fullPath);
+
+            if (stat.isDirectory()) {
+                scanDir(fullPath);
+                continue;
+            }
 
             if (!stat.isFile() || !entry.endsWith('.md')) {
                 continue;
@@ -62,6 +62,14 @@ function getUntaggedNotes(state: NoteTaggingState): string[] {
 
             untagged.push(fullPath);
         }
+    }
+
+    for (const folder of noteFolders) {
+        const folderPath = path.join(KNOWLEDGE_DIR, folder);
+        if (!fs.existsSync(folderPath)) {
+            continue;
+        }
+        scanDir(folderPath);
     }
 
     return untagged;

@@ -28,8 +28,8 @@ const NOTE_CREATION_AGENT = 'note_creation';
 const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
 const SOURCE_FOLDERS = [
     'gmail_sync',
-    'fireflies_transcripts',
-    'granola_notes',
+    path.join('knowledge', 'Meetings', 'fireflies'),
+    path.join('knowledge', 'Meetings', 'granola'),
 ];
 
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
@@ -192,7 +192,9 @@ async function createNotesFromBatch(
     // Add each file's content
     message += `# Source Files to Process\n\n`;
     files.forEach((file, idx) => {
-        message += `## Source File ${idx + 1}: ${path.basename(file.path)}\n\n`;
+        // Pass workspace-relative path so the agent can link back to meeting notes
+        const relativePath = path.relative(WorkDir, file.path);
+        message += `## Source File ${idx + 1}: ${relativePath}\n\n`;
         message += file.content;
         message += `\n\n---\n\n`;
     });
