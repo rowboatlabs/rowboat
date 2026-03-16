@@ -386,6 +386,12 @@ const ipcSchemas = {
       enabled: z.boolean(),
     }),
   },
+  'composio:use-composio-for-google-calendar': {
+    req: z.null(),
+    res: z.object({
+      enabled: z.boolean(),
+    }),
+  },
   'composio:didConnect': {
     req: z.object({
       toolkitSlug: z.string(),

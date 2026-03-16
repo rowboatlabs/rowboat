@@ -278,6 +278,13 @@ export async function useComposioForGoogle(): Promise<{ enabled: boolean }> {
 }
 
 /**
+ * Check if Composio should be used for Google Calendar
+ */
+export async function useComposioForGoogleCalendar(): Promise<{ enabled: boolean }> {
+    return { enabled: await composioClient.useComposioForGoogleCalendar() };
+}
+
+/**
  * Execute a Composio action
  */
 export async function executeAction(
