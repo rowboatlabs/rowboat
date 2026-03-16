@@ -186,7 +186,11 @@ export async function connectProvider(provider: string, clientId?: string): Prom
     });
 
     // Create callback server
+    let callbackHandled = false;
     const { server } = await createAuthServer(8080, async (code, receivedState) => {
+      // Guard against duplicate callbacks (browser may send multiple requests)
+      if (callbackHandled) return;
+      callbackHandled = true;
       // Validate state
       if (receivedState !== state) {
         throw new Error('Invalid state parameter - possible CSRF attack');

@@ -496,7 +496,10 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
         setGoogleCalendarConnecting(false)
 
         if (success) {
-          toast.success('Connected to Google Calendar')
+          toast.success('Connected to Google Calendar', {
+            description: 'Syncing your calendar in the background. This may take a few minutes before changes appear.',
+            duration: 8000,
+          })
         } else {
           toast.error(error || 'Failed to connect to Google Calendar')
         }

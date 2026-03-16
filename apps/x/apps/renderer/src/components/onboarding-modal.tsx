@@ -538,10 +538,10 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
   }, [open, providers, refreshAllStatuses])
 
-  // Listen for OAuth completion events
+  // Listen for OAuth completion events (state updates only — toasts handled by ConnectorsPopover)
   useEffect(() => {
     const cleanup = window.ipc.on('oauth:didConnect', (event) => {
-      const { provider, success, error } = event
+      const { provider, success } = event
 
       setProviderStates(prev => ({
         ...prev,
@@ -551,13 +551,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           isConnecting: false,
         }
       }))
-
-      if (success) {
-        const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
-        toast.success(`Connected to ${displayName}`)
-      } else {
-        toast.error(error || `Failed to connect to ${provider}`)
-      }
     })
 
     return cleanup
@@ -576,34 +569,19 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     return cleanup
   }, [onboardingPath, currentStep])
 
-  // Listen for Composio connection events (Gmail, Google Calendar)
+  // Listen for Composio connection events (state updates only — toasts handled by ConnectorsPopover)
   useEffect(() => {
     const cleanup = window.ipc.on('composio:didConnect', (event) => {
-      const { toolkitSlug, success, error } = event
+      const { toolkitSlug, success } = event
 
       if (toolkitSlug === 'gmail') {
         setGmailConnected(success)
         setGmailConnecting(false)
-
-        if (success) {
-          toast.success('Connected to Gmail', {
-            description: 'Syncing your emails in the background. This may take a few minutes before changes appear.',
-            duration: 8000,
-          })
-        } else {
-          toast.error(error || 'Failed to connect to Gmail')
-        }
       }
 
       if (toolkitSlug === 'googlecalendar') {
         setGoogleCalendarConnected(success)
         setGoogleCalendarConnecting(false)
-
-        if (success) {
-          toast.success('Connected to Google Calendar')
-        } else {
-          toast.error(error || 'Failed to connect to Google Calendar')
-        }
       }
     })
 
