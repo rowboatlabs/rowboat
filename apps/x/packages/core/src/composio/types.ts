@@ -45,9 +45,9 @@ export const ZToolkit = z.object({
     slug: z.string(),
     name: z.string(),
     meta: ZToolkitMeta,
-    no_auth: z.boolean(),
-    auth_schemes: z.array(ZAuthScheme),
-    composio_managed_auth_schemes: z.array(ZAuthScheme),
+    no_auth: z.boolean().optional(),
+    auth_schemes: z.array(ZAuthScheme).optional(),
+    composio_managed_auth_schemes: z.array(ZAuthScheme).optional(),
 });
 
 /**
@@ -68,7 +68,7 @@ export const ZTool = z.object({
         required: z.array(z.string()).optional(),
         additionalProperties: z.boolean().optional(),
     }),
-    no_auth: z.boolean(),
+    no_auth: z.boolean().optional(),
 });
 
 /**

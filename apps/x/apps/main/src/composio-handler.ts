@@ -70,7 +70,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         const toolkit = await composioClient.getToolkit(toolkitSlug);
 
         // Check for managed OAuth2
-        if (!toolkit.composio_managed_auth_schemes.includes('OAUTH2')) {
+        if (!toolkit.composio_managed_auth_schemes?.includes('OAUTH2')) {
             return {
                 success: false,
                 error: `Toolkit ${toolkitSlug} does not support managed OAuth2`,

@@ -562,15 +562,19 @@ async function processThreadComposio(connectedAccountId: string, threadId: strin
     try {
         threadResult = await executeAction(
             'GMAIL_FETCH_MESSAGE_BY_THREAD_ID',
-            connectedAccountId,
-            { thread_id: threadId, user_id: 'me' }
+            {
+                connected_account_id: connectedAccountId,
+                user_id: 'rowboat-user',
+                version: 'latest',
+                arguments: { thread_id: threadId, user_id: 'me' },
+            }
         );
     } catch (error) {
         console.warn(`[Gmail] Skipping thread ${threadId} (fetch failed):`, error instanceof Error ? error.message : error);
         return null;
     }
 
-    if (!threadResult.success || !threadResult.data) {
+    if (!threadResult.successful || !threadResult.data) {
         console.error(`[Gmail] Failed to fetch thread ${threadId}:`, threadResult.error);
         return null;
     }
@@ -674,11 +678,15 @@ async function performSyncComposio() {
 
             const result = await executeAction(
                 'GMAIL_LIST_THREADS',
-                connectedAccountId,
-                params
+                {
+                    connected_account_id: connectedAccountId,
+                    user_id: 'rowboat-user',
+                    version: 'latest',
+                    arguments: params,
+                }
             );
 
-            if (!result.success || !result.data) {
+            if (!result.successful || !result.data) {
                 console.error('[Gmail] Failed to list threads:', result.error);
                 return;
             }

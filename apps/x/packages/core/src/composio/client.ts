@@ -123,7 +123,7 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
 ): Promise<z.infer<T>> {
     const authHeaders = await getAuthHeaders();
     const baseURL = await getBaseUrl();
-    const url = new URL(path, baseURL);
+    const url = new URL(`${baseURL}${path}`);
 
     console.log(`[Composio] ${options.method || 'GET'} ${url}`);
     const startTime = Date.now();
@@ -171,7 +171,7 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
             throw new Error(`Failed to parse response: ${message}`);
         }
 
-        if (typeof data === 'object' && data !== null && 'error' in data) {
+        if (typeof data === 'object' && data !== null && 'error' in data && data.error !== null && typeof data.error === 'object') {
             const parsedError = ZErrorResponse.parse(data);
             throw new Error(`Composio error (${parsedError.error.error_code}): ${parsedError.error.message}`);
         }
