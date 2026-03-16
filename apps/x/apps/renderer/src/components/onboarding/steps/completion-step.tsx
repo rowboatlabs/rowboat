@@ -8,8 +8,8 @@ interface CompletionStepProps {
 }
 
 export function CompletionStep({ state }: CompletionStepProps) {
-  const { connectedProviders, granolaEnabled, slackEnabled, handleComplete } = state
-  const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackEnabled
+  const { connectedProviders, granolaEnabled, slackEnabled, gmailConnected, handleComplete } = state
+  const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackEnabled || gmailConnected
 
   return (
     <div className="flex flex-col items-center justify-center text-center flex-1">
@@ -65,6 +65,17 @@ export function CompletionStep({ state }: CompletionStepProps) {
         >
           <p className="text-sm font-semibold mb-3 text-left">Connected</p>
           <div className="space-y-2">
+            {gmailConnected && (
+              <motion.div
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.5 }}
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
+                <span>Gmail (Email)</span>
+              </motion.div>
+            )}
             {connectedProviders.includes('google') && (
               <motion.div
                 initial={{ opacity: 0, x: -8 }}

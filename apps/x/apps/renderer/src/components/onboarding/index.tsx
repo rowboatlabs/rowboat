@@ -8,6 +8,7 @@ import {
   DialogContent,
 } from "@/components/ui/dialog"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
+import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
 import { useOnboardingState } from "./use-onboarding-state"
 import { StepIndicator } from "./step-indicator"
 import { WelcomeStep } from "./steps/welcome-step"
@@ -43,6 +44,12 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         onOpenChange={state.setGoogleClientIdOpen}
         onSubmit={state.handleGoogleClientIdSubmit}
         isSubmitting={state.providerStates.google?.isConnecting ?? false}
+      />
+      <ComposioApiKeyModal
+        open={state.composioApiKeyOpen}
+        onOpenChange={state.setComposioApiKeyOpen}
+        onSubmit={state.handleComposioApiKeySubmit}
+        isSubmitting={state.gmailConnecting}
       />
       <Dialog open={open} onOpenChange={() => {}}>
         <DialogContent

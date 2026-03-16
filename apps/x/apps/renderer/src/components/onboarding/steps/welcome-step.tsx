@@ -41,7 +41,10 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
             <span className="text-sm font-medium">Connected to Rowboat</span>
           </div>
           <Button
-            onClick={() => state.setCurrentStep(2)}
+            onClick={() => {
+              state.setOnboardingPath('rowboat')
+              state.setCurrentStep(2)
+            }}
             size="lg"
             className="w-full h-12 text-base font-medium"
           >

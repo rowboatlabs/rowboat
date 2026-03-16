@@ -75,7 +75,7 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
   const [gmailLoading, setGmailLoading] = useState(true)
   const [gmailConnecting, setGmailConnecting] = useState(false)
 
-  // Load available providers and composio-for-google flag on mount
+  // Load available providers on mount
   useEffect(() => {
     async function loadProviders() {
       try {
@@ -89,6 +89,12 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
         setProvidersLoading(false)
       }
     }
+    loadProviders()
+  }, [])
+
+  // Re-check composio-for-google flag every time the popover opens
+  useEffect(() => {
+    if (!open) return
     async function loadComposioForGoogleFlag() {
       try {
         const result = await window.ipc.invoke('composio:use-composio-for-google', null)
@@ -97,9 +103,8 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
         console.error('Failed to check composio-for-google flag:', error)
       }
     }
-    loadProviders()
     loadComposioForGoogleFlag()
-  }, [])
+  }, [open])
 
   // Load Granola config
   const refreshGranolaConfig = useCallback(async () => {
@@ -339,9 +344,9 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
 
   // Listen for OAuth completion events
   useEffect(() => {
-    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+    const cleanup = window.ipc.on('oauth:didConnect', async (event) => {
       const { provider, success, error } = event
-      
+
       setProviderStates(prev => ({
         ...prev,
         [provider]: {
@@ -362,6 +367,17 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
         } else {
           toast.success(`Connected to ${displayName}`)
         }
+
+        // When Rowboat account connects, re-check composio flag so Gmail uses the right flow
+        if (provider === 'rowboat') {
+          try {
+            const result = await window.ipc.invoke('composio:use-composio-for-google', null)
+            setUseComposioForGoogle(result.enabled)
+          } catch (err) {
+            console.error('Failed to re-check composio-for-google flag:', err)
+          }
+        }
+
         // Refresh status to ensure consistency
         refreshAllStatuses()
       } else {

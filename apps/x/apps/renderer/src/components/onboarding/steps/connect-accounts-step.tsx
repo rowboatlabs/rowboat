@@ -90,6 +90,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
     slackSelectedUrls, setSlackSelectedUrls, slackPickerOpen,
     slackDiscovering, slackDiscoverError,
     handleSlackEnable, handleSlackSaveWorkspaces, handleSlackDisable,
+    useComposioForGoogle, gmailConnected, gmailLoading, gmailConnecting, handleConnectGmail,
     handleNext, handleBack,
   } = state
 
@@ -111,22 +112,35 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Email & Calendar */}
-          {providers.includes('google') && (
+          {/* Email / Email & Calendar */}
+          {(useComposioForGoogle || providers.includes('google')) && (
             <div className="space-y-3">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Email & Calendar
+                {useComposioForGoogle ? 'Email' : 'Email & Calendar'}
               </span>
-              <ProviderCard
-                name="Google"
-                description="Rowboat uses your email and calendar to provide personalized, context-aware assistance"
-                icon={<GmailIcon />}
-                iconBg="bg-red-500/10"
-                iconColor="text-red-500"
-                providerState={providerStates['google']}
-                onConnect={() => handleConnect('google')}
-                index={cardIndex++}
-              />
+              {useComposioForGoogle ? (
+                <ProviderCard
+                  name="Gmail"
+                  description="Sync your email for context-aware assistance"
+                  icon={<GmailIcon />}
+                  iconBg="bg-red-500/10"
+                  iconColor="text-red-500"
+                  providerState={{ isConnected: gmailConnected, isLoading: gmailLoading, isConnecting: gmailConnecting }}
+                  onConnect={handleConnectGmail}
+                  index={cardIndex++}
+                />
+              ) : (
+                <ProviderCard
+                  name="Google"
+                  description="Rowboat uses your email and calendar to provide personalized, context-aware assistance"
+                  icon={<GmailIcon />}
+                  iconBg="bg-red-500/10"
+                  iconColor="text-red-500"
+                  providerState={providerStates['google']}
+                  onConnect={() => handleConnect('google')}
+                  index={cardIndex++}
+                />
+              )}
             </div>
           )}
 

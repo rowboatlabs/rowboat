@@ -66,6 +66,14 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   // Inline upsell callout dismissed
   const [upsellDismissed, setUpsellDismissed] = useState(false)
 
+  // Composio/Gmail state (used when signed in with Rowboat account)
+  const [useComposioForGoogle, setUseComposioForGoogle] = useState(false)
+  const [gmailConnected, setGmailConnected] = useState(false)
+  const [gmailLoading, setGmailLoading] = useState(true)
+  const [gmailConnecting, setGmailConnecting] = useState(false)
+  const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
+  const [composioApiKeyTarget, setComposioApiKeyTarget] = useState<'slack' | 'gmail'>('gmail')
+
   const updateProviderConfig = useCallback(
     (provider: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string }>) => {
       setProviderConfigs(prev => ({
@@ -93,7 +101,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     .filter(([, state]) => state.isConnected)
     .map(([provider]) => provider)
 
-  // Load available providers on mount
+  // Load available providers and composio-for-google flag on mount
   useEffect(() => {
     if (!open) return
 
@@ -109,7 +117,16 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
         setProvidersLoading(false)
       }
     }
+    async function loadComposioForGoogleFlag() {
+      try {
+        const result = await window.ipc.invoke('composio:use-composio-for-google', null)
+        setUseComposioForGoogle(result.enabled)
+      } catch (error) {
+        console.error('Failed to check composio-for-google flag:', error)
+      }
+    }
     loadProviders()
+    loadComposioForGoogleFlag()
   }, [open])
 
   // Load LLM models catalog on open
@@ -266,6 +283,60 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     }
   }, [])
 
+  // Load Gmail connection status (Composio)
+  const refreshGmailStatus = useCallback(async () => {
+    try {
+      setGmailLoading(true)
+      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'gmail' })
+      setGmailConnected(result.isConnected)
+    } catch (error) {
+      console.error('Failed to load Gmail status:', error)
+      setGmailConnected(false)
+    } finally {
+      setGmailLoading(false)
+    }
+  }, [])
+
+  // Connect to Gmail via Composio
+  const startGmailConnect = useCallback(async () => {
+    try {
+      setGmailConnecting(true)
+      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'gmail' })
+      if (!result.success) {
+        toast.error(result.error || 'Failed to connect to Gmail')
+        setGmailConnecting(false)
+      }
+    } catch (error) {
+      console.error('Failed to connect to Gmail:', error)
+      toast.error('Failed to connect to Gmail')
+      setGmailConnecting(false)
+    }
+  }, [])
+
+  // Handle Gmail connect button click (checks Composio config first)
+  const handleConnectGmail = useCallback(async () => {
+    const configResult = await window.ipc.invoke('composio:is-configured', null)
+    if (!configResult.configured) {
+      setComposioApiKeyTarget('gmail')
+      setComposioApiKeyOpen(true)
+      return
+    }
+    await startGmailConnect()
+  }, [startGmailConnect])
+
+  // Handle Composio API key submission
+  const handleComposioApiKeySubmit = useCallback(async (apiKey: string) => {
+    try {
+      await window.ipc.invoke('composio:set-api-key', { apiKey })
+      setComposioApiKeyOpen(false)
+      toast.success('Composio API key saved')
+      await startGmailConnect()
+    } catch (error) {
+      console.error('Failed to save Composio API key:', error)
+      toast.error('Failed to save API key')
+    }
+  }, [startGmailConnect])
+
   // New step flow:
   // Rowboat path: 0 (welcome) → 2 (connect) → 3 (done)
   // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (done)
@@ -338,6 +409,11 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     refreshGranolaConfig()
     refreshSlackConfig()
 
+    // Refresh Gmail Composio status if enabled
+    if (useComposioForGoogle) {
+      refreshGmailStatus()
+    }
+
     if (providers.length === 0) return
 
     const newStates: Record<string, ProviderState> = {}
@@ -364,7 +440,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     }
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackConfig])
+  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshGmailStatus, useComposioForGoogle])
 
   // Refresh statuses when modal opens or providers list changes
   useEffect(() => {
@@ -402,8 +478,15 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   useEffect(() => {
     if (onboardingPath !== 'rowboat' || currentStep !== 0) return
 
-    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+    const cleanup = window.ipc.on('oauth:didConnect', async (event) => {
       if (event.provider === 'rowboat' && event.success) {
+        // Re-check the composio-for-google flag now that the account is connected
+        try {
+          const result = await window.ipc.invoke('composio:use-composio-for-google', null)
+          setUseComposioForGoogle(result.enabled)
+        } catch (error) {
+          console.error('Failed to re-check composio-for-google flag:', error)
+        }
         setCurrentStep(2) // Go to Connect Accounts
       }
     })
@@ -423,6 +506,17 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
           toast.success('Connected to Slack')
         } else {
           toast.error(error || 'Failed to connect to Slack')
+        }
+      }
+
+      if (toolkitSlug === 'gmail') {
+        setGmailConnected(success)
+        setGmailConnecting(false)
+
+        if (success) {
+          toast.success('Connected to Gmail')
+        } else {
+          toast.error(error || 'Failed to connect to Gmail')
         }
       }
     })
@@ -544,6 +638,17 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     // Upsell
     upsellDismissed,
     setUpsellDismissed,
+
+    // Composio/Gmail state
+    useComposioForGoogle,
+    gmailConnected,
+    gmailLoading,
+    gmailConnecting,
+    composioApiKeyOpen,
+    setComposioApiKeyOpen,
+    composioApiKeyTarget,
+    handleConnectGmail,
+    handleComposioApiKeySubmit,
 
     // Navigation
     handleNext,

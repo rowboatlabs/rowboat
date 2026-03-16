@@ -1112,8 +1112,31 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [rowboatConnected, setRowboatConnected] = useState(false)
 
-  const activeTabConfig = tabs.find((t) => t.id === activeTab)!
+  // Check if user is signed in to Rowboat (hides Models tab)
+  useEffect(() => {
+    if (!open) return
+    window.ipc.invoke('oauth:getState', null).then((result) => {
+      const connected = result.config?.rowboat?.connected ?? false
+      setRowboatConnected(connected)
+      // If currently on models tab and signed in, switch to next tab
+      if (connected && activeTab === 'models') {
+        setActiveTab('mcp')
+      }
+    }).catch(() => {
+      setRowboatConnected(false)
+    })
+  }, [open])
+
+  const visibleTabs = useMemo(() => {
+    if (rowboatConnected) {
+      return tabs.filter(t => t.id !== 'models')
+    }
+    return tabs
+  }, [rowboatConnected])
+
+  const activeTabConfig = visibleTabs.find((t) => t.id === activeTab) ?? visibleTabs[0]
   const isJsonTab = activeTab === "mcp" || activeTab === "security"
 
   const formatJson = (jsonString: string): string => {
@@ -1202,7 +1225,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
               <h2 className="font-semibold text-sm">Settings</h2>
             </div>
             <nav className="flex flex-col gap-1">
-              {tabs.map((tab) => (
+              {visibleTabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => handleTabChange(tab.id)}
