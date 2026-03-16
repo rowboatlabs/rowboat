@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, Mic, Mail, CheckCircle2, MessageSquare } from "lucide-react"
+import { Loader2, Mic, Mail, Calendar, CheckCircle2, MessageSquare } from "lucide-react"
 
 import {
   Dialog,
@@ -99,6 +99,12 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [gmailLoading, setGmailLoading] = useState(true)
   const [gmailConnecting, setGmailConnecting] = useState(false)
 
+  // Composio/Google Calendar state
+  const [useComposioForGoogleCalendar, setUseComposioForGoogleCalendar] = useState(false)
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false)
+  const [googleCalendarLoading, setGoogleCalendarLoading] = useState(true)
+  const [googleCalendarConnecting, setGoogleCalendarConnecting] = useState(false)
+
   const updateProviderConfig = useCallback(
     (provider: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string }>) => {
       setProviderConfigs(prev => ({
@@ -150,8 +156,17 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         console.error('Failed to check composio-for-google flag:', error)
       }
     }
+    async function loadComposioForGoogleCalendarFlag() {
+      try {
+        const result = await window.ipc.invoke('composio:use-composio-for-google-calendar', null)
+        setUseComposioForGoogleCalendar(result.enabled)
+      } catch (error) {
+        console.error('Failed to check composio-for-google-calendar flag:', error)
+      }
+    }
     loadProviders()
     loadComposioForGoogleFlag()
+    loadComposioForGoogleCalendarFlag()
   }, [open])
 
   // Load LLM models catalog on open
@@ -288,6 +303,20 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
   }, [])
 
+  // Load Google Calendar connection status
+  const refreshGoogleCalendarStatus = useCallback(async () => {
+    try {
+      setGoogleCalendarLoading(true)
+      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'googlecalendar' })
+      setGoogleCalendarConnected(result.isConnected)
+    } catch (error) {
+      console.error('Failed to load Google Calendar status:', error)
+      setGoogleCalendarConnected(false)
+    } finally {
+      setGoogleCalendarLoading(false)
+    }
+  }, [])
+
   // Connect to Gmail via Composio
   const startGmailConnect = useCallback(async () => {
     try {
@@ -314,6 +343,33 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
     await startGmailConnect()
   }, [startGmailConnect])
+
+  // Connect to Google Calendar via Composio
+  const startGoogleCalendarConnect = useCallback(async () => {
+    try {
+      setGoogleCalendarConnecting(true)
+      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'googlecalendar' })
+      if (!result.success) {
+        toast.error(result.error || 'Failed to connect to Google Calendar')
+        setGoogleCalendarConnecting(false)
+      }
+    } catch (error) {
+      console.error('Failed to connect to Google Calendar:', error)
+      toast.error('Failed to connect to Google Calendar')
+      setGoogleCalendarConnecting(false)
+    }
+  }, [])
+
+  // Handle Google Calendar connect button click
+  const handleConnectGoogleCalendar = useCallback(async () => {
+    const configResult = await window.ipc.invoke('composio:is-configured', null)
+    if (!configResult.configured) {
+      setComposioApiKeyTarget('gmail')
+      setComposioApiKeyOpen(true)
+      return
+    }
+    await startGoogleCalendarConnect()
+  }, [startGoogleCalendarConnect])
 
   // Handle Composio API key submission
   const handleComposioApiKeySubmit = useCallback(async (apiKey: string) => {
@@ -420,6 +476,11 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       refreshGmailStatus()
     }
 
+    // Refresh Google Calendar Composio status if enabled
+    if (useComposioForGoogleCalendar) {
+      refreshGoogleCalendarStatus()
+    }
+
     // Refresh OAuth providers
     if (providers.length === 0) return
 
@@ -447,7 +508,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshGmailStatus, useComposioForGoogle])
+  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshGmailStatus, useComposioForGoogle, refreshGoogleCalendarStatus, useComposioForGoogleCalendar])
 
   // Refresh statuses when modal opens or providers list changes
   useEffect(() => {
@@ -481,7 +542,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     return cleanup
   }, [])
 
-  // Listen for Composio connection events (Gmail)
+  // Listen for Composio connection events (Gmail, Google Calendar)
   useEffect(() => {
     const cleanup = window.ipc.on('composio:didConnect', (event) => {
       const { toolkitSlug, success, error } = event
@@ -497,6 +558,17 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           })
         } else {
           toast.error(error || 'Failed to connect to Gmail')
+        }
+      }
+
+      if (toolkitSlug === 'googlecalendar') {
+        setGoogleCalendarConnected(success)
+        setGoogleCalendarConnecting(false)
+
+        if (success) {
+          toast.success('Connected to Google Calendar')
+        } else {
+          toast.error(error || 'Failed to connect to Google Calendar')
         }
       }
     })
@@ -681,6 +753,50 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
             disabled={gmailConnecting}
           >
             {gmailConnecting ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              "Connect"
+            )}
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+
+  // Render Google Calendar Composio row
+  const renderGoogleCalendarRow = () => (
+    <div className="flex items-center justify-between gap-3 rounded-md px-3 py-3 hover:bg-accent">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="flex size-10 items-center justify-center rounded-md bg-muted">
+          <Calendar className="size-5" />
+        </div>
+        <div className="flex flex-col min-w-0">
+          <span className="text-sm font-medium truncate">Google Calendar</span>
+          {googleCalendarLoading ? (
+            <span className="text-xs text-muted-foreground">Checking...</span>
+          ) : (
+            <span className="text-xs text-muted-foreground truncate">
+              Sync calendar events
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="shrink-0">
+        {googleCalendarLoading ? (
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        ) : googleCalendarConnected ? (
+          <div className="flex items-center gap-1.5 text-sm text-green-600">
+            <CheckCircle2 className="size-4" />
+            <span>Connected</span>
+          </div>
+        ) : (
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleConnectGoogleCalendar}
+            disabled={googleCalendarConnecting}
+          >
+            {googleCalendarConnecting ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               "Connect"
@@ -983,17 +1099,18 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         ) : (
           <>
             {/* Email / Email & Calendar Section */}
-            {(useComposioForGoogle || providers.includes('google')) && (
+            {(useComposioForGoogle || useComposioForGoogleCalendar || providers.includes('google')) && (
               <div className="space-y-2">
                 <div className="px-3">
                   <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    {useComposioForGoogle ? 'Email' : 'Email & Calendar'}
+                    {(useComposioForGoogle || useComposioForGoogleCalendar) ? 'Email & Calendar' : 'Email & Calendar'}
                   </span>
                 </div>
                 {useComposioForGoogle
                   ? renderGmailRow()
                   : renderOAuthProvider('google', 'Google', <Mail className="size-5" />, 'Sync emails and calendar events')
                 }
+                {useComposioForGoogleCalendar && renderGoogleCalendarRow()}
               </div>
             )}
 
@@ -1030,7 +1147,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Step 2: Completion
   const renderCompletionStep = () => {
-    const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackEnabled || gmailConnected
+    const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackEnabled || gmailConnected || googleCalendarConnected
 
     return (
       <div className="flex flex-col items-center text-center">
@@ -1057,6 +1174,12 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <CheckCircle2 className="size-4 text-green-600" />
                     <span>Gmail (Email)</span>
+                  </div>
+                )}
+                {googleCalendarConnected && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <CheckCircle2 className="size-4 text-green-600" />
+                    <span>Google Calendar</span>
                   </div>
                 )}
                 {connectedProviders.includes('google') && (

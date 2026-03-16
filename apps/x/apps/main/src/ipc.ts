@@ -546,6 +546,9 @@ export function setupIpcHandlers() {
     'composio:use-composio-for-google': async () => {
       return composioHandler.useComposioForGoogle();
     },
+    'composio:use-composio-for-google-calendar': async () => {
+      return composioHandler.useComposioForGoogleCalendar();
+    },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
       const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
