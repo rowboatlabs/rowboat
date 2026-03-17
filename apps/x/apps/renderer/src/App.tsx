@@ -431,25 +431,31 @@ function FixedSidebarToggle({
       >
         <SearchIcon className="size-5" />
       </button>
-      <button
-        type="button"
-        onClick={onToggleMeeting}
-        disabled={meetingState === 'connecting' || meetingState === 'stopping'}
-        className={cn(
-          "flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:pointer-events-none",
-          meetingState === 'recording'
-            ? "text-red-500 hover:bg-accent"
-            : "text-muted-foreground hover:bg-accent hover:text-foreground"
-        )}
-        style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
-        aria-label={meetingState === 'recording' ? "Stop meeting transcription" : "Start meeting transcription"}
-      >
-        {meetingState === 'recording' ? (
-          <SquareIcon className="size-4 animate-pulse" />
-        ) : (
-          <RadioIcon className="size-5" />
-        )}
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onToggleMeeting}
+            disabled={meetingState === 'connecting' || meetingState === 'stopping'}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:pointer-events-none",
+              meetingState === 'recording'
+                ? "text-red-500 hover:bg-accent"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            )}
+            style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
+          >
+            {meetingState === 'recording' ? (
+              <SquareIcon className="size-4 animate-pulse" />
+            ) : (
+              <RadioIcon className="size-5" />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
+        </TooltipContent>
+      </Tooltip>
       {/* Back / Forward navigation */}
       {isCollapsed && (
         <>
