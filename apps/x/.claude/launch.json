@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "renderer-dev",
+      "runtimeExecutable": "/Users/tusharmagar/Rowboat/rowboat-V2/apps/x/apps/renderer/node_modules/.bin/vite",
+      "runtimeArgs": ["--port", "5173"],
+      "port": 5173
+    }
+  ]
+}

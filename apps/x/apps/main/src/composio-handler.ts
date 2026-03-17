@@ -5,6 +5,7 @@ import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
 import type { LocalConnectedAccount, ZExecuteActionResponse } from '@x/core/dist/composio/types.js';
 import { z } from 'zod';
 import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
+import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 
 const REDIRECT_URI = 'http://localhost:8081/oauth/callback';
 
@@ -145,7 +146,11 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
 
         // Set up callback server
         let cleanupTimeout: NodeJS.Timeout;
+        let callbackHandled = false;
         const { server } = await createAuthServer(8081, async (_code, _state) => {
+            // Guard against duplicate callbacks (browser may send multiple requests)
+            if (callbackHandled) return;
+            callbackHandled = true;
             // OAuth callback received - sync the account status
             try {
                 const accountStatus = await composioClient.getConnectedAccount(connectedAccountId);
@@ -155,6 +160,9 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
                     emitComposioEvent({ toolkitSlug, success: true });
                     if (toolkitSlug === 'gmail') {
                         triggerGmailSync();
+                    }
+                    if (toolkitSlug === 'googlecalendar') {
+                        triggerCalendarSync();
                     }
                 } else {
                     emitComposioEvent({
@@ -275,6 +283,13 @@ export function listConnected(): { toolkits: string[] } {
  */
 export async function useComposioForGoogle(): Promise<{ enabled: boolean }> {
     return { enabled: await composioClient.useComposioForGoogle() };
+}
+
+/**
+ * Check if Composio should be used for Google Calendar
+ */
+export async function useComposioForGoogleCalendar(): Promise<{ enabled: boolean }> {
+    return { enabled: await composioClient.useComposioForGoogleCalendar() };
 }
 
 /**

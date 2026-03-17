@@ -49,7 +49,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
-import { OnboardingModal } from '@/components/onboarding-modal'
+import { OnboardingModal } from '@/components/onboarding'
 import { SearchDialog } from '@/components/search-dialog'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
@@ -619,8 +619,8 @@ function App() {
   const voiceRef = useRef(voice)
   voiceRef.current = voice
 
-  // Check if voice is available on mount
-  useEffect(() => {
+  // Check if voice is available on mount and when OAuth state changes
+  const refreshVoiceAvailability = useCallback(() => {
     Promise.all([
       window.ipc.invoke('voice:getConfig', null),
       window.ipc.invoke('oauth:getState', null),
@@ -633,6 +633,14 @@ function App() {
       setTtsAvailable(false)
     })
   }, [])
+
+  useEffect(() => {
+    refreshVoiceAvailability()
+    const cleanup = window.ipc.on('oauth:didConnect', () => {
+      refreshVoiceAvailability()
+    })
+    return cleanup
+  }, [refreshVoiceAvailability])
 
   const handleStartRecording = useCallback(() => {
     setIsRecording(true)

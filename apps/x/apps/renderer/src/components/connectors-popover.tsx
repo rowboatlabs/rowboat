@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { AlertTriangle, Loader2, Mic, Mail, MessageSquare, User } from "lucide-react"
+import { AlertTriangle, Loader2, Mic, Mail, Calendar, MessageSquare, User } from "lucide-react"
 
 import {
   Popover,
@@ -75,7 +75,13 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
   const [gmailLoading, setGmailLoading] = useState(true)
   const [gmailConnecting, setGmailConnecting] = useState(false)
 
-  // Load available providers and composio-for-google flag on mount
+  // Composio/Google Calendar state
+  const [useComposioForGoogleCalendar, setUseComposioForGoogleCalendar] = useState(false)
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false)
+  const [googleCalendarLoading, setGoogleCalendarLoading] = useState(true)
+  const [googleCalendarConnecting, setGoogleCalendarConnecting] = useState(false)
+
+  // Load available providers on mount
   useEffect(() => {
     async function loadProviders() {
       try {
@@ -89,6 +95,12 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
         setProvidersLoading(false)
       }
     }
+    loadProviders()
+  }, [])
+
+  // Re-check composio-for-google flag every time the popover opens
+  useEffect(() => {
+    if (!open) return
     async function loadComposioForGoogleFlag() {
       try {
         const result = await window.ipc.invoke('composio:use-composio-for-google', null)
@@ -97,9 +109,17 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
         console.error('Failed to check composio-for-google flag:', error)
       }
     }
-    loadProviders()
+    async function loadComposioForGoogleCalendarFlag() {
+      try {
+        const result = await window.ipc.invoke('composio:use-composio-for-google-calendar', null)
+        setUseComposioForGoogleCalendar(result.enabled)
+      } catch (error) {
+        console.error('Failed to check composio-for-google-calendar flag:', error)
+      }
+    }
     loadComposioForGoogleFlag()
-  }, [])
+    loadComposioForGoogleCalendarFlag()
+  }, [open])
 
   // Load Granola config
   const refreshGranolaConfig = useCallback(async () => {
@@ -184,6 +204,20 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     }
   }, [])
 
+  // Load Google Calendar connection status
+  const refreshGoogleCalendarStatus = useCallback(async () => {
+    try {
+      setGoogleCalendarLoading(true)
+      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'googlecalendar' })
+      setGoogleCalendarConnected(result.isConnected)
+    } catch (error) {
+      console.error('Failed to load Google Calendar status:', error)
+      setGoogleCalendarConnected(false)
+    } finally {
+      setGoogleCalendarLoading(false)
+    }
+  }, [])
+
   // Connect to Gmail via Composio
   const startGmailConnect = useCallback(async () => {
     try {
@@ -211,6 +245,52 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     }
     await startGmailConnect()
   }, [startGmailConnect])
+
+  // Connect to Google Calendar via Composio
+  const startGoogleCalendarConnect = useCallback(async () => {
+    try {
+      setGoogleCalendarConnecting(true)
+      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'googlecalendar' })
+      if (!result.success) {
+        toast.error(result.error || 'Failed to connect to Google Calendar')
+        setGoogleCalendarConnecting(false)
+      }
+    } catch (error) {
+      console.error('Failed to connect to Google Calendar:', error)
+      toast.error('Failed to connect to Google Calendar')
+      setGoogleCalendarConnecting(false)
+    }
+  }, [])
+
+  // Handle Google Calendar connect button click
+  const handleConnectGoogleCalendar = useCallback(async () => {
+    const configResult = await window.ipc.invoke('composio:is-configured', null)
+    if (!configResult.configured) {
+      setComposioApiKeyTarget('gmail')
+      setComposioApiKeyOpen(true)
+      return
+    }
+    await startGoogleCalendarConnect()
+  }, [startGoogleCalendarConnect])
+
+  // Disconnect from Google Calendar
+  const handleDisconnectGoogleCalendar = useCallback(async () => {
+    try {
+      setGoogleCalendarLoading(true)
+      const result = await window.ipc.invoke('composio:disconnect', { toolkitSlug: 'googlecalendar' })
+      if (result.success) {
+        setGoogleCalendarConnected(false)
+        toast.success('Disconnected from Google Calendar')
+      } else {
+        toast.error('Failed to disconnect from Google Calendar')
+      }
+    } catch (error) {
+      console.error('Failed to disconnect from Google Calendar:', error)
+      toast.error('Failed to disconnect from Google Calendar')
+    } finally {
+      setGoogleCalendarLoading(false)
+    }
+  }, [])
 
   // Disconnect from Gmail
   const handleDisconnectGmail = useCallback(async () => {
@@ -292,6 +372,11 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
       refreshGmailStatus()
     }
 
+    // Refresh Google Calendar Composio status if enabled
+    if (useComposioForGoogleCalendar) {
+      refreshGoogleCalendarStatus()
+    }
+
     // Refresh OAuth providers
     if (providers.length === 0) return
 
@@ -328,7 +413,7 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     }
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshGmailStatus, useComposioForGoogle])
+  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshGmailStatus, useComposioForGoogle, refreshGoogleCalendarStatus, useComposioForGoogleCalendar])
 
   // Refresh statuses when popover opens or providers list changes
   useEffect(() => {
@@ -337,11 +422,11 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     }
   }, [open, providers, refreshAllStatuses])
 
-  // Listen for OAuth completion events
+  // Listen for OAuth state change events (connect + disconnect)
   useEffect(() => {
-    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
-      const { provider, success, error } = event
-      
+    const cleanup = window.ipc.on('oauth:didConnect', async (event) => {
+      const { provider, success } = event
+
       setProviderStates(prev => ({
         ...prev,
         [provider]: {
@@ -362,17 +447,32 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
         } else {
           toast.success(`Connected to ${displayName}`)
         }
+
+        // When Rowboat account connects, re-check composio flags so Gmail/Calendar use the right flow
+        if (provider === 'rowboat') {
+          try {
+            const [googleResult, calendarResult] = await Promise.all([
+              window.ipc.invoke('composio:use-composio-for-google', null),
+              window.ipc.invoke('composio:use-composio-for-google-calendar', null),
+            ])
+            setUseComposioForGoogle(googleResult.enabled)
+            setUseComposioForGoogleCalendar(calendarResult.enabled)
+          } catch (err) {
+            console.error('Failed to re-check composio flags:', err)
+          }
+        }
+
         // Refresh status to ensure consistency
         refreshAllStatuses()
-      } else {
-        toast.error(error || `Failed to connect to ${provider}`)
       }
+      // Note: error toasts for failed connections are handled by startConnect/handleConnect.
+      // Disconnect events (success: false) are handled by handleDisconnect which shows its own toast.
     })
 
     return cleanup
   }, [refreshAllStatuses])
 
-  // Listen for Composio connection events (Gmail)
+  // Listen for Composio connection events (Gmail, Google Calendar)
   useEffect(() => {
     const cleanup = window.ipc.on('composio:didConnect', (event) => {
       const { toolkitSlug, success, error } = event
@@ -388,6 +488,20 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
           })
         } else {
           toast.error(error || 'Failed to connect to Gmail')
+        }
+      }
+
+      if (toolkitSlug === 'googlecalendar') {
+        setGoogleCalendarConnected(success)
+        setGoogleCalendarConnecting(false)
+
+        if (success) {
+          toast.success('Connected to Google Calendar', {
+            description: 'Syncing your calendar in the background. This may take a few minutes before changes appear.',
+            duration: 8000,
+          })
+        } else {
+          toast.error(error || 'Failed to connect to Google Calendar')
         }
       }
     })
@@ -640,11 +754,11 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
               )}
 
               {/* Email & Calendar Section */}
-              {(useComposioForGoogle || providers.includes('google')) && (
+              {(useComposioForGoogle || useComposioForGoogleCalendar || providers.includes('google')) && (
                 <>
                   <div className="px-2 py-1.5">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {useComposioForGoogle ? 'Email' : 'Email & Calendar'}
+                      Email & Calendar
                     </span>
                   </div>
                   {useComposioForGoogle ? (
@@ -695,6 +809,53 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
                     </div>
                   ) : (
                     renderOAuthProvider('google', 'Google', <Mail className="size-4" />, 'Sync emails and calendar')
+                  )}
+                  {useComposioForGoogleCalendar && (
+                    <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                          <Calendar className="size-4" />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-sm font-medium truncate">Google Calendar</span>
+                          {googleCalendarLoading ? (
+                            <span className="text-xs text-muted-foreground">Checking...</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground truncate">
+                              Sync calendar events
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        {googleCalendarLoading ? (
+                          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                        ) : googleCalendarConnected ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleDisconnectGoogleCalendar}
+                            className="h-7 px-2 text-xs"
+                          >
+                            Disconnect
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={handleConnectGoogleCalendar}
+                            disabled={googleCalendarConnecting}
+                            className="h-7 px-2 text-xs"
+                          >
+                            {googleCalendarConnecting ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              "Connect"
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
                   )}
                   <Separator className="my-2" />
                 </>

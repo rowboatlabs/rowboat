@@ -786,13 +786,9 @@ export async function init() {
     console.log("Starting Gmail Sync (TS)...");
     console.log(`Will sync every ${SYNC_INTERVAL_MS / 1000} seconds.`);
 
-    const composioMode = await useComposioForGoogle();
-    if (composioMode) {
-        console.log('[Gmail] Using Composio backend for Gmail sync.');
-    }
-
     while (true) {
         try {
+            const composioMode = await useComposioForGoogle();
             if (composioMode) {
                 const isConnected = composioAccountsRepo.isConnected('gmail');
                 if (!isConnected) {

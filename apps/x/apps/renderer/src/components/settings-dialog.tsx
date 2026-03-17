@@ -693,6 +693,126 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Rowboat Model Settings (when signed in via Rowboat) ---
+
+function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  const [gatewayModels, setGatewayModels] = useState<LlmModelOption[]>([])
+  const [selectedModel, setSelectedModel] = useState("")
+  const [selectedKgModel, setSelectedKgModel] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!dialogOpen) return
+
+    async function load() {
+      setLoading(true)
+      try {
+        // Fetch gateway models
+        const listResult = await window.ipc.invoke("models:list", null)
+        const rowboatProvider = listResult.providers?.find((p: { id: string }) => p.id === "rowboat")
+        const models = rowboatProvider?.models || []
+        setGatewayModels(models)
+
+        // Read current selection from config
+        try {
+          const configResult = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
+          const parsed = JSON.parse(configResult.data)
+          if (parsed?.model) setSelectedModel(parsed.model)
+          if (parsed?.knowledgeGraphModel) setSelectedKgModel(parsed.knowledgeGraphModel)
+        } catch {
+          // No config yet — pick first model as default
+          if (models.length > 0) setSelectedModel(models[0].id)
+        }
+      } catch {
+        toast.error("Failed to load models")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    load()
+  }, [dialogOpen])
+
+  const handleSave = useCallback(async () => {
+    if (!selectedModel) return
+    setSaving(true)
+    try {
+      await window.ipc.invoke("models:saveConfig", {
+        provider: { flavor: "openrouter" as const },
+        model: selectedModel,
+        knowledgeGraphModel: selectedKgModel || undefined,
+      })
+      window.dispatchEvent(new Event("models-config-changed"))
+      toast.success("Model configuration saved")
+    } catch {
+      toast.error("Failed to save model configuration")
+    } finally {
+      setSaving(false)
+    }
+  }, [selectedModel, selectedKgModel])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 text-muted-foreground">
+        <Loader2 className="size-5 animate-spin" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">
+        Select the models Rowboat uses. These are provided through your Rowboat account.
+      </p>
+
+      {/* Assistant model */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Assistant model</label>
+        <Select value={selectedModel} onValueChange={setSelectedModel}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Select a model" />
+          </SelectTrigger>
+          <SelectContent>
+            {gatewayModels.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.name || m.id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Knowledge graph model */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Knowledge graph model</label>
+        <Select value={selectedKgModel || "__same__"} onValueChange={(v) => setSelectedKgModel(v === "__same__" ? "" : v)}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Same as assistant" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__same__">Same as assistant</SelectItem>
+            {gatewayModels.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.name || m.id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Save */}
+      <Button onClick={handleSave} disabled={!selectedModel || saving}>
+        {saving ? (
+          <><Loader2 className="size-4 animate-spin mr-2" />Saving...</>
+        ) : (
+          "Save"
+        )}
+      </Button>
+    </div>
+  )
+}
+
 // --- Note Tagging Settings ---
 
 interface TagDef {
@@ -1112,8 +1232,22 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [rowboatConnected, setRowboatConnected] = useState(false)
 
-  const activeTabConfig = tabs.find((t) => t.id === activeTab)!
+  // Check if user is signed in to Rowboat
+  useEffect(() => {
+    if (!open) return
+    window.ipc.invoke('oauth:getState', null).then((result) => {
+      const connected = result.config?.rowboat?.connected ?? false
+      setRowboatConnected(connected)
+    }).catch(() => {
+      setRowboatConnected(false)
+    })
+  }, [open])
+
+  const visibleTabs = useMemo(() => tabs, [])
+
+  const activeTabConfig = visibleTabs.find((t) => t.id === activeTab) ?? visibleTabs[0]
   const isJsonTab = activeTab === "mcp" || activeTab === "security"
 
   const formatJson = (jsonString: string): string => {
@@ -1202,7 +1336,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
               <h2 className="font-semibold text-sm">Settings</h2>
             </div>
             <nav className="flex flex-col gap-1">
-              {tabs.map((tab) => (
+              {visibleTabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => handleTabChange(tab.id)}
@@ -1226,14 +1360,18 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
             <div className="px-4 py-3 border-b">
               <h3 className="font-medium text-sm">{activeTabConfig.label}</h3>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {activeTabConfig.description}
+                {activeTab === "models" && rowboatConnected
+                  ? "Select your default models"
+                  : activeTabConfig.description}
               </p>
             </div>
 
             {/* Content */}
             <div className={cn("flex-1 p-4 min-h-0", activeTab === "models" ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "models" ? (
-                <ModelSettings dialogOpen={open} />
+                rowboatConnected
+                  ? <RowboatModelSettings dialogOpen={open} />
+                  : <ModelSettings dialogOpen={open} />
               ) : activeTab === "note-tagging" ? (
                 <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (

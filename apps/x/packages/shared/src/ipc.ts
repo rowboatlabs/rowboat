@@ -386,6 +386,12 @@ const ipcSchemas = {
       enabled: z.boolean(),
     }),
   },
+  'composio:use-composio-for-google-calendar': {
+    req: z.null(),
+    res: z.object({
+      enabled: z.boolean(),
+    }),
+  },
   'composio:didConnect': {
     req: z.object({
       toolkitSlug: z.string(),
@@ -514,6 +520,16 @@ const ipcSchemas = {
         z.object({ type: z.literal('window'), cron: z.string(), startTime: z.string(), endTime: z.string(), startDate: z.string(), endDate: z.string(), label: z.string() }),
         z.object({ type: z.literal('once'), runAt: z.string(), label: z.string() }),
       ]).nullable(),
+    }),
+  },
+  // Billing channels
+  'billing:getInfo': {
+    req: z.null(),
+    res: z.object({
+      subscriptionPlan: z.string().nullable(),
+      subscriptionStatus: z.string().nullable(),
+      sanctionedCredits: z.number(),
+      availableCredits: z.number(),
     }),
   },
 } as const;

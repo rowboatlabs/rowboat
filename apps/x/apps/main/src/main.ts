@@ -103,6 +103,7 @@ function createWindow() {
 
   // Show window when content is ready to prevent blank screen
   win.once("ready-to-show", () => {
+    win.maximize();
     win.show();
   });
 
