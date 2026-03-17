@@ -8,12 +8,36 @@ const DEEPGRAM_PARAMS = new URLSearchParams({
     sample_rate: '16000',
     channels: '2',
     multichannel: 'true',
+    diarize: 'true',
     interim_results: 'true',
     smart_format: 'true',
     punctuate: 'true',
 });
 const DEEPGRAM_LISTEN_URL = `wss://api.deepgram.com/v1/listen?${DEEPGRAM_PARAMS.toString()}`;
 
+// RMS threshold: system audio above this = "active" (speakers playing)
+const SYSTEM_AUDIO_GATE_THRESHOLD = 0.005;
+
+// ---------------------------------------------------------------------------
+// Headphone detection
+// ---------------------------------------------------------------------------
+async function detectHeadphones(): Promise<boolean> {
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const outputs = devices.filter(d => d.kind === 'audiooutput');
+        const defaultOutput = outputs.find(d => d.deviceId === 'default');
+        const label = (defaultOutput?.label ?? '').toLowerCase();
+        // Heuristic: built-in speakers won't match these patterns
+        const headphonePatterns = ['headphone', 'airpod', 'earpod', 'earphone', 'earbud', 'bluetooth', 'bt_', 'jabra', 'bose', 'sony wh', 'sony wf'];
+        return headphonePatterns.some(p => label.includes(p));
+    } catch {
+        return false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transcript formatting
+// ---------------------------------------------------------------------------
 interface TranscriptEntry {
     speaker: string;
     text: string;
@@ -32,7 +56,6 @@ function formatTranscript(entries: TranscriptEntry[], date: string): string {
         '',
     ];
     for (let i = 0; i < entries.length; i++) {
-        // Add extra blank line between different speakers
         if (i > 0 && entries[i].speaker !== entries[i - 1].speaker) {
             lines.push('');
         }
@@ -42,6 +65,9 @@ function formatTranscript(entries: TranscriptEntry[], date: string): string {
     return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
 export function useMeetingTranscription() {
     const [state, setState] = useState<MeetingTranscriptionState>('idle');
     const wsRef = useRef<WebSocket | null>(null);
@@ -57,7 +83,6 @@ export function useMeetingTranscription() {
 
     const writeTranscriptToFile = useCallback(async () => {
         if (!notePathRef.current) return;
-        // Combine finalized entries with any in-progress interim text
         const entries = [...transcriptRef.current];
         for (const interim of interimRef.current.values()) {
             if (!interim.text) continue;
@@ -119,6 +144,10 @@ export function useMeetingTranscription() {
         if (state !== 'idle') return null;
         setState('connecting');
 
+        // Detect headphones vs speakers
+        const usingHeadphones = await detectHeadphones();
+        console.log(`[meeting] Audio output mode: ${usingHeadphones ? 'headphones' : 'speakers'}`);
+
         // Get Deepgram token
         let ws: WebSocket;
         try {
@@ -167,12 +196,21 @@ export function useMeetingTranscription() {
             if (!transcript) return;
 
             const channelIndex = data.channel_index?.[0] ?? 0;
-            const speaker = channelIndex === 0 ? 'You' : 'System audio';
+            const isMic = channelIndex === 0;
+
+            // Channel 0 = mic = "You", Channel 1 = system audio with diarization
+            let speaker: string;
+            if (isMic) {
+                speaker = 'You';
+            } else {
+                // Use Deepgram diarization speaker ID for system audio channel
+                const words = data.channel.alternatives[0].words;
+                const speakerId = words?.[0]?.speaker;
+                speaker = speakerId != null ? `Speaker ${speakerId}` : 'System audio';
+            }
 
             if (data.is_final) {
-                // Clear interim for this channel
                 interimRef.current.delete(channelIndex);
-                // Merge with last entry if same speaker
                 const entries = transcriptRef.current;
                 if (entries.length > 0 && entries[entries.length - 1].speaker === speaker) {
                     entries[entries.length - 1].text += ' ' + transcript;
@@ -180,7 +218,6 @@ export function useMeetingTranscription() {
                     entries.push({ speaker, text: transcript });
                 }
             } else {
-                // Update interim text for this channel
                 interimRef.current.set(channelIndex, { speaker, text: transcript });
             }
             scheduleDebouncedWrite();
@@ -194,7 +231,13 @@ export function useMeetingTranscription() {
         // Get mic stream
         let micStream: MediaStream;
         try {
-            micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            micStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                },
+            });
         } catch (err) {
             console.error('[meeting] Microphone access denied:', err);
             cleanup();
@@ -203,12 +246,10 @@ export function useMeetingTranscription() {
         }
         micStreamRef.current = micStream;
 
-        // Get system audio via getDisplayMedia
-        // The main process setDisplayMediaRequestHandler auto-approves with loopback audio
+        // Get system audio via getDisplayMedia (loopback)
         let systemStream: MediaStream;
         try {
             systemStream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
-            // Stop any video tracks — we only need audio
             systemStream.getVideoTracks().forEach(t => t.stop());
         } catch (err) {
             console.error('[meeting] System audio access denied:', err);
@@ -226,7 +267,7 @@ export function useMeetingTranscription() {
         console.log('[meeting] System audio captured');
         systemStreamRef.current = systemStream;
 
-        // Set up AudioContext with channel merger
+        // ----- Audio pipeline -----
         const audioCtx = new AudioContext({ sampleRate: 16000 });
         audioCtxRef.current = audioCtx;
 
@@ -242,13 +283,35 @@ export function useMeetingTranscription() {
 
         processor.onaudioprocess = (e) => {
             if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-            const ch0 = e.inputBuffer.getChannelData(0);
-            const ch1 = e.inputBuffer.getChannelData(1);
-            // Interleave 2 channels into stereo int16 PCM
-            const int16 = new Int16Array(ch0.length * 2);
-            for (let i = 0; i < ch0.length; i++) {
-                const s0 = Math.max(-1, Math.min(1, ch0[i]));
-                const s1 = Math.max(-1, Math.min(1, ch1[i]));
+
+            const micRaw = e.inputBuffer.getChannelData(0);
+            const sysRaw = e.inputBuffer.getChannelData(1);
+
+            // Mode 1 (headphones): pass both streams through unmodified
+            // Mode 2 (speakers): gate/mute mic when system audio is active
+            let micOut: Float32Array;
+            if (usingHeadphones) {
+                micOut = micRaw;
+            } else {
+                // Compute system audio RMS to detect activity
+                let sysSum = 0;
+                for (let i = 0; i < sysRaw.length; i++) sysSum += sysRaw[i] * sysRaw[i];
+                const sysRms = Math.sqrt(sysSum / sysRaw.length);
+
+                if (sysRms > SYSTEM_AUDIO_GATE_THRESHOLD) {
+                    // System audio is playing — mute mic to prevent bleed
+                    micOut = new Float32Array(micRaw.length); // all zeros
+                } else {
+                    // System audio is silent — pass mic through
+                    micOut = micRaw;
+                }
+            }
+
+            // Interleave mic (ch0) + system audio (ch1) into stereo int16 PCM
+            const int16 = new Int16Array(micOut.length * 2);
+            for (let i = 0; i < micOut.length; i++) {
+                const s0 = Math.max(-1, Math.min(1, micOut[i]));
+                const s1 = Math.max(-1, Math.min(1, sysRaw[i]));
                 int16[i * 2] = s0 < 0 ? s0 * 0x8000 : s0 * 0x7fff;
                 int16[i * 2 + 1] = s1 < 0 ? s1 * 0x8000 : s1 * 0x7fff;
             }
@@ -282,11 +345,7 @@ export function useMeetingTranscription() {
         setState('stopping');
 
         cleanup();
-
-        // Clear interims so final write only has finalized text
         interimRef.current = new Map();
-
-        // Write final transcript
         await writeTranscriptToFile();
 
         setState('idle');
