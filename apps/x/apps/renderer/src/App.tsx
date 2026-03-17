@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon, RadioIcon, SquareIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -78,6 +78,7 @@ import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
+import { useMeetingTranscription, type MeetingTranscriptionState } from '@/hooks/useMeetingTranscription'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -383,6 +384,8 @@ function FixedSidebarToggle({
   canNavigateForward,
   onNewChat,
   onOpenSearch,
+  meetingState,
+  onToggleMeeting,
   leftInsetPx,
 }: {
   onNavigateBack: () => void
@@ -391,6 +394,8 @@ function FixedSidebarToggle({
   canNavigateForward: boolean
   onNewChat: () => void
   onOpenSearch: () => void
+  meetingState: MeetingTranscriptionState
+  onToggleMeeting: () => void
   leftInsetPx: number
 }) {
   const { toggleSidebar, state } = useSidebar()
@@ -425,6 +430,25 @@ function FixedSidebarToggle({
         aria-label="Search"
       >
         <SearchIcon className="size-5" />
+      </button>
+      <button
+        type="button"
+        onClick={onToggleMeeting}
+        disabled={meetingState === 'connecting' || meetingState === 'stopping'}
+        className={cn(
+          "flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:pointer-events-none",
+          meetingState === 'recording'
+            ? "text-red-500 hover:bg-accent"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground"
+        )}
+        style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
+        aria-label={meetingState === 'recording' ? "Stop meeting transcription" : "Start meeting transcription"}
+      >
+        {meetingState === 'recording' ? (
+          <SquareIcon className="size-4 animate-pulse" />
+        ) : (
+          <RadioIcon className="size-5" />
+        )}
       </button>
       {/* Back / Forward navigation */}
       {isCollapsed && (
@@ -618,6 +642,11 @@ function App() {
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
   voiceRef.current = voice
+
+  const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
+  const meetingTranscription = useMeetingTranscription(() => {
+    handleToggleMeetingRef.current?.()
+  })
 
   // Check if voice is available on mount and when OAuth state changes
   const refreshVoiceAvailability = useCallback(() => {
@@ -3314,6 +3343,17 @@ function App() {
     navigateToFile(notePath)
   }, [loadDirectory, navigateToFile, fileTabs])
 
+  const handleToggleMeeting = useCallback(async () => {
+    if (meetingTranscription.state === 'recording') {
+      await meetingTranscription.stop()
+    } else if (meetingTranscription.state === 'idle') {
+      const notePath = await meetingTranscription.start()
+      if (notePath) {
+        await handleVoiceNoteCreated(notePath)
+      }
+    }
+  }, [meetingTranscription, handleVoiceNoteCreated])
+
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
     if (!resolvedPath) return null
@@ -4176,6 +4216,8 @@ function App() {
               canNavigateForward={canNavigateForward}
               onNewChat={handleNewChatTab}
               onOpenSearch={() => setIsSearchOpen(true)}
+              meetingState={meetingTranscription.state}
+              onToggleMeeting={() => { void handleToggleMeeting() }}
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
           </SidebarProvider>
