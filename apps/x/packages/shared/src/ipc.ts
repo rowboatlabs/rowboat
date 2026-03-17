@@ -498,6 +498,14 @@ const ipcSchemas = {
       token: z.string(),
     }).nullable(),
   },
+  'meeting:summarize': {
+    req: z.object({
+      transcript: z.string(),
+    }),
+    res: z.object({
+      notes: z.string(),
+    }),
+  },
   // Inline task schedule classification
   'export:note': {
     req: z.object({

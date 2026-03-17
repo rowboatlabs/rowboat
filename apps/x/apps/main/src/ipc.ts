@@ -41,6 +41,7 @@ import { search } from '@x/core/dist/search/search.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
+import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -700,6 +701,10 @@ export function setupIpcHandlers() {
       }
 
       return { success: false, error: 'Unknown format' };
+    },
+    'meeting:summarize': async (_event, args) => {
+      const notes = await summarizeMeeting(args.transcript);
+      return { notes };
     },
     'inline-task:classifySchedule': async (_event, args) => {
       const schedule = await classifySchedule(args.instruction);
