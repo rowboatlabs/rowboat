@@ -18,6 +18,9 @@ const DEEPGRAM_LISTEN_URL = `wss://api.deepgram.com/v1/listen?${DEEPGRAM_PARAMS.
 // RMS threshold: system audio above this = "active" (speakers playing)
 const SYSTEM_AUDIO_GATE_THRESHOLD = 0.005;
 
+// Auto-stop after 2 minutes of silence (no transcript from Deepgram)
+const SILENCE_AUTO_STOP_MS = 2 * 60 * 1000;
+
 // ---------------------------------------------------------------------------
 // Headphone detection
 // ---------------------------------------------------------------------------
@@ -68,7 +71,7 @@ function formatTranscript(entries: TranscriptEntry[], date: string): string {
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
-export function useMeetingTranscription() {
+export function useMeetingTranscription(onAutoStop?: () => void) {
     const [state, setState] = useState<MeetingTranscriptionState>('idle');
     const wsRef = useRef<WebSocket | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -79,6 +82,9 @@ export function useMeetingTranscription() {
     const interimRef = useRef<Map<number, { speaker: string; text: string }>>(new Map());
     const notePathRef = useRef<string>('');
     const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const onAutoStopRef = useRef(onAutoStop);
+    onAutoStopRef.current = onAutoStop;
     const dateRef = useRef<string>('');
 
     const writeTranscriptToFile = useCallback(async () => {
@@ -116,6 +122,10 @@ export function useMeetingTranscription() {
         if (writeTimerRef.current) {
             clearTimeout(writeTimerRef.current);
             writeTimerRef.current = null;
+        }
+        if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = null;
         }
         if (processorRef.current) {
             processorRef.current.disconnect();
@@ -194,6 +204,13 @@ export function useMeetingTranscription() {
             if (!data.channel?.alternatives?.[0]) return;
             const transcript = data.channel.alternatives[0].transcript;
             if (!transcript) return;
+
+            // Reset silence auto-stop timer on any transcript
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = setTimeout(() => {
+                console.log('[meeting] 2 minutes of silence — auto-stopping');
+                onAutoStopRef.current?.();
+            }, SILENCE_AUTO_STOP_MS);
 
             const channelIndex = data.channel_index?.[0] ?? 0;
             const isMic = channelIndex === 0;
