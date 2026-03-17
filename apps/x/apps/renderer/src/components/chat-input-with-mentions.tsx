@@ -44,6 +44,10 @@ import {
   usePromptInputController,
 } from '@/components/ai-elements/prompt-input'
 import { toast } from 'sonner'
+import { z } from 'zod'
+import { ConfiguredModelEntry } from '@x/shared/src/models.js'
+
+type ConfiguredModel = z.infer<typeof ConfiguredModelEntry>
 
 export type StagedAttachment = {
   id: string
@@ -66,15 +70,6 @@ const providerDisplayNames: Record<string, string> = {
   openrouter: 'OpenRouter',
   aigateway: 'AI Gateway',
   'openai-compatible': 'OpenAI-Compatible',
-}
-
-interface ConfiguredModel {
-  flavor: string
-  model: string
-  apiKey?: string
-  baseURL?: string
-  headers?: Record<string, string>
-  knowledgeGraphModel?: string
 }
 
 function getAttachmentIcon(kind: AttachmentIconKind) {
@@ -157,45 +152,13 @@ function ChatInputInner({
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
 
-  // Load model config from disk (on mount and whenever tab becomes active)
+  // Load model config via IPC (on mount and whenever tab becomes active)
   const loadModelConfig = useCallback(async () => {
     try {
-      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
-      const parsed = JSON.parse(result.data)
-      const models: ConfiguredModel[] = []
-      if (parsed?.providers) {
-        for (const [flavor, entry] of Object.entries(parsed.providers)) {
-          const e = entry as Record<string, unknown>
-          const modelList: string[] = Array.isArray(e.models) ? e.models as string[] : []
-          const singleModel = typeof e.model === 'string' ? e.model : ''
-          const allModels = modelList.length > 0 ? modelList : singleModel ? [singleModel] : []
-          for (const model of allModels) {
-            if (model) {
-              models.push({
-                flavor,
-                model,
-                apiKey: (e.apiKey as string) || undefined,
-                baseURL: (e.baseURL as string) || undefined,
-                headers: (e.headers as Record<string, string>) || undefined,
-                knowledgeGraphModel: (e.knowledgeGraphModel as string) || undefined,
-              })
-            }
-          }
-        }
-      }
-      const defaultKey = parsed?.provider?.flavor && parsed?.model
-        ? `${parsed.provider.flavor}/${parsed.model}`
-        : ''
-      models.sort((a, b) => {
-        const aKey = `${a.flavor}/${a.model}`
-        const bKey = `${b.flavor}/${b.model}`
-        if (aKey === defaultKey) return -1
-        if (bKey === defaultKey) return 1
-        return 0
-      })
-      setConfiguredModels(models)
-      if (defaultKey) {
-        setActiveModelKey(defaultKey)
+      const result = await window.ipc.invoke('models:getConfiguredModels', null)
+      setConfiguredModels(result.models)
+      if (result.activeModelKey) {
+        setActiveModelKey(result.activeModelKey)
       }
     } catch {
       // No config yet
