@@ -3387,6 +3387,7 @@ function App() {
       }
     }
   }, [meetingTranscription, handleVoiceNoteCreated])
+  handleToggleMeetingRef.current = handleToggleMeeting
 
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
