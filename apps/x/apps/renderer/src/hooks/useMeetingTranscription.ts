@@ -31,8 +31,12 @@ function formatTranscript(entries: TranscriptEntry[], date: string): string {
         '# Meeting Transcription',
         '',
     ];
-    for (const entry of entries) {
-        lines.push(`**${entry.speaker}:** ${entry.text}`);
+    for (let i = 0; i < entries.length; i++) {
+        // Add extra blank line between different speakers
+        if (i > 0 && entries[i].speaker !== entries[i - 1].speaker) {
+            lines.push('');
+        }
+        lines.push(`**${entries[i].speaker}:** ${entries[i].text}`);
         lines.push('');
     }
     return lines.join('\n');
@@ -46,13 +50,25 @@ export function useMeetingTranscription() {
     const processorRef = useRef<ScriptProcessorNode | null>(null);
     const audioCtxRef = useRef<AudioContext | null>(null);
     const transcriptRef = useRef<TranscriptEntry[]>([]);
+    const interimRef = useRef<Map<number, { speaker: string; text: string }>>(new Map());
     const notePathRef = useRef<string>('');
     const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const dateRef = useRef<string>('');
 
     const writeTranscriptToFile = useCallback(async () => {
-        if (!notePathRef.current || transcriptRef.current.length === 0) return;
-        const content = formatTranscript(transcriptRef.current, dateRef.current);
+        if (!notePathRef.current) return;
+        // Combine finalized entries with any in-progress interim text
+        const entries = [...transcriptRef.current];
+        for (const interim of interimRef.current.values()) {
+            if (!interim.text) continue;
+            if (entries.length > 0 && entries[entries.length - 1].speaker === interim.speaker) {
+                entries[entries.length - 1] = { speaker: interim.speaker, text: entries[entries.length - 1].text + ' ' + interim.text };
+            } else {
+                entries.push({ speaker: interim.speaker, text: interim.text });
+            }
+        }
+        if (entries.length === 0) return;
+        const content = formatTranscript(entries, dateRef.current);
         try {
             await window.ipc.invoke('workspace:writeFile', {
                 path: notePathRef.current,
@@ -68,7 +84,7 @@ export function useMeetingTranscription() {
         if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
         writeTimerRef.current = setTimeout(() => {
             void writeTranscriptToFile();
-        }, 5000);
+        }, 1000);
     }, [writeTranscriptToFile]);
 
     const cleanup = useCallback(() => {
@@ -143,21 +159,29 @@ export function useMeetingTranscription() {
 
         // Set up WS message handler
         transcriptRef.current = [];
+        interimRef.current = new Map();
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (!data.channel?.alternatives?.[0]) return;
             const transcript = data.channel.alternatives[0].transcript;
-            if (!transcript || !data.is_final) return;
+            if (!transcript) return;
 
             const channelIndex = data.channel_index?.[0] ?? 0;
-            const speaker = channelIndex === 0 ? 'You' : 'Speaker';
+            const speaker = channelIndex === 0 ? 'You' : 'System audio';
 
-            // Merge with last entry if same speaker
-            const entries = transcriptRef.current;
-            if (entries.length > 0 && entries[entries.length - 1].speaker === speaker) {
-                entries[entries.length - 1].text += ' ' + transcript;
+            if (data.is_final) {
+                // Clear interim for this channel
+                interimRef.current.delete(channelIndex);
+                // Merge with last entry if same speaker
+                const entries = transcriptRef.current;
+                if (entries.length > 0 && entries[entries.length - 1].speaker === speaker) {
+                    entries[entries.length - 1].text += ' ' + transcript;
+                } else {
+                    entries.push({ speaker, text: transcript });
+                }
             } else {
-                entries.push({ speaker, text: transcript });
+                // Update interim text for this channel
+                interimRef.current.set(channelIndex, { speaker, text: transcript });
             }
             scheduleDebouncedWrite();
         };
@@ -258,6 +282,9 @@ export function useMeetingTranscription() {
         setState('stopping');
 
         cleanup();
+
+        // Clear interims so final write only has finalized text
+        interimRef.current = new Map();
 
         // Write final transcript
         await writeTranscriptToFile();
