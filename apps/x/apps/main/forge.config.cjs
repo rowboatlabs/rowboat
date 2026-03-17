@@ -13,6 +13,10 @@ module.exports = {
         appCategoryType: 'public.app-category.productivity',
         osxSign: {
             batchCodesignCalls: true,
+            optionsForFile: () => ({
+                entitlements: path.join(__dirname, 'entitlements.plist'),
+                'entitlements-inherit': path.join(__dirname, 'entitlements.plist'),
+            }),
         },
         osxNotarize: {
             appleId: process.env.APPLE_ID,
