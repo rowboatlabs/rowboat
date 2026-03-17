@@ -747,6 +747,8 @@ function App() {
   }, [])
 
   const handleEditorChange = useCallback((path: string, markdown: string) => {
+    // Don't cache empty content (prevents editor initialization from polluting cache)
+    if (!markdown) return
     setEditorCacheForPath(path, markdown)
     const nextSelectedPath = selectedPathRef.current
     if (nextSelectedPath !== path) {
@@ -887,7 +889,9 @@ function App() {
     }
     if (selectedPath.endsWith('.md')) {
       const cachedContent = editorContentByPathRef.current.get(selectedPath)
-      if (cachedContent !== undefined) {
+      // Primary guard: handleEditorChange prevents empty content from being cached.
+      // Secondary guard: explicit length check as defense in depth.
+      if (cachedContent !== undefined && cachedContent.length > 0) {
         setFileContent(cachedContent)
         setEditorContent(cachedContent)
         editorContentRef.current = cachedContent

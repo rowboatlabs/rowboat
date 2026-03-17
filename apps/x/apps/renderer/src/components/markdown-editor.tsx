@@ -492,7 +492,8 @@ export function MarkdownEditor({
       const currentContent = getMarkdownWithBlankLines(editor)
       // Normalize for comparison (trim trailing whitespace from lines)
       const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
-      if (normalizeForCompare(currentContent) !== normalizeForCompare(content)) {
+      const shouldUpdate = normalizeForCompare(currentContent) !== normalizeForCompare(content)
+      if (shouldUpdate) {
         isInternalUpdate.current = true
         // Pre-process to preserve blank lines
         const preprocessed = preprocessMarkdown(content)
