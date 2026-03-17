@@ -3343,12 +3343,46 @@ function App() {
     navigateToFile(notePath)
   }, [loadDirectory, navigateToFile, fileTabs])
 
+  const meetingNotePathRef = useRef<string | null>(null)
+
   const handleToggleMeeting = useCallback(async () => {
     if (meetingTranscription.state === 'recording') {
       await meetingTranscription.stop()
+
+      // Read the final transcript and generate meeting notes via LLM
+      const notePath = meetingNotePathRef.current
+      if (notePath) {
+        try {
+          const result = await window.ipc.invoke('workspace:readFile', { path: notePath, encoding: 'utf8' })
+          const fileContent = result.data
+          if (fileContent && fileContent.trim()) {
+            // Call LLM to summarize the transcript
+            const { notes } = await window.ipc.invoke('meeting:summarize', { transcript: fileContent })
+            if (notes) {
+              // Prepend meeting notes below the title but above the transcript
+              const { raw: fm, body: transcriptBody } = splitFrontmatter(fileContent)
+              // Strip the "# Meeting note" title from transcript body — we'll put it first
+              const bodyWithoutTitle = transcriptBody.replace(/^#\s+Meeting note\s*\n*/, '')
+              const newBody = '# Meeting note\n\n' + notes + '\n\n---\n\n## Raw transcript\n\n' + bodyWithoutTitle
+              const newContent = fm ? `${fm}\n${newBody}` : newBody
+              await window.ipc.invoke('workspace:writeFile', {
+                path: notePath,
+                data: newContent,
+                opts: { encoding: 'utf8' },
+              })
+              // Refresh the file view
+              await handleVoiceNoteCreated(notePath)
+            }
+          }
+        } catch (err) {
+          console.error('[meeting] Failed to generate meeting notes:', err)
+        }
+        meetingNotePathRef.current = null
+      }
     } else if (meetingTranscription.state === 'idle') {
       const notePath = await meetingTranscription.start()
       if (notePath) {
+        meetingNotePathRef.current = notePath
         await handleVoiceNoteCreated(notePath)
       }
     }

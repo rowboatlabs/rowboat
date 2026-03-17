@@ -48,11 +48,11 @@ function formatTranscript(entries: TranscriptEntry[], date: string): string {
         '---',
         'type: meeting',
         'source: rowboat',
-        'title: Meeting Transcription',
+        'title: Meeting note',
         `date: "${date}"`,
         '---',
         '',
-        '# Meeting Transcription',
+        '# Meeting note',
         '',
     ];
     for (let i = 0; i < entries.length; i++) {
