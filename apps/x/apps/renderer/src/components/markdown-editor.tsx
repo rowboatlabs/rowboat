@@ -311,6 +311,7 @@ export function MarkdownEditor({
         heading: {
           levels: [1, 2, 3],
         },
+        link: false, // Disable StarterKit's Link to use custom-configured one below
       }),
       Link.configure({
         openOnClick: false,
