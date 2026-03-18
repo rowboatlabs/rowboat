@@ -444,7 +444,7 @@ async function performSync() {
 
 // --- Composio-based Sync ---
 
-const COMPOSIO_LOOKBACK_DAYS = 7;
+const COMPOSIO_LOOKBACK_DAYS = 30;
 
 interface ComposioSyncState {
     last_sync: string; // ISO string
