@@ -338,12 +338,13 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         merger.connect(processor);
         processor.connect(audioCtx.destination);
 
-        // Create the note file
+        // Create the note file, organized by date like voice memos
         const now = new Date();
         const dateStr = now.toISOString();
         dateRef.current = dateStr;
+        const dateFolder = dateStr.split('T')[0]; // YYYY-MM-DD
         const timestamp = dateStr.replace(/:/g, '-').replace(/\.\d+Z$/, '');
-        const notePath = `knowledge/Meetings/rowboat/meeting-${timestamp}.md`;
+        const notePath = `knowledge/Meetings/rowboat/${dateFolder}/meeting-${timestamp}.md`;
         notePathRef.current = notePath;
 
         const initialContent = formatTranscript([], dateStr);
