@@ -1,17 +1,19 @@
 import { mergeAttributes, Node } from '@tiptap/react'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
-import { CalendarClock, X } from 'lucide-react'
+import { CalendarClock, Loader2, X } from 'lucide-react'
 import { inlineTask } from '@x/shared'
 
 function TaskBlockView({ node, deleteNode }: { node: { attrs: Record<string, unknown> }; deleteNode: () => void }) {
   const raw = node.attrs.data as string
   let instruction = ''
   let scheduleLabel = ''
+  let processing = false
 
   try {
     const parsed = inlineTask.InlineTaskBlockSchema.parse(JSON.parse(raw))
     instruction = parsed.instruction
     scheduleLabel = parsed['schedule-label'] ?? ''
+    processing = parsed.processing ?? false
   } catch {
     // Fallback: show raw data
     instruction = raw
@@ -29,7 +31,13 @@ function TaskBlockView({ node, deleteNode }: { node: { attrs: Record<string, unk
         </button>
         <div className="task-block-content">
           <span className="task-block-instruction"><span className="task-block-prefix">@rowboat</span> {instruction}</span>
-          {scheduleLabel && (
+          {processing && (
+            <span className="task-block-schedule">
+              <Loader2 size={12} className="animate-spin" />
+              processing…
+            </span>
+          )}
+          {!processing && scheduleLabel && (
             <span className="task-block-schedule">
               <CalendarClock size={12} />
               {scheduleLabel}

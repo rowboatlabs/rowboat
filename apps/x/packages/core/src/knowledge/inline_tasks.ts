@@ -532,6 +532,78 @@ async function processInlineTasks(): Promise<void> {
 }
 
 /**
+ * Process a @rowboat instruction via the inline task agent.
+ * The agent can execute one-off tasks and/or detect scheduling intent.
+ * Returns schedule info (if any), a schedule label, and optional response text.
+ */
+export async function processRowboatInstruction(
+    instruction: string,
+    noteContent: string,
+    notePath: string,
+): Promise<{
+    schedule: { type: 'cron'; expression: string; startDate: string; endDate: string }
+        | { type: 'window'; cron: string; startTime: string; endTime: string; startDate: string; endDate: string }
+        | { type: 'once'; runAt: string }
+        | null;
+    scheduleLabel: string | null;
+    response: string | null;
+}> {
+    const run = await createRun({ agentId: INLINE_TASK_AGENT });
+
+    const message = [
+        `Execute the following instruction from the note "${notePath}":`,
+        '',
+        `**Instruction:** ${instruction}`,
+        '',
+        '**Full note content for context:**',
+        '```markdown',
+        noteContent,
+        '```',
+    ].join('\n');
+
+    await createMessage(run.id, message);
+    await waitForRunCompletion(run.id);
+
+    const rawResponse = await extractAgentResponse(run.id);
+    if (!rawResponse) {
+        return { schedule: null, scheduleLabel: null, response: null };
+    }
+
+    // Parse out the schedule marker if present
+    const scheduleMarkerRegex = /<!--rowboat-schedule:(.*?)-->/;
+    const match = rawResponse.match(scheduleMarkerRegex);
+
+    type ScheduleWithoutLabel =
+        | { type: 'cron'; expression: string; startDate: string; endDate: string }
+        | { type: 'window'; cron: string; startTime: string; endTime: string; startDate: string; endDate: string }
+        | { type: 'once'; runAt: string };
+
+    let schedule: ScheduleWithoutLabel | null = null;
+    let scheduleLabel: string | null = null;
+    let response: string | null = null;
+
+    if (match) {
+        try {
+            const parsed = JSON.parse(match[1]);
+            if (parsed && typeof parsed === 'object' && parsed.type) {
+                scheduleLabel = parsed.label || null;
+                const { label: _, ...rest } = parsed;
+                schedule = rest as ScheduleWithoutLabel;
+            }
+        } catch {
+            // Invalid JSON in marker — ignore
+        }
+        // Remove the marker from the response text
+        const cleaned = rawResponse.replace(scheduleMarkerRegex, '').trim();
+        response = cleaned || null;
+    } else {
+        response = rawResponse.trim() || null;
+    }
+
+    return { schedule, scheduleLabel, response };
+}
+
+/**
  * Classify whether an instruction contains a scheduling intent using the user's configured LLM.
  * Returns a schedule object or null for one-time tasks.
  */

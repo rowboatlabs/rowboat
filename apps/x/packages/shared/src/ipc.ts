@@ -522,6 +522,22 @@ const ipcSchemas = {
       ]).nullable(),
     }),
   },
+  'inline-task:process': {
+    req: z.object({
+      instruction: z.string(),
+      noteContent: z.string(),
+      notePath: z.string(),
+    }),
+    res: z.object({
+      schedule: z.union([
+        z.object({ type: z.literal('cron'), expression: z.string(), startDate: z.string(), endDate: z.string() }),
+        z.object({ type: z.literal('window'), cron: z.string(), startTime: z.string(), endTime: z.string(), startDate: z.string(), endDate: z.string() }),
+        z.object({ type: z.literal('once'), runAt: z.string() }),
+      ]).nullable(),
+      scheduleLabel: z.string().nullable(),
+      response: z.string().nullable(),
+    }),
+  },
   // Billing channels
   'billing:getInfo': {
     req: z.null(),

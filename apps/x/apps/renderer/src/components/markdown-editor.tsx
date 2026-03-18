@@ -232,6 +232,7 @@ interface MarkdownEditorProps {
   frontmatter?: string | null
   onFrontmatterChange?: (raw: string | null) => void
   onExport?: (format: 'md' | 'pdf' | 'docx') => void
+  notePath?: string
 }
 
 type WikiLinkMatch = {
@@ -323,6 +324,7 @@ export function MarkdownEditor({
   frontmatter,
   onFrontmatterChange,
   onExport,
+  notePath,
 }: MarkdownEditorProps) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -928,24 +930,17 @@ export function MarkdownEditor({
     }
 
     if (activeRowboatMention) {
-      // Classify schedule intent for new blocks
-      const blockData: Record<string, unknown> = { instruction }
-      try {
-        const result = await window.ipc.invoke('inline-task:classifySchedule', { instruction })
-        if (result.schedule) {
-          const { label, ...rest } = result.schedule
-          blockData.schedule = rest
-          blockData['schedule-label'] = label
-        }
-      } catch (error) {
-        console.error('[RowboatAdd] Schedule classification failed:', error)
-      }
+      // Insert block with processing state immediately
+      const blockData: Record<string, unknown> = { instruction, processing: true }
+
+      const insertFrom = activeRowboatMention.range.from
+      const insertTo = activeRowboatMention.range.to
 
       editor
         .chain()
         .focus()
         .insertContentAt(
-          { from: activeRowboatMention.range.from, to: activeRowboatMention.range.to },
+          { from: insertFrom, to: insertTo },
           [
             { type: 'taskBlock', attrs: { data: JSON.stringify(blockData) } },
             { type: 'paragraph' },
@@ -953,17 +948,109 @@ export function MarkdownEditor({
         )
         .run()
 
-      // Mark note as live
-      if (onFrontmatterChange) {
-        const fields = extractAllFrontmatterValues(frontmatter ?? null)
-        fields['live_note'] = 'true'
-        onFrontmatterChange(buildFrontmatter(fields))
-      }
-
       setActiveRowboatMention(null)
       setRowboatAnchorTop(null)
+
+      // Find the taskBlock we just inserted so we can update it later
+      const processingData = JSON.stringify(blockData)
+      let taskBlockPos: number | null = null
+      editor.state.doc.descendants((node, pos) => {
+        if (taskBlockPos !== null) return false
+        if (node.type.name === 'taskBlock' && node.attrs.data === processingData) {
+          taskBlockPos = pos
+          return false
+        }
+      })
+
+      // Get editor content for the agent
+      const editorContent = editor.storage.markdown?.getMarkdown?.() ?? ''
+
+      // Call the assistant agent asynchronously
+      try {
+        const result = await window.ipc.invoke('inline-task:process', {
+          instruction,
+          noteContent: editorContent,
+          notePath: notePath ?? '',
+        })
+
+        // Update the block: remove processing, add schedule if any
+        const updatedData: Record<string, unknown> = { instruction }
+        if (result.schedule) {
+          updatedData.schedule = result.schedule
+          updatedData['schedule-label'] = result.scheduleLabel
+
+          // Mark note as live if there's a schedule
+          if (onFrontmatterChange) {
+            const fields = extractAllFrontmatterValues(frontmatter ?? null)
+            fields['live_note'] = 'true'
+            onFrontmatterChange(buildFrontmatter(fields))
+          }
+        }
+
+        // Find the processing block again (position may have shifted)
+        let currentPos: number | null = null
+        editor.state.doc.descendants((node, pos) => {
+          if (currentPos !== null) return false
+          if (node.type.name === 'taskBlock') {
+            try {
+              const data = JSON.parse(node.attrs.data || '{}')
+              if (data.instruction === instruction && data.processing === true) {
+                currentPos = pos
+                return false
+              }
+            } catch { /* skip */ }
+          }
+        })
+
+        if (currentPos !== null) {
+          const node = editor.state.doc.nodeAt(currentPos)
+          if (node) {
+            let tr = editor.state.tr.setNodeMarkup(currentPos, undefined, {
+              data: JSON.stringify(updatedData),
+            })
+
+            // Insert response text below the block if present
+            if (result.response) {
+              const insertPos = currentPos + node.nodeSize
+              const responseNode = editor.schema.nodes.paragraph?.create(
+                null,
+                editor.schema.text(result.response),
+              )
+              if (responseNode) {
+                tr = tr.insert(insertPos, responseNode)
+              }
+            }
+
+            editor.view.dispatch(tr)
+          }
+        }
+      } catch (error) {
+        console.error('[RowboatAdd] Processing failed:', error)
+
+        // Remove processing state on error
+        let currentPos: number | null = null
+        editor.state.doc.descendants((node, pos) => {
+          if (currentPos !== null) return false
+          if (node.type.name === 'taskBlock') {
+            try {
+              const data = JSON.parse(node.attrs.data || '{}')
+              if (data.instruction === instruction && data.processing === true) {
+                currentPos = pos
+                return false
+              }
+            } catch { /* skip */ }
+          }
+        })
+
+        if (currentPos !== null) {
+          const tr = editor.state.tr.setNodeMarkup(currentPos, undefined, {
+            data: JSON.stringify({ instruction }),
+          })
+          editor.view.dispatch(tr)
+        }
+      }
     }
-  }, [editor, activeRowboatMention, rowboatBlockEdit, frontmatter, onFrontmatterChange])
+  }, [editor, activeRowboatMention, rowboatBlockEdit, frontmatter, onFrontmatterChange, notePath])
 
   const handleRowboatRemove = useCallback(() => {
     if (!editor || !rowboatBlockEdit) return
