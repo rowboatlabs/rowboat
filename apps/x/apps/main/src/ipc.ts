@@ -703,7 +703,7 @@ export function setupIpcHandlers() {
       return { success: false, error: 'Unknown format' };
     },
     'meeting:summarize': async (_event, args) => {
-      const notes = await summarizeMeeting(args.transcript);
+      const notes = await summarizeMeeting(args.transcript, args.meetingStartTime);
       return { notes };
     },
     'inline-task:classifySchedule': async (_event, args) => {

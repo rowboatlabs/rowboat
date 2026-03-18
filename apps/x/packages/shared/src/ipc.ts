@@ -501,6 +501,7 @@ const ipcSchemas = {
   'meeting:summarize': {
     req: z.object({
       transcript: z.string(),
+      meetingStartTime: z.string().optional(),
     }),
     res: z.object({
       notes: z.string(),
