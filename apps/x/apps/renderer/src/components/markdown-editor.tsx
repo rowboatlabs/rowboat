@@ -930,7 +930,7 @@ export function MarkdownEditor({
     }
 
     if (activeRowboatMention) {
-      // Insert block with processing state immediately
+      // Insert a temporary processing block
       const blockData: Record<string, unknown> = { instruction, processing: true }
 
       const insertFrom = activeRowboatMention.range.from
@@ -951,21 +951,27 @@ export function MarkdownEditor({
       setActiveRowboatMention(null)
       setRowboatAnchorTop(null)
 
-      // Find the taskBlock we just inserted so we can update it later
-      const processingData = JSON.stringify(blockData)
-      let taskBlockPos: number | null = null
-      editor.state.doc.descendants((node, pos) => {
-        if (taskBlockPos !== null) return false
-        if (node.type.name === 'taskBlock' && node.attrs.data === processingData) {
-          taskBlockPos = pos
-          return false
-        }
-      })
-
       // Get editor content for the agent
       const editorContent = editor.storage.markdown?.getMarkdown?.() ?? ''
 
-      // Call the assistant agent asynchronously
+      // Helper to find the processing block
+      const findProcessingBlock = (): number | null => {
+        let pos: number | null = null
+        editor.state.doc.descendants((node, p) => {
+          if (pos !== null) return false
+          if (node.type.name === 'taskBlock') {
+            try {
+              const data = JSON.parse(node.attrs.data || '{}')
+              if (data.instruction === instruction && data.processing === true) {
+                pos = p
+                return false
+              }
+            } catch { /* skip */ }
+          }
+        })
+        return pos
+      }
+
       try {
         const result = await window.ipc.invoke('inline-task:process', {
           instruction,
@@ -973,89 +979,70 @@ export function MarkdownEditor({
           notePath: notePath ?? '',
         })
 
-        // Update the block: remove processing, add schedule if any
-        const updatedData: Record<string, unknown> = { instruction }
-        if (result.schedule) {
-          updatedData.schedule = result.schedule
-          updatedData['schedule-label'] = result.scheduleLabel
+        const currentPos = findProcessingBlock()
+        if (currentPos === null) return
 
-          // Mark note as live if there's a schedule
+        const node = editor.state.doc.nodeAt(currentPos)
+        if (!node) return
+
+        if (result.schedule) {
+          // Scheduled task: keep the block, update with schedule info
+          const updatedData: Record<string, unknown> = {
+            instruction,
+            schedule: result.schedule,
+            'schedule-label': result.scheduleLabel,
+          }
+          const tr = editor.state.tr.setNodeMarkup(currentPos, undefined, {
+            data: JSON.stringify(updatedData),
+          })
+          editor.view.dispatch(tr)
+
+          // Mark note as live
           if (onFrontmatterChange) {
             const fields = extractAllFrontmatterValues(frontmatter ?? null)
             fields['live_note'] = 'true'
             onFrontmatterChange(buildFrontmatter(fields))
           }
-        }
 
-        // Find the processing block again (position may have shifted)
-        let currentPos: number | null = null
-        editor.state.doc.descendants((node, pos) => {
-          if (currentPos !== null) return false
-          if (node.type.name === 'taskBlock') {
-            try {
-              const data = JSON.parse(node.attrs.data || '{}')
-              if (data.instruction === instruction && data.processing === true) {
-                currentPos = pos
-                return false
+          // Insert response text below the block if any
+          if (result.response) {
+            let afterPos: number | null = null
+            editor.state.doc.descendants((n, p) => {
+              if (afterPos !== null) return false
+              if (n.type.name === 'taskBlock') {
+                try {
+                  const data = JSON.parse(n.attrs.data || '{}')
+                  if (data.instruction === instruction && !data.processing) {
+                    afterPos = p + n.nodeSize
+                    return false
+                  }
+                } catch { /* skip */ }
               }
-            } catch { /* skip */ }
-          }
-        })
-
-        if (currentPos !== null) {
-          const node = editor.state.doc.nodeAt(currentPos)
-          if (node) {
-            // Update the block data (remove processing, add schedule)
-            const tr = editor.state.tr.setNodeMarkup(currentPos, undefined, {
-              data: JSON.stringify(updatedData),
             })
-            editor.view.dispatch(tr)
-
-            // Insert response text below the block as rendered markdown
-            if (result.response) {
-              // Re-find position after the dispatch above
-              let afterPos: number | null = null
-              editor.state.doc.descendants((n, pos) => {
-                if (afterPos !== null) return false
-                if (n.type.name === 'taskBlock') {
-                  try {
-                    const data = JSON.parse(n.attrs.data || '{}')
-                    if (data.instruction === instruction && !data.processing) {
-                      afterPos = pos + n.nodeSize
-                      return false
-                    }
-                  } catch { /* skip */ }
-                }
-              })
-              if (afterPos !== null) {
-                editor.chain().insertContentAt(afterPos, result.response).run()
-              }
+            if (afterPos !== null) {
+              editor.chain().insertContentAt(afterPos, result.response).run()
             }
+          }
+        } else {
+          // One-time task: remove the processing block, insert response in its place
+          const insertPos = currentPos
+          const deleteEnd = currentPos + node.nodeSize
+          editor.chain().focus().deleteRange({ from: insertPos, to: deleteEnd }).run()
+
+          if (result.response) {
+            editor.chain().insertContentAt(insertPos, result.response).run()
           }
         }
       } catch (error) {
         console.error('[RowboatAdd] Processing failed:', error)
 
-        // Remove processing state on error
-        let currentPos: number | null = null
-        editor.state.doc.descendants((node, pos) => {
-          if (currentPos !== null) return false
-          if (node.type.name === 'taskBlock') {
-            try {
-              const data = JSON.parse(node.attrs.data || '{}')
-              if (data.instruction === instruction && data.processing === true) {
-                currentPos = pos
-                return false
-              }
-            } catch { /* skip */ }
-          }
-        })
-
+        // Remove the processing block on error
+        const currentPos = findProcessingBlock()
         if (currentPos !== null) {
-          const tr = editor.state.tr.setNodeMarkup(currentPos, undefined, {
-            data: JSON.stringify({ instruction }),
-          })
-          editor.view.dispatch(tr)
+          const node = editor.state.doc.nodeAt(currentPos)
+          if (node) {
+            editor.chain().focus().deleteRange({ from: currentPos, to: currentPos + node.nodeSize }).run()
+          }
         }
       }
     }
