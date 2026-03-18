@@ -3,8 +3,8 @@ import { useState, useEffect, useCallback } from 'react'
 interface BillingInfo {
   userEmail: string | null
   userId: string | null
-  subscriptionPlan: string
-  subscriptionStatus: string
+  subscriptionPlan: string | null
+  subscriptionStatus: string | null
   sanctionedCredits: number
   availableCredits: number
 }

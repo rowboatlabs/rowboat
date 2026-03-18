@@ -555,7 +555,7 @@ export function MarkdownEditor({
 
         return false
       },
-      handleClickOn: (_view, _pos, node, nodePos, event) => {
+      handleClickOn: (_view, _pos, node, _nodePos, event) => {
         if (node.type.name === 'wikiLink') {
           event.preventDefault()
           wikiLinks?.onOpen?.(node.attrs.path)

@@ -41,7 +41,7 @@ const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: s
 export function LlmSetupStep({ state }: LlmSetupStepProps) {
   const {
     llmProvider, setLlmProvider, modelsCatalog, modelsLoading, modelsError,
-    activeConfig, testState, setTestState, showApiKey, requiresApiKey,
+    activeConfig, testState, setTestState, showApiKey,
     showBaseURL, isLocalProvider, canTest, showMoreProviders, setShowMoreProviders,
     updateProviderConfig, handleTestAndSaveLlmConfig, handleBack,
     upsellDismissed, setUpsellDismissed, handleSwitchToRowboat,

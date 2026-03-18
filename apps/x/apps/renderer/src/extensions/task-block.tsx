@@ -3,8 +3,8 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
 import { CalendarClock, X } from 'lucide-react'
 import { inlineTask } from '@x/shared'
 
-function TaskBlockView({ node, deleteNode }: { node: { attrs: { data: string } }; deleteNode: () => void }) {
-  const raw = node.attrs.data
+function TaskBlockView({ node, deleteNode }: { node: { attrs: Record<string, unknown> }; deleteNode: () => void }) {
+  const raw = node.attrs.data as string
   let instruction = ''
   let scheduleLabel = ''
 

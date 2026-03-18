@@ -84,7 +84,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   // Composio API key state
   const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
-  const [composioApiKeyTarget, setComposioApiKeyTarget] = useState<'slack' | 'gmail'>('gmail')
+  const [, setComposioApiKeyTarget] = useState<'slack' | 'gmail'>('gmail')
 
   // Slack state (agent-slack CLI)
   const [slackEnabled, setSlackEnabled] = useState(false)
