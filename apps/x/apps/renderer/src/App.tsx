@@ -648,7 +648,7 @@ function App() {
     voice.start()
   }, [voice])
 
-  const handlePromptSubmitRef = useRef<((msg: { text: string }) => void) | null>(null)
+  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean) => Promise<void>) | null>(null)
   const pendingVoiceInputRef = useRef(false)
 
   const handleSubmitRecording = useCallback(() => {
@@ -657,7 +657,7 @@ function App() {
     isRecordingRef.current = false
     if (text) {
       pendingVoiceInputRef.current = true
-      handlePromptSubmitRef.current?.({ text })
+      handlePromptSubmitRef.current?.({ text, files: [] })
     }
   }, [voice])
 

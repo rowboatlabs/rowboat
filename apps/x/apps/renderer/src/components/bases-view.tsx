@@ -143,9 +143,6 @@ function getSortValue(note: NoteEntry, column: string): string | number {
   return Array.isArray(v) ? v[0] ?? '' : v
 }
 
-const isBuiltin = (col: string): col is BuiltinColumn =>
-  (BUILTIN_COLUMNS as readonly string[]).includes(col)
-
 export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaultBase, onSave, externalSearch, onExternalSearchConsumed }: BasesViewProps) {
   // Build notes instantly from tree
   const notes = useMemo<NoteEntry[]>(() => {
