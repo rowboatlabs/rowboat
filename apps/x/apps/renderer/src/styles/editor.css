@@ -608,6 +608,230 @@
   color: color-mix(in srgb, var(--foreground) 55%, transparent);
 }
 
+/* Shared block styles (image, embed, chart, table) */
+.tiptap-editor .ProseMirror .image-block-wrapper,
+.tiptap-editor .ProseMirror .embed-block-wrapper,
+.tiptap-editor .ProseMirror .chart-block-wrapper,
+.tiptap-editor .ProseMirror .table-block-wrapper {
+  margin: 8px 0;
+}
+
+.tiptap-editor .ProseMirror .image-block-card,
+.tiptap-editor .ProseMirror .embed-block-card,
+.tiptap-editor .ProseMirror .chart-block-card,
+.tiptap-editor .ProseMirror .table-block-card {
+  position: relative;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  cursor: default;
+  transition: background-color 0.15s ease;
+}
+
+.tiptap-editor .ProseMirror .image-block-card:hover,
+.tiptap-editor .ProseMirror .embed-block-card:hover,
+.tiptap-editor .ProseMirror .chart-block-card:hover,
+.tiptap-editor .ProseMirror .table-block-card:hover {
+  background-color: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.tiptap-editor .ProseMirror .image-block-wrapper.ProseMirror-selectednode .image-block-card,
+.tiptap-editor .ProseMirror .embed-block-wrapper.ProseMirror-selectednode .embed-block-card,
+.tiptap-editor .ProseMirror .chart-block-wrapper.ProseMirror-selectednode .chart-block-card,
+.tiptap-editor .ProseMirror .table-block-wrapper.ProseMirror-selectednode .table-block-card {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.tiptap-editor .ProseMirror .image-block-delete,
+.tiptap-editor .ProseMirror .embed-block-delete,
+.tiptap-editor .ProseMirror .chart-block-delete,
+.tiptap-editor .ProseMirror .table-block-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--foreground) 40%, transparent);
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.tiptap-editor .ProseMirror .image-block-card:hover .image-block-delete,
+.tiptap-editor .ProseMirror .embed-block-card:hover .embed-block-delete,
+.tiptap-editor .ProseMirror .chart-block-card:hover .chart-block-delete,
+.tiptap-editor .ProseMirror .table-block-card:hover .table-block-delete {
+  opacity: 1;
+}
+
+.tiptap-editor .ProseMirror .image-block-delete:hover,
+.tiptap-editor .ProseMirror .embed-block-delete:hover,
+.tiptap-editor .ProseMirror .chart-block-delete:hover,
+.tiptap-editor .ProseMirror .table-block-delete:hover {
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+}
+
+/* Image block */
+.tiptap-editor .ProseMirror .image-block-img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+.tiptap-editor .ProseMirror .image-block-caption {
+  margin-top: 6px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  text-align: center;
+}
+
+.tiptap-editor .ProseMirror .image-block-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  font-size: 13px;
+}
+
+/* Embed block */
+.tiptap-editor .ProseMirror .embed-block-iframe-container {
+  position: relative;
+  width: 100%;
+  padding-bottom: 56.25%; /* 16:9 aspect ratio */
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.tiptap-editor .ProseMirror .embed-block-iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.tiptap-editor .ProseMirror .embed-block-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  font-size: 13px;
+  color: var(--primary);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.tiptap-editor .ProseMirror .embed-block-caption {
+  margin-top: 6px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  text-align: center;
+}
+
+.tiptap-editor .ProseMirror .embed-block-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  font-size: 13px;
+}
+
+/* Chart block */
+.tiptap-editor .ProseMirror .chart-block-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .chart-block-loading,
+.tiptap-editor .ProseMirror .chart-block-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+}
+
+.tiptap-editor .ProseMirror .chart-block-error-msg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+  font-size: 13px;
+  color: #ef4444;
+}
+
+.tiptap-editor .ProseMirror .chart-block-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  font-size: 13px;
+}
+
+/* Table block */
+.tiptap-editor .ProseMirror .table-block-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .table-block-scroll {
+  overflow-x: auto;
+}
+
+.tiptap-editor .ProseMirror .table-block-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.tiptap-editor .ProseMirror .table-block-table th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 2px solid var(--border);
+  font-weight: 600;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+.tiptap-editor .ProseMirror .table-block-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  color: color-mix(in srgb, var(--foreground) 80%, transparent);
+}
+
+.tiptap-editor .ProseMirror .table-block-table tr:last-child td {
+  border-bottom: none;
+}
+
+.tiptap-editor .ProseMirror .table-block-empty {
+  text-align: center;
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+  padding: 16px 10px !important;
+}
+
+.tiptap-editor .ProseMirror .table-block-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  font-size: 13px;
+}
+
 /* Dark mode overrides */
 .dark .tiptap-editor .ProseMirror {
   color: rgba(255, 255, 255, 0.9);
