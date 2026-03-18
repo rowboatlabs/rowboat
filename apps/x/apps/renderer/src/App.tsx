@@ -46,6 +46,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
@@ -3350,6 +3352,17 @@ function App() {
   }, [loadDirectory, navigateToFile, fileTabs])
 
   const meetingNotePathRef = useRef<string | null>(null)
+  const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
+
+  const startMeetingAfterPermissions = useCallback(async () => {
+    setShowMeetingPermissions(false)
+    localStorage.setItem('meeting-permissions-acknowledged', '1')
+    const notePath = await meetingTranscription.start()
+    if (notePath) {
+      meetingNotePathRef.current = notePath
+      await handleVoiceNoteCreated(notePath)
+    }
+  }, [meetingTranscription, handleVoiceNoteCreated])
 
   const handleToggleMeeting = useCallback(async () => {
     if (meetingTranscription.state === 'recording') {
@@ -3388,6 +3401,11 @@ function App() {
         meetingNotePathRef.current = null
       }
     } else if (meetingTranscription.state === 'idle') {
+      // Show permissions modal on first use
+      if (!localStorage.getItem('meeting-permissions-acknowledged')) {
+        setShowMeetingPermissions(true)
+        return
+      }
       const notePath = await meetingTranscription.start()
       if (notePath) {
         meetingNotePathRef.current = notePath
@@ -4277,6 +4295,29 @@ function App() {
         open={showOnboarding}
         onComplete={handleOnboardingComplete}
       />
+      <Dialog open={showMeetingPermissions} onOpenChange={setShowMeetingPermissions}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Meeting transcription setup</DialogTitle>
+            <DialogDescription>
+              Rowboat needs <strong>Screen Recording</strong> permission to capture meeting audio from other apps (Zoom, Meet, etc.).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <p>To enable this:</p>
+            <ol className="list-decimal list-inside space-y-1.5">
+              <li>Open <strong>System Settings</strong> → <strong>Privacy & Security</strong></li>
+              <li>Click <strong>Screen Recording</strong></li>
+              <li>Toggle on <strong>Rowboat</strong></li>
+              <li>You may need to restart the app after granting permission</li>
+            </ol>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowMeetingPermissions(false)}>Cancel</Button>
+            <Button onClick={() => { void startMeetingAfterPermissions() }}>Continue</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   )
 }
