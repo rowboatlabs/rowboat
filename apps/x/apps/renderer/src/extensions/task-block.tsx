@@ -3,21 +3,36 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
 import { CalendarClock, Loader2, X } from 'lucide-react'
 import { inlineTask } from '@x/shared'
 
+function formatDateTime(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+}
+
 function TaskBlockView({ node, deleteNode }: { node: { attrs: Record<string, unknown> }; deleteNode: () => void }) {
   const raw = node.attrs.data as string
   let instruction = ''
   let scheduleLabel = ''
   let processing = false
+  let lastRunAt = ''
 
   try {
     const parsed = inlineTask.InlineTaskBlockSchema.parse(JSON.parse(raw))
     instruction = parsed.instruction
     scheduleLabel = parsed['schedule-label'] ?? ''
     processing = parsed.processing ?? false
+    lastRunAt = parsed.lastRunAt ?? ''
   } catch {
     // Fallback: show raw data
     instruction = raw
   }
+
+  const lastRunLabel = lastRunAt ? formatDateTime(lastRunAt) : ''
 
   return (
     <NodeViewWrapper className="task-block-wrapper" data-type="task-block">
@@ -41,6 +56,7 @@ function TaskBlockView({ node, deleteNode }: { node: { attrs: Record<string, unk
             <span className="task-block-schedule">
               <CalendarClock size={12} />
               {scheduleLabel}
+              {lastRunLabel && <span className="task-block-last-run"> · last ran {lastRunLabel}</span>}
             </span>
           )}
         </div>

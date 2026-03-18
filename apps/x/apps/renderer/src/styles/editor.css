@@ -608,6 +608,10 @@
   color: color-mix(in srgb, var(--foreground) 55%, transparent);
 }
 
+.tiptap-editor .ProseMirror .task-block-last-run {
+  color: color-mix(in srgb, var(--foreground) 38%, transparent);
+}
+
 /* Shared block styles (image, embed, chart, table) */
 .tiptap-editor .ProseMirror .image-block-wrapper,
 .tiptap-editor .ProseMirror .embed-block-wrapper,
