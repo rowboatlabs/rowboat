@@ -973,6 +973,7 @@ export function MarkdownEditor({
       }
 
       try {
+        // Call the copilot assistant for both one-time and recurring tasks
         const result = await window.ipc.invoke('inline-task:process', {
           instruction,
           noteContent: editorContent,
@@ -986,11 +987,13 @@ export function MarkdownEditor({
         if (!node) return
 
         if (result.schedule) {
-          // Scheduled task: keep the block, update with schedule info
+          // Recurring/scheduled task: update block with schedule, write target tags to disk
+          const targetId = Math.random().toString(36).slice(2, 10)
           const updatedData: Record<string, unknown> = {
-            instruction,
+            instruction: result.instruction,
             schedule: result.schedule,
             'schedule-label': result.scheduleLabel,
+            targetId,
           }
           const tr = editor.state.tr.setNodeMarkup(currentPos, undefined, {
             data: JSON.stringify(updatedData),
@@ -1004,24 +1007,40 @@ export function MarkdownEditor({
             onFrontmatterChange(buildFrontmatter(fields))
           }
 
-          // Insert response text below the block if any
-          if (result.response) {
-            let afterPos: number | null = null
-            editor.state.doc.descendants((n, p) => {
-              if (afterPos !== null) return false
-              if (n.type.name === 'taskBlock') {
-                try {
-                  const data = JSON.parse(n.attrs.data || '{}')
-                  if (data.instruction === instruction && !data.processing) {
-                    afterPos = p + n.nodeSize
-                    return false
+          // Write target tags directly to the file on disk after a short delay
+          // to let the editor save the updated content first
+          if (notePath) {
+            setTimeout(async () => {
+              try {
+                const file = await window.ipc.invoke('workspace:readFile', { path: notePath })
+                const content = file.data
+                const openTag = `<!--task-target:${targetId}-->`
+                const closeTag = `<!--/task-target:${targetId}-->`
+
+                // Only add if not already present
+                if (content.includes(openTag)) return
+
+                // Find the task block in the raw markdown and insert target tags after it
+                const blockJson = JSON.stringify(updatedData)
+                const blockStart = content.indexOf('```task\n' + blockJson)
+                if (blockStart !== -1) {
+                  const blockEnd = content.indexOf('\n```', blockStart + 8)
+                  if (blockEnd !== -1) {
+                    const insertAt = blockEnd + 4 // after the closing ```
+                    const before = content.slice(0, insertAt)
+                    const after = content.slice(insertAt)
+                    const updated = before + '\n\n' + openTag + '\n' + closeTag + after
+                    await window.ipc.invoke('workspace:writeFile', {
+                      path: notePath,
+                      data: updated,
+                      opts: { encoding: 'utf8' },
+                    })
                   }
-                } catch { /* skip */ }
+                }
+              } catch (err) {
+                console.error('[RowboatAdd] Failed to write target tags:', err)
               }
-            })
-            if (afterPos !== null) {
-              editor.chain().insertContentAt(afterPos, result.response).run()
-            }
+            }, 500)
           }
         } else {
           // One-time task: remove the processing block, insert response in its place

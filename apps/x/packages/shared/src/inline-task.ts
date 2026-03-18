@@ -29,6 +29,7 @@ export const InlineTaskBlockSchema = z.object({
     'schedule-label': z.string().optional(),
     lastRunAt: z.string().optional(),
     processing: z.boolean().optional(),
+    targetId: z.string().optional(),
 });
 
 export type InlineTaskBlock = z.infer<typeof InlineTaskBlockSchema>;

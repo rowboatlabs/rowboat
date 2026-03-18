@@ -529,6 +529,7 @@ const ipcSchemas = {
       notePath: z.string(),
     }),
     res: z.object({
+      instruction: z.string(),
       schedule: z.union([
         z.object({ type: z.literal('cron'), expression: z.string(), startDate: z.string(), endDate: z.string() }),
         z.object({ type: z.literal('window'), cron: z.string(), startTime: z.string(), endTime: z.string(), startDate: z.string(), endDate: z.string() }),
