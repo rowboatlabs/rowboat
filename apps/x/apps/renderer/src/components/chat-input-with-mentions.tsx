@@ -70,7 +70,7 @@ const providerDisplayNames: Record<string, string> = {
 }
 
 interface ConfiguredModel {
-  flavor: string
+  flavor: "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible" | "rowboat"
   model: string
   apiKey?: string
   baseURL?: string
@@ -224,7 +224,7 @@ function ChatInputInner({
             for (const model of allModels) {
               if (model) {
                 models.push({
-                  flavor,
+                  flavor: flavor as ConfiguredModel['flavor'],
                   model,
                   apiKey: (e.apiKey as string) || undefined,
                   baseURL: (e.baseURL as string) || undefined,

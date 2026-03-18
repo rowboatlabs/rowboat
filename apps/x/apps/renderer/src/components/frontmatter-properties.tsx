@@ -59,7 +59,7 @@ export function FrontmatterProperties({ raw, onRawChange, editable = true }: Fro
     })
   }, [])
 
-  const commitField = useCallback((index: number) => {
+  const commitField = useCallback((_index: number) => {
     setFields(prev => {
       commit(prev)
       return prev

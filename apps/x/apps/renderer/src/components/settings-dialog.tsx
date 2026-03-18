@@ -907,7 +907,7 @@ const DEFAULT_TAGS: TagDef[] = [
 
 function TagGroupTable({
   group,
-  tags,
+  tags: _tags,
   collapsed,
   onToggle,
   onAdd,
