@@ -9,6 +9,10 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
 import { TaskBlockExtension } from '@/extensions/task-block'
+import { ImageBlockExtension } from '@/extensions/image-block'
+import { EmbedBlockExtension } from '@/extensions/embed-block'
+import { ChartBlockExtension } from '@/extensions/chart-block'
+import { TableBlockExtension } from '@/extensions/table-block'
 import { Markdown } from 'tiptap-markdown'
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
 
@@ -136,6 +140,14 @@ function getMarkdownWithBlankLines(editor: Editor): string {
       blocks.push(listLines.join('\n'))
     } else if (node.type === 'taskBlock') {
       blocks.push('```task\n' + (node.attrs?.data as string || '{}') + '\n```')
+    } else if (node.type === 'imageBlock') {
+      blocks.push('```image\n' + (node.attrs?.data as string || '{}') + '\n```')
+    } else if (node.type === 'embedBlock') {
+      blocks.push('```embed\n' + (node.attrs?.data as string || '{}') + '\n```')
+    } else if (node.type === 'chartBlock') {
+      blocks.push('```chart\n' + (node.attrs?.data as string || '{}') + '\n```')
+    } else if (node.type === 'tableBlock') {
+      blocks.push('```table\n' + (node.attrs?.data as string || '{}') + '\n```')
     } else if (node.type === 'codeBlock') {
       const lang = (node.attrs?.language as string) || ''
       blocks.push('```' + lang + '\n' + nodeToText(node) + '\n```')
@@ -429,6 +441,10 @@ export function MarkdownEditor({
       }),
       ImageUploadPlaceholderExtension,
       TaskBlockExtension,
+      ImageBlockExtension,
+      EmbedBlockExtension,
+      ChartBlockExtension,
+      TableBlockExtension,
       WikiLink.configure({
         onCreate: wikiLinks?.onCreate
           ? (path) => {
