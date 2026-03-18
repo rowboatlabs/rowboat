@@ -3362,8 +3362,10 @@ function App() {
           const result = await window.ipc.invoke('workspace:readFile', { path: notePath, encoding: 'utf8' })
           const fileContent = result.data
           if (fileContent && fileContent.trim()) {
-            // Call LLM to summarize the transcript
-            const { notes } = await window.ipc.invoke('meeting:summarize', { transcript: fileContent })
+            // Extract meeting start time from frontmatter for calendar matching
+            const dateMatch = fileContent.match(/^date:\s*"(.+)"$/m)
+            const meetingStartTime = dateMatch?.[1]
+            const { notes } = await window.ipc.invoke('meeting:summarize', { transcript: fileContent, meetingStartTime })
             if (notes) {
               // Prepend meeting notes below the title but above the transcript
               const { raw: fm, body: transcriptBody } = splitFrontmatter(fileContent)
