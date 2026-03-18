@@ -3869,6 +3869,7 @@ function App() {
                           >
                             <MarkdownEditor
                               content={tabContent}
+                              notePath={tab.path}
                               onChange={(markdown) => { if (!isViewingHistory) handleEditorChange(tab.path, markdown) }}
                               onPrimaryHeadingCommit={() => {
                                 untitledRenameReadyPathsRef.current.add(tab.path)

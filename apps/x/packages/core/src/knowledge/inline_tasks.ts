@@ -176,6 +176,8 @@ interface InlineTask {
     startLine: number;
     /** Line index of the closing ``` fence */
     endLine: number;
+    /** Target region ID for recurring tasks */
+    targetId: string | null;
 }
 
 /**
@@ -183,7 +185,7 @@ interface InlineTask {
  * Returns { instruction, schedule } or null if not valid JSON.
  * Also supports legacy @rowboat format.
  */
-function parseBlockContent(contentLines: string[]): { instruction: string; schedule: InlineTaskSchedule | null; lastRunAt: string | null } | null {
+function parseBlockContent(contentLines: string[]): { instruction: string; schedule: InlineTaskSchedule | null; lastRunAt: string | null; targetId: string | null } | null {
     const raw = contentLines.join('\n').trim();
     try {
         const data = JSON.parse(raw);
@@ -193,6 +195,7 @@ function parseBlockContent(contentLines: string[]): { instruction: string; sched
                 instruction: parsed.data.instruction,
                 schedule: parsed.data.schedule ? { ...parsed.data.schedule, label: parsed.data['schedule-label'] ?? '' } as InlineTaskSchedule : null,
                 lastRunAt: parsed.data.lastRunAt ?? null,
+                targetId: parsed.data.targetId ?? null,
             };
         }
         // Fallback for blocks that have instruction but don't fully match schema
@@ -201,6 +204,7 @@ function parseBlockContent(contentLines: string[]): { instruction: string; sched
                 instruction: data.instruction,
                 schedule: data.schedule ?? null,
                 lastRunAt: data.lastRunAt ?? null,
+                targetId: data.targetId ?? null,
             };
         }
     } catch {
@@ -227,7 +231,7 @@ function parseBlockContent(contentLines: string[]): { instruction: string; sched
     const rawInstruction = firstRowboatLine?.trim() ?? instructionLines.join('\n').trim();
     const instruction = rawInstruction.replace(/^@rowboat:?\s*/, '');
     if (!instruction) return null;
-    return { instruction, schedule, lastRunAt: null };
+    return { instruction, schedule, lastRunAt: null, targetId: null };
 }
 
 /**
@@ -308,16 +312,16 @@ function findPendingTasks(body: string): InlineTask[] {
 
             const parsed = parseBlockContent(contentLines);
             if (parsed) {
-                const { instruction, schedule, lastRunAt } = parsed;
+                const { instruction, schedule, lastRunAt, targetId } = parsed;
 
                 if (schedule) {
                     if (isScheduledTaskDue(schedule, lastRunAt)) {
-                        tasks.push({ instruction, schedule, startLine, endLine });
+                        tasks.push({ instruction, schedule, startLine, endLine, targetId });
                     }
                 } else {
                     // One-time task: skip if already ran
                     if (!lastRunAt) {
-                        tasks.push({ instruction, schedule: null, startLine, endLine });
+                        tasks.push({ instruction, schedule: null, startLine, endLine, targetId });
                     }
                 }
             }
@@ -338,6 +342,32 @@ function insertResultBelow(body: string, endLine: number, result: string): strin
     return lines.join('\n');
 }
 
+
+/**
+ * Replace content inside a target region identified by targetId.
+ * If the target region exists, replaces its content.
+ * If it doesn't exist, creates the target region below the task block,
+ * wrapping any existing content between the block and the next block/heading.
+ */
+function replaceTargetRegion(body: string, targetId: string, result: string, endLine: number): string {
+    const openTag = `<!--task-target:${targetId}-->`;
+    const closeTag = `<!--/task-target:${targetId}-->`;
+    const openIdx = body.indexOf(openTag);
+    const closeIdx = body.indexOf(closeTag);
+
+    if (openIdx !== -1 && closeIdx !== -1 && closeIdx > openIdx) {
+        // Target region exists — replace content between the tags
+        const before = body.slice(0, openIdx + openTag.length);
+        const after = body.slice(closeIdx);
+        return before + '\n' + result + '\n' + after;
+    }
+
+    // Target region doesn't exist yet — create it below the task block's closing fence
+    const lines = body.split('\n');
+    const taggedResult = `${openTag}\n${result}\n${closeTag}`;
+    lines.splice(endLine + 1, 0, '', taggedResult);
+    return lines.join('\n');
+}
 
 /**
  * Determine if a note has any "live" tell-rowboat tasks.
@@ -495,7 +525,13 @@ async function processInlineTasks(): Promise<void> {
 
                 const result = await extractAgentResponse(run.id);
                 if (result) {
-                    currentBody = insertResultBelow(currentBody, task.endLine, result);
+                    if (task.targetId) {
+                        // Recurring task with target region — replace content inside the region
+                        currentBody = replaceTargetRegion(currentBody, task.targetId, result, task.endLine);
+                    } else {
+                        // No target region — insert below the block
+                        currentBody = insertResultBelow(currentBody, task.endLine, result);
+                    }
                     // Update the block JSON with lastRunAt
                     const timestamp = new Date().toISOString();
                     currentBody = updateBlockData(currentBody, task.startLine, task.endLine, timestamp);
@@ -529,6 +565,85 @@ async function processInlineTasks(): Promise<void> {
     } else {
         console.log('[InlineTasks] No pending tasks found');
     }
+}
+
+/**
+ * Process a @rowboat instruction via the inline task agent.
+ * The agent can execute one-off tasks and/or detect scheduling intent.
+ * Returns schedule info (if any), a schedule label, and optional response text.
+ */
+type ScheduleWithoutLabel =
+    | { type: 'cron'; expression: string; startDate: string; endDate: string }
+    | { type: 'window'; cron: string; startTime: string; endTime: string; startDate: string; endDate: string }
+    | { type: 'once'; runAt: string };
+
+export async function processRowboatInstruction(
+    instruction: string,
+    noteContent: string,
+    notePath: string,
+): Promise<{
+    instruction: string;
+    schedule: ScheduleWithoutLabel | null;
+    scheduleLabel: string | null;
+    response: string | null;
+}> {
+    const run = await createRun({ agentId: INLINE_TASK_AGENT });
+
+    const message = [
+        `Process the following @rowboat instruction from the note "${notePath}":`,
+        '',
+        `**Instruction:** ${instruction}`,
+        '',
+        '**Full note content for context:**',
+        '```markdown',
+        noteContent,
+        '```',
+    ].join('\n');
+
+    await createMessage(run.id, message);
+    await waitForRunCompletion(run.id);
+
+    const rawResponse = await extractAgentResponse(run.id);
+    if (!rawResponse) {
+        return { instruction, schedule: null, scheduleLabel: null, response: null };
+    }
+
+    // Parse out the schedule marker if present (allow multiline JSON)
+    const scheduleMarkerRegex = /<!--rowboat-schedule:([\s\S]*?)-->/;
+    const scheduleMatch = rawResponse.match(scheduleMarkerRegex);
+
+    // Parse out the instruction marker if present
+    const instructionMarkerRegex = /<!--rowboat-instruction:([\s\S]*?)-->/;
+    const instructionMatch = rawResponse.match(instructionMarkerRegex);
+
+    let schedule: ScheduleWithoutLabel | null = null;
+    let scheduleLabel: string | null = null;
+    let refinedInstruction = instruction;
+
+    if (instructionMatch) {
+        refinedInstruction = instructionMatch[1].trim();
+    }
+
+    if (scheduleMatch) {
+        try {
+            const parsed = JSON.parse(scheduleMatch[1]);
+            if (parsed && typeof parsed === 'object' && parsed.type) {
+                scheduleLabel = parsed.label || null;
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const { label: _, ...rest } = parsed;
+                schedule = rest as ScheduleWithoutLabel;
+            }
+        } catch {
+            // Invalid JSON in marker — ignore
+        }
+
+        // Scheduled task — no response content (agent only returns markers)
+        return { instruction: refinedInstruction, schedule, scheduleLabel, response: null };
+    }
+
+    // One-time task — the full response is the content
+    const response = rawResponse.trim() || null;
+    return { instruction: refinedInstruction, schedule: null, scheduleLabel: null, response };
 }
 
 /**
