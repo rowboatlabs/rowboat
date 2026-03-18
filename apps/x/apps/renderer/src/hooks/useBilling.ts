@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 
 interface BillingInfo {
+  userEmail: string | null
+  userId: string | null
   subscriptionPlan: string
   subscriptionStatus: string
   sanctionedCredits: number

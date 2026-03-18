@@ -526,6 +526,8 @@ const ipcSchemas = {
   'billing:getInfo': {
     req: z.null(),
     res: z.object({
+      userEmail: z.string().nullable(),
+      userId: z.string().nullable(),
       subscriptionPlan: z.string().nullable(),
       subscriptionStatus: z.string().nullable(),
       sanctionedCredits: z.number(),

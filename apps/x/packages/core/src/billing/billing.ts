@@ -2,6 +2,8 @@ import { getAccessToken } from '../auth/tokens.js';
 import { API_URL } from '../config/env.js';
 
 export interface BillingInfo {
+  userEmail: string | null;
+  userId: string | null;
   subscriptionPlan: string | null;
   subscriptionStatus: string | null;
   sanctionedCredits: number;
@@ -31,6 +33,8 @@ export async function getBillingInfo(): Promise<BillingInfo> {
     };
   };
   return {
+    userEmail: body.user.email ?? null,
+    userId: body.user.id ?? null,
     subscriptionPlan: body.billing.plan,
     subscriptionStatus: body.billing.status,
     sanctionedCredits: body.billing.usage.sanctionedCredits,

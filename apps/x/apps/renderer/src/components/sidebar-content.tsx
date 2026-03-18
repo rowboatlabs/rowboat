@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Bot,
   ChevronRight,
@@ -403,7 +403,20 @@ export function SidebarContentPanel({
   const [openConnectorsAfterClose, setOpenConnectorsAfterClose] = useState(false)
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
+  const [loggingIn, setLoggingIn] = useState(false)
   const { billing } = useBilling(isRowboatConnected)
+
+  const handleRowboatLogin = useCallback(async () => {
+    try {
+      setLoggingIn(true)
+      const result = await window.ipc.invoke('oauth:connect', { provider: 'rowboat' })
+      if (!result.success) {
+        setLoggingIn(false)
+      }
+    } catch {
+      setLoggingIn(false)
+    }
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -433,6 +446,7 @@ export function SidebarContentPanel({
     refreshOauthError()
     const cleanup = window.ipc.on('oauth:didConnect', () => {
       refreshOauthError()
+      setLoggingIn(false)
     })
 
     return () => {
@@ -488,8 +502,8 @@ export function SidebarContentPanel({
           />
         )}
       </SidebarContent>
-      {/* Billing / upgrade CTA */}
-      {isRowboatConnected && billing && (
+      {/* Billing / upgrade CTA or Log in CTA */}
+      {isRowboatConnected && billing ? (
         <div className="px-3 py-2">
           <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
             <span className="text-xs font-medium capitalize text-sidebar-foreground">
@@ -500,18 +514,30 @@ export function SidebarContentPanel({
             </button>
           </div>
         </div>
+      ) : null}
+      {/* Sign in CTA */}
+      {!isRowboatConnected && (
+        <div className="px-3 py-2">
+          <button
+            onClick={handleRowboatLogin}
+            disabled={loggingIn}
+            className="flex w-full items-center justify-center rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2.5 text-xs font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent/40 disabled:opacity-50"
+          >
+            {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
+          </button>
+        </div>
       )}
       {/* Bottom actions */}
       <div className="border-t border-sidebar-border px-2 py-2">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
-            <ConnectorsPopover open={connectorsOpen} onOpenChange={setConnectorsOpen}>
+            <ConnectorsPopover open={connectorsOpen} onOpenChange={setConnectorsOpen} mode="unconnected">
               <button
                 ref={connectorsButtonRef}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
               >
                 <Plug className="size-4" />
-                <span>Connected accounts</span>
+                <span>Connect Accounts</span>
               </button>
             </ConnectorsPopover>
             {hasOauthError && (
