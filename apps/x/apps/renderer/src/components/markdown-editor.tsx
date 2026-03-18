@@ -1005,23 +1005,32 @@ export function MarkdownEditor({
         if (currentPos !== null) {
           const node = editor.state.doc.nodeAt(currentPos)
           if (node) {
-            let tr = editor.state.tr.setNodeMarkup(currentPos, undefined, {
+            // Update the block data (remove processing, add schedule)
+            const tr = editor.state.tr.setNodeMarkup(currentPos, undefined, {
               data: JSON.stringify(updatedData),
             })
+            editor.view.dispatch(tr)
 
-            // Insert response text below the block if present
+            // Insert response text below the block as rendered markdown
             if (result.response) {
-              const insertPos = currentPos + node.nodeSize
-              const responseNode = editor.schema.nodes.paragraph?.create(
-                null,
-                editor.schema.text(result.response),
-              )
-              if (responseNode) {
-                tr = tr.insert(insertPos, responseNode)
+              // Re-find position after the dispatch above
+              let afterPos: number | null = null
+              editor.state.doc.descendants((n, pos) => {
+                if (afterPos !== null) return false
+                if (n.type.name === 'taskBlock') {
+                  try {
+                    const data = JSON.parse(n.attrs.data || '{}')
+                    if (data.instruction === instruction && !data.processing) {
+                      afterPos = pos + n.nodeSize
+                      return false
+                    }
+                  } catch { /* skip */ }
+                }
+              })
+              if (afterPos !== null) {
+                editor.chain().insertContentAt(afterPos, result.response).run()
               }
             }
-
-            editor.view.dispatch(tr)
           }
         }
       } catch (error) {
