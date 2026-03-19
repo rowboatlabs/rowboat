@@ -3480,12 +3480,17 @@ function App() {
         return
       }
 
-      const nodeSet = new Set(knowledgeFilePaths)
+      const graphFilePaths = knowledgeFilePaths.filter((p) => {
+        const normalized = stripKnowledgePrefix(p)
+        return !normalized.toLowerCase().startsWith('meetings/')
+      })
+
+      const nodeSet = new Set(graphFilePaths)
       const edges: GraphEdge[] = []
       const edgeKeys = new Set<string>()
 
       const contents = await Promise.all(
-        knowledgeFilePaths.map(async (path) => {
+        graphFilePaths.map(async (path) => {
           try {
             const result = await window.ipc.invoke('workspace:readFile', { path })
             return { path, data: result.data as string }
@@ -3544,7 +3549,7 @@ function App() {
         }
       }
 
-      const nodes = knowledgeFilePaths.map((path) => {
+      const nodes = graphFilePaths.map((path) => {
         const degree = degreeMap.get(path) ?? 0
         const radius = 6 + Math.min(18, degree * 2)
         const { group, depth } = getNodeGroup(path)
