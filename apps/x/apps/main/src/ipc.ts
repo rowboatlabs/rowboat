@@ -39,7 +39,7 @@ import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 import { search } from '@x/core/dist/search/search.js';
 import { versionHistory, voice } from '@x/core';
-import { classifySchedule } from '@x/core/dist/knowledge/inline_tasks.js';
+import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 
 /**
@@ -704,6 +704,9 @@ export function setupIpcHandlers() {
     'inline-task:classifySchedule': async (_event, args) => {
       const schedule = await classifySchedule(args.instruction);
       return { schedule };
+    },
+    'inline-task:process': async (_event, args) => {
+      return await processRowboatInstruction(args.instruction, args.noteContent, args.notePath);
     },
     'voice:getConfig': async () => {
       return voice.getVoiceConfig();

@@ -9,6 +9,10 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
 import { TaskBlockExtension } from '@/extensions/task-block'
+import { ImageBlockExtension } from '@/extensions/image-block'
+import { EmbedBlockExtension } from '@/extensions/embed-block'
+import { ChartBlockExtension } from '@/extensions/chart-block'
+import { TableBlockExtension } from '@/extensions/table-block'
 import { Markdown } from 'tiptap-markdown'
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
 
@@ -136,6 +140,14 @@ function getMarkdownWithBlankLines(editor: Editor): string {
       blocks.push(listLines.join('\n'))
     } else if (node.type === 'taskBlock') {
       blocks.push('```task\n' + (node.attrs?.data as string || '{}') + '\n```')
+    } else if (node.type === 'imageBlock') {
+      blocks.push('```image\n' + (node.attrs?.data as string || '{}') + '\n```')
+    } else if (node.type === 'embedBlock') {
+      blocks.push('```embed\n' + (node.attrs?.data as string || '{}') + '\n```')
+    } else if (node.type === 'chartBlock') {
+      blocks.push('```chart\n' + (node.attrs?.data as string || '{}') + '\n```')
+    } else if (node.type === 'tableBlock') {
+      blocks.push('```table\n' + (node.attrs?.data as string || '{}') + '\n```')
     } else if (node.type === 'codeBlock') {
       const lang = (node.attrs?.language as string) || ''
       blocks.push('```' + lang + '\n' + nodeToText(node) + '\n```')
@@ -220,6 +232,7 @@ interface MarkdownEditorProps {
   frontmatter?: string | null
   onFrontmatterChange?: (raw: string | null) => void
   onExport?: (format: 'md' | 'pdf' | 'docx') => void
+  notePath?: string
 }
 
 type WikiLinkMatch = {
@@ -311,6 +324,7 @@ export function MarkdownEditor({
   frontmatter,
   onFrontmatterChange,
   onExport,
+  notePath,
 }: MarkdownEditorProps) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -429,6 +443,10 @@ export function MarkdownEditor({
       }),
       ImageUploadPlaceholderExtension,
       TaskBlockExtension,
+      ImageBlockExtension,
+      EmbedBlockExtension,
+      ChartBlockExtension,
+      TableBlockExtension,
       WikiLink.configure({
         onCreate: wikiLinks?.onCreate
           ? (path) => {
@@ -912,24 +930,17 @@ export function MarkdownEditor({
     }
 
     if (activeRowboatMention) {
-      // Classify schedule intent for new blocks
-      const blockData: Record<string, unknown> = { instruction }
-      try {
-        const result = await window.ipc.invoke('inline-task:classifySchedule', { instruction })
-        if (result.schedule) {
-          const { label, ...rest } = result.schedule
-          blockData.schedule = rest
-          blockData['schedule-label'] = label
-        }
-      } catch (error) {
-        console.error('[RowboatAdd] Schedule classification failed:', error)
-      }
+      // Insert a temporary processing block
+      const blockData: Record<string, unknown> = { instruction, processing: true }
+
+      const insertFrom = activeRowboatMention.range.from
+      const insertTo = activeRowboatMention.range.to
 
       editor
         .chain()
         .focus()
         .insertContentAt(
-          { from: activeRowboatMention.range.from, to: activeRowboatMention.range.to },
+          { from: insertFrom, to: insertTo },
           [
             { type: 'taskBlock', attrs: { data: JSON.stringify(blockData) } },
             { type: 'paragraph' },
@@ -937,17 +948,124 @@ export function MarkdownEditor({
         )
         .run()
 
-      // Mark note as live
-      if (onFrontmatterChange) {
-        const fields = extractAllFrontmatterValues(frontmatter ?? null)
-        fields['live_note'] = 'true'
-        onFrontmatterChange(buildFrontmatter(fields))
-      }
-
       setActiveRowboatMention(null)
       setRowboatAnchorTop(null)
+
+      // Get editor content for the agent
+      const editorContent = editor.storage.markdown?.getMarkdown?.() ?? ''
+
+      // Helper to find the processing block
+      const findProcessingBlock = (): number | null => {
+        let pos: number | null = null
+        editor.state.doc.descendants((node, p) => {
+          if (pos !== null) return false
+          if (node.type.name === 'taskBlock') {
+            try {
+              const data = JSON.parse(node.attrs.data || '{}')
+              if (data.instruction === instruction && data.processing === true) {
+                pos = p
+                return false
+              }
+            } catch { /* skip */ }
+          }
+        })
+        return pos
+      }
+
+      try {
+        // Call the copilot assistant for both one-time and recurring tasks
+        const result = await window.ipc.invoke('inline-task:process', {
+          instruction,
+          noteContent: editorContent,
+          notePath: notePath ?? '',
+        })
+
+        const currentPos = findProcessingBlock()
+        if (currentPos === null) return
+
+        const node = editor.state.doc.nodeAt(currentPos)
+        if (!node) return
+
+        if (result.schedule) {
+          // Recurring/scheduled task: update block with schedule, write target tags to disk
+          const targetId = Math.random().toString(36).slice(2, 10)
+          const updatedData: Record<string, unknown> = {
+            instruction: result.instruction,
+            schedule: result.schedule,
+            'schedule-label': result.scheduleLabel,
+            targetId,
+          }
+          const tr = editor.state.tr.setNodeMarkup(currentPos, undefined, {
+            data: JSON.stringify(updatedData),
+          })
+          editor.view.dispatch(tr)
+
+          // Mark note as live
+          if (onFrontmatterChange) {
+            const fields = extractAllFrontmatterValues(frontmatter ?? null)
+            fields['live_note'] = 'true'
+            onFrontmatterChange(buildFrontmatter(fields))
+          }
+
+          // Write target tags directly to the file on disk after a short delay
+          // to let the editor save the updated content first
+          if (notePath) {
+            setTimeout(async () => {
+              try {
+                const file = await window.ipc.invoke('workspace:readFile', { path: notePath })
+                const content = file.data
+                const openTag = `<!--task-target:${targetId}-->`
+                const closeTag = `<!--/task-target:${targetId}-->`
+
+                // Only add if not already present
+                if (content.includes(openTag)) return
+
+                // Find the task block in the raw markdown and insert target tags after it
+                const blockJson = JSON.stringify(updatedData)
+                const blockStart = content.indexOf('```task\n' + blockJson)
+                if (blockStart !== -1) {
+                  const blockEnd = content.indexOf('\n```', blockStart + 8)
+                  if (blockEnd !== -1) {
+                    const insertAt = blockEnd + 4 // after the closing ```
+                    const before = content.slice(0, insertAt)
+                    const after = content.slice(insertAt)
+                    const updated = before + '\n\n' + openTag + '\n' + closeTag + after
+                    await window.ipc.invoke('workspace:writeFile', {
+                      path: notePath,
+                      data: updated,
+                      opts: { encoding: 'utf8' },
+                    })
+                  }
+                }
+              } catch (err) {
+                console.error('[RowboatAdd] Failed to write target tags:', err)
+              }
+            }, 500)
+          }
+        } else {
+          // One-time task: remove the processing block, insert response in its place
+          const insertPos = currentPos
+          const deleteEnd = currentPos + node.nodeSize
+          editor.chain().focus().deleteRange({ from: insertPos, to: deleteEnd }).run()
+
+          if (result.response) {
+            editor.chain().insertContentAt(insertPos, result.response).run()
+          }
+        }
+      } catch (error) {
+        console.error('[RowboatAdd] Processing failed:', error)
+
+        // Remove the processing block on error
+        const currentPos = findProcessingBlock()
+        if (currentPos !== null) {
+          const node = editor.state.doc.nodeAt(currentPos)
+          if (node) {
+            editor.chain().focus().deleteRange({ from: currentPos, to: currentPos + node.nodeSize }).run()
+          }
+        }
+      }
     }
-  }, [editor, activeRowboatMention, rowboatBlockEdit, frontmatter, onFrontmatterChange])
+  }, [editor, activeRowboatMention, rowboatBlockEdit, frontmatter, onFrontmatterChange, notePath])
 
   const handleRowboatRemove = useCallback(() => {
     if (!editor || !rowboatBlockEdit) return
