@@ -1,5 +1,5 @@
 export const API_URL =
-  process.env.API_URL || 'http://localhost:3002/v1';
+  process.env.API_URL || 'https://api.x.rowboatlabs.com/v1';
 
 export const SUPABASE_PROJECT_URL =
-  process.env.SUPABASE_PROJECT_URL || 'http://127.0.0.1:54321';
+  process.env.SUPABASE_PROJECT_URL || 'https://jpxoiuhlshgwixajvsbu.supabase.co';
