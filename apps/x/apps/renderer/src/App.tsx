@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon, RadioIcon, SquareIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -46,6 +46,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
@@ -78,6 +80,7 @@ import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
+import { useMeetingTranscription, type MeetingTranscriptionState } from '@/hooks/useMeetingTranscription'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -383,6 +386,10 @@ function FixedSidebarToggle({
   canNavigateForward,
   onNewChat,
   onOpenSearch,
+  meetingState,
+  meetingSummarizing,
+  meetingAvailable,
+  onToggleMeeting,
   leftInsetPx,
 }: {
   onNavigateBack: () => void
@@ -391,6 +398,10 @@ function FixedSidebarToggle({
   canNavigateForward: boolean
   onNewChat: () => void
   onOpenSearch: () => void
+  meetingState: MeetingTranscriptionState
+  meetingSummarizing: boolean
+  meetingAvailable: boolean
+  onToggleMeeting: () => void
   leftInsetPx: number
 }) {
   const { toggleSidebar, state } = useSidebar()
@@ -426,6 +437,37 @@ function FixedSidebarToggle({
       >
         <SearchIcon className="size-5" />
       </button>
+      {meetingAvailable && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onToggleMeeting}
+              disabled={meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:pointer-events-none",
+                meetingSummarizing
+                  ? "text-muted-foreground"
+                  : meetingState === 'recording'
+                    ? "text-red-500 hover:bg-accent"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              )}
+              style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
+            >
+              {meetingSummarizing ? (
+                <LoaderIcon className="size-4 animate-spin" />
+              ) : meetingState === 'recording' ? (
+                <SquareIcon className="size-4 animate-pulse" />
+              ) : (
+                <RadioIcon className="size-5" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {meetingSummarizing ? 'Generating meeting notes...' : meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
+          </TooltipContent>
+        </Tooltip>
+      )}
       {/* Back / Forward navigation */}
       {isCollapsed && (
         <>
@@ -618,6 +660,11 @@ function App() {
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
   voiceRef.current = voice
+
+  const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
+  const meetingTranscription = useMeetingTranscription(() => {
+    handleToggleMeetingRef.current?.()
+  })
 
   // Check if voice is available on mount and when OAuth state changes
   const refreshVoiceAvailability = useCallback(() => {
@@ -3314,6 +3361,73 @@ function App() {
     navigateToFile(notePath)
   }, [loadDirectory, navigateToFile, fileTabs])
 
+  const meetingNotePathRef = useRef<string | null>(null)
+  const [meetingSummarizing, setMeetingSummarizing] = useState(false)
+  const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
+
+  const startMeetingAfterPermissions = useCallback(async () => {
+    setShowMeetingPermissions(false)
+    localStorage.setItem('meeting-permissions-acknowledged', '1')
+    const notePath = await meetingTranscription.start()
+    if (notePath) {
+      meetingNotePathRef.current = notePath
+      await handleVoiceNoteCreated(notePath)
+    }
+  }, [meetingTranscription, handleVoiceNoteCreated])
+
+  const handleToggleMeeting = useCallback(async () => {
+    if (meetingTranscription.state === 'recording') {
+      await meetingTranscription.stop()
+
+      // Read the final transcript and generate meeting notes via LLM
+      const notePath = meetingNotePathRef.current
+      if (notePath) {
+        setMeetingSummarizing(true)
+        try {
+          const result = await window.ipc.invoke('workspace:readFile', { path: notePath, encoding: 'utf8' })
+          const fileContent = result.data
+          if (fileContent && fileContent.trim()) {
+            // Extract meeting start time from frontmatter for calendar matching
+            const dateMatch = fileContent.match(/^date:\s*"(.+)"$/m)
+            const meetingStartTime = dateMatch?.[1]
+            const { notes } = await window.ipc.invoke('meeting:summarize', { transcript: fileContent, meetingStartTime })
+            if (notes) {
+              // Prepend meeting notes below the title but above the transcript
+              const { raw: fm, body: transcriptBody } = splitFrontmatter(fileContent)
+              // Strip the "# Meeting note" title from transcript body — we'll put it first
+              const bodyWithoutTitle = transcriptBody.replace(/^#\s+Meeting note\s*\n*/, '')
+              const newBody = '# Meeting note\n\n' + notes + '\n\n---\n\n## Raw transcript\n\n' + bodyWithoutTitle
+              const newContent = fm ? `${fm}\n${newBody}` : newBody
+              await window.ipc.invoke('workspace:writeFile', {
+                path: notePath,
+                data: newContent,
+                opts: { encoding: 'utf8' },
+              })
+              // Refresh the file view
+              await handleVoiceNoteCreated(notePath)
+            }
+          }
+        } catch (err) {
+          console.error('[meeting] Failed to generate meeting notes:', err)
+        }
+        setMeetingSummarizing(false)
+        meetingNotePathRef.current = null
+      }
+    } else if (meetingTranscription.state === 'idle') {
+      // Show permissions modal on first use (macOS only — Windows works out of the box)
+      if (isMac && !localStorage.getItem('meeting-permissions-acknowledged')) {
+        setShowMeetingPermissions(true)
+        return
+      }
+      const notePath = await meetingTranscription.start()
+      if (notePath) {
+        meetingNotePathRef.current = notePath
+        await handleVoiceNoteCreated(notePath)
+      }
+    }
+  }, [meetingTranscription, handleVoiceNoteCreated])
+  handleToggleMeetingRef.current = handleToggleMeeting
+
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
     if (!resolvedPath) return null
@@ -4176,6 +4290,10 @@ function App() {
               canNavigateForward={canNavigateForward}
               onNewChat={handleNewChatTab}
               onOpenSearch={() => setIsSearchOpen(true)}
+              meetingState={meetingTranscription.state}
+              meetingSummarizing={meetingSummarizing}
+              meetingAvailable={voiceAvailable}
+              onToggleMeeting={() => { void handleToggleMeeting() }}
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
           </SidebarProvider>
@@ -4192,6 +4310,29 @@ function App() {
         open={showOnboarding}
         onComplete={handleOnboardingComplete}
       />
+      <Dialog open={showMeetingPermissions} onOpenChange={setShowMeetingPermissions}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Meeting transcription setup</DialogTitle>
+            <DialogDescription>
+              Rowboat needs <strong>Screen Recording</strong> permission to capture meeting audio from other apps (Zoom, Meet, etc.).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <p>To enable this:</p>
+            <ol className="list-decimal list-inside space-y-1.5">
+              <li>Open <strong>System Settings</strong> → <strong>Privacy & Security</strong></li>
+              <li>Click <strong>Screen Recording</strong></li>
+              <li>Toggle on <strong>Rowboat</strong></li>
+              <li>You may need to restart the app after granting permission</li>
+            </ol>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowMeetingPermissions(false)}>Cancel</Button>
+            <Button onClick={() => { void startMeetingAfterPermissions() }}>Continue</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   )
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol, net, shell, session } from "electron";
+import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session } from "electron";
 import path from "node:path";
 import {
   setupIpcHandlers,
@@ -92,13 +92,25 @@ function createWindow() {
     },
   });
 
-  // Grant microphone permission for voice mode
+  // Grant microphone and display-capture permissions
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    if (permission === 'media') {
+    if (permission === 'media' || permission === 'display-capture') {
       callback(true);
     } else {
       callback(false);
     }
+  });
+
+  // Auto-approve display media requests and route system audio as loopback.
+  // Electron requires a video source in the callback even if we only want audio.
+  // We pass the first available screen source; the renderer discards the video track.
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    if (sources.length === 0) {
+      callback({});
+      return;
+    }
+    callback({ video: sources[0], audio: 'loopback' });
   });
 
   // Show window when content is ready to prevent blank screen

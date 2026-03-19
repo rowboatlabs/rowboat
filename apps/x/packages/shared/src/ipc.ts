@@ -498,6 +498,15 @@ const ipcSchemas = {
       token: z.string(),
     }).nullable(),
   },
+  'meeting:summarize': {
+    req: z.object({
+      transcript: z.string(),
+      meetingStartTime: z.string().optional(),
+    }),
+    res: z.object({
+      notes: z.string(),
+    }),
+  },
   // Inline task schedule classification
   'export:note': {
     req: z.object({
