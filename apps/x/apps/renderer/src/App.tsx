@@ -387,6 +387,8 @@ function FixedSidebarToggle({
   onNewChat,
   onOpenSearch,
   meetingState,
+  meetingSummarizing,
+  meetingAvailable,
   onToggleMeeting,
   leftInsetPx,
 }: {
@@ -397,6 +399,8 @@ function FixedSidebarToggle({
   onNewChat: () => void
   onOpenSearch: () => void
   meetingState: MeetingTranscriptionState
+  meetingSummarizing: boolean
+  meetingAvailable: boolean
   onToggleMeeting: () => void
   leftInsetPx: number
 }) {
@@ -433,31 +437,37 @@ function FixedSidebarToggle({
       >
         <SearchIcon className="size-5" />
       </button>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={onToggleMeeting}
-            disabled={meetingState === 'connecting' || meetingState === 'stopping'}
-            className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:pointer-events-none",
-              meetingState === 'recording'
-                ? "text-red-500 hover:bg-accent"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-            )}
-            style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
-          >
-            {meetingState === 'recording' ? (
-              <SquareIcon className="size-4 animate-pulse" />
-            ) : (
-              <RadioIcon className="size-5" />
-            )}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          {meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
-        </TooltipContent>
-      </Tooltip>
+      {meetingAvailable && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onToggleMeeting}
+              disabled={meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:pointer-events-none",
+                meetingSummarizing
+                  ? "text-muted-foreground"
+                  : meetingState === 'recording'
+                    ? "text-red-500 hover:bg-accent"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              )}
+              style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
+            >
+              {meetingSummarizing ? (
+                <LoaderIcon className="size-4 animate-spin" />
+              ) : meetingState === 'recording' ? (
+                <SquareIcon className="size-4 animate-pulse" />
+              ) : (
+                <RadioIcon className="size-5" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {meetingSummarizing ? 'Generating meeting notes...' : meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
+          </TooltipContent>
+        </Tooltip>
+      )}
       {/* Back / Forward navigation */}
       {isCollapsed && (
         <>
@@ -3352,6 +3362,7 @@ function App() {
   }, [loadDirectory, navigateToFile, fileTabs])
 
   const meetingNotePathRef = useRef<string | null>(null)
+  const [meetingSummarizing, setMeetingSummarizing] = useState(false)
   const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
 
   const startMeetingAfterPermissions = useCallback(async () => {
@@ -3371,6 +3382,7 @@ function App() {
       // Read the final transcript and generate meeting notes via LLM
       const notePath = meetingNotePathRef.current
       if (notePath) {
+        setMeetingSummarizing(true)
         try {
           const result = await window.ipc.invoke('workspace:readFile', { path: notePath, encoding: 'utf8' })
           const fileContent = result.data
@@ -3398,6 +3410,7 @@ function App() {
         } catch (err) {
           console.error('[meeting] Failed to generate meeting notes:', err)
         }
+        setMeetingSummarizing(false)
         meetingNotePathRef.current = null
       }
     } else if (meetingTranscription.state === 'idle') {
@@ -4278,6 +4291,8 @@ function App() {
               onNewChat={handleNewChatTab}
               onOpenSearch={() => setIsSearchOpen(true)}
               meetingState={meetingTranscription.state}
+              meetingSummarizing={meetingSummarizing}
+              meetingAvailable={voiceAvailable}
               onToggleMeeting={() => { void handleToggleMeeting() }}
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
