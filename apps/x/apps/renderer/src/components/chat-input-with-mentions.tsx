@@ -266,9 +266,13 @@ function ChatInputInner({
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
 
-  // Check search tool availability (brave or exa)
+  // Check search tool availability (brave or exa, or signed-in via gateway)
   useEffect(() => {
     const checkSearch = async () => {
+      if (isRowboatConnected) {
+        setSearchAvailable(true)
+        return
+      }
       let available = false
       try {
         const raw = await window.ipc.invoke('workspace:readFile', { path: 'config/brave-search.json' })
@@ -285,7 +289,7 @@ function ChatInputInner({
       setSearchAvailable(available)
     }
     checkSearch()
-  }, [isActive])
+  }, [isActive, isRowboatConnected])
 
   const handleModelChange = useCallback(async (key: string) => {
     const entry = configuredModels.find((m) => `${m.flavor}/${m.model}` === key)
