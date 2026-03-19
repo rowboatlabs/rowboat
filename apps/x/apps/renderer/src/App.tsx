@@ -3414,8 +3414,8 @@ function App() {
         meetingNotePathRef.current = null
       }
     } else if (meetingTranscription.state === 'idle') {
-      // Show permissions modal on first use
-      if (!localStorage.getItem('meeting-permissions-acknowledged')) {
+      // Show permissions modal on first use (macOS only — Windows works out of the box)
+      if (isMac && !localStorage.getItem('meeting-permissions-acknowledged')) {
         setShowMeetingPermissions(true)
         return
       }
