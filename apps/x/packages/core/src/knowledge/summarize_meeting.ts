@@ -12,13 +12,14 @@ const SYSTEM_PROMPT = `You are a meeting notes assistant. Given a raw meeting tr
 
 ## Calendar matching
 You will be given the transcript (with a timestamp of when recording started) and recent calendar events with their titles, times, and attendees. If a calendar event clearly matches this meeting (overlapping time + content aligns), then:
-- Use the calendar event title as the meeting title (output it as the first line: "## <event title>")
+- Do NOT output a title or heading — the title is already set by the caller.
 - Replace generic speaker labels ("Speaker 0", "Speaker 1", "System audio") with actual attendee names, but ONLY if you have HIGH CONFIDENCE about which speaker is which based on the discussion content. If unsure, use "They" instead of "Speaker 0" etc.
 - "You" in the transcript is the local user — if the calendar event has an organizer or you can identify who "You" is from context, use their name.
 
-If no calendar event matches with high confidence, or if no calendar events are provided, skip the title line and use "They" for all non-"You" speakers.
+If no calendar event matches with high confidence, or if no calendar events are provided, use "They" for all non-"You" speakers.
 
 ## Format rules
+- Do NOT output a title or top-level heading (# or ##). Start directly with section content.
 - Use ### for section headers that group related discussion topics
 - Section headers should be in sentence case (e.g. "### Onboarding flow status"), NOT Title Case
 - Use bullet points with sub-bullets for details
@@ -83,13 +84,70 @@ function loadRecentCalendarEvents(meetingTime: string): string {
     }
 }
 
-export async function summarizeMeeting(transcript: string, meetingStartTime?: string): Promise<string> {
+/**
+ * Load a specific calendar event from the calendar_sync directory using
+ * the calendar_event JSON stored in the meeting note frontmatter.
+ * If a `source` field is present, loads the full event file for richer
+ * details (attendees, organizer, etc.).
+ */
+function loadCalendarEventContext(calendarEventJson: string): string {
+    try {
+        const meta = JSON.parse(calendarEventJson) as {
+            summary?: string;
+            start?: string;
+            end?: string;
+            location?: string;
+            htmlLink?: string;
+            conferenceLink?: string;
+            source?: string;
+        };
+
+        // Try to load the full event from source file for attendee info
+        let attendees = '';
+        let organizer = '';
+        if (meta.source) {
+            try {
+                const fullPath = path.join(WorkDir, meta.source);
+                if (fs.existsSync(fullPath)) {
+                    const event = JSON.parse(fs.readFileSync(fullPath, 'utf-8'));
+                    attendees = (event.attendees || [])
+                        .map((a: { displayName?: string; email?: string }) => a.displayName || a.email)
+                        .filter(Boolean)
+                        .join(', ');
+                    organizer = event.organizer?.displayName || event.organizer?.email || '';
+                }
+            } catch {
+                // Fall through — use metadata only
+            }
+        }
+
+        const eventStr =
+            `- Title: ${meta.summary || 'Untitled'}\n` +
+            `  Start: ${meta.start || ''}\n` +
+            `  End: ${meta.end || ''}\n` +
+            `  Organizer: ${organizer || 'unknown'}\n` +
+            `  Attendees: ${attendees || 'none listed'}`;
+
+        return `\n\n## Calendar event for this meeting\n\n${eventStr}`;
+    } catch {
+        return '';
+    }
+}
+
+export async function summarizeMeeting(transcript: string, meetingStartTime?: string, calendarEventJson?: string): Promise<string> {
     const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
     const config = await repo.getConfig();
     const provider = createProvider(config.provider);
     const model = provider.languageModel(config.model);
 
-    const calendarContext = meetingStartTime ? loadRecentCalendarEvents(meetingStartTime) : '';
+    // If a specific calendar event was linked, use it directly.
+    // Otherwise fall back to scanning events within ±3 hours.
+    let calendarContext: string;
+    if (calendarEventJson) {
+        calendarContext = loadCalendarEventContext(calendarEventJson);
+    } else {
+        calendarContext = meetingStartTime ? loadRecentCalendarEvents(meetingStartTime) : '';
+    }
 
     const prompt = `Meeting recording started at: ${meetingStartTime || 'unknown'}\n\n${transcript}${calendarContext}`;
 

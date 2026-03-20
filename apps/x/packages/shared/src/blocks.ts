@@ -34,3 +34,29 @@ export const TableBlockSchema = z.object({
 });
 
 export type TableBlock = z.infer<typeof TableBlockSchema>;
+
+export const CalendarEventSchema = z.object({
+  summary: z.string().optional(),
+  start: z.object({
+    dateTime: z.string().optional(),
+    date: z.string().optional(),
+  }).optional(),
+  end: z.object({
+    dateTime: z.string().optional(),
+    date: z.string().optional(),
+  }).optional(),
+  location: z.string().optional(),
+  htmlLink: z.string().optional(),
+  conferenceLink: z.string().optional(),
+  source: z.string().optional(),
+});
+
+export type CalendarEvent = z.infer<typeof CalendarEventSchema>;
+
+export const CalendarBlockSchema = z.object({
+  title: z.string().optional(),
+  events: z.array(CalendarEventSchema),
+  showJoinButton: z.boolean().optional(),
+});
+
+export type CalendarBlock = z.infer<typeof CalendarBlockSchema>;

@@ -616,14 +616,16 @@
 .tiptap-editor .ProseMirror .image-block-wrapper,
 .tiptap-editor .ProseMirror .embed-block-wrapper,
 .tiptap-editor .ProseMirror .chart-block-wrapper,
-.tiptap-editor .ProseMirror .table-block-wrapper {
+.tiptap-editor .ProseMirror .table-block-wrapper,
+.tiptap-editor .ProseMirror .calendar-block-wrapper {
   margin: 8px 0;
 }
 
 .tiptap-editor .ProseMirror .image-block-card,
 .tiptap-editor .ProseMirror .embed-block-card,
 .tiptap-editor .ProseMirror .chart-block-card,
-.tiptap-editor .ProseMirror .table-block-card {
+.tiptap-editor .ProseMirror .table-block-card,
+.tiptap-editor .ProseMirror .calendar-block-card {
   position: relative;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -636,14 +638,16 @@
 .tiptap-editor .ProseMirror .image-block-card:hover,
 .tiptap-editor .ProseMirror .embed-block-card:hover,
 .tiptap-editor .ProseMirror .chart-block-card:hover,
-.tiptap-editor .ProseMirror .table-block-card:hover {
+.tiptap-editor .ProseMirror .table-block-card:hover,
+.tiptap-editor .ProseMirror .calendar-block-card:hover {
   background-color: color-mix(in srgb, var(--muted) 70%, transparent);
 }
 
 .tiptap-editor .ProseMirror .image-block-wrapper.ProseMirror-selectednode .image-block-card,
 .tiptap-editor .ProseMirror .embed-block-wrapper.ProseMirror-selectednode .embed-block-card,
 .tiptap-editor .ProseMirror .chart-block-wrapper.ProseMirror-selectednode .chart-block-card,
-.tiptap-editor .ProseMirror .table-block-wrapper.ProseMirror-selectednode .table-block-card {
+.tiptap-editor .ProseMirror .table-block-wrapper.ProseMirror-selectednode .table-block-card,
+.tiptap-editor .ProseMirror .calendar-block-wrapper.ProseMirror-selectednode .calendar-block-card {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
@@ -651,7 +655,8 @@
 .tiptap-editor .ProseMirror .image-block-delete,
 .tiptap-editor .ProseMirror .embed-block-delete,
 .tiptap-editor .ProseMirror .chart-block-delete,
-.tiptap-editor .ProseMirror .table-block-delete {
+.tiptap-editor .ProseMirror .table-block-delete,
+.tiptap-editor .ProseMirror .calendar-block-delete {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -673,14 +678,16 @@
 .tiptap-editor .ProseMirror .image-block-card:hover .image-block-delete,
 .tiptap-editor .ProseMirror .embed-block-card:hover .embed-block-delete,
 .tiptap-editor .ProseMirror .chart-block-card:hover .chart-block-delete,
-.tiptap-editor .ProseMirror .table-block-card:hover .table-block-delete {
+.tiptap-editor .ProseMirror .table-block-card:hover .table-block-delete,
+.tiptap-editor .ProseMirror .calendar-block-card:hover .calendar-block-delete {
   opacity: 1;
 }
 
 .tiptap-editor .ProseMirror .image-block-delete:hover,
 .tiptap-editor .ProseMirror .embed-block-delete:hover,
 .tiptap-editor .ProseMirror .chart-block-delete:hover,
-.tiptap-editor .ProseMirror .table-block-delete:hover {
+.tiptap-editor .ProseMirror .table-block-delete:hover,
+.tiptap-editor .ProseMirror .calendar-block-delete:hover {
   background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
   color: var(--foreground);
 }
@@ -834,6 +841,264 @@
   gap: 6px;
   color: color-mix(in srgb, var(--foreground) 55%, transparent);
   font-size: 13px;
+}
+
+/* Calendar block */
+.tiptap-editor .ProseMirror .calendar-block-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .calendar-block-loading,
+.tiptap-editor .ProseMirror .calendar-block-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+}
+
+.tiptap-editor .ProseMirror .calendar-block-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  font-size: 13px;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-date-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-separator {
+  border: none;
+  border-top: 1px dashed color-mix(in srgb, var(--foreground) 20%, transparent);
+  margin: 4px 0;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-date-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  padding: 12px 0;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-date-left {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 140px;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-day {
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1;
+  color: color-mix(in srgb, var(--foreground) 70%, transparent);
+}
+
+.tiptap-editor .ProseMirror .calendar-block-month-weekday {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-month {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+  line-height: 1.3;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-weekday {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 40%, transparent);
+  line-height: 1.3;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-events {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-event {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background-color 0.12s ease;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-event-clickable {
+  cursor: pointer;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-event-clickable:hover {
+  background-color: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+
+.tiptap-editor .ProseMirror .calendar-block-event-bar {
+  width: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  min-height: 32px;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-event-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-event-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .calendar-block-event-time {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+}
+
+.tiptap-editor .ProseMirror .calendar-block-join-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #7ec8c8;
+  background: color-mix(in srgb, #7ec8c8 12%, transparent);
+  border: 1px solid color-mix(in srgb, #7ec8c8 25%, transparent);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+  width: fit-content;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-join-btn:hover {
+  background: color-mix(in srgb, #7ec8c8 22%, transparent);
+  border-color: color-mix(in srgb, #7ec8c8 40%, transparent);
+}
+
+/* Meeting event banner */
+.meeting-event-banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 20px 0;
+}
+
+.meeting-event-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--foreground) 65%, transparent);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.meeting-event-pill:hover {
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.meeting-event-chevron {
+  transition: transform 0.15s ease;
+}
+
+.meeting-event-chevron-open {
+  transform: rotate(180deg);
+}
+
+.meeting-event-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 20px;
+  z-index: 50;
+  min-width: 260px;
+  padding: 10px 12px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.meeting-event-dropdown-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.meeting-event-dropdown-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #7ec8c8;
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+
+.meeting-event-dropdown-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.meeting-event-dropdown-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.meeting-event-dropdown-time {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+}
+
+.meeting-event-dropdown-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--foreground);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.meeting-event-dropdown-link:hover {
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
 }
 
 /* Dark mode overrides */
