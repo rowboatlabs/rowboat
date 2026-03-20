@@ -80,7 +80,7 @@ import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
-import { useMeetingTranscription, type MeetingTranscriptionState } from '@/hooks/useMeetingTranscription'
+import { useMeetingTranscription, type MeetingTranscriptionState, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -283,9 +283,12 @@ function sortNodes(nodes: TreeNode[]): TreeNode[] {
 }
 
 /**
- * Flatten date-based folder hierarchy under Meetings/ source folders.
- * Turns Meetings/granola/2026/03/15/Title.md into a flat list under
- * Meetings/granola/ with display name "2026-03-15 Title".
+ * Organize Meetings/ source folders into date-grouped subfolders.
+ *
+ * - rowboat:  rowboat/2026-03-20/meeting-xxx.md  → keeps date folders as-is
+ * - granola:  granola/2026/03/18/Title.md         → collapses into "2026-03-18" folders
+ * - Files directly under a source folder (no date subfolder) are grouped
+ *   by the date prefix in their filename (e.g. meeting-2026-03-17T...).
  */
 function flattenMeetingsTree(nodes: TreeNode[]): TreeNode[] {
   return nodes.flatMap(node => {
@@ -294,14 +297,18 @@ function flattenMeetingsTree(nodes: TreeNode[]): TreeNode[] {
     const flattenedSourceChildren = (node.children ?? []).flatMap(sourceNode => {
       if (sourceNode.kind !== 'dir') return [sourceNode]
 
-      // Collect all files recursively from the date hierarchy
-      const files: TreeNode[] = []
+      // Collect all files with their date group label
+      const dateGroups = new Map<string, TreeNode[]>()
+
       function collectFiles(n: TreeNode, dateParts: string[]) {
         for (const child of n.children ?? []) {
           if (child.kind === 'file') {
             const dateStr = dateParts.join('-')
-            const displayName = dateStr ? `${dateStr} ${child.name}` : child.name
-            files.push({ ...child, name: displayName })
+            // If file is at root of source folder, try to extract date from filename
+            const groupKey = dateStr || extractDateFromFilename(child.name) || 'other'
+            const group = dateGroups.get(groupKey) ?? []
+            group.push(child)
+            dateGroups.set(groupKey, group)
           } else if (child.kind === 'dir') {
             collectFiles(child, [...dateParts, child.name])
           }
@@ -309,13 +316,24 @@ function flattenMeetingsTree(nodes: TreeNode[]): TreeNode[] {
       }
       collectFiles(sourceNode, [])
 
-      // Hide empty source folders
-      if (files.length === 0) return []
+      if (dateGroups.size === 0) return []
 
-      // Sort files reverse chronologically (newest first)
-      files.sort((a, b) => b.name.localeCompare(a.name))
+      // Build date folder nodes, sorted reverse chronologically
+      const dateFolderNodes: TreeNode[] = [...dateGroups.entries()]
+        .sort(([a], [b]) => b.localeCompare(a))
+        .map(([dateKey, files]) => {
+          // Sort files within each date group reverse chronologically
+          files.sort((a, b) => b.name.localeCompare(a.name))
+          return {
+            name: dateKey,
+            path: `${sourceNode.path}/${dateKey}`,
+            kind: 'dir' as const,
+            children: files,
+            loaded: true,
+          }
+        })
 
-      return [{ ...sourceNode, children: files }]
+      return [{ ...sourceNode, children: dateFolderNodes }]
     })
 
     // Hide Meetings folder entirely if no source folders have files
@@ -323,6 +341,12 @@ function flattenMeetingsTree(nodes: TreeNode[]): TreeNode[] {
 
     return [{ ...node, children: flattenedSourceChildren }]
   })
+}
+
+/** Extract YYYY-MM-DD from filenames like "meeting-2026-03-17T05-01-47.md" */
+function extractDateFromFilename(name: string): string | null {
+  const match = name.match(/(\d{4}-\d{2}-\d{2})/)
+  return match ? match[1] : null
 }
 
 // Build tree structure from flat entries
@@ -3362,13 +3386,16 @@ function App() {
   }, [loadDirectory, navigateToFile, fileTabs])
 
   const meetingNotePathRef = useRef<string | null>(null)
+  const pendingCalendarEventRef = useRef<CalendarEventMeta | undefined>(undefined)
   const [meetingSummarizing, setMeetingSummarizing] = useState(false)
   const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
 
   const startMeetingAfterPermissions = useCallback(async () => {
     setShowMeetingPermissions(false)
     localStorage.setItem('meeting-permissions-acknowledged', '1')
-    const notePath = await meetingTranscription.start()
+    const calEvent = pendingCalendarEventRef.current
+    pendingCalendarEventRef.current = undefined
+    const notePath = await meetingTranscription.start(calEvent)
     if (notePath) {
       meetingNotePathRef.current = notePath
       await handleVoiceNoteCreated(notePath)
@@ -3387,16 +3414,25 @@ function App() {
           const result = await window.ipc.invoke('workspace:readFile', { path: notePath, encoding: 'utf8' })
           const fileContent = result.data
           if (fileContent && fileContent.trim()) {
-            // Extract meeting start time from frontmatter for calendar matching
+            // Extract meeting start time and calendar event from frontmatter
             const dateMatch = fileContent.match(/^date:\s*"(.+)"$/m)
             const meetingStartTime = dateMatch?.[1]
-            const { notes } = await window.ipc.invoke('meeting:summarize', { transcript: fileContent, meetingStartTime })
+            // If a calendar event was linked, pass it directly so the summarizer
+            // skips scanning and uses this event for attendee/title info.
+            const calEventMatch = fileContent.match(/^calendar_event:\s*'(.+)'$/m)
+            const calendarEventJson = calEventMatch?.[1]?.replace(/''/g, "'")
+            const { notes } = await window.ipc.invoke('meeting:summarize', { transcript: fileContent, meetingStartTime, calendarEventJson })
             if (notes) {
               // Prepend meeting notes below the title but above the transcript
               const { raw: fm, body: transcriptBody } = splitFrontmatter(fileContent)
-              // Strip the "# Meeting note" title from transcript body — we'll put it first
-              const bodyWithoutTitle = transcriptBody.replace(/^#\s+Meeting note\s*\n*/, '')
-              const newBody = '# Meeting note\n\n' + notes + '\n\n---\n\n## Raw transcript\n\n' + bodyWithoutTitle
+              // Use frontmatter title as the heading (set from calendar event summary)
+              const fmTitleMatch = fileContent.match(/^title:\s*(.+)$/m)
+              const noteTitle = fmTitleMatch?.[1]?.trim() || 'Meeting note'
+              // Strip any existing top-level heading from body
+              const bodyWithoutTitle = transcriptBody.replace(/^#\s+.+\s*\n*/, '')
+              // Also strip any title/heading the LLM may have generated
+              const cleanedNotes = notes.replace(/^#{1,2}\s+.+\n+/, '')
+              const newBody = `# ${noteTitle}\n\n` + cleanedNotes + '\n\n---\n\n## Raw transcript\n\n' + bodyWithoutTitle
               const newContent = fm ? `${fm}\n${newBody}` : newBody
               await window.ipc.invoke('workspace:writeFile', {
                 path: notePath,
@@ -3419,7 +3455,9 @@ function App() {
         setShowMeetingPermissions(true)
         return
       }
-      const notePath = await meetingTranscription.start()
+      const calEvent = pendingCalendarEventRef.current
+      pendingCalendarEventRef.current = undefined
+      const notePath = await meetingTranscription.start(calEvent)
       if (notePath) {
         meetingNotePathRef.current = notePath
         await handleVoiceNoteCreated(notePath)
@@ -3427,6 +3465,30 @@ function App() {
     }
   }, [meetingTranscription, handleVoiceNoteCreated])
   handleToggleMeetingRef.current = handleToggleMeeting
+
+  // Listen for calendar block "join meeting & take notes" events
+  useEffect(() => {
+    const handler = () => {
+      // Read calendar event data set by the calendar block on window
+      const pending = window.__pendingCalendarEvent
+      window.__pendingCalendarEvent = undefined
+      if (pending) {
+        pendingCalendarEventRef.current = {
+          summary: pending.summary,
+          start: pending.start,
+          end: pending.end,
+          location: pending.location,
+          htmlLink: pending.htmlLink,
+          conferenceLink: pending.conferenceLink,
+          source: pending.source,
+        }
+      }
+      // Use the same toggle flow — it will pick up pendingCalendarEventRef
+      handleToggleMeetingRef.current?.()
+    }
+    window.addEventListener('calendar-block:join-meeting', handler)
+    return () => window.removeEventListener('calendar-block:join-meeting', handler)
+  }, [])
 
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)

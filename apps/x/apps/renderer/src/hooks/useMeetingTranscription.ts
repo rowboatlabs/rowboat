@@ -47,18 +47,46 @@ interface TranscriptEntry {
     text: string;
 }
 
-function formatTranscript(entries: TranscriptEntry[], date: string): string {
+export interface CalendarEventMeta {
+    summary?: string
+    start?: { dateTime?: string; date?: string }
+    end?: { dateTime?: string; date?: string }
+    location?: string
+    htmlLink?: string
+    conferenceLink?: string
+    source?: string
+}
+
+function formatTranscript(entries: TranscriptEntry[], date: string, calendarEvent?: CalendarEventMeta): string {
+    const noteTitle = calendarEvent?.summary || 'Meeting note';
     const lines = [
         '---',
         'type: meeting',
         'source: rowboat',
-        'title: Meeting note',
+        `title: ${noteTitle}`,
         `date: "${date}"`,
+    ];
+    if (calendarEvent) {
+        // Serialize as a JSON string on one line — the frontmatter system
+        // only supports flat key: value pairs, not nested YAML objects.
+        const eventObj: Record<string, string> = {}
+        if (calendarEvent.summary) eventObj.summary = calendarEvent.summary
+        if (calendarEvent.start?.dateTime) eventObj.start = calendarEvent.start.dateTime
+        else if (calendarEvent.start?.date) eventObj.start = calendarEvent.start.date
+        if (calendarEvent.end?.dateTime) eventObj.end = calendarEvent.end.dateTime
+        else if (calendarEvent.end?.date) eventObj.end = calendarEvent.end.date
+        if (calendarEvent.location) eventObj.location = calendarEvent.location
+        if (calendarEvent.htmlLink) eventObj.htmlLink = calendarEvent.htmlLink
+        if (calendarEvent.conferenceLink) eventObj.conferenceLink = calendarEvent.conferenceLink
+        if (calendarEvent.source) eventObj.source = calendarEvent.source
+        lines.push(`calendar_event: '${JSON.stringify(eventObj).replace(/'/g, "''")}'`)
+    }
+    lines.push(
         '---',
         '',
-        '# Meeting note',
+        `# ${noteTitle}`,
         '',
-    ];
+    );
     for (let i = 0; i < entries.length; i++) {
         if (i > 0 && entries[i].speaker !== entries[i - 1].speaker) {
             lines.push('');
@@ -87,6 +115,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
     const onAutoStopRef = useRef(onAutoStop);
     onAutoStopRef.current = onAutoStop;
     const dateRef = useRef<string>('');
+    const calendarEventRef = useRef<CalendarEventMeta | undefined>(undefined);
 
     const writeTranscriptToFile = useCallback(async () => {
         if (!notePathRef.current) return;
@@ -100,7 +129,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
             }
         }
         if (entries.length === 0) return;
-        const content = formatTranscript(entries, dateRef.current);
+        const content = formatTranscript(entries, dateRef.current, calendarEventRef.current);
         try {
             await window.ipc.invoke('workspace:writeFile', {
                 path: notePathRef.current,
@@ -151,7 +180,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         }
     }, []);
 
-    const start = useCallback(async (): Promise<string | null> => {
+    const start = useCallback(async (calendarEvent?: CalendarEventMeta): Promise<string | null> => {
         if (state !== 'idle') return null;
         setState('connecting');
 
@@ -345,10 +374,13 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         dateRef.current = dateStr;
         const dateFolder = dateStr.split('T')[0]; // YYYY-MM-DD
         const timestamp = dateStr.replace(/:/g, '-').replace(/\.\d+Z$/, '');
-        const notePath = `knowledge/Meetings/rowboat/${dateFolder}/meeting-${timestamp}.md`;
+        const filename = calendarEvent?.summary
+            ? calendarEvent.summary.replace(/[\\/*?:"<>|]/g, '').replace(/\s+/g, '_').substring(0, 100).trim()
+            : `meeting-${timestamp}`;
+        const notePath = `knowledge/Meetings/rowboat/${dateFolder}/${filename}.md`;
         notePathRef.current = notePath;
-
-        const initialContent = formatTranscript([], dateStr);
+        calendarEventRef.current = calendarEvent;
+        const initialContent = formatTranscript([], dateStr, calendarEvent);
         await window.ipc.invoke('workspace:writeFile', {
             path: notePath,
             data: initialContent,
