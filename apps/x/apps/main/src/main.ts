@@ -23,12 +23,35 @@ import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js"
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
+import { execSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // run this as early in the main process as possible
 if (started) app.quit();
+
+// Fix PATH for packaged Electron apps on macOS/Linux.
+// Packaged apps inherit a minimal environment that doesn't include paths from
+// the user's shell profile (nvm, Homebrew, etc.). Spawn the user's login shell
+// to resolve the full PATH, using delimiters to safely extract it from any
+// surrounding shell output (motd, greeting messages, etc.).
+if (process.platform !== 'win32') {
+  try {
+    const userShell = process.env.SHELL || '/bin/zsh';
+    const delimiter = '__ROWBOAT_PATH__';
+    const output = execSync(
+      `${userShell} -lc 'echo -n "${delimiter}$PATH${delimiter}"'`,
+      { encoding: 'utf-8', timeout: 5000 },
+    );
+    const match = output.match(new RegExp(`${delimiter}(.+?)${delimiter}`));
+    if (match?.[1]) {
+      process.env.PATH = match[1];
+    }
+  } catch {
+    // Silently fall back to the existing PATH if shell resolution fails
+  }
+}
 
 // Path resolution differs between development and production:
 const preloadPath = app.isPackaged
