@@ -952,7 +952,8 @@ export function MarkdownEditor({
       setRowboatAnchorTop(null)
 
       // Get editor content for the agent
-      const editorContent = editor.storage.markdown?.getMarkdown?.() ?? ''
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const editorContent = (editor.storage as any).markdown?.getMarkdown?.() ?? ''
 
       // Helper to find the processing block
       const findProcessingBlock = (): number | null => {
