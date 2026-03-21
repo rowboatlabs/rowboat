@@ -1,8 +1,8 @@
 import { mergeAttributes, Node } from '@tiptap/react'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
-import { X, Calendar, Video } from 'lucide-react'
+import { X, Calendar, Video, ChevronDown, Mic } from 'lucide-react'
 import { blocks } from '@x/shared'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 function formatTime(dateStr: string): string {
   const d = new Date(dateStr)
@@ -63,6 +63,57 @@ interface ResolvedEvent {
 }
 
 const EVENT_BAR_COLOR = '#7ec8c8'
+
+function JoinMeetingSplitButton({ onJoinAndNotes, onNotesOnly }: {
+  onJoinAndNotes: () => void
+  onNotesOnly: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div className="calendar-block-split-btn" ref={ref}>
+      <button
+        className="calendar-block-split-main"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); onJoinAndNotes() }}
+      >
+        <Video size={13} />
+        Join meeting & take notes
+      </button>
+      <div className="calendar-block-split-chevron-wrap">
+        <button
+          className={`calendar-block-split-chevron ${open ? 'calendar-block-split-chevron-open' : ''}`}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+        >
+          <ChevronDown size={12} />
+        </button>
+        {open && (
+          <div className="calendar-block-split-dropdown">
+            <button
+              className="calendar-block-split-option"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setOpen(false); onNotesOnly() }}
+            >
+              <Mic size={13} />
+              Take notes only
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // Shared global to pass calendar event data to App.tsx when joining a meeting.
 // Set before dispatching the custom event, read by the handler in App.tsx.
@@ -170,10 +221,12 @@ function CalendarBlockView({ node, deleteNode }: { node: { attrs: Record<string,
     }
   }
 
-  const handleJoinMeeting = (event: blocks.CalendarEvent & { conferenceLink?: string }, resolvedIdx: number) => {
-    const meetingUrl = event.conferenceLink
-    if (meetingUrl) {
-      window.open(meetingUrl, '_blank')
+  const handleJoinMeeting = (event: blocks.CalendarEvent & { conferenceLink?: string }, resolvedIdx: number, joinCall: boolean) => {
+    if (joinCall) {
+      const meetingUrl = event.conferenceLink
+      if (meetingUrl) {
+        window.open(meetingUrl, '_blank')
+      }
     }
 
     // Find the original source path from config
@@ -249,14 +302,10 @@ function CalendarBlockView({ node, deleteNode }: { node: { attrs: Record<string,
                               {getTimeRange(event)}
                             </div>
                             {showJoinButton && event.conferenceLink && (
-                              <button
-                                className="calendar-block-join-btn"
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onClick={(e) => { e.stopPropagation(); handleJoinMeeting(event, event._idx) }}
-                              >
-                                <Video size={13} />
-                                Join meeting & take notes
-                              </button>
+                              <JoinMeetingSplitButton
+                                onJoinAndNotes={() => handleJoinMeeting(event, event._idx, true)}
+                                onNotesOnly={() => handleJoinMeeting(event, event._idx, false)}
+                              />
                             )}
                           </div>
                         </div>
