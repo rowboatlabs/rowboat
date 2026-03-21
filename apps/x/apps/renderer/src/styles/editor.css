@@ -989,6 +989,93 @@
   color: color-mix(in srgb, var(--foreground) 45%, transparent);
 }
 
+.tiptap-editor .ProseMirror .calendar-block-split-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  margin-top: 4px;
+  border-radius: 5px;
+  overflow: visible;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-split-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #7ec8c8;
+  background: color-mix(in srgb, #7ec8c8 12%, transparent);
+  border: 1px solid color-mix(in srgb, #7ec8c8 25%, transparent);
+  border-right: none;
+  border-radius: 5px 0 0 5px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-split-main:hover {
+  background: color-mix(in srgb, #7ec8c8 22%, transparent);
+}
+
+.tiptap-editor .ProseMirror .calendar-block-split-chevron-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-split-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  color: #7ec8c8;
+  background: color-mix(in srgb, #7ec8c8 12%, transparent);
+  border: 1px solid color-mix(in srgb, #7ec8c8 25%, transparent);
+  border-left: 1px solid color-mix(in srgb, #7ec8c8 20%, transparent);
+  border-radius: 0 5px 5px 0;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-split-chevron:hover {
+  background: color-mix(in srgb, #7ec8c8 22%, transparent);
+}
+
+.tiptap-editor .ProseMirror .calendar-block-split-chevron-open {
+  border-radius: 0 5px 0 0;
+  border-bottom-color: transparent;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-split-dropdown {
+  position: absolute;
+  top: calc(100% - 1px);
+  right: 0;
+  z-index: 50;
+  background: color-mix(in srgb, #7ec8c8 12%, transparent);
+  border: 1px solid color-mix(in srgb, #7ec8c8 25%, transparent);
+  border-top: none;
+  border-radius: 0 0 5px 5px;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-split-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #7ec8c8;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-split-option:hover {
+  background: color-mix(in srgb, #7ec8c8 22%, transparent);
+}
+
 .tiptap-editor .ProseMirror .calendar-block-join-btn {
   display: inline-flex;
   align-items: center;
