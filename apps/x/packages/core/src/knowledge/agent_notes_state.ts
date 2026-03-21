@@ -13,7 +13,12 @@ export interface AgentNotesState {
 export function loadAgentNotesState(): AgentNotesState {
     if (fs.existsSync(STATE_FILE)) {
         try {
-            return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+            const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+            // Handle migration from older state without processedRuns
+            if (!parsed.processedRuns) {
+                parsed.processedRuns = {};
+            }
+            return parsed;
         } catch (error) {
             console.error('Error loading agent notes state:', error);
         }
