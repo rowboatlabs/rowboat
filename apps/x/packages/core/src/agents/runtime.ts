@@ -31,6 +31,36 @@ import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
 import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
 
+const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'agent-notes');
+
+function loadAgentNotesContext(): string | null {
+    const sections: string[] = [];
+
+    const userFile = path.join(AGENT_NOTES_DIR, 'user.md');
+    const prefsFile = path.join(AGENT_NOTES_DIR, 'preferences.md');
+
+    try {
+        if (fs.existsSync(userFile)) {
+            const content = fs.readFileSync(userFile, 'utf-8').trim();
+            if (content) {
+                sections.push(`## About the User\nThese are notes you took about the user in previous chats.\n\n${content}`);
+            }
+        }
+    } catch { /* ignore */ }
+
+    try {
+        if (fs.existsSync(prefsFile)) {
+            const content = fs.readFileSync(prefsFile, 'utf-8').trim();
+            if (content) {
+                sections.push(`## User Preferences\nThese are notes you took on their general preferences.\n\n${content}`);
+            }
+        }
+    } catch { /* ignore */ }
+
+    if (sections.length === 0) return null;
+    return `# Agent Memory\n\n${sections.join('\n\n')}`;
+}
+
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
 }
@@ -951,6 +981,13 @@ export async function* streamAgent({
             timeZoneName: 'short'
         });
         let instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
+        // Inject agent-notes context for copilot
+        if (state.agentName === 'copilot' || state.agentName === 'rowboatx') {
+            const agentNotesContext = loadAgentNotesContext();
+            if (agentNotesContext) {
+                instructionsWithDateTime += `\n\n${agentNotesContext}`;
+            }
+        }
         if (voiceInput) {
             loopLogger.log('voice input enabled, injecting voice input prompt');
             instructionsWithDateTime += `\n\n# Voice Input\nThe user's message was transcribed from speech. Be aware that:\n- There may be transcription errors. Silently correct obvious ones (e.g. homophones, misheard words). If an error is genuinely ambiguous, briefly mention your interpretation (e.g. "I'm assuming you meant X").\n- Spoken messages are often long-winded. The user may ramble, repeat themselves, or correct something they said earlier in the same message. Focus on their final intent, not every word verbatim.`;
