@@ -14,6 +14,7 @@ import { EmbedBlockExtension } from '@/extensions/embed-block'
 import { ChartBlockExtension } from '@/extensions/chart-block'
 import { TableBlockExtension } from '@/extensions/table-block'
 import { CalendarBlockExtension } from '@/extensions/calendar-block'
+import { EmailBlockExtension } from '@/extensions/email-block'
 import { Markdown } from 'tiptap-markdown'
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
 import { Calendar, ChevronDown, ExternalLink } from 'lucide-react'
@@ -152,6 +153,8 @@ function getMarkdownWithBlankLines(editor: Editor): string {
       blocks.push('```table\n' + (node.attrs?.data as string || '{}') + '\n```')
     } else if (node.type === 'calendarBlock') {
       blocks.push('```calendar\n' + (node.attrs?.data as string || '{}') + '\n```')
+    } else if (node.type === 'emailBlock') {
+      blocks.push('```email\n' + (node.attrs?.data as string || '{}') + '\n```')
     } else if (node.type === 'codeBlock') {
       const lang = (node.attrs?.language as string) || ''
       blocks.push('```' + lang + '\n' + nodeToText(node) + '\n```')
@@ -563,6 +566,7 @@ export function MarkdownEditor({
       ChartBlockExtension,
       TableBlockExtension,
       CalendarBlockExtension,
+      EmailBlockExtension,
       WikiLink.configure({
         onCreate: wikiLinks?.onCreate
           ? (path) => {
