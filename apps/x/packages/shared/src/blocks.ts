@@ -60,3 +60,16 @@ export const CalendarBlockSchema = z.object({
 });
 
 export type CalendarBlock = z.infer<typeof CalendarBlockSchema>;
+
+export const EmailBlockSchema = z.object({
+  threadId: z.string().optional(),
+  subject: z.string().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  date: z.string().optional(),
+  latest_email: z.string(),
+  past_summary: z.string().optional(),
+  draft_response: z.string().optional(),
+});
+
+export type EmailBlock = z.infer<typeof EmailBlockSchema>;
