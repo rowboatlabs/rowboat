@@ -23,6 +23,9 @@
   <a href="https://www.ycombinator.com" target="_blank" rel="noopener">
     <img alt="Y Combinator" src="https://img.shields.io/badge/Y%20Combinator-S24-orange">
   </a>
+  <a href="https://gitcgr.com/rowboatlabs/rowboat">
+    <img src="https://gitcgr.com/badge/rowboatlabs/rowboat.svg" alt="gitcgr" />
+  </a>
 </p>
 
 # Rowboat  
