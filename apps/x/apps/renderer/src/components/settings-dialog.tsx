@@ -134,7 +134,7 @@ function AppearanceSettings() {
 
 // --- Model Settings UI ---
 
-type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type LlmProviderFlavor = "openai" | "anthropic" | "google" | "novita" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
 interface LlmModelOption {
   id: string
@@ -150,6 +150,7 @@ const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description
 ]
 
 const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
+  { id: "novita", name: "Novita AI", description: "Fast, affordable open-source models" },
   { id: "openrouter", name: "OpenRouter", description: "Multiple models, one key" },
   { id: "aigateway", name: "AI Gateway (Vercel)", description: "Vercel's AI Gateway" },
   { id: "openai-compatible", name: "OpenAI-Compatible", description: "Custom OpenAI-compatible API" },
@@ -171,6 +172,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     openai: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
     anthropic: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
     google: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
+    novita: { apiKey: "", baseURL: "https://api.novita.ai/openai", model: "moonshotai/kimi-k2.5", knowledgeGraphModel: "" },
     openrouter: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
     aigateway: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
     ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "", knowledgeGraphModel: "" },
@@ -184,8 +186,8 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [showMoreProviders, setShowMoreProviders] = useState(false)
 
   const activeConfig = providerConfigs[provider]
-  const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
-  const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway"
+  const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "novita" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
+  const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "novita" || provider === "openrouter" || provider === "aigateway"
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
   const requiresBaseURL = provider === "ollama" || provider === "openai-compatible"
   const isLocalProvider = provider === "ollama" || provider === "openai-compatible"

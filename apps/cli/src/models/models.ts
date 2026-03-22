@@ -15,6 +15,7 @@ export const Flavor = z.enum([
     "aigateway",
     "anthropic",
     "google",
+    "novita",
     "ollama",
     "openai",
     "openai-compatible",
@@ -95,6 +96,14 @@ export async function getProvider(name: string = ""): Promise<ProviderV2> {
             providerMap[name] = createOllama({
                 baseURL,
                 headers
+            });
+            break;
+        case "novita":
+            providerMap[name] = createOpenAICompatible({
+                name: "novita",
+                apiKey,
+                baseURL: baseURL || "https://api.novita.ai/openai",
+                headers,
             });
             break;
         case "openai-compatible":

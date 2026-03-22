@@ -50,6 +50,13 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
                 headers,
             });
         }
+        case "novita":
+            return createOpenAICompatible({
+                name: "novita",
+                apiKey,
+                baseURL: baseURL || "https://api.novita.ai/openai",
+                headers,
+            });
         case "openai-compatible":
             return createOpenAICompatible({
                 name: "openai-compatible",

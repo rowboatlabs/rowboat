@@ -41,7 +41,7 @@ interface OnboardingModalProps {
 
 type Step = 0 | 1 | 2
 
-type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type LlmProviderFlavor = "openai" | "anthropic" | "google" | "novita" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
 interface LlmModelOption {
   id: string
@@ -61,6 +61,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     openai: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
     anthropic: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
     google: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
+    novita: { apiKey: "", baseURL: "https://api.novita.ai/openai", model: "moonshotai/kimi-k2.5", knowledgeGraphModel: "" },
     openrouter: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
     aigateway: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
     ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "", knowledgeGraphModel: "" },
@@ -98,8 +99,8 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   )
 
   const activeConfig = providerConfigs[llmProvider]
-  const showApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "openrouter" || llmProvider === "aigateway" || llmProvider === "openai-compatible"
-  const requiresApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "openrouter" || llmProvider === "aigateway"
+  const showApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "novita" || llmProvider === "openrouter" || llmProvider === "aigateway" || llmProvider === "openai-compatible"
+  const requiresApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "novita" || llmProvider === "openrouter" || llmProvider === "aigateway"
   const requiresBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible"
   const showBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible" || llmProvider === "aigateway"
   const isLocalProvider = llmProvider === "ollama" || llmProvider === "openai-compatible"
@@ -601,6 +602,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     ]
 
     const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
+      { id: "novita", name: "Novita AI", description: "Fast, affordable open-source models" },
       { id: "openrouter", name: "OpenRouter", description: "Access multiple models with one key" },
       { id: "aigateway", name: "AI Gateway (Vercel)", description: "Use Vercel's AI Gateway" },
       { id: "openai-compatible", name: "OpenAI-Compatible", description: "Local or hosted OpenAI-compatible API" },
