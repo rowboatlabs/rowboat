@@ -69,7 +69,10 @@ Create when you see multiple preferences about a specific skill/topic.
 ## Rules
 
 - Always read a file before updating it so you know what's already there.
-- For \`user.md\`: ONLY append new facts. Do NOT rewrite or remove existing entries. Format: \`- [ISO_TIMESTAMP] The fact\`
+- For \`user.md\`: Format is \`- [ISO_TIMESTAMP] The fact\`. The timestamp indicates when the fact was last confirmed.
+  - **Add** new facts with the current timestamp.
+  - **Refresh** existing facts: if you would add a fact that's already there, update its timestamp to the current one so it stays fresh.
+  - **Remove** facts that are likely outdated. Use your judgment: time-bound facts (e.g., "planning to launch next week", "has a meeting with X on Friday") go stale quickly. Stable facts (e.g., "co-founded Rowboat with Ramnique", "previously worked at Twitter") persist. If a fact's timestamp is old and it describes something transient, remove it.
 - For \`preferences.md\` and other preference files: you may reorganize and deduplicate, but preserve all existing preferences that are still relevant.
 - **Deduplicate strictly.** Before adding anything, check if the same fact is already captured — even if worded differently. Do NOT add a near-duplicate.
 - **Skip ephemeral tasks.** If the user asked the assistant to do a one-off thing (draft an email, write a story, search for something), that is NOT a fact about the user. Skip it entirely.
