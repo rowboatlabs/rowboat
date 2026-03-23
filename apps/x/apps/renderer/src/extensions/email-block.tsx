@@ -1,6 +1,6 @@
 import { mergeAttributes, Node } from '@tiptap/react'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
-import { X, Mail, ChevronDown, ExternalLink, Copy, Check, Sparkles, Loader2 } from 'lucide-react'
+import { X, Mail, ChevronDown, ExternalLink, Copy, Check, Sparkles, Loader2, MessageSquare } from 'lucide-react'
 import { blocks } from '@x/shared'
 import { useState, useEffect, useRef, useCallback } from 'react'
 
@@ -21,6 +21,12 @@ function getInitials(name: string): string {
   return name.split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
 }
 
+declare global {
+  interface Window {
+    __pendingEmailDraft?: { prompt: string }
+  }
+}
+
 // --- Email Block ---
 
 function EmailBlockView({ node, deleteNode, updateAttributes }: {
@@ -39,13 +45,26 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
 
   const hasDraft = !!config?.draft_response
   const hasPastSummary = !!config?.past_summary
+  const responseMode = config?.response_mode || 'both'
 
   // Local draft state for editing
   const [draftBody, setDraftBody] = useState(config?.draft_response || '')
   const [contextExpanded, setContextExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [responseSplitOpen, setResponseSplitOpen] = useState(false)
+  const responseSplitRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
+
+  // Close split dropdown on outside click
+  useEffect(() => {
+    if (!responseSplitOpen) return
+    const handler = (e: MouseEvent) => {
+      if (responseSplitRef.current && !responseSplitRef.current.contains(e.target as Node)) setResponseSplitOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [responseSplitOpen])
 
   // Sync draft from external changes
   useEffect(() => {
@@ -104,6 +123,19 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
       setGenerating(false)
     }
   }, [config, generating, raw, updateAttributes])
+
+  const draftWithAssistant = useCallback(() => {
+    if (!config) return
+    let prompt = `Help me draft a response to this email`
+    if (config.threadId) {
+      prompt += `. Read the full thread at gmail_sync/${config.threadId}.md for context`
+    }
+    prompt += `.\n\n`
+    prompt += `**From:** ${config.from || 'Unknown'}\n`
+    prompt += `**Subject:** ${config.subject || 'No subject'}\n`
+    window.__pendingEmailDraft = { prompt }
+    window.dispatchEvent(new Event('email-block:draft-with-assistant'))
+  }, [config])
 
   if (!config) {
     return (
@@ -250,14 +282,56 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
               {contextExpanded ? 'Hide' : 'Show'} context
             </button>
           )}
-          <button
-            className="email-block-gmail-btn email-block-generate-btn"
-            onClick={generateResponse}
-            disabled={generating}
-          >
-            {generating ? <Loader2 size={13} className="email-block-spinner" /> : <Sparkles size={13} />}
-            {generating ? 'Generating...' : 'Generate response'}
-          </button>
+          {responseMode === 'inline' && (
+            <button
+              className="email-block-gmail-btn email-block-generate-btn"
+              onClick={generateResponse}
+              disabled={generating}
+            >
+              {generating ? <Loader2 size={13} className="email-block-spinner" /> : <Sparkles size={13} />}
+              {generating ? 'Generating...' : 'Generate response'}
+            </button>
+          )}
+          {responseMode === 'assistant' && (
+            <button
+              className="email-block-gmail-btn email-block-generate-btn"
+              onClick={draftWithAssistant}
+            >
+              <MessageSquare size={13} />
+              Draft with assistant
+            </button>
+          )}
+          {responseMode === 'both' && (
+            <div className="email-block-response-split" ref={responseSplitRef}>
+              <button
+                className="email-block-split-main"
+                onClick={generateResponse}
+                disabled={generating}
+              >
+                {generating ? <Loader2 size={13} className="email-block-spinner" /> : <Sparkles size={13} />}
+                {generating ? 'Generating...' : 'Generate response'}
+              </button>
+              <button
+                className={`email-block-split-chevron ${responseSplitOpen ? 'email-block-split-chevron-open' : ''}`}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); setResponseSplitOpen(!responseSplitOpen) }}
+              >
+                <ChevronDown size={12} />
+              </button>
+              {responseSplitOpen && (
+                <div className="email-block-split-dropdown">
+                  <button
+                    className="email-block-split-option"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); setResponseSplitOpen(false); draftWithAssistant() }}
+                  >
+                    <MessageSquare size={13} />
+                    Draft with assistant
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {gmailUrl && (
             <button
               className="email-block-gmail-btn"

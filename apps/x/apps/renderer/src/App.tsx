@@ -3490,6 +3490,20 @@ function App() {
     return () => window.removeEventListener('calendar-block:join-meeting', handler)
   }, [])
 
+  // Email block: draft with assistant
+  useEffect(() => {
+    const handler = () => {
+      const pending = window.__pendingEmailDraft
+      if (pending) {
+        setPresetMessage(pending.prompt)
+        setIsChatSidebarOpen(true)
+        window.__pendingEmailDraft = undefined
+      }
+    }
+    window.addEventListener('email-block:draft-with-assistant', handler)
+    return () => window.removeEventListener('email-block:draft-with-assistant', handler)
+  }, [])
+
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
     if (!resolvedPath) return null

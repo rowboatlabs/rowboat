@@ -70,6 +70,7 @@ export const EmailBlockSchema = z.object({
   latest_email: z.string(),
   past_summary: z.string().optional(),
   draft_response: z.string().optional(),
+  response_mode: z.enum(['inline', 'assistant', 'both']).optional(),
 });
 
 export type EmailBlock = z.infer<typeof EmailBlockSchema>;
