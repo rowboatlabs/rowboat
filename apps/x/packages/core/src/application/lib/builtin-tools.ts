@@ -1261,24 +1261,23 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
     'save-to-memory': {
-        description: "Save a note about user preferences, style, people, or routines to the agent memory inbox. Use this when you observe something worth remembering about the user — their preferences, communication patterns, relationship context, scheduling habits, or explicit instructions about how they want things done.",
+        description: "Save a note about the user to the agent memory inbox. Use this when you observe something worth remembering — their preferences, communication patterns, relationship context, scheduling habits, or explicit instructions about how they want things done.",
         inputSchema: z.object({
             note: z.string().describe("The observation or preference to remember. Be specific and concise."),
-            category: z.enum(['preference', 'style', 'people', 'routine']).describe("Category: 'preference' for rules/preferences, 'style' for writing/communication patterns, 'people' for relationship context, 'routine' for scheduling/workflow patterns"),
         }),
-        execute: async ({ note, category }: { note: string; category: string }) => {
+        execute: async ({ note }: { note: string }) => {
             const inboxPath = path.join(WorkDir, 'knowledge', 'agent-notes', 'inbox.md');
             const dir = path.dirname(inboxPath);
             await fs.mkdir(dir, { recursive: true });
 
             const timestamp = new Date().toISOString();
-            const entry = `\n- [${timestamp}] [${category}] ${note}\n`;
+            const entry = `\n- [${timestamp}] ${note}\n`;
 
             await fs.appendFile(inboxPath, entry, 'utf-8');
 
             return {
                 success: true,
-                message: `Saved to memory inbox: [${category}] ${note}`,
+                message: `Saved to memory: ${note}`,
             };
         },
     },

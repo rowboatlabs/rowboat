@@ -30,6 +30,7 @@ import { getRaw as getNoteCreationRaw } from "../knowledge/note_creation.js";
 import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
 import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
+import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
 
 const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'agent-notes');
 
@@ -56,6 +57,30 @@ function loadAgentNotesContext(): string | null {
             }
         }
     } catch { /* ignore */ }
+
+    // List other agent-notes files for on-demand access
+    const otherFiles: string[] = [];
+    const skipFiles = new Set(['user.md', 'preferences.md', 'inbox.md']);
+    try {
+        if (fs.existsSync(AGENT_NOTES_DIR)) {
+            function listMdFiles(dir: string, prefix: string) {
+                for (const entry of fs.readdirSync(dir)) {
+                    const fullPath = path.join(dir, entry);
+                    const stat = fs.statSync(fullPath);
+                    if (stat.isDirectory()) {
+                        listMdFiles(fullPath, `${prefix}${entry}/`);
+                    } else if (entry.endsWith('.md') && !skipFiles.has(`${prefix}${entry}`)) {
+                        otherFiles.push(`${prefix}${entry}`);
+                    }
+                }
+            }
+            listMdFiles(AGENT_NOTES_DIR, '');
+        }
+    } catch { /* ignore */ }
+
+    if (otherFiles.length > 0) {
+        sections.push(`## More Specific Preferences\nFor more specific preferences, you can read these files using workspace-readFile. Only read them when relevant to the current task.\n\n${otherFiles.map(f => `- knowledge/agent-notes/${f}`).join('\n')}`);
+    }
 
     if (sections.length === 0) return null;
     return `# Agent Memory\n\n${sections.join('\n\n')}`;
@@ -448,6 +473,31 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
         return agent;
     }
 
+    if (id === 'agent_notes_agent') {
+        const agentNotesAgentRaw = getAgentNotesAgentRaw();
+        let agent: z.infer<typeof Agent> = {
+            name: id,
+            instructions: agentNotesAgentRaw,
+        };
+
+        if (agentNotesAgentRaw.startsWith("---")) {
+            const end = agentNotesAgentRaw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = agentNotesAgentRaw.slice(3, end).trim();
+                const content = agentNotesAgentRaw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
     const repo = container.resolve<IAgentsRepo>('agentsRepo');
     return await repo.fetch(id);
 }
@@ -803,7 +853,7 @@ export async function* streamAgent({
     const provider = await isSignedIn()
         ? await getGatewayProvider()
         : createProvider(modelConfig.provider);
-    const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep", "labeling_agent", "note_tagging_agent"];
+    const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep", "labeling_agent", "note_tagging_agent", "agent_notes_agent"];
     const modelId = (knowledgeGraphAgents.includes(state.agentName!) && modelConfig.knowledgeGraphModel)
         ? modelConfig.knowledgeGraphModel
         : modelConfig.model;
