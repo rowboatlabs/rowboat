@@ -32,7 +32,7 @@ import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agen
 import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
 import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
 
-const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'agent-notes');
+const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
 
 function loadAgentNotesContext(): string | null {
     const sections: string[] = [];
@@ -58,7 +58,7 @@ function loadAgentNotesContext(): string | null {
         }
     } catch { /* ignore */ }
 
-    // List other agent-notes files for on-demand access
+    // List other Agent Notes files for on-demand access
     const otherFiles: string[] = [];
     const skipFiles = new Set(['user.md', 'preferences.md', 'inbox.md']);
     try {
@@ -79,7 +79,7 @@ function loadAgentNotesContext(): string | null {
     } catch { /* ignore */ }
 
     if (otherFiles.length > 0) {
-        sections.push(`## More Specific Preferences\nFor more specific preferences, you can read these files using workspace-readFile. Only read them when relevant to the current task.\n\n${otherFiles.map(f => `- knowledge/agent-notes/${f}`).join('\n')}`);
+        sections.push(`## More Specific Preferences\nFor more specific preferences, you can read these files using workspace-readFile. Only read them when relevant to the current task.\n\n${otherFiles.map(f => `- knowledge/Agent Notes/${f}`).join('\n')}`);
     }
 
     if (sections.length === 0) return null;
@@ -1031,7 +1031,7 @@ export async function* streamAgent({
             timeZoneName: 'short'
         });
         let instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
-        // Inject agent-notes context for copilot
+        // Inject Agent Notes context for copilot
         if (state.agentName === 'copilot' || state.agentName === 'rowboatx') {
             const agentNotesContext = loadAgentNotesContext();
             if (agentNotesContext) {

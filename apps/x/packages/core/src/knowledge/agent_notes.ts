@@ -18,7 +18,7 @@ const EMAIL_BATCH_SIZE = 5;
 const RUNS_BATCH_SIZE = 5;
 const GMAIL_SYNC_DIR = path.join(WorkDir, 'gmail_sync');
 const RUNS_DIR = path.join(WorkDir, 'runs');
-const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'agent-notes');
+const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
 const INBOX_FILE = path.join(AGENT_NOTES_DIR, 'inbox.md');
 const AGENT_ID = 'agent_notes_agent';
 
@@ -265,7 +265,7 @@ async function processAgentNotes(): Promise<void> {
 
     try {
         const timestamp = new Date().toISOString();
-        const message = `Current timestamp: ${timestamp}\n\nProcess the following source material and update the agent-notes folder accordingly.\n\n${messageParts.join('\n\n')}`;
+        const message = `Current timestamp: ${timestamp}\n\nProcess the following source material and update the Agent Notes folder accordingly.\n\n${messageParts.join('\n\n')}`;
 
         const agentRun = await createRun({ agentId: AGENT_ID });
         await createMessage(agentRun.id, message);

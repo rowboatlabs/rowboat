@@ -1266,7 +1266,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             note: z.string().describe("The observation or preference to remember. Be specific and concise."),
         }),
         execute: async ({ note }: { note: string }) => {
-            const inboxPath = path.join(WorkDir, 'knowledge', 'agent-notes', 'inbox.md');
+            const inboxPath = path.join(WorkDir, 'knowledge', 'Agent Notes', 'inbox.md');
             const dir = path.dirname(inboxPath);
             await fs.mkdir(dir, { recursive: true });
 
