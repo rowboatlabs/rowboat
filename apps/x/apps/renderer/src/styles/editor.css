@@ -1298,6 +1298,98 @@
   animation: email-block-spin 1s linear infinite;
 }
 
+/* Email block split button (generate/assistant) */
+.tiptap-editor .ProseMirror .email-block-response-split {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  margin-top: 8px;
+}
+
+.tiptap-editor .ProseMirror .email-block-response-split > button {
+  box-sizing: border-box;
+}
+
+.tiptap-editor .ProseMirror .email-block-split-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.tiptap-editor .ProseMirror .email-block-split-main:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.tiptap-editor .ProseMirror .email-block-split-main:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.tiptap-editor .ProseMirror .email-block-split-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 6px;
+  color: color-mix(in srgb, var(--foreground) 60%, transparent);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+  border-radius: 0 6px 6px 0;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.tiptap-editor .ProseMirror .email-block-split-chevron:hover {
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.tiptap-editor .ProseMirror .email-block-split-chevron-open {
+  border-radius: 0 6px 0 0;
+  border-bottom-color: transparent;
+}
+
+.tiptap-editor .ProseMirror .email-block-split-dropdown {
+  position: absolute;
+  top: calc(100% - 1px);
+  right: 0;
+  z-index: 50;
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+}
+
+.tiptap-editor .ProseMirror .email-block-split-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--foreground) 60%, transparent);
+  background: none;
+  border: none;
+  border-radius: 0 0 6px 6px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.tiptap-editor .ProseMirror .email-block-split-option:hover {
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  color: var(--foreground);
+}
+
 /* Email draft block */
 .tiptap-editor .ProseMirror .email-draft-block-header {
   display: flex;
