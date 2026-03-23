@@ -7,6 +7,7 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { UserMessageContent } from './message.js';
+import { ResolvedSkill, SkillOverride } from './skill.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -550,6 +551,43 @@ const ipcSchemas = {
     }),
   },
   // Billing channels
+  // Skills channels
+  'skills:list': {
+    req: z.null(),
+    res: z.object({
+      skills: z.array(ResolvedSkill),
+    }),
+  },
+  'skills:get': {
+    req: z.object({
+      id: z.string(),
+    }),
+    res: ResolvedSkill.nullable(),
+  },
+  'skills:getOfficial': {
+    req: z.object({
+      id: z.string(),
+    }),
+    res: ResolvedSkill.nullable(),
+  },
+  'skills:saveOverride': {
+    req: z.object({
+      skillId: z.string(),
+      meta: SkillOverride,
+      content: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  'skills:deleteOverride': {
+    req: z.object({
+      skillId: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
   'billing:getInfo': {
     req: z.null(),
     res: z.object({

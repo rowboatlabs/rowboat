@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Tags, Mail, BookOpen, ChevronRight, Plus, X, User, Plug } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Tags, Mail, BookOpen, ChevronRight, Plus, X, User, Plug, Sparkles } from "lucide-react"
 
 import {
   Dialog,
@@ -24,8 +24,9 @@ import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
+import { SkillsSettings } from "@/components/settings/skills-settings"
 
-type ConfigTab = "account" | "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "note-tagging"
+export type ConfigTab = "account" | "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "note-tagging" | "skills"
 
 interface TabConfig {
   id: ConfigTab
@@ -82,10 +83,17 @@ const tabs: TabConfig[] = [
     path: "config/tags.json",
     description: "Configure tags for notes and emails",
   },
+  {
+    id: "skills",
+    label: "Skills",
+    icon: Sparkles,
+    description: "View and customize copilot skills",
+  },
 ]
 
 interface SettingsDialogProps {
   children: React.ReactNode
+  initialTab?: ConfigTab
 }
 
 // --- Theme option for Appearance tab ---
@@ -1238,15 +1246,17 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Main Settings Dialog ---
 
-export function SettingsDialog({ children }: SettingsDialogProps) {
+export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
   const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<ConfigTab>("models")
+  const [activeTab, setActiveTab] = useState<ConfigTab>(initialTab ?? "models")
   const [content, setContent] = useState("")
   const [originalContent, setOriginalContent] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [rowboatConnected, setRowboatConnected] = useState(false)
+  const [skillUpdateCount, setSkillUpdateCount] = useState(0)
+  const [skillsExpanded, setSkillsExpanded] = useState(false)
 
   // Check if user is signed in to Rowboat
   useEffect(() => {
@@ -1258,6 +1268,24 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
       setRowboatConnected(false)
     })
   }, [open])
+
+  // Check for skill updates
+  useEffect(() => {
+    if (!open) return
+    window.ipc.invoke('skills:list', null).then((result) => {
+      const count = result.skills.filter((s: { hasUpdate?: boolean }) => s.hasUpdate).length
+      setSkillUpdateCount(count)
+    }).catch(() => {
+      setSkillUpdateCount(0)
+    })
+  }, [open])
+
+  // Handle initialTab changes (e.g. when opened from sidebar notification)
+  useEffect(() => {
+    if (initialTab && open) {
+      setActiveTab(initialTab)
+    }
+  }, [initialTab, open])
 
   const visibleTabs = useMemo(() => tabs, [])
 
@@ -1329,6 +1357,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   }, [open, activeTab, isJsonTab, loadConfig])
 
   const handleTabChange = (tab: ConfigTab) => {
+    if (tab !== "skills") setSkillsExpanded(false)
     if (isJsonTab && hasChanges) {
       if (!confirm("You have unsaved changes. Discard them?")) {
         return
@@ -1341,7 +1370,12 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent
-        className="max-w-[900px]! w-[900px] h-[600px] p-0 gap-0 overflow-hidden"
+        className={cn(
+          "p-0 gap-0 overflow-hidden transition-all duration-200",
+          skillsExpanded
+            ? "max-w-[1200px]! w-[1200px] h-[80vh]"
+            : "max-w-[900px]! w-[900px] h-[600px]"
+        )}
       >
         <div className="flex h-full overflow-hidden">
           {/* Sidebar */}
@@ -1362,7 +1396,12 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
                   )}
                 >
                   <tab.icon className="size-4" />
-                  {tab.label}
+                  <span className="flex-1">{tab.label}</span>
+                  {tab.id === "skills" && skillUpdateCount > 0 && (
+                    <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-medium">
+                      {skillUpdateCount}
+                    </span>
+                  )}
                 </button>
               ))}
             </nav>
@@ -1381,7 +1420,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", activeTab === "models" ? "overflow-y-auto" : activeTab === "account" || activeTab === "connected-accounts" ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", activeTab === "models" ? "overflow-y-auto" : activeTab === "account" || activeTab === "connected-accounts" ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : activeTab === "skills" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connected-accounts" ? (
@@ -1394,6 +1433,8 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
                 <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
+              ) : activeTab === "skills" ? (
+                <SkillsSettings dialogOpen={open} onExpandRequest={setSkillsExpanded} />
               ) : loading ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                   Loading...

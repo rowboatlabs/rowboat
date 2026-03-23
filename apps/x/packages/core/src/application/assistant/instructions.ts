@@ -1,6 +1,7 @@
-import { skillCatalog } from "./skills/index.js";
 import { WorkDir as BASE_DIR } from "../../config/config.js";
 import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js";
+
+export const SKILL_CATALOG_PLACEHOLDER = "{{SKILL_CATALOG}}";
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
 
@@ -117,7 +118,7 @@ Use the catalog below to decide which skills to load for each user request. Befo
 - Call the \`loadSkill\` tool with the skill's name or path so you can read its guidance string.
 - Apply the instructions from every loaded skill while working on the request.
 
-\${skillCatalog}
+${SKILL_CATALOG_PLACEHOLDER}
 
 Always consult this catalog first so you load the right skills before taking action.
 

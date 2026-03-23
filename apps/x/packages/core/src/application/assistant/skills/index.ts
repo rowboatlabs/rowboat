@@ -16,10 +16,11 @@ import appNavigationSkill from "./app-navigation/skill.js";
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
 
-type SkillDefinition = {
+export type SkillDefinition = {
   id: string;  // Also used as folder name
   title: string;
   summary: string;
+  version: string;  // semver
   content: string;
 };
 
@@ -29,82 +30,94 @@ type ResolvedSkill = {
   content: string;
 };
 
-const definitions: SkillDefinition[] = [
+export const officialDefinitions: SkillDefinition[] = [
   {
     id: "create-presentations",
     title: "Create Presentations",
     summary: "Create PDF presentations and slide decks from natural language requests using knowledge base context.",
+    version: "1.0.0",
     content: createPresentationsSkill,
   },
   {
     id: "doc-collab",
     title: "Document Collaboration",
     summary: "Collaborate on documents - create, edit, and refine notes and documents in the knowledge base.",
+    version: "1.0.0",
     content: docCollabSkill,
   },
   {
     id: "draft-emails",
     title: "Draft Emails",
     summary: "Process incoming emails and create draft responses using calendar and knowledge base for context.",
+    version: "1.1.0",
     content: draftEmailsSkill,
   },
   {
     id: "meeting-prep",
     title: "Meeting Prep",
     summary: "Prepare for meetings by gathering context about attendees from the knowledge base.",
+    version: "1.0.0",
     content: meetingPrepSkill,
   },
   {
     id: "organize-files",
     title: "Organize Files",
     summary: "Find, organize, and tidy up files on the user's machine. Move files to folders, clean up Desktop/Downloads, locate specific files.",
+    version: "1.0.0",
     content: organizeFilesSkill,
   },
   {
     id: "slack",
     title: "Slack Integration",
     summary: "Send Slack messages, view channel history, search conversations, find users, and manage team communication.",
+    version: "1.0.0",
     content: slackSkill,
   },
   {
     id: "background-agents",
     title: "Background Agents",
     summary: "Creating, editing, and scheduling background agents. Configure schedules in agent-schedule.json and build multi-agent workflows.",
+    version: "1.0.0",
     content: backgroundAgentsSkill,
   },
   {
     id: "builtin-tools",
     title: "Builtin Tools Reference",
     summary: "Understanding and using builtin tools (especially executeCommand for bash/shell) in agent definitions.",
+    version: "1.0.0",
     content: builtinToolsSkill,
   },
   {
     id: "mcp-integration",
     title: "MCP Integration Guidance",
     summary: "Discovering, executing, and integrating MCP tools. Use this to check what external capabilities are available and execute MCP tools on behalf of users.",
+    version: "1.0.0",
     content: mcpIntegrationSkill,
   },
   {
     id: "web-search",
     title: "Web Search",
     summary: "Searching the web or researching a topic. Guidance on when to use web-search vs research-search, and how many searches to do.",
+    version: "1.0.0",
     content: webSearchSkill,
   },
   {
     id: "deletion-guardrails",
     title: "Deletion Guardrails",
     summary: "Following the confirmation process before removing workflows or agents and their dependencies.",
+    version: "1.0.0",
     content: deletionGuardrailsSkill,
   },
   {
     id: "app-navigation",
     title: "App Navigation",
     summary: "Navigate the app UI - open notes, switch views, filter/search the knowledge base, and manage saved views.",
+    version: "1.0.0",
     content: appNavigationSkill,
   },
 ];
 
-const skillEntries = definitions.map((definition) => ({
+const skillEntries = officialDefinitions.map((definition) => ({
   ...definition,
   catalogPath: `${CATALOG_PREFIX}/${definition.id}/skill.ts`,
 }));

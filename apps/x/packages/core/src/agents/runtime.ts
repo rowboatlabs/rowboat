@@ -11,8 +11,10 @@ import { execTool } from "../application/lib/exec-tool.js";
 import { AskHumanRequestEvent, RunEvent, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
 import { BuiltinTools } from "../application/lib/builtin-tools.js";
 import { CopilotAgent } from "../application/assistant/agent.js";
+import { SKILL_CATALOG_PLACEHOLDER } from "../application/assistant/instructions.js";
 import { isBlocked, extractCommandNames } from "../application/lib/command-executor.js";
 import container from "../di/container.js";
+import { ISkillResolver } from "../skills/resolver.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createProvider } from "../models/models.js";
 import { isSignedIn } from "../account/account.js";
@@ -314,7 +316,12 @@ function formatLlmStreamError(rawError: unknown): string {
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     if (id === "copilot" || id === "rowboatx") {
-        return CopilotAgent;
+        const resolver = container.resolve<ISkillResolver>("skillResolver");
+        const catalogMarkdown = await resolver.generateCatalogMarkdown();
+        return {
+            ...CopilotAgent,
+            instructions: CopilotAgent.instructions.replace(SKILL_CATALOG_PLACEHOLDER, catalogMarkdown),
+        };
     }
 
     if (id === 'note_creation') {

@@ -405,6 +405,7 @@ export function SidebarContentPanel({
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
   const { billing } = useBilling(isRowboatConnected)
+  const [skillUpdateCount, setSkillUpdateCount] = useState(0)
 
   const handleRowboatLogin = useCallback(async () => {
     try {
@@ -448,6 +449,14 @@ export function SidebarContentPanel({
       refreshOauthError()
       setLoggingIn(false)
     })
+
+    // Check for skill updates
+    window.ipc.invoke('skills:list', null).then((result) => {
+      if (mounted) {
+        const count = result.skills.filter((s: { hasUpdate?: boolean }) => s.hasUpdate).length
+        setSkillUpdateCount(count)
+      }
+    }).catch(() => {})
 
     return () => {
       mounted = false
@@ -597,6 +606,11 @@ export function SidebarContentPanel({
             <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
               <Settings className="size-4" />
               <span>Settings</span>
+              {skillUpdateCount > 0 && (
+                <span className="ml-auto text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                  {skillUpdateCount} skill {skillUpdateCount === 1 ? "update" : "updates"}
+                </span>
+              )}
             </button>
           </SettingsDialog>
           <HelpPopover>

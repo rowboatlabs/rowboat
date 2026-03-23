@@ -23,6 +23,8 @@ const execAsync = promisify(exec);
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
+import type { ISkillsRepo } from '@x/core/dist/skills/repo.js';
+import type { ISkillResolver } from '@x/core/dist/skills/resolver.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection } from '@x/core/dist/models/models.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
@@ -721,6 +723,30 @@ export function setupIpcHandlers() {
     },
     'voice:getDeepgramToken': async () => {
       return voice.getDeepgramToken();
+    },
+    // Skills handlers
+    'skills:list': async () => {
+      const resolver = container.resolve<ISkillResolver>('skillResolver');
+      const skills = await resolver.getCatalog();
+      return { skills };
+    },
+    'skills:get': async (_event, args) => {
+      const resolver = container.resolve<ISkillResolver>('skillResolver');
+      return await resolver.resolve(args.id);
+    },
+    'skills:getOfficial': async (_event, args) => {
+      const resolver = container.resolve<ISkillResolver>('skillResolver');
+      return resolver.getOfficial(args.id);
+    },
+    'skills:saveOverride': async (_event, args) => {
+      const repo = container.resolve<ISkillsRepo>('skillsRepo');
+      await repo.saveOverride(args.skillId, args.meta, args.content);
+      return { success: true as const };
+    },
+    'skills:deleteOverride': async (_event, args) => {
+      const repo = container.resolve<ISkillsRepo>('skillsRepo');
+      await repo.deleteOverride(args.skillId);
+      return { success: true as const };
     },
     // Billing handler
     'billing:getInfo': async () => {

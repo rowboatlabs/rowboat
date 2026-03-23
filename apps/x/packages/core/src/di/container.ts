@@ -15,6 +15,8 @@ import { IAbortRegistry, InMemoryAbortRegistry } from "../runs/abort-registry.js
 import { FSAgentScheduleRepo, IAgentScheduleRepo } from "../agent-schedule/repo.js";
 import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
 import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
+import { FSSkillsRepo, ISkillsRepo } from "../skills/repo.js";
+import { SkillResolver, ISkillResolver } from "../skills/resolver.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -39,6 +41,8 @@ container.register({
     agentScheduleRepo: asClass<IAgentScheduleRepo>(FSAgentScheduleRepo).singleton(),
     agentScheduleStateRepo: asClass<IAgentScheduleStateRepo>(FSAgentScheduleStateRepo).singleton(),
     slackConfigRepo: asClass<ISlackConfigRepo>(FSSlackConfigRepo).singleton(),
+    skillsRepo: asClass<ISkillsRepo>(FSSkillsRepo).singleton(),
+    skillResolver: asClass<ISkillResolver>(SkillResolver).singleton(),
 });
 
 export default container;

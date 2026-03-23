@@ -11,4 +11,5 @@ export * as inlineTask from './inline-task.js';
 export * as blocks from './blocks.js';
 export * as frontmatter from './frontmatter.js';
 export * as bases from './bases.js';
+export * as skill from './skill.js';
 export { PrefixLogger };

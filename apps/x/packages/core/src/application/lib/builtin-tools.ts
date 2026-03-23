@@ -4,7 +4,8 @@ import * as fs from "fs/promises";
 import { execSync } from "child_process";
 import { glob } from "glob";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
-import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
+import { availableSkills } from "../assistant/skills/index.js";
+import { ISkillResolver } from "../../skills/resolver.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
 import container from "../../di/container.js";
 import { IMcpConfigRepo } from "../..//mcp/repo.js";
@@ -61,10 +62,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     loadSkill: {
         description: "Load a Rowboat skill definition into context by fetching its guidance string",
         inputSchema: z.object({
-            skillName: z.string().describe("Skill identifier or path (e.g., 'workflow-run-ops' or 'src/application/assistant/skills/workflow-run-ops/skill.ts')"),
+            skillName: z.string().describe("Skill identifier (e.g., 'doc-collab', 'web-search')"),
         }),
         execute: async ({ skillName }: { skillName: string }) => {
-            const resolved = resolveSkill(skillName);
+            const resolver = container.resolve<ISkillResolver>("skillResolver");
+            const resolved = await resolver.resolve(skillName);
 
             if (!resolved) {
                 return {
@@ -76,8 +78,22 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             return {
                 success: true,
                 skillName: resolved.id,
-                path: resolved.catalogPath,
+                source: resolved.source,
                 content: resolved.content,
+            };
+        },
+    },
+
+    listSkills: {
+        description: "List all available skills with their metadata, source, and customization status",
+        inputSchema: z.object({}),
+        execute: async () => {
+            const resolver = container.resolve<ISkillResolver>("skillResolver");
+            const catalog = await resolver.getCatalog();
+            return {
+                success: true,
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                skills: catalog.map(({ content, ...rest }) => rest),
             };
         },
     },
