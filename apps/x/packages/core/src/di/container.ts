@@ -16,6 +16,7 @@ import { FSAgentScheduleRepo, IAgentScheduleRepo } from "../agent-schedule/repo.
 import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
 import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
 import { FSSkillsRepo, ISkillsRepo } from "../skills/repo.js";
+import { FSOfficialSkillsRepo, IOfficialSkillsRepo } from "../skills/official-repo.js";
 import { SkillResolver, ISkillResolver } from "../skills/resolver.js";
 
 const container = createContainer({
@@ -42,6 +43,7 @@ container.register({
     agentScheduleStateRepo: asClass<IAgentScheduleStateRepo>(FSAgentScheduleStateRepo).singleton(),
     slackConfigRepo: asClass<ISlackConfigRepo>(FSSlackConfigRepo).singleton(),
     skillsRepo: asClass<ISkillsRepo>(FSSkillsRepo).singleton(),
+    officialSkillsRepo: asClass<IOfficialSkillsRepo>(FSOfficialSkillsRepo).singleton(),
     skillResolver: asClass<ISkillResolver>(SkillResolver).singleton(),
 });
 

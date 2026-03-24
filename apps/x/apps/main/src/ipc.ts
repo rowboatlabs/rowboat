@@ -736,7 +736,7 @@ export function setupIpcHandlers() {
     },
     'skills:getOfficial': async (_event, args) => {
       const resolver = container.resolve<ISkillResolver>('skillResolver');
-      return resolver.getOfficial(args.id);
+      return await resolver.getOfficial(args.id);
     },
     'skills:saveOverride': async (_event, args) => {
       const repo = container.resolve<ISkillsRepo>('skillsRepo');

@@ -1,32 +1,31 @@
 import { ResolvedSkill } from "@x/shared/dist/skill.js";
-import { officialDefinitions, type SkillDefinition } from "../application/assistant/skills/index.js";
+import { IOfficialSkillsRepo } from "./official-repo.js";
 import { ISkillsRepo } from "./repo.js";
 
 export interface ISkillResolver {
     getCatalog(): Promise<ResolvedSkill[]>;
     resolve(id: string): Promise<ResolvedSkill | null>;
-    getOfficial(id: string): ResolvedSkill | null;
+    getOfficial(id: string): Promise<ResolvedSkill | null>;
     generateCatalogMarkdown(): Promise<string>;
 }
 
 export class SkillResolver implements ISkillResolver {
-    private readonly officialMap: Map<string, SkillDefinition>;
+    private readonly officialSkillsRepo: IOfficialSkillsRepo;
     private readonly skillsRepo: ISkillsRepo;
 
-    constructor({ skillsRepo }: { skillsRepo: ISkillsRepo }) {
+    constructor({ officialSkillsRepo, skillsRepo }: { officialSkillsRepo: IOfficialSkillsRepo; skillsRepo: ISkillsRepo }) {
+        this.officialSkillsRepo = officialSkillsRepo;
         this.skillsRepo = skillsRepo;
-        this.officialMap = new Map(
-            officialDefinitions.map((d) => [d.id, d]),
-        );
     }
 
     async getCatalog(): Promise<ResolvedSkill[]> {
+        const officials = await this.officialSkillsRepo.listOfficial();
         const overrides = await this.skillsRepo.listOverrides();
         const overrideMap = new Map(overrides.map((o) => [o.skillId, o]));
 
         const results: ResolvedSkill[] = [];
 
-        for (const official of officialDefinitions) {
+        for (const official of officials) {
             const override = overrideMap.get(official.id);
             if (override) {
                 results.push({
@@ -55,7 +54,7 @@ export class SkillResolver implements ISkillResolver {
     }
 
     async resolve(id: string): Promise<ResolvedSkill | null> {
-        const official = this.officialMap.get(id);
+        const official = await this.officialSkillsRepo.getOfficial(id);
         if (!official) return null;
 
         const override = await this.skillsRepo.getOverride(id);
@@ -82,8 +81,8 @@ export class SkillResolver implements ISkillResolver {
         };
     }
 
-    getOfficial(id: string): ResolvedSkill | null {
-        const official = this.officialMap.get(id);
+    async getOfficial(id: string): Promise<ResolvedSkill | null> {
+        const official = await this.officialSkillsRepo.getOfficial(id);
         if (!official) return null;
 
         return {

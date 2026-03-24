@@ -21,6 +21,7 @@ import { init as initEmailLabeling } from "@x/core/dist/knowledge/label_emails.j
 import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
+import { init as initSkillSync } from "@x/core/dist/skills/sync.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
 import { execSync } from "node:child_process";
@@ -229,6 +230,9 @@ app.whenReady().then(async () => {
 
   // start background agent runner (scheduled agents)
   initAgentRunner();
+
+  // start skill sync service (pulls from GitHub repo hourly)
+  initSkillSync();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

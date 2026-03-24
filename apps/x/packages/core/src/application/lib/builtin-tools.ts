@@ -4,7 +4,6 @@ import * as fs from "fs/promises";
 import { execSync } from "child_process";
 import { glob } from "glob";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
-import { availableSkills } from "../assistant/skills/index.js";
 import { ISkillResolver } from "../../skills/resolver.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
 import container from "../../di/container.js";
@@ -69,9 +68,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             const resolved = await resolver.resolve(skillName);
 
             if (!resolved) {
+                const catalog = await resolver.getCatalog();
+                const available = catalog.map((s) => s.id).join(", ");
                 return {
                     success: false,
-                    message: `Skill '${skillName}' not found. Available skills: ${availableSkills.join(", ")}`,
+                    message: `Skill '${skillName}' not found. Available skills: ${available}`,
                 };
             }
 
