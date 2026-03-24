@@ -13,7 +13,7 @@ import {
 } from './note_tagging_state.js';
 import { getNoteTypeDefinitions } from './note_system.js';
 
-const SYNC_INTERVAL_MS = 30 * 1000; // 30 seconds
+const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const BATCH_SIZE = 15;
 const NOTE_TAGGING_AGENT = 'note_tagging_agent';
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
