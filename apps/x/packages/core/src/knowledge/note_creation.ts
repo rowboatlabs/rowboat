@@ -27,6 +27,15 @@ tools:
     type: builtin
     name: workspace-glob
 ---
+# Context
+
+**Current date and time:** ${new Date().toISOString()}
+
+Sources (emails, meetings, voice memos) are processed in roughly chronological order. This means:
+- Earlier sources may reference events that have since occurred — later sources will provide updates.
+- If a source mentions a future meeting or deadline, it may already be in the past by now. Use the current date above to reason about what is past vs. upcoming.
+- Don't treat old commitments as still "open" if later sources or the current date suggest they've likely been resolved.
+
 # Task
 
 You are a memory agent. Given a single source file (email, meeting transcript, or voice memo), you will:
