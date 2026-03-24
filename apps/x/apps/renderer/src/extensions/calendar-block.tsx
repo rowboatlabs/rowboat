@@ -1,4 +1,4 @@
-import { mergeAttributes, Node } from '@tiptap/react'
+import { mergeAttributes, Node as TiptapNode } from '@tiptap/react'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
 import { X, Calendar, Video, ChevronDown, Mic } from 'lucide-react'
 import { blocks } from '@x/shared'
@@ -74,7 +74,8 @@ function JoinMeetingSplitButton({ onJoinAndNotes, onNotesOnly }: {
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target
+      if (ref.current && target instanceof globalThis.Node && !ref.current.contains(target)) setOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -322,7 +323,7 @@ function CalendarBlockView({ node, deleteNode }: { node: { attrs: Record<string,
   )
 }
 
-export const CalendarBlockExtension = Node.create({
+export const CalendarBlockExtension = TiptapNode.create({
   name: 'calendarBlock',
   group: 'block',
   atom: true,
