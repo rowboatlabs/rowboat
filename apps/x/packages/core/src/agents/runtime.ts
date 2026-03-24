@@ -850,13 +850,21 @@ export async function* streamAgent({
     const tools = await buildTools(agent);
 
     // set up provider + model
-    const provider = await isSignedIn()
+    const signedIn = await isSignedIn();
+    const provider = signedIn
         ? await getGatewayProvider()
         : createProvider(modelConfig.provider);
     const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep", "labeling_agent", "note_tagging_agent", "agent_notes_agent"];
-    const modelId = (knowledgeGraphAgents.includes(state.agentName!) && modelConfig.knowledgeGraphModel)
-        ? modelConfig.knowledgeGraphModel
-        : modelConfig.model;
+    const isKgAgent = knowledgeGraphAgents.includes(state.agentName!);
+    const isInlineTaskAgent = state.agentName === "inline_task_agent";
+    const defaultModel = signedIn ? "gpt-5.4" : modelConfig.model;
+    const defaultKgModel = signedIn ? "gpt-5.4-nano" : defaultModel;
+    const defaultInlineTaskModel = signedIn ? "gpt-5.4-mini" : defaultModel;
+    const modelId = isInlineTaskAgent
+        ? defaultInlineTaskModel
+        : (isKgAgent && modelConfig.knowledgeGraphModel)
+            ? modelConfig.knowledgeGraphModel
+            : isKgAgent ? defaultKgModel : defaultModel;
     const model = provider.languageModel(modelId);
     logger.log(`using model: ${modelId}`);
 

@@ -51,6 +51,7 @@ export class FSModelConfigRepo implements IModelConfigRepo {
             model: config.model,
             models: config.models,
             knowledgeGraphModel: config.knowledgeGraphModel,
+            meetingNotesModel: config.meetingNotesModel,
         };
 
         const toWrite = { ...config, providers: existingProviders };
