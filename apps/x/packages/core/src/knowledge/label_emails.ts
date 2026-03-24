@@ -12,7 +12,7 @@ import {
     type LabelingState,
 } from './labeling_state.js';
 
-const SYNC_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
+const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const BATCH_SIZE = 15;
 const LABELING_AGENT = 'labeling_agent';
 const GMAIL_SYNC_DIR = path.join(WorkDir, 'gmail_sync');
