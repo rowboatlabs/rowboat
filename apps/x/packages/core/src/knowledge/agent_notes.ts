@@ -1,10 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import { google } from 'googleapis';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
 import { serviceLogger } from '../services/service_logger.js';
-import { loadUserConfig } from '../pre_built/config.js';
+import { loadUserConfig, updateUserEmail } from '../config/user_config.js';
+import { GoogleClientFactory } from './google-client-factory.js';
 import {
     loadAgentNotesState,
     saveAgentNotesState,
@@ -199,28 +201,52 @@ async function waitForRunCompletion(runId: string): Promise<void> {
     });
 }
 
+// --- User email resolution ---
+
+async function ensureUserEmail(): Promise<string | null> {
+    const existing = loadUserConfig();
+    if (existing?.email) {
+        return existing.email;
+    }
+
+    // Try to get email from Gmail profile
+    try {
+        const auth = await GoogleClientFactory.getClient();
+        if (auth) {
+            const gmail = google.gmail({ version: 'v1', auth });
+            const profile = await gmail.users.getProfile({ userId: 'me' });
+            if (profile.data.emailAddress) {
+                updateUserEmail(profile.data.emailAddress);
+                console.log(`[AgentNotes] Auto-populated user email: ${profile.data.emailAddress}`);
+                return profile.data.emailAddress;
+            }
+        }
+    } catch (error) {
+        console.log('[AgentNotes] Could not fetch Gmail profile for user email:', error instanceof Error ? error.message : error);
+    }
+
+    return null;
+}
+
 // --- Main processing ---
 
 async function processAgentNotes(): Promise<void> {
-    const userConfig = loadUserConfig();
-    if (!userConfig) {
-        console.log('[AgentNotes] No user config found, skipping');
-        return;
-    }
-
     ensureAgentNotesDir();
     const state = loadAgentNotesState();
+    const userEmail = await ensureUserEmail();
 
     // Collect all source material
     const messageParts: string[] = [];
 
-    // 1. Emails
-    const emailPaths = findUserSentEmails(state, userConfig.email, EMAIL_BATCH_SIZE);
+    // 1. Emails (only if we have user email)
+    const emailPaths = userEmail
+        ? findUserSentEmails(state, userEmail, EMAIL_BATCH_SIZE)
+        : [];
     if (emailPaths.length > 0) {
-        messageParts.push(`## Emails sent by ${userConfig.name}\n`);
+        messageParts.push(`## Emails sent by the user\n`);
         for (const p of emailPaths) {
             const content = fs.readFileSync(p, 'utf-8');
-            const userParts = extractUserPartsFromEmail(content, userConfig.email);
+            const userParts = extractUserPartsFromEmail(content, userEmail!);
             if (userParts) {
                 messageParts.push(`---\n${userParts}\n---\n`);
             }
