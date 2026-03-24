@@ -19,7 +19,7 @@ export async function getAccessToken(): Promise<string> {
         throw new Error('Rowboat token expired and no refresh token available. Please sign in again.');
     }
 
-    const providerConfig = getProviderConfig('rowboat');
+    const providerConfig = await getProviderConfig('rowboat');
     if (providerConfig.discovery.mode !== 'issuer') {
         throw new Error('Rowboat provider requires issuer discovery mode');
     }

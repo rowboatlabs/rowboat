@@ -42,6 +42,8 @@ import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
+import { getAccessToken } from '@x/core/dist/auth/tokens.js';
+import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -144,10 +146,10 @@ export function registerIpcHandlers(handlers: InvokeHandlers) {
     ipcMain.handle(channel, async (event, rawArgs) => {
       // Validate request payload
       const args = ipc.validateRequest(channel, rawArgs);
-      
+
       // Call handler
       const result = await handler(event, args);
-      
+
       // Validate response payload
       return ipc.validateResponse(channel, result);
     });
@@ -471,6 +473,21 @@ export function setupIpcHandlers() {
       const config = await repo.getClientFacingConfig();
       return { config };
     },
+    'account:getRowboat': async () => {
+      const signedIn = await isSignedIn();
+      if (!signedIn) {
+        return { signedIn: false, accessToken: null, config: null };
+      }
+
+      const config = await getRowboatConfig();
+
+      try {
+        const accessToken = await getAccessToken();
+        return { signedIn: true, accessToken, config };
+      } catch {
+        return { signedIn: true, accessToken: null, config };
+      }
+    },
     'granola:getConfig': async () => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
       const config = await repo.getConfig();
@@ -718,9 +735,6 @@ export function setupIpcHandlers() {
     },
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
-    },
-    'voice:getDeepgramToken': async () => {
-      return voice.getDeepgramToken();
     },
     // Billing handler
     'billing:getInfo': async () => {

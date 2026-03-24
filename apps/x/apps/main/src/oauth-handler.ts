@@ -75,7 +75,7 @@ function getClientRegistrationRepo(): IClientRegistrationRepo {
  * Get or create OAuth configuration for a provider
  */
 async function getProviderConfiguration(provider: string, clientIdOverride?: string): Promise<Configuration> {
-  const config = getProviderConfig(provider);
+  const config = await getProviderConfig(provider);
   const resolveClientId = async (): Promise<string> => {
     if (config.client.mode === 'static' && config.client.clientId) {
       return config.client.clientId;
@@ -156,7 +156,7 @@ export async function connectProvider(provider: string, clientId?: string): Prom
     cancelActiveFlow('new_flow_started');
 
     const oauthRepo = getOAuthRepo();
-    const providerConfig = getProviderConfig(provider);
+    const providerConfig = await getProviderConfig(provider);
 
     if (provider === 'google') {
       if (!clientId) {

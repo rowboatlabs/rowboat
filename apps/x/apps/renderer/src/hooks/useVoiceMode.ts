@@ -1,4 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
+import { buildDeepgramListenUrl } from '@/lib/deepgram-listen-url';
+import { useRowboatAccount } from '@/hooks/useRowboatAccount';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening';
 
@@ -15,6 +17,7 @@ const DEEPGRAM_PARAMS = new URLSearchParams({
 const DEEPGRAM_LISTEN_URL = `wss://api.deepgram.com/v1/listen?${DEEPGRAM_PARAMS.toString()}`;
 
 export function useVoiceMode() {
+    const { refresh: refreshRowboatAccount } = useRowboatAccount();
     const [state, setState] = useState<VoiceState>('idle');
     const [interimText, setInterimText] = useState('');
     const wsRef = useRef<WebSocket | null>(null);
@@ -25,16 +28,20 @@ export function useVoiceMode() {
     const interimRef = useRef('');
 
     // Connect (or reconnect) the Deepgram WebSocket.
-    // Fetches a fresh token on each connect — temp tokens have short TTL.
+    // Refreshes Rowboat account before connect so access token is current.
     const connectWs = useCallback(async () => {
         if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return;
 
         let ws: WebSocket;
 
-        // Try signed-in proxy token first (passed as query param for JWTs)
-        const result = await window.ipc.invoke('voice:getDeepgramToken', null);
-        if (result) {
-            ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['bearer', result.token]);
+        const account = await refreshRowboatAccount();
+        if (
+            account?.signedIn &&
+            account.accessToken &&
+            account.config?.websocketApiUrl
+        ) {
+            const listenUrl = buildDeepgramListenUrl(account.config.websocketApiUrl, DEEPGRAM_PARAMS);
+            ws = new WebSocket(listenUrl, ['bearer', account.accessToken]);
         } else {
             // Fall back to local API key (passed as subprotocol)
             const config = await window.ipc.invoke('voice:getConfig', null);
@@ -72,7 +79,7 @@ export function useVoiceMode() {
             console.log('[voice] WebSocket closed');
             wsRef.current = null;
         };
-    }, []);
+    }, [refreshRowboatAccount]);
 
     // Stop audio capture and close WS
     const stopAudioCapture = useCallback(() => {

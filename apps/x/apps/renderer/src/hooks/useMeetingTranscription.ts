@@ -1,4 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
+import { buildDeepgramListenUrl } from '@/lib/deepgram-listen-url';
+import { useRowboatAccount } from '@/hooks/useRowboatAccount';
 
 export type MeetingTranscriptionState = 'idle' | 'connecting' | 'recording' | 'stopping';
 
@@ -101,6 +103,7 @@ function formatTranscript(entries: TranscriptEntry[], date: string, calendarEven
 // Hook
 // ---------------------------------------------------------------------------
 export function useMeetingTranscription(onAutoStop?: () => void) {
+    const { refresh: refreshRowboatAccount } = useRowboatAccount();
     const [state, setState] = useState<MeetingTranscriptionState>('idle');
     const wsRef = useRef<WebSocket | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -188,13 +191,18 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         const usingHeadphones = await detectHeadphones();
         console.log(`[meeting] Audio output mode: ${usingHeadphones ? 'headphones' : 'speakers'}`);
 
-        // Get Deepgram token
+        // Rowboat WebSocket + bearer token when signed in; else local Deepgram API key
         let ws: WebSocket;
         try {
-            const result = await window.ipc.invoke('voice:getDeepgramToken', null);
-            if (result) {
-                console.log('[meeting] Using proxy token');
-                ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['bearer', result.token]);
+            const account = await refreshRowboatAccount();
+            if (
+                account?.signedIn &&
+                account.accessToken &&
+                account.config?.websocketApiUrl
+            ) {
+                const listenUrl = buildDeepgramListenUrl(account.config.websocketApiUrl, DEEPGRAM_PARAMS);
+                console.log('[meeting] Using Rowboat WebSocket');
+                ws = new WebSocket(listenUrl, ['bearer', account.accessToken]);
             } else {
                 const config = await window.ipc.invoke('voice:getConfig', null);
                 if (!config?.deepgram) {
@@ -202,11 +210,11 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                     setState('idle');
                     return null;
                 }
-                console.log('[meeting] Using API key');
+                console.log('[meeting] Using Deepgram API key');
                 ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['token', config.deepgram.apiKey]);
             }
         } catch (err) {
-            console.error('[meeting] Failed to get Deepgram token:', err);
+            console.error('[meeting] Failed to connect Deepgram:', err);
             setState('idle');
             return null;
         }
@@ -389,7 +397,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
 
         setState('recording');
         return notePath;
-    }, [state, cleanup, scheduleDebouncedWrite]);
+    }, [state, cleanup, scheduleDebouncedWrite, refreshRowboatAccount]);
 
     const stop = useCallback(async () => {
         if (state !== 'recording') return;

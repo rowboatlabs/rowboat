@@ -7,6 +7,7 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { UserMessageContent } from './message.js';
+import { RowboatApiConfig } from './rowboat-account.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -252,6 +253,14 @@ const ipcSchemas = {
       })),
     }),
   },
+  'account:getRowboat': {
+    req: z.null(),
+    res: z.object({
+      signedIn: z.boolean(),
+      accessToken: z.string().nullable(),
+      config: RowboatApiConfig.nullable(),
+    }),
+  },
   'oauth:didConnect': {
     req: z.object({
       provider: z.string(),
@@ -491,12 +500,6 @@ const ipcSchemas = {
       audioBase64: z.string(),
       mimeType: z.string(),
     }),
-  },
-  'voice:getDeepgramToken': {
-    req: z.null(),
-    res: z.object({
-      token: z.string(),
-    }).nullable(),
   },
   'meeting:summarize': {
     req: z.object({
