@@ -1240,7 +1240,7 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 export function SettingsDialog({ children }: SettingsDialogProps) {
   const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<ConfigTab>("models")
+  const [activeTab, setActiveTab] = useState<ConfigTab>("account")
   const [content, setContent] = useState("")
   const [originalContent, setOriginalContent] = useState("")
   const [loading, setLoading] = useState(false)
@@ -1259,7 +1259,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
     })
   }, [open])
 
-  const visibleTabs = useMemo(() => tabs, [])
+  const visibleTabs = useMemo(() => rowboatConnected ? tabs.filter(t => t.id !== "models") : tabs, [rowboatConnected])
 
   const activeTabConfig = visibleTabs.find((t) => t.id === activeTab) ?? visibleTabs[0]
   const isJsonTab = activeTab === "mcp" || activeTab === "security"
