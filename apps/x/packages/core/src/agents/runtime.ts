@@ -858,7 +858,7 @@ export async function* streamAgent({
     const isKgAgent = knowledgeGraphAgents.includes(state.agentName!);
     const isInlineTaskAgent = state.agentName === "inline_task_agent";
     const defaultModel = signedIn ? "gpt-5.4" : modelConfig.model;
-    const defaultKgModel = signedIn ? "gpt-5.4-nano" : defaultModel;
+    const defaultKgModel = signedIn ? "gpt-5.4-mini" : defaultModel;
     const defaultInlineTaskModel = signedIn ? "gpt-5.4-mini" : defaultModel;
     const modelId = isInlineTaskAgent
         ? defaultInlineTaskModel
