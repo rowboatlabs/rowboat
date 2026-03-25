@@ -9,7 +9,7 @@ export type TagType =
   | 'relationship-sub'
   | 'topic'
   | 'email-type'
-  | 'filter'
+  | 'noise'
   | 'action'
   | 'status'
   | 'source';
@@ -29,22 +29,21 @@ export interface TagDefinition {
 // ── Default definitions (used to seed ~/.rowboat/config/tags.json) ──────────
 
 const DEFAULT_TAG_DEFINITIONS: TagDefinition[] = [
-  // ── Relationship (both) ──────────────────────────────────────────────
+  // ── Relationship — who is this from/about (all create) ────────────────
   { tag: 'investor', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Investors, VCs, or angels', example: 'Following up on our meeting — we\'d like to move forward with the Series A term sheet.' },
   { tag: 'customer', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Paying customers', example: 'We\'re seeing great results with Rowboat. Can we discuss expanding to more teams?' },
   { tag: 'prospect', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Potential customers', example: 'Thanks for the demo yesterday. We\'re interested in starting a pilot.' },
-  { tag: 'partner', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Business partners', example: 'Let\'s discuss how we can promote the integration to both our user bases.' },
-  { tag: 'vendor', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Service providers you work with', example: 'Here are the updated employment agreements you requested.' },
-  { tag: 'product', type: 'relationship', applicability: 'both', noteEffect: 'skip', description: 'Products or services you use (automated)', example: 'Your AWS bill for January 2025 is now available.' },
-  { tag: 'candidate', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Job applicants', example: 'Thanks for reaching out. I\'d love to learn more about the engineering role.' },
-  { tag: 'team', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Internal team members', example: 'Here\'s the updated roadmap for Q2. Let\'s discuss in our sync.' },
+  { tag: 'partner', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Business partners, corp dev, or strategic contacts', example: 'Let\'s discuss how we can promote the integration to both our user bases.' },
+  { tag: 'vendor', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Service providers you work with (legal, accounting, infra)', example: 'Here are the updated employment agreements you requested.' },
+  { tag: 'candidate', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Job applicants or recruiter pitches for specific roles', example: 'Thanks for reaching out. I\'d love to learn more about the engineering role.' },
+  { tag: 'team', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Internal team members and co-founders', example: 'Here\'s the updated roadmap for Q2. Let\'s discuss in our sync.' },
   { tag: 'advisor', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Advisors, mentors, or board members', example: 'I\'ve reviewed the deck. Here are my thoughts on the GTM strategy.' },
   { tag: 'personal', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Family or friends', example: 'Are you coming to Thanksgiving this year? Let me know your travel dates.' },
   { tag: 'press', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Journalists or media', example: 'I\'m writing a piece on AI agents. Would you be available for an interview?' },
-  { tag: 'community', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Users, peers, or open source contributors', example: 'Love what you\'re building with Rowboat. Here\'s a bug I found...' },
+  { tag: 'community', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Peers, YC batchmates, or open source contributors with direct interaction', example: 'Love what you\'re building with Rowboat. Here\'s a bug I found...' },
   { tag: 'government', type: 'relationship', applicability: 'both', noteEffect: 'create', description: 'Government agencies', example: 'Your Delaware franchise tax is due by March 1, 2025.' },
 
-  // ── Relationship Sub-Tags (notes only) ───────────────────────────────
+  // ── Relationship Sub-Tags — role metadata (notes only, all none) ──────
   { tag: 'primary', type: 'relationship-sub', applicability: 'notes', noteEffect: 'none', description: 'Main contact or decision maker', example: 'Sarah Chen — VP Engineering, your main point of contact at Acme.' },
   { tag: 'secondary', type: 'relationship-sub', applicability: 'notes', noteEffect: 'none', description: 'Supporting contact, involved but not the lead', example: 'David Kim — Engineer CC\'d on customer emails.' },
   { tag: 'executive-assistant', type: 'relationship-sub', applicability: 'notes', noteEffect: 'none', description: 'EA or admin handling scheduling and logistics', example: 'Lisa — Sarah\'s EA who schedules all her meetings.' },
@@ -54,57 +53,60 @@ const DEFAULT_TAG_DEFINITIONS: TagDefinition[] = [
   { tag: 'champion', type: 'relationship-sub', applicability: 'notes', noteEffect: 'none', description: 'Internal advocate pushing for you', example: 'Engineer who loves your product and is selling internally.' },
   { tag: 'blocker', type: 'relationship-sub', applicability: 'notes', noteEffect: 'none', description: 'Person opposing or blocking progress', example: 'CFO resistant to spending on new tools.' },
 
-  // ── Topic (both) ─────────────────────────────────────────────────────
+  // ── Topic — what the email is about (all create) ──────────────────────
   { tag: 'sales', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Sales conversations, deals, and revenue', example: 'Here\'s the pricing proposal we discussed. Let me know if you have questions.' },
   { tag: 'support', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Help requests, issues, and customer support', example: 'We\'re seeing an error when trying to export. Can you help?' },
   { tag: 'legal', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Contracts, terms, compliance, and legal matters', example: 'Legal has reviewed the MSA. Attached are our requested changes.' },
-  { tag: 'finance', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Money, invoices, payments, banking, and taxes', example: 'Your invoice #1234 for $5,000 is attached. Payment due in 30 days.' },
+  { tag: 'finance', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Actionable money matters: invoices, payments, banking, and taxes', example: 'Your invoice #1234 for $5,000 is attached. Payment due in 30 days.' },
   { tag: 'hiring', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Recruiting, interviews, and employment', example: 'We\'d like to move forward with a final round interview. Are you available Thursday?' },
-  { tag: 'fundraising', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Raising money and investor relations', example: 'Thanks for sending the deck. We\'d like to schedule a partner meeting.' },
-  { tag: 'travel', type: 'topic', applicability: 'both', noteEffect: 'skip', description: 'Flights, hotels, trips, and travel logistics', example: 'Your flight to Tokyo on March 15 is confirmed. Confirmation #ABC123.' },
-  { tag: 'event', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Conferences, meetups, and gatherings', example: 'You\'re invited to speak at TechCrunch Disrupt. Can you confirm your availability?' },
-  { tag: 'shopping', type: 'topic', applicability: 'both', noteEffect: 'skip', description: 'Purchases, orders, and returns', example: 'Your order #12345 has shipped. Track it here.' },
-  { tag: 'health', type: 'topic', applicability: 'both', noteEffect: 'skip', description: 'Medical, wellness, and health-related matters', example: 'Your appointment with Dr. Smith is confirmed for Monday at 2pm.' },
-  { tag: 'learning', type: 'topic', applicability: 'both', noteEffect: 'skip', description: 'Courses, education, and skill-building', example: 'Welcome to the Advanced Python course. Here\'s your access link.' },
+  { tag: 'fundraising', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Raising money, SAFEs, term sheets, and investor relations', example: 'Thanks for sending the deck. We\'d like to schedule a partner meeting.' },
+  { tag: 'security', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Vulnerability disclosures, login alerts, brand impersonation, or compliance requests', example: 'We found a JWT bypass in your auth endpoint. Details attached.' },
+  { tag: 'infrastructure', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Deploy failures, build errors, webhook issues, API migrations, and production alerts', example: 'Vercel deploy failed for rowboat-app. Build log attached.' },
+  { tag: 'event', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Conferences, meetups, and gatherings you are attending or invited to', example: 'You\'re invited to speak at TechCrunch Disrupt. Can you confirm your availability?' },
   { tag: 'research', type: 'topic', applicability: 'both', noteEffect: 'create', description: 'Research requests and information gathering', example: 'Here\'s the market analysis you requested on the AI agent space.' },
 
-  // ── Email Type ───────────────────────────────────────────────────────
+  // ── Email Type — high-signal email formats (all create) ───────────────
   { tag: 'intro', type: 'email-type', applicability: 'both', noteEffect: 'create', description: 'Warm introduction from someone you know', example: 'I\'d like to introduce you to Sarah Chen, VP Engineering at Acme.' },
   { tag: 'followup', type: 'email-type', applicability: 'both', noteEffect: 'create', description: 'Following up on a previous conversation', example: 'Following up on our call last week. Have you had a chance to review the proposal?' },
-  { tag: 'scheduling', type: 'email-type', applicability: 'email', noteEffect: 'skip', description: 'Meeting and calendar scheduling', example: 'Are you available for a call next Tuesday at 2pm?' },
-  { tag: 'cold-outreach', type: 'email-type', applicability: 'email', noteEffect: 'skip', description: 'Unsolicited contact from someone you don\'t know', example: 'Hi, I noticed your company is growing fast. I\'d love to show you how we can help with...' },
-  { tag: 'newsletter', type: 'email-type', applicability: 'email', noteEffect: 'skip', description: 'Newsletters, marketing emails, and subscriptions', example: 'This week in AI: The latest developments in agent frameworks...' },
-  { tag: 'notification', type: 'email-type', applicability: 'email', noteEffect: 'skip', description: 'Automated alerts, receipts, and system notifications', example: 'Your password was changed successfully. If this wasn\'t you, contact support.' },
 
-  // ── Filter (email only) ──────────────────────────────────────────────
-  { tag: 'spam', type: 'filter', applicability: 'email', noteEffect: 'skip', description: 'Junk and unwanted email', example: 'Congratulations! You\'ve won $1,000,000...' },
-  { tag: 'promotion', type: 'filter', applicability: 'email', noteEffect: 'skip', description: 'Marketing offers and sales pitches', example: '50% off all items this weekend only!' },
-  { tag: 'social', type: 'filter', applicability: 'email', noteEffect: 'skip', description: 'Social media notifications', example: 'John Smith commented on your post.' },
-  { tag: 'forums', type: 'filter', applicability: 'email', noteEffect: 'skip', description: 'Mailing lists and group discussions', example: 'Re: [dev-list] Question about API design' },
+  // ── Noise — all skip signals in one place ─────────────────────────────
+  { tag: 'spam', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Junk and unwanted email', example: 'Congratulations! You\'ve won $1,000,000...' },
+  { tag: 'promotion', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Marketing offers, sales pitches, and product launches', example: '50% off all items this weekend only!' },
+  { tag: 'cold-outreach', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Unsolicited contact from someone you don\'t know', example: 'Hi, I noticed your company is growing fast. I\'d love to show you how we can help with...' },
+  { tag: 'newsletter', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Newsletters, digests, and subscription emails', example: 'This week in AI: The latest developments in agent frameworks...' },
+  { tag: 'notification', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Automated alerts and system notifications with no action needed', example: 'Your password was changed successfully. If this wasn\'t you, contact support.' },
+  { tag: 'digest', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Community digests, forum roundups, and aggregated updates', example: 'YC Bookface Weekly: 12 new posts this week...' },
+  { tag: 'product-update', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Product changelogs, feature announcements, and vendor marketing', example: 'Introducing our new AI-powered dashboard...' },
+  { tag: 'receipt', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Transactional receipts, invoices, and billing confirmations with no follow-up needed', example: 'Payment of $49.99 received. Thank you!' },
+  { tag: 'social', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Social media notifications', example: 'John Smith commented on your post.' },
+  { tag: 'forums', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Mailing lists and group discussions', example: 'Re: [dev-list] Question about API design' },
+  { tag: 'scheduling', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Calendar invites, meeting reminders, and scheduling confirmations', example: 'Reminder: Team standup in 15 minutes.' },
+  { tag: 'fyi', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Informational only, no action needed', example: 'Just wanted to let you know the deal closed. Thanks for your help!' },
+  { tag: 'travel', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Flights, hotels, trips, and travel logistics', example: 'Your flight to Tokyo on March 15 is confirmed. Confirmation #ABC123.' },
+  { tag: 'shopping', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Purchases, orders, and returns', example: 'Your order #12345 has shipped. Track it here.' },
+  { tag: 'health', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Medical, wellness, and health-related matters', example: 'Your appointment with Dr. Smith is confirmed for Monday at 2pm.' },
+  { tag: 'learning', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Courses, webinars, and education marketing', example: 'Welcome to the Advanced Python course. Here\'s your access link.' },
 
-  // ── Action ───────────────────────────────────────────────────────────
+  // ── Action — urgency signals (all create) ─────────────────────────────
   { tag: 'action-required', type: 'action', applicability: 'both', noteEffect: 'create', description: 'Needs a response or action from you', example: 'Can you send me the pricing by Friday?' },
-  { tag: 'fyi', type: 'action', applicability: 'email', noteEffect: 'skip', description: 'Informational only, no action needed', example: 'Just wanted to let you know the deal closed. Thanks for your help!' },
   { tag: 'urgent', type: 'action', applicability: 'both', noteEffect: 'create', description: 'Time-sensitive, needs immediate attention', example: 'We need your signature on the contract by EOD today or we lose the deal.' },
   { tag: 'waiting', type: 'action', applicability: 'both', noteEffect: 'create', description: 'Waiting on a response from them' },
 
-  // ── Status (email) ───────────────────────────────────────────────────
+  // ── Status — workflow state (all none) ────────────────────────────────
   { tag: 'unread', type: 'status', applicability: 'email', noteEffect: 'none', description: 'Not yet processed' },
   { tag: 'to-reply', type: 'status', applicability: 'email', noteEffect: 'none', description: 'Need to respond' },
   { tag: 'done', type: 'status', applicability: 'email', noteEffect: 'none', description: 'Handled, can be archived' },
+  { tag: 'active', type: 'status', applicability: 'notes', noteEffect: 'none', description: 'Currently relevant, recent activity' },
+  { tag: 'archived', type: 'status', applicability: 'notes', noteEffect: 'none', description: 'No longer active, kept for reference' },
+  { tag: 'stale', type: 'status', applicability: 'notes', noteEffect: 'none', description: 'No activity in 60+ days, needs attention or archive' },
 
-  // ── Source (notes only) ──────────────────────────────────────────────
+  // ── Source — origin metadata (notes only, all none) ───────────────────
   { tag: 'email', type: 'source', applicability: 'notes', noteEffect: 'none', description: 'Created or updated from email' },
   { tag: 'meeting', type: 'source', applicability: 'notes', noteEffect: 'none', description: 'Created or updated from meeting transcript' },
   { tag: 'browser', type: 'source', applicability: 'notes', noteEffect: 'none', description: 'Content captured from web browsing' },
   { tag: 'web-search', type: 'source', applicability: 'notes', noteEffect: 'none', description: 'Information from web search' },
   { tag: 'manual', type: 'source', applicability: 'notes', noteEffect: 'none', description: 'Manually entered by user' },
   { tag: 'import', type: 'source', applicability: 'notes', noteEffect: 'none', description: 'Imported from another system' },
-
-  // ── Status (notes) ──────────────────────────────────────────────────
-  { tag: 'active', type: 'status', applicability: 'notes', noteEffect: 'none', description: 'Currently relevant, recent activity' },
-  { tag: 'archived', type: 'status', applicability: 'notes', noteEffect: 'none', description: 'No longer active, kept for reference' },
-  { tag: 'stale', type: 'status', applicability: 'notes', noteEffect: 'none', description: 'No activity in 60+ days, needs attention or archive' },
 ];
 
 // ── Disk-backed config with mtime caching ──────────────────────────────────
@@ -146,7 +148,7 @@ export function getTagDefinitions(): TagDefinition[] {
 
 const TYPE_ORDER: TagType[] = [
   'relationship', 'relationship-sub', 'topic', 'email-type',
-  'filter', 'action', 'status', 'source',
+  'noise', 'action', 'status', 'source',
 ];
 
 const TYPE_LABELS: Record<TagType, string> = {
@@ -154,7 +156,7 @@ const TYPE_LABELS: Record<TagType, string> = {
   'relationship-sub': 'Relationship Sub-Tags',
   'topic': 'Topic',
   'email-type': 'Email Type',
-  'filter': 'Filter',
+  'noise': 'Noise',
   'action': 'Action',
   'status': 'Status',
   'source': 'Source',
