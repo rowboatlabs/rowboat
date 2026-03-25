@@ -129,7 +129,7 @@ async function labelEmailBatch(
 /**
  * Process all unlabeled emails in batches
  */
-async function processUnlabeledEmails(): Promise<void> {
+export async function processUnlabeledEmails(): Promise<void> {
     console.log('[EmailLabeling] Checking for unlabeled emails...');
 
     const state = loadLabelingState();

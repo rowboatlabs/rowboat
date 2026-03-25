@@ -535,7 +535,7 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
 /**
  * Process all configured source directories
  */
-async function processAllSources(): Promise<void> {
+export async function processAllSources(): Promise<void> {
     console.log('[GraphBuilder] Checking for new content in all sources...');
 
 
