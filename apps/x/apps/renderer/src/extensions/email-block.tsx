@@ -60,7 +60,7 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
   useEffect(() => {
     if (!responseSplitOpen) return
     const handler = (e: MouseEvent) => {
-      if (responseSplitRef.current && !responseSplitRef.current.contains(e.target as Node)) setResponseSplitOpen(false)
+      if (responseSplitRef.current && !responseSplitRef.current.contains(e.target as globalThis.Node)) setResponseSplitOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
