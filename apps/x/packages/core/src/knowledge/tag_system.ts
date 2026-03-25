@@ -70,7 +70,7 @@ const DEFAULT_TAG_DEFINITIONS: TagDefinition[] = [
   { tag: 'followup', type: 'email-type', applicability: 'both', noteEffect: 'create', description: 'Following up on a previous two-way conversation (both parties have engaged). A cold sender bumping their own unanswered email is NOT a followup — it is cold-outreach.', example: 'Following up on our call last week. Have you had a chance to review the proposal?' },
 
   // ── Noise — all skip signals in one place ─────────────────────────────
-  { tag: 'spam', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Junk and unwanted email', example: 'Congratulations! You\'ve won $1,000,000...' },
+  { tag: 'spam', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Junk and unwanted email, including Google Groups spam moderation digests (from noreply-spamdigest)', example: 'Congratulations! You\'ve won $1,000,000...' },
   { tag: 'promotion', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Marketing offers, sales pitches, and product launches', example: '50% off all items this weekend only!' },
   { tag: 'cold-outreach', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Unsolicited contact from someone you don\'t know — includes sales pitches disguised as follow-ups, strangers asking for your time/feedback, and service providers you never engaged with', example: 'Hi, I noticed your company is growing fast. I\'d love to show you how we can help with...' },
   { tag: 'newsletter', type: 'noise', applicability: 'email', noteEffect: 'skip', description: 'Newsletters, digests, and subscription emails', example: 'This week in AI: The latest developments in agent frameworks...' },

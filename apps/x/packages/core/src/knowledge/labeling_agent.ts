@@ -88,6 +88,8 @@ Many emails disguise themselves as real relationships. Before assigning \`vendor
 
 **Noise array must only contain tags from the Noise category.** Do not put topic or relationship tags (like \`event\`) into the noise array. If an email is an event promotion, use \`promotion\` in noise — not \`event\`.
 
+**Spam digests are spam.** If the sender is \`noreply-spamdigest\` (Google Groups spam moderation reports), label it as \`spam\` — Google already flagged these as spam. Do not try to evaluate the held messages inside.
+
 # Frontmatter Format
 
 \`\`\`yaml
