@@ -27,28 +27,36 @@ import path from 'path';
 const VALID_STEPS = ['label', 'graph', 'tag'] as const;
 type Step = typeof VALID_STEPS[number];
 
-function parseArgs(): { workdir: string; steps: Step[] } {
+function parseArgs(): { workdir: string; steps: Step[]; concurrency: number } {
     const args = process.argv.slice(2);
     let workdir: string | undefined;
     let stepsRaw: string | undefined;
+    let concurrency = 3;
 
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--workdir' && args[i + 1]) {
             workdir = args[++i];
         } else if (args[i] === '--steps' && args[i + 1]) {
             stepsRaw = args[++i];
+        } else if (args[i] === '--concurrency' && args[i + 1]) {
+            concurrency = parseInt(args[++i], 10);
+            if (isNaN(concurrency) || concurrency < 1) {
+                console.error('Error: --concurrency must be a positive integer');
+                process.exit(1);
+            }
         } else if (args[i] === '--help' || args[i] === '-h') {
             console.log(`
-Usage: run_pipeline --workdir <path> [--steps label,graph,tag]
+Usage: run_pipeline --workdir <path> [--steps label,graph,tag] [--concurrency N]
 
 Options:
-  --workdir <path>   Working directory containing gmail_sync/ folder (required)
-  --steps <list>     Comma-separated steps to run: label, graph, tag (default: all)
-  --help, -h         Show this help message
+  --workdir <path>      Working directory containing gmail_sync/ folder (required)
+  --steps <list>        Comma-separated steps to run: label, graph, tag (default: all)
+  --concurrency <N>     Number of parallel batches for labeling (default: 3)
+  --help, -h            Show this help message
 
 Examples:
   run_pipeline --workdir ./my-emails
-  run_pipeline --workdir ./my-emails --steps label
+  run_pipeline --workdir ./my-emails --steps label --concurrency 5
   run_pipeline --workdir ./my-emails --steps label,graph
   run_pipeline --workdir ./my-emails --steps graph,tag
 `);
@@ -83,10 +91,10 @@ Examples:
         steps = [...VALID_STEPS];
     }
 
-    return { workdir, steps };
+    return { workdir, steps, concurrency };
 }
 
-const { workdir, steps } = parseArgs();
+const { workdir, steps, concurrency } = parseArgs();
 
 // Set env BEFORE importing core modules (WorkDir is read at module load time)
 process.env.ROWBOAT_WORKDIR = workdir;
@@ -96,6 +104,7 @@ process.env.ROWBOAT_WORKDIR = workdir;
 async function main() {
     console.log(`[Pipeline] Working directory: ${workdir}`);
     console.log(`[Pipeline] Steps to run: ${steps.join(', ')}`);
+    console.log(`[Pipeline] Concurrency: ${concurrency}`);
     console.log();
 
     // Verify gmail_sync exists if label or graph step is requested
@@ -109,7 +118,7 @@ async function main() {
     if (steps.includes('label')) {
         console.log('[Pipeline] === Step 1: Email Labeling ===');
         const { processUnlabeledEmails } = await import('./label_emails.js');
-        await processUnlabeledEmails();
+        await processUnlabeledEmails(concurrency);
         console.log();
     }
 
