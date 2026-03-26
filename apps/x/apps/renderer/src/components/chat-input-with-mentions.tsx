@@ -246,9 +246,8 @@ function ChatInputInner({
           return 0
         })
         setConfiguredModels(models)
-        if (defaultKey) {
-          setActiveModelKey(defaultKey)
-        }
+        const activeKey = defaultKey || (models[0] ? `${models[0].flavor}/${models[0].model}` : '')
+        if (activeKey) setActiveModelKey(activeKey)
       }
     } catch {
       // No config yet
