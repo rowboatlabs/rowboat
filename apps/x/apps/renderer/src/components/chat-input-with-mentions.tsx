@@ -488,7 +488,17 @@ function ChatInputInner({
       />
       {isRecording ? (
         /* ── Recording bar ── */
-        <div className="flex items-center gap-3 px-4 py-3">
+        <div
+          className="flex items-center gap-3 px-4 py-3"
+          tabIndex={0}
+          ref={(el) => el?.focus()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && recordingText?.trim()) {
+              e.preventDefault()
+              onSubmitRecording?.()
+            }
+          }}
+        >
           <button
             type="button"
             onClick={onCancelRecording}
