@@ -134,6 +134,13 @@ System-generated messages that require no decision:
 - **Platform policy updates**: "Billing permissions are changing starting next month" → \`filter: ['notification']\`
 - **Expired OTPs**: One-time passwords for completed actions → \`filter: ['notification']\`
 
+# Meeting vs Scheduling (Critical Distinction)
+
+- **topic: meeting** (CREATE) — A calendar invite or scheduling email for a real meeting with a **named person** you have a relationship with: an investor, customer, partner, candidate, advisor, team member. Examples: "Invitation: Zoom: Rowboat Labs <> Dalton Caldwell", "YC between Peer Richelsen and Arjun", "Rowboat <> Smash Capital". The key signal is a specific person or company in the subject/body.
+- **filter: scheduling** (SKIP) — Automated reminders and scheduling tool notifications with **no named person or meaningful context**: "Reminder: your meeting is about to start", "Our meeting in an hour", generic ChiliPiper/Calendly confirmations. These are system-generated noise.
+
+**Rule of thumb:** If the email names who you're meeting with, it's \`topic: meeting\`. If it's just a system ping about a time slot, it's \`filter: scheduling\`.
+
 # Newsletter & Promotion Detection (Often Missed as Noise)
 
 These are noise even from a vendor you recognize or a platform you use:
