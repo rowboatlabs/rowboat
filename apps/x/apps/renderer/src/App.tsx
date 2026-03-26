@@ -703,13 +703,18 @@ function App() {
       window.ipc.invoke('oauth:getState', null),
     ]).then(([config, oauthState]) => {
       const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
-      setVoiceAvailable(!!config.deepgram || rowboatConnected)
+      const hasVoice = !!config.deepgram || rowboatConnected
+      setVoiceAvailable(hasVoice)
       setTtsAvailable(!!config.elevenlabs || rowboatConnected)
+      // Pre-cache auth details so mic click skips IPC round-trips
+      if (hasVoice) {
+        voice.warmup()
+      }
     }).catch(() => {
       setVoiceAvailable(false)
       setTtsAvailable(false)
     })
-  }, [])
+  }, [voice])
 
   useEffect(() => {
     refreshVoiceAvailability()
