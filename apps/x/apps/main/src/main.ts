@@ -25,6 +25,7 @@ import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
 import { execSync } from "node:child_process";
+import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -233,6 +234,9 @@ app.whenReady().then(async () => {
 
   // start agent notes learning service
   initAgentNotes();
+
+  // start chrome extension sync server
+  initChromeSync();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
