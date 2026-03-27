@@ -1059,7 +1059,7 @@ export async function* streamAgent({
         }
         if (searchEnabled) {
             loopLogger.log('search enabled, injecting search prompt');
-            instructionsWithDateTime += `\n\n# Search\nThe user has requested a search. Use the web-search tool to answer their query. Start with exactly one search call and wait for results before deciding if more are needed.`;
+            instructionsWithDateTime += `\n\n# Search\nThe user has requested a search. Use the web-search tool to answer their query.`;
         }
         let streamError: string | null = null;
         for await (const event of streamLlm(
