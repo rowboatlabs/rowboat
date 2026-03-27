@@ -29,7 +29,7 @@ cd server
 python server.py
 ```
 
-The server will run at `http://localhost:19876`.
+The server will run at `http://localhost:3001`.
 
 ### 3. Install the Chrome Extension
 

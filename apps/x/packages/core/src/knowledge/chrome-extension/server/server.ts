@@ -214,7 +214,7 @@ app.post('/browse/config', (req, res) => {
     return res.json({ status: 'saved', config: data });
 });
 
-const PORT = 19876;
+const PORT = 3001;
 const RETENTION_DAYS = 7;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 

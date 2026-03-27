@@ -1,4 +1,4 @@
-const SERVER_URL = 'http://localhost:19876';
+const SERVER_URL = 'http://localhost:3001';
 
 
 let currentDomain = null;
