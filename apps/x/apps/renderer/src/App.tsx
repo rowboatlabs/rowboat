@@ -33,6 +33,7 @@ import {
 } from '@/components/ai-elements/prompt-input';
 
 import { Shimmer } from '@/components/ai-elements/shimmer';
+import { useSmoothedText } from './hooks/useSmoothedText';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
@@ -92,6 +93,11 @@ interface TreeNode extends DirEntry {
 }
 
 const streamdownComponents = { pre: MarkdownPreOverride }
+
+function SmoothStreamingMessage({ text, components }: { text: string; components: typeof streamdownComponents }) {
+  const smoothText = useSmoothedText(text)
+  return <MessageResponse components={components}>{smoothText}</MessageResponse>
+}
 
 const DEFAULT_SIDEBAR_WIDTH = 256
 const wikiLinkRegex = /\[\[([^[\]]+)\]\]/g
@@ -4237,7 +4243,7 @@ function App() {
                                 {tabState.currentAssistantMessage && (
                                   <Message from="assistant">
                                     <MessageContent>
-                                      <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')}</MessageResponse>
+                                      <SmoothStreamingMessage text={tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')} components={streamdownComponents} />
                                     </MessageContent>
                                   </Message>
                                 )}
