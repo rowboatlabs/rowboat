@@ -238,9 +238,19 @@ function cleanUpOldFiles(): void {
     }
 }
 
-export async function init(): Promise<void> {
+function isServerEnabled(): boolean {
+    if (!fs.existsSync(CONFIG_FILE)) return false;
+    try {
+        const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+        const config = JSON.parse(raw);
+        return config.serverEnabled === true;
+    } catch {
+        return false;
+    }
+}
+
+function startServer(): void {
     fs.mkdirSync(CAPTURED_PAGES_DIR, { recursive: true });
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
     cleanUpOldFiles();
     setInterval(cleanUpOldFiles, CLEANUP_INTERVAL_MS);
@@ -250,5 +260,22 @@ export async function init(): Promise<void> {
         console.log(`  Captured pages: ${CAPTURED_PAGES_DIR}`);
         console.log(`  Config: ${CONFIG_FILE}`);
         console.log(`  Listening on http://localhost:${PORT}`);
+    });
+}
+
+export async function init(): Promise<void> {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+
+    if (isServerEnabled()) {
+        startServer();
+        return;
+    }
+
+    console.log('[ChromeSync] Server disabled, watching config for changes...');
+    fs.watch(CONFIG_DIR, (_, filename) => {
+        if (filename === 'chrome-plugin.json' && isServerEnabled()) {
+            console.log('[ChromeSync] serverEnabled set to true, starting server...');
+            startServer();
+        }
     });
 }
