@@ -714,7 +714,7 @@ function App() {
       setVoiceAvailable(false)
       setTtsAvailable(false)
     })
-  }, [voice])
+  }, [voice.warmup])
 
   useEffect(() => {
     refreshVoiceAvailability()
