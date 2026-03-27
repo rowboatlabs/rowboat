@@ -765,6 +765,22 @@ function App() {
     isRecordingRef.current = false
   }, [voice])
 
+  // Enter to submit voice input, Escape to cancel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isRecordingRef.current) return
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        handleSubmitRecording()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        handleCancelRecording()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [handleSubmitRecording, handleCancelRecording])
+
   // Helper to cancel recording from any navigation handler
   const cancelRecordingIfActive = useCallback(() => {
     if (isRecordingRef.current) {
