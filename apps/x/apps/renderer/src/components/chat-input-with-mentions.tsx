@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
   AudioLines,
@@ -9,7 +10,10 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
+  Globe,
+  Headphones,
   LoaderIcon,
+  Mic,
   Plus,
   Square,
   X,
@@ -53,6 +57,7 @@ export type StagedAttachment = {
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024 // 10MB
 
+
 const providerDisplayNames: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
@@ -61,10 +66,11 @@ const providerDisplayNames: Record<string, string> = {
   openrouter: 'OpenRouter',
   aigateway: 'AI Gateway',
   'openai-compatible': 'OpenAI-Compatible',
+  rowboat: 'Rowboat',
 }
 
 interface ConfiguredModel {
-  flavor: string
+  flavor: "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible" | "rowboat"
   model: string
   apiKey?: string
   baseURL?: string
@@ -92,7 +98,7 @@ function getAttachmentIcon(kind: AttachmentIconKind) {
 }
 
 interface ChatInputInnerProps {
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[]) => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean) => void
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean
@@ -102,6 +108,18 @@ interface ChatInputInnerProps {
   runId?: string | null
   initialDraft?: string
   onDraftChange?: (text: string) => void
+  isRecording?: boolean
+  recordingText?: string
+  recordingState?: 'connecting' | 'listening'
+  onStartRecording?: () => void
+  onSubmitRecording?: () => void
+  onCancelRecording?: () => void
+  voiceAvailable?: boolean
+  ttsAvailable?: boolean
+  ttsEnabled?: boolean
+  ttsMode?: 'summary' | 'full'
+  onToggleTts?: () => void
+  onTtsModeChange?: (mode: 'summary' | 'full') => void
 }
 
 function ChatInputInner({
@@ -115,6 +133,18 @@ function ChatInputInner({
   runId,
   initialDraft,
   onDraftChange,
+  isRecording,
+  recordingText,
+  recordingState,
+  onStartRecording,
+  onSubmitRecording,
+  onCancelRecording,
+  voiceAvailable,
+  ttsAvailable,
+  ttsEnabled,
+  ttsMode,
+  onToggleTts,
+  onTtsModeChange,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -125,51 +155,105 @@ function ChatInputInner({
 
   const [configuredModels, setConfiguredModels] = useState<ConfiguredModel[]>([])
   const [activeModelKey, setActiveModelKey] = useState('')
+  const [searchEnabled, setSearchEnabled] = useState(false)
+  const [searchAvailable, setSearchAvailable] = useState(false)
+  const [isRowboatConnected, setIsRowboatConnected] = useState(false)
 
-  // Load model config from disk (on mount and whenever tab becomes active)
+  // Check Rowboat sign-in state
+  useEffect(() => {
+    window.ipc.invoke('oauth:getState', null).then((result) => {
+      setIsRowboatConnected(result.config?.rowboat?.connected ?? false)
+    }).catch(() => setIsRowboatConnected(false))
+  }, [isActive])
+
+  // Update sign-in state when OAuth events fire
+  useEffect(() => {
+    const cleanup = window.ipc.on('oauth:didConnect', () => {
+      window.ipc.invoke('oauth:getState', null).then((result) => {
+        setIsRowboatConnected(result.config?.rowboat?.connected ?? false)
+      }).catch(() => setIsRowboatConnected(false))
+    })
+    return cleanup
+  }, [])
+
+  // Load model config (gateway when signed in, local config when BYOK)
   const loadModelConfig = useCallback(async () => {
     try {
-      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
-      const parsed = JSON.parse(result.data)
-      const models: ConfiguredModel[] = []
-      if (parsed?.providers) {
-        for (const [flavor, entry] of Object.entries(parsed.providers)) {
-          const e = entry as Record<string, unknown>
-          const modelList: string[] = Array.isArray(e.models) ? e.models as string[] : []
-          const singleModel = typeof e.model === 'string' ? e.model : ''
-          const allModels = modelList.length > 0 ? modelList : singleModel ? [singleModel] : []
-          for (const model of allModels) {
-            if (model) {
-              models.push({
-                flavor,
-                model,
-                apiKey: (e.apiKey as string) || undefined,
-                baseURL: (e.baseURL as string) || undefined,
-                headers: (e.headers as Record<string, string>) || undefined,
-                knowledgeGraphModel: (e.knowledgeGraphModel as string) || undefined,
-              })
+      if (isRowboatConnected) {
+        // Fetch gateway models
+        const listResult = await window.ipc.invoke('models:list', null)
+        const rowboatProvider = listResult.providers?.find(
+          (p: { id: string }) => p.id === 'rowboat'
+        )
+        const models: ConfiguredModel[] = (rowboatProvider?.models || []).map(
+          (m: { id: string }) => ({ flavor: 'rowboat', model: m.id })
+        )
+
+        // Read current default from config
+        let defaultModel = ''
+        try {
+          const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
+          const parsed = JSON.parse(result.data)
+          defaultModel = parsed?.model || ''
+        } catch { /* no config yet */ }
+
+        if (defaultModel) {
+          models.sort((a, b) => {
+            if (a.model === defaultModel) return -1
+            if (b.model === defaultModel) return 1
+            return 0
+          })
+        }
+
+        setConfiguredModels(models)
+        const activeKey = defaultModel
+          ? `rowboat/${defaultModel}`
+          : models[0] ? `rowboat/${models[0].model}` : ''
+        if (activeKey) setActiveModelKey(activeKey)
+      } else {
+        // BYOK: read from local models.json
+        const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
+        const parsed = JSON.parse(result.data)
+        const models: ConfiguredModel[] = []
+        if (parsed?.providers) {
+          for (const [flavor, entry] of Object.entries(parsed.providers)) {
+            const e = entry as Record<string, unknown>
+            const modelList: string[] = Array.isArray(e.models) ? e.models as string[] : []
+            const singleModel = typeof e.model === 'string' ? e.model : ''
+            const allModels = modelList.length > 0 ? modelList : singleModel ? [singleModel] : []
+            for (const model of allModels) {
+              if (model) {
+                models.push({
+                  flavor: flavor as ConfiguredModel['flavor'],
+                  model,
+                  apiKey: (e.apiKey as string) || undefined,
+                  baseURL: (e.baseURL as string) || undefined,
+                  headers: (e.headers as Record<string, string>) || undefined,
+                  knowledgeGraphModel: (e.knowledgeGraphModel as string) || undefined,
+                })
+              }
             }
           }
         }
-      }
-      const defaultKey = parsed?.provider?.flavor && parsed?.model
-        ? `${parsed.provider.flavor}/${parsed.model}`
-        : ''
-      models.sort((a, b) => {
-        const aKey = `${a.flavor}/${a.model}`
-        const bKey = `${b.flavor}/${b.model}`
-        if (aKey === defaultKey) return -1
-        if (bKey === defaultKey) return 1
-        return 0
-      })
-      setConfiguredModels(models)
-      if (defaultKey) {
-        setActiveModelKey(defaultKey)
+        const defaultKey = parsed?.provider?.flavor && parsed?.model
+          ? `${parsed.provider.flavor}/${parsed.model}`
+          : ''
+        models.sort((a, b) => {
+          const aKey = `${a.flavor}/${a.model}`
+          const bKey = `${b.flavor}/${b.model}`
+          if (aKey === defaultKey) return -1
+          if (bKey === defaultKey) return 1
+          return 0
+        })
+        setConfiguredModels(models)
+        if (defaultKey) {
+          setActiveModelKey(defaultKey)
+        }
       }
     } catch {
       // No config yet
     }
-  }, [])
+  }, [isRowboatConnected])
 
   useEffect(() => {
     loadModelConfig()
@@ -182,26 +266,61 @@ function ChatInputInner({
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
 
+  // Check search tool availability (brave or exa, or signed-in via gateway)
+  useEffect(() => {
+    const checkSearch = async () => {
+      if (isRowboatConnected) {
+        setSearchAvailable(true)
+        return
+      }
+      let available = false
+      try {
+        const raw = await window.ipc.invoke('workspace:readFile', { path: 'config/brave-search.json' })
+        const config = JSON.parse(raw.data)
+        if (config.apiKey) available = true
+      } catch { /* not configured */ }
+      if (!available) {
+        try {
+          const raw = await window.ipc.invoke('workspace:readFile', { path: 'config/exa-search.json' })
+          const config = JSON.parse(raw.data)
+          if (config.apiKey) available = true
+        } catch { /* not configured */ }
+      }
+      setSearchAvailable(available)
+    }
+    checkSearch()
+  }, [isActive, isRowboatConnected])
+
   const handleModelChange = useCallback(async (key: string) => {
     const entry = configuredModels.find((m) => `${m.flavor}/${m.model}` === key)
     if (!entry) return
     setActiveModelKey(key)
-    // Collect all models for this provider so the full list is preserved
-    const providerModels = configuredModels
-      .filter((m) => m.flavor === entry.flavor)
-      .map((m) => m.model)
+
     try {
-      await window.ipc.invoke('models:saveConfig', {
-        provider: {
-          flavor: entry.flavor,
-          apiKey: entry.apiKey,
-          baseURL: entry.baseURL,
-          headers: entry.headers,
-        },
-        model: entry.model,
-        models: providerModels,
-        knowledgeGraphModel: entry.knowledgeGraphModel,
-      })
+      if (entry.flavor === 'rowboat') {
+        // Gateway model — save with valid Zod flavor, no credentials
+        await window.ipc.invoke('models:saveConfig', {
+          provider: { flavor: 'openrouter' as const },
+          model: entry.model,
+          knowledgeGraphModel: entry.knowledgeGraphModel,
+        })
+      } else {
+        // BYOK — preserve full provider config
+        const providerModels = configuredModels
+          .filter((m) => m.flavor === entry.flavor)
+          .map((m) => m.model)
+        await window.ipc.invoke('models:saveConfig', {
+          provider: {
+            flavor: entry.flavor,
+            apiKey: entry.apiKey,
+            baseURL: entry.baseURL,
+            headers: entry.headers,
+          },
+          model: entry.model,
+          models: providerModels,
+          knowledgeGraphModel: entry.knowledgeGraphModel,
+        })
+      }
     } catch {
       toast.error('Failed to switch model')
     }
@@ -263,11 +382,12 @@ function ChatInputInner({
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return
-    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments)
+    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined)
     controller.textInput.clear()
     controller.mentions.clearMentions()
     setAttachments([])
-  }, [attachments, canSubmit, controller, message, onSubmit])
+    setSearchEnabled(false)
+  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -367,6 +487,40 @@ function ChatInputInner({
           e.target.value = ''
         }}
       />
+      {isRecording ? (
+        /* ── Recording bar ── */
+        <div className="flex items-center gap-3 px-4 py-3">
+          <button
+            type="button"
+            onClick={onCancelRecording}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Cancel recording"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <div className="flex flex-1 items-center gap-2 overflow-hidden">
+            <VoiceWaveform />
+            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+              {recordingState === 'connecting' ? 'Connecting...' : recordingText || 'Listening...'}
+            </span>
+          </div>
+          <Button
+            size="icon"
+            onClick={onSubmitRecording}
+            disabled={!recordingText?.trim()}
+            className={cn(
+              'h-7 w-7 shrink-0 rounded-full transition-all',
+              recordingText?.trim()
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : 'bg-muted text-muted-foreground'
+            )}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        /* ── Normal input ── */
+        <>
       <div className="px-4 pt-4 pb-2">
         <PromptInputTextarea
           placeholder="Type your message..."
@@ -385,6 +539,28 @@ function ChatInputInner({
         >
           <Plus className="h-4 w-4" />
         </button>
+        {searchAvailable && (
+          searchEnabled ? (
+            <button
+              type="button"
+              onClick={() => setSearchEnabled(false)}
+              className="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 text-blue-600 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
+            >
+              <Globe className="h-3.5 w-3.5" />
+              <span className="text-xs font-medium">Search</span>
+              <X className="h-3 w-3" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSearchEnabled(true)}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Search"
+            >
+              <Globe className="h-4 w-4" />
+            </button>
+          )
+        )}
         <div className="flex-1" />
         {configuredModels.length > 0 && (
           <DropdownMenu>
@@ -413,6 +589,63 @@ function ChatInputInner({
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
+        )}
+        {onToggleTts && ttsAvailable && (
+          <div className="flex shrink-0 items-center">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onToggleTts}
+                  className={cn(
+                    'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
+                    ttsEnabled
+                      ? 'text-foreground hover:bg-muted'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  )}
+                  aria-label={ttsEnabled ? 'Disable voice output' : 'Enable voice output'}
+                >
+                  <Headphones className="h-4 w-4" />
+                  {!ttsEnabled && (
+                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <span className="block h-[1.5px] w-5 -rotate-45 rounded-full bg-muted-foreground" />
+                    </span>
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {ttsEnabled ? 'Voice output on' : 'Voice output off'}
+              </TooltipContent>
+            </Tooltip>
+            {ttsEnabled && onTtsModeChange && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-7 w-4 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuRadioGroup value={ttsMode ?? 'summary'} onValueChange={(v) => onTtsModeChange(v as 'summary' | 'full')}>
+                    <DropdownMenuRadioItem value="summary">Speak summary</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="full">Speak full response</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        )}
+        {voiceAvailable && onStartRecording && (
+          <button
+            type="button"
+            onClick={onStartRecording}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Voice input"
+          >
+            <Mic className="h-4 w-4" />
+          </button>
         )}
         {isProcessing ? (
           <Button
@@ -448,6 +681,31 @@ function ChatInputInner({
           </Button>
         )}
       </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Animated waveform bars for the recording indicator */
+function VoiceWaveform() {
+  return (
+    <div className="flex items-center gap-[3px] h-5">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <span
+          key={i}
+          className="w-[3px] rounded-full bg-primary"
+          style={{
+            animation: `voice-wave 1.2s ease-in-out ${i * 0.15}s infinite`,
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes voice-wave {
+          0%, 100% { height: 4px; }
+          50% { height: 16px; }
+        }
+      `}</style>
     </div>
   )
 }
@@ -466,6 +724,18 @@ export interface ChatInputWithMentionsProps {
   runId?: string | null
   initialDraft?: string
   onDraftChange?: (text: string) => void
+  isRecording?: boolean
+  recordingText?: string
+  recordingState?: 'connecting' | 'listening'
+  onStartRecording?: () => void
+  onSubmitRecording?: () => void
+  onCancelRecording?: () => void
+  voiceAvailable?: boolean
+  ttsAvailable?: boolean
+  ttsEnabled?: boolean
+  ttsMode?: 'summary' | 'full'
+  onToggleTts?: () => void
+  onTtsModeChange?: (mode: 'summary' | 'full') => void
 }
 
 export function ChatInputWithMentions({
@@ -482,6 +752,18 @@ export function ChatInputWithMentions({
   runId,
   initialDraft,
   onDraftChange,
+  isRecording,
+  recordingText,
+  recordingState,
+  onStartRecording,
+  onSubmitRecording,
+  onCancelRecording,
+  voiceAvailable,
+  ttsAvailable,
+  ttsEnabled,
+  ttsMode,
+  onToggleTts,
+  onTtsModeChange,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -496,6 +778,18 @@ export function ChatInputWithMentions({
         runId={runId}
         initialDraft={initialDraft}
         onDraftChange={onDraftChange}
+        isRecording={isRecording}
+        recordingText={recordingText}
+        recordingState={recordingState}
+        onStartRecording={onStartRecording}
+        onSubmitRecording={onSubmitRecording}
+        onCancelRecording={onCancelRecording}
+        voiceAvailable={voiceAvailable}
+        ttsAvailable={ttsAvailable}
+        ttsEnabled={ttsEnabled}
+        ttsMode={ttsMode}
+        onToggleTts={onToggleTts}
+        onTtsModeChange={onTtsModeChange}
       />
     </PromptInputProvider>
   )

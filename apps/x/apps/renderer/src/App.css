@@ -49,6 +49,15 @@
   color: #888;
 }
 
+/* Onboarding dot grid background */
+.onboarding-dot-grid {
+  background-image: radial-gradient(circle, oklch(0.5 0 0 / 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.dark .onboarding-dot-grid {
+  background-image: radial-gradient(circle, oklch(0.7 0 0 / 0.06) 1px, transparent 1px);
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -292,4 +301,57 @@
 .graph-view text {
   pointer-events: none;
   user-select: none;
+}
+
+/* Upgrade button: grainy gradient sweep on hover */
+.upgrade-btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.upgrade-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.25'/%3E%3C/svg%3E"),
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(168, 85, 247, 0.35) 20%,
+      rgba(236, 72, 153, 0.4) 40%,
+      rgba(251, 146, 60, 0.35) 60%,
+      rgba(168, 85, 247, 0.3) 80%,
+      transparent 100%
+    );
+  background-size: 100px 100px, 100% 100%;
+  transform: translateX(-120%);
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.upgrade-btn:hover::before {
+  animation: grain-sweep 2.4s ease-in-out infinite;
+}
+
+@keyframes grain-sweep {
+  0% {
+    opacity: 1;
+    transform: translateX(-120%);
+  }
+  45% {
+    opacity: 1;
+    transform: translateX(120%);
+  }
+  55% {
+    opacity: 1;
+    transform: translateX(120%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-120%);
+  }
 }

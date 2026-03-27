@@ -2,7 +2,6 @@ import { jsonSchema, ModelMessage } from "ai";
 import fs from "fs";
 import path from "path";
 import { WorkDir } from "../config/config.js";
-import { getNoteCreationStrictness } from "../config/note_creation_config.js";
 import { Agent, ToolAttachment } from "@x/shared/dist/agent.js";
 import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage } from "@x/shared/dist/message.js";
 import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
@@ -17,6 +16,8 @@ import { isBlocked, extractCommandNames } from "../application/lib/command-execu
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createProvider } from "../models/models.js";
+import { isSignedIn } from "../account/account.js";
+import { getGatewayProvider } from "../models/gateway.js";
 import { IAgentsRepo } from "./repo.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { IBus } from "../application/lib/bus.js";
@@ -26,9 +27,65 @@ import { IRunsLock } from "../runs/lock.js";
 import { IAbortRegistry } from "../runs/abort-registry.js";
 import { PrefixLogger } from "@x/shared";
 import { parse } from "yaml";
-import { raw as noteCreationMediumRaw } from "../knowledge/note_creation_medium.js";
-import { raw as noteCreationLowRaw } from "../knowledge/note_creation_low.js";
-import { raw as noteCreationHighRaw } from "../knowledge/note_creation_high.js";
+import { getRaw as getNoteCreationRaw } from "../knowledge/note_creation.js";
+import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
+import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
+import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
+import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
+
+const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
+
+function loadAgentNotesContext(): string | null {
+    const sections: string[] = [];
+
+    const userFile = path.join(AGENT_NOTES_DIR, 'user.md');
+    const prefsFile = path.join(AGENT_NOTES_DIR, 'preferences.md');
+
+    try {
+        if (fs.existsSync(userFile)) {
+            const content = fs.readFileSync(userFile, 'utf-8').trim();
+            if (content) {
+                sections.push(`## About the User\nThese are notes you took about the user in previous chats.\n\n${content}`);
+            }
+        }
+    } catch { /* ignore */ }
+
+    try {
+        if (fs.existsSync(prefsFile)) {
+            const content = fs.readFileSync(prefsFile, 'utf-8').trim();
+            if (content) {
+                sections.push(`## User Preferences\nThese are notes you took on their general preferences.\n\n${content}`);
+            }
+        }
+    } catch { /* ignore */ }
+
+    // List other Agent Notes files for on-demand access
+    const otherFiles: string[] = [];
+    const skipFiles = new Set(['user.md', 'preferences.md', 'inbox.md']);
+    try {
+        if (fs.existsSync(AGENT_NOTES_DIR)) {
+            function listMdFiles(dir: string, prefix: string) {
+                for (const entry of fs.readdirSync(dir)) {
+                    const fullPath = path.join(dir, entry);
+                    const stat = fs.statSync(fullPath);
+                    if (stat.isDirectory()) {
+                        listMdFiles(fullPath, `${prefix}${entry}/`);
+                    } else if (entry.endsWith('.md') && !skipFiles.has(`${prefix}${entry}`)) {
+                        otherFiles.push(`${prefix}${entry}`);
+                    }
+                }
+            }
+            listMdFiles(AGENT_NOTES_DIR, '');
+        }
+    } catch { /* ignore */ }
+
+    if (otherFiles.length > 0) {
+        sections.push(`## More Specific Preferences\nFor more specific preferences, you can read these files using workspace-readFile. Only read them when relevant to the current task.\n\n${otherFiles.map(f => `- knowledge/Agent Notes/${f}`).join('\n')}`);
+    }
+
+    if (sections.length === 0) return null;
+    return `# Agent Memory\n\n${sections.join('\n\n')}`;
+}
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -320,24 +377,12 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
             tools[name] = { type: "builtin", name };
         }
         // Rebuild instructions to include current Composio tools section
-        const instructions = buildCopilotInstructions();
+        const instructions = await buildCopilotInstructions();
         return { ...CopilotAgent, tools, instructions };
     }
 
     if (id === 'note_creation') {
-        const strictness = getNoteCreationStrictness();
-        let raw = '';
-        switch (strictness) {
-            case 'medium':
-                raw = noteCreationMediumRaw;
-                break;
-            case 'low':
-                raw = noteCreationLowRaw;
-                break;
-            case 'high':
-                raw = noteCreationHighRaw;
-                break;
-        }
+        const raw = getNoteCreationRaw();
         let agent: z.infer<typeof Agent> = {
             name: id,
             instructions: raw,
@@ -349,6 +394,106 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
             if (end !== -1) {
                 const fm = raw.slice(3, end).trim();
                 const content = raw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
+    if (id === 'labeling_agent') {
+        const labelingAgentRaw = getLabelingAgentRaw();
+        let agent: z.infer<typeof Agent> = {
+            name: id,
+            instructions: labelingAgentRaw,
+        };
+
+        if (labelingAgentRaw.startsWith("---")) {
+            const end = labelingAgentRaw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = labelingAgentRaw.slice(3, end).trim();
+                const content = labelingAgentRaw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
+    if (id === 'note_tagging_agent') {
+        const noteTaggingAgentRaw = getNoteTaggingAgentRaw();
+        let agent: z.infer<typeof Agent> = {
+            name: id,
+            instructions: noteTaggingAgentRaw,
+        };
+
+        if (noteTaggingAgentRaw.startsWith("---")) {
+            const end = noteTaggingAgentRaw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = noteTaggingAgentRaw.slice(3, end).trim();
+                const content = noteTaggingAgentRaw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
+    if (id === 'inline_task_agent') {
+        const inlineTaskAgentRaw = getInlineTaskAgentRaw();
+        let agent: z.infer<typeof Agent> = {
+            name: id,
+            instructions: inlineTaskAgentRaw,
+        };
+
+        if (inlineTaskAgentRaw.startsWith("---")) {
+            const end = inlineTaskAgentRaw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = inlineTaskAgentRaw.slice(3, end).trim();
+                const content = inlineTaskAgentRaw.slice(end + 4).trim();
+                const yaml = parse(fm);
+                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
+                agent = {
+                    ...agent,
+                    ...parsed,
+                    instructions: content,
+                };
+            }
+        }
+
+        return agent;
+    }
+
+    if (id === 'agent_notes_agent') {
+        const agentNotesAgentRaw = getAgentNotesAgentRaw();
+        let agent: z.infer<typeof Agent> = {
+            name: id,
+            instructions: agentNotesAgentRaw,
+        };
+
+        if (agentNotesAgentRaw.startsWith("---")) {
+            const end = agentNotesAgentRaw.indexOf("\n---", 3);
+            if (end !== -1) {
+                const fm = agentNotesAgentRaw.slice(3, end).trim();
+                const content = agentNotesAgentRaw.slice(end + 4).trim();
                 const yaml = parse(fm);
                 const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
                 agent = {
@@ -714,11 +859,21 @@ export async function* streamAgent({
     const tools = await buildTools(agent);
 
     // set up provider + model
-    const provider = createProvider(modelConfig.provider);
-    const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep"];
-    const modelId = (knowledgeGraphAgents.includes(state.agentName!) && modelConfig.knowledgeGraphModel)
-        ? modelConfig.knowledgeGraphModel
-        : modelConfig.model;
+    const signedIn = await isSignedIn();
+    const provider = signedIn
+        ? await getGatewayProvider()
+        : createProvider(modelConfig.provider);
+    const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep", "labeling_agent", "note_tagging_agent", "agent_notes_agent"];
+    const isKgAgent = knowledgeGraphAgents.includes(state.agentName!);
+    const isInlineTaskAgent = state.agentName === "inline_task_agent";
+    const defaultModel = signedIn ? "gpt-5.4" : modelConfig.model;
+    const defaultKgModel = signedIn ? "gpt-5.4-mini" : defaultModel;
+    const defaultInlineTaskModel = signedIn ? "gpt-5.4-mini" : defaultModel;
+    const modelId = isInlineTaskAgent
+        ? defaultInlineTaskModel
+        : (isKgAgent && modelConfig.knowledgeGraphModel)
+            ? modelConfig.knowledgeGraphModel
+            : isKgAgent ? defaultKgModel : defaultModel;
     const model = provider.languageModel(modelId);
     logger.log(`using model: ${modelId}`);
 
@@ -836,10 +991,22 @@ export async function* streamAgent({
         }
 
         // get any queued user messages
+        let voiceInput = false;
+        let voiceOutput: 'summary' | 'full' | null = null;
+        let searchEnabled = false;
         while (true) {
             const msg = await messageQueue.dequeue(runId);
             if (!msg) {
                 break;
+            }
+            if (msg.voiceInput) {
+                voiceInput = true;
+            }
+            if (msg.searchEnabled) {
+                searchEnabled = true;
+            }
+            if (msg.voiceOutput) {
+                voiceOutput = msg.voiceOutput;
             }
             loopLogger.log('dequeued user message', msg.messageId);
             yield* processEvent({
@@ -880,7 +1047,29 @@ export async function* streamAgent({
             minute: '2-digit',
             timeZoneName: 'short'
         });
-        const instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
+        let instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
+        // Inject Agent Notes context for copilot
+        if (state.agentName === 'copilot' || state.agentName === 'rowboatx') {
+            const agentNotesContext = loadAgentNotesContext();
+            if (agentNotesContext) {
+                instructionsWithDateTime += `\n\n${agentNotesContext}`;
+            }
+        }
+        if (voiceInput) {
+            loopLogger.log('voice input enabled, injecting voice input prompt');
+            instructionsWithDateTime += `\n\n# Voice Input\nThe user's message was transcribed from speech. Be aware that:\n- There may be transcription errors. Silently correct obvious ones (e.g. homophones, misheard words). If an error is genuinely ambiguous, briefly mention your interpretation (e.g. "I'm assuming you meant X").\n- Spoken messages are often long-winded. The user may ramble, repeat themselves, or correct something they said earlier in the same message. Focus on their final intent, not every word verbatim.`;
+        }
+        if (voiceOutput === 'summary') {
+            loopLogger.log('voice output enabled (summary mode), injecting voice output prompt');
+            instructionsWithDateTime += `\n\n# Voice Output (MANDATORY)\nThe user has voice output enabled. You MUST start your response with <voice></voice> tags that provide a spoken summary and guide to your written response. This is NOT optional — every response MUST begin with <voice> tags.\n\nRules:\n1. ALWAYS start your response with one or more <voice> tags. Never skip them.\n2. Place ALL <voice> tags at the BEGINNING of your response, before any detailed content. Do NOT intersperse <voice> tags throughout the response.\n3. Wrap EACH spoken sentence in its own separate <voice> tag so it can be spoken incrementally. Do NOT wrap everything in a single <voice> block.\n4. Use voice as a TL;DR and navigation aid — do NOT read the entire response aloud.\n\nExample — if the user asks "what happened in my meeting with Sarah yesterday?":\n<voice>Your meeting with Sarah covered three main things: the Q2 roadmap timeline, hiring for the backend role, and the client demo next week.</voice>\n<voice>I've pulled out the key details and action items below — the demo prep notes are at the end.</voice>\n\n## Meeting with Sarah — March 11\n(Then the full detailed written response follows without any more <voice> tags.)\n\nAny text outside <voice> tags is shown visually but not spoken.`;
+        } else if (voiceOutput === 'full') {
+            loopLogger.log('voice output enabled (full mode), injecting voice output prompt');
+            instructionsWithDateTime += `\n\n# Voice Output — Full Read-Aloud (MANDATORY)\nThe user wants your ENTIRE response spoken aloud. You MUST wrap your full response in <voice></voice> tags. This is NOT optional.\n\nRules:\n1. Wrap EACH sentence in its own separate <voice> tag so it can be spoken incrementally.\n2. Write your response in a natural, conversational style suitable for listening — no markdown headings, bullet points, or formatting symbols. Use plain spoken language.\n3. Structure the content as if you are speaking to the user directly. Use transitions like "first", "also", "one more thing" instead of visual formatting.\n4. Every sentence MUST be inside a <voice> tag. Do not leave any content outside <voice> tags.\n\nExample:\n<voice>Your meeting with Sarah covered three main things.</voice>\n<voice>First, you discussed the Q2 roadmap timeline and agreed to push the launch to April.</voice>\n<voice>Second, you talked about hiring for the backend role — Sarah will send over two candidates by Friday.</voice>\n<voice>And lastly, the client demo is next week on Thursday at 2pm, and you're handling the intro slides.</voice>`;
+        }
+        if (searchEnabled) {
+            loopLogger.log('search enabled, injecting search prompt');
+            instructionsWithDateTime += `\n\n# Search\nThe user has requested a search. Load the search skill and use web search or research search as needed to answer their query.`;
+        }
         let streamError: string | null = null;
         for await (const event of streamLlm(
             model,

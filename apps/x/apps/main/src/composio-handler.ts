@@ -4,8 +4,11 @@ import * as composioClient from '@x/core/dist/composio/client.js';
 import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
 import { composioEnabledToolsRepo } from '@x/core/dist/composio/enabled-tools-repo.js';
 import type { EnabledTool } from '@x/core/dist/composio/enabled-tools-repo.js';
-import type { LocalConnectedAccount } from '@x/core/dist/composio/types.js';
+import type { LocalConnectedAccount, ZExecuteActionResponse } from '@x/core/dist/composio/types.js';
 import { refreshComposioTools } from '@x/core/dist/application/lib/builtin-tools.js';
+import { z } from 'zod';
+import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
+import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 
 const REDIRECT_URI = 'http://localhost:8081/oauth/callback';
 
@@ -31,8 +34,8 @@ export function emitComposioEvent(event: { toolkitSlug: string; success: boolean
 /**
  * Check if Composio is configured with an API key
  */
-export function isConfigured(): { configured: boolean } {
-    return { configured: composioClient.isConfigured() };
+export async function isConfigured(): Promise<{ configured: boolean }> {
+    return { configured: await composioClient.isConfigured() };
 }
 
 /**
@@ -71,7 +74,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         const toolkit = await composioClient.getToolkit(toolkitSlug);
 
         // Check for managed OAuth2
-        if (!toolkit.composio_managed_auth_schemes.includes('OAUTH2')) {
+        if (!toolkit.composio_managed_auth_schemes?.includes('OAUTH2')) {
             return {
                 success: false,
                 error: `Toolkit ${toolkitSlug} does not support managed OAuth2`,
@@ -146,7 +149,11 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
 
         // Set up callback server
         let cleanupTimeout: NodeJS.Timeout;
+        let callbackHandled = false;
         const { server } = await createAuthServer(8081, async (_code, _state) => {
+            // Guard against duplicate callbacks (browser may send multiple requests)
+            if (callbackHandled) return;
+            callbackHandled = true;
             // OAuth callback received - sync the account status
             try {
                 const accountStatus = await composioClient.getConnectedAccount(connectedAccountId);
@@ -154,6 +161,12 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
 
                 if (accountStatus.status === 'ACTIVE') {
                     emitComposioEvent({ toolkitSlug, success: true });
+                    if (toolkitSlug === 'gmail') {
+                        triggerGmailSync();
+                    }
+                    if (toolkitSlug === 'googlecalendar') {
+                        triggerCalendarSync();
+                    }
                 } else {
                     emitComposioEvent({
                         toolkitSlug,
@@ -274,29 +287,48 @@ export function listConnected(): { toolkits: string[] } {
 }
 
 /**
+ * Check if Composio should be used for Google services (Gmail, etc.)
+ */
+export async function useComposioForGoogle(): Promise<{ enabled: boolean }> {
+    return { enabled: await composioClient.useComposioForGoogle() };
+}
+
+/**
+ * Check if Composio should be used for Google Calendar
+ */
+export async function useComposioForGoogleCalendar(): Promise<{ enabled: boolean }> {
+    return { enabled: await composioClient.useComposioForGoogleCalendar() };
+}
+
+/**
  * Execute a Composio action
  */
 export async function executeAction(
     actionSlug: string,
     toolkitSlug: string,
     input: Record<string, unknown>
-): Promise<{ success: boolean; data: unknown; error?: string }> {
+): Promise<z.infer<typeof ZExecuteActionResponse>> {
     try {
         const account = composioAccountsRepo.getAccount(toolkitSlug);
         if (!account || account.status !== 'ACTIVE') {
             return {
-                success: false,
                 data: null,
+                successful: false,
                 error: `Toolkit ${toolkitSlug} is not connected`,
             };
         }
 
-        const result = await composioClient.executeAction(actionSlug, account.id, input);
+        const result = await composioClient.executeAction(actionSlug, {
+            connected_account_id: account.id,
+            user_id: 'rowboat-user',
+            version: 'latest',
+            arguments: input,
+        });
         return result;
     } catch (error) {
         console.error('[Composio] Action execution failed:', error);
         return {
-            success: false,
+            successful: false,
             data: null,
             error: error instanceof Error ? error.message : 'Unknown error',
         };
@@ -311,9 +343,9 @@ export async function listToolkits(cursor?: string): Promise<{
         slug: string;
         name: string;
         meta: { description: string; logo: string; tools_count: number; triggers_count: number };
-        no_auth: boolean;
-        auth_schemes: string[];
-        composio_managed_auth_schemes: string[];
+        no_auth?: boolean;
+        auth_schemes?: string[];
+        composio_managed_auth_schemes?: string[];
     }>;
     nextCursor: string | null;
     totalItems: number;

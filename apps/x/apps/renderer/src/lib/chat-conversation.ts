@@ -150,6 +150,89 @@ export const getWebSearchCardData = (tool: ToolCall): WebSearchCardData | null =
   return null
 }
 
+// App navigation action card data
+export type AppActionCardData = {
+  action: string
+  label: string
+  details?: Record<string, unknown>
+}
+
+const summarizeFilterUpdates = (updates: Record<string, unknown>): string => {
+  const filters = updates.filters as Record<string, unknown> | undefined
+  const parts: string[] = []
+
+  if (filters) {
+    if (filters.clear) parts.push('Cleared filters')
+    const set = filters.set as Array<{ category: string; value: string }> | undefined
+    if (set?.length) parts.push(`Set ${set.length} filter${set.length !== 1 ? 's' : ''}: ${set.map(f => `${f.category}=${f.value}`).join(', ')}`)
+    const add = filters.add as Array<{ category: string; value: string }> | undefined
+    if (add?.length) parts.push(`Added ${add.length} filter${add.length !== 1 ? 's' : ''}`)
+    const remove = filters.remove as Array<{ category: string; value: string }> | undefined
+    if (remove?.length) parts.push(`Removed ${remove.length} filter${remove.length !== 1 ? 's' : ''}`)
+  }
+
+  if (updates.sort) {
+    const sort = updates.sort as { field: string; dir: string }
+    parts.push(`Sorted by ${sort.field} ${sort.dir}`)
+  }
+
+  if (updates.search !== undefined) {
+    parts.push(updates.search ? `Searching "${updates.search}"` : 'Cleared search')
+  }
+
+  const columns = updates.columns as Record<string, unknown> | undefined
+  if (columns) {
+    const set = columns.set as string[] | undefined
+    if (set) parts.push(`Set ${set.length} column${set.length !== 1 ? 's' : ''}`)
+    const add = columns.add as string[] | undefined
+    if (add?.length) parts.push(`Added ${add.length} column${add.length !== 1 ? 's' : ''}`)
+    const remove = columns.remove as string[] | undefined
+    if (remove?.length) parts.push(`Removed ${remove.length} column${remove.length !== 1 ? 's' : ''}`)
+  }
+
+  return parts.length > 0 ? parts.join(', ') : 'Updated view'
+}
+
+export const getAppActionCardData = (tool: ToolCall): AppActionCardData | null => {
+  if (tool.name !== 'app-navigation') return null
+  const result = tool.result as Record<string, unknown> | undefined
+
+  // While pending/running, derive label from input
+  if (!result || !result.success) {
+    const input = normalizeToolInput(tool.input) as Record<string, unknown> | undefined
+    if (!input) return null
+    const action = input.action as string
+    switch (action) {
+      case 'open-note': return { action, label: `Opening ${(input.path as string || '').split('/').pop()?.replace(/\.md$/, '') || 'note'}...` }
+      case 'open-view': return { action, label: `Opening ${input.view} view...` }
+      case 'update-base-view': return { action, label: 'Updating view...' }
+      case 'create-base': return { action, label: `Creating "${input.name}"...` }
+      case 'get-base-state': return null // renders as normal tool block
+      default: return null
+    }
+  }
+
+  switch (result.action) {
+    case 'open-note': {
+      const filePath = result.path as string || ''
+      const name = filePath.split('/').pop()?.replace(/\.md$/, '') || 'note'
+      return { action: 'open-note', label: `Opened ${name}` }
+    }
+    case 'open-view':
+      return { action: 'open-view', label: `Opened ${result.view} view` }
+    case 'update-base-view':
+      return {
+        action: 'update-base-view',
+        label: summarizeFilterUpdates(result.updates as Record<string, unknown> || {}),
+        details: result.updates as Record<string, unknown>,
+      }
+    case 'create-base':
+      return { action: 'create-base', label: `Created base "${result.name}"` }
+    default:
+      return null // get-base-state renders as normal tool block
+  }
+}
+
 // Parse attached files from message content and return clean message + file paths.
 export const parseAttachedFiles = (content: string): { message: string; files: string[] } => {
   const attachedFilesRegex = /<attached-files>\s*([\s\S]*?)\s*<\/attached-files>/

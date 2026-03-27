@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { autoConfigureStrictnessIfNeeded } from '../config/strictness_analyzer.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
@@ -26,11 +25,11 @@ const NOTES_OUTPUT_DIR = path.join(WorkDir, 'knowledge');
 const NOTE_CREATION_AGENT = 'note_creation';
 
 // Configuration for the graph builder service
-const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
+const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const SOURCE_FOLDERS = [
     'gmail_sync',
-    'fireflies_transcripts',
-    'granola_notes',
+    path.join('knowledge', 'Meetings', 'fireflies'),
+    path.join('knowledge', 'Meetings', 'granola'),
 ];
 
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
@@ -193,7 +192,9 @@ async function createNotesFromBatch(
     // Add each file's content
     message += `# Source Files to Process\n\n`;
     files.forEach((file, idx) => {
-        message += `## Source File ${idx + 1}: ${path.basename(file.path)}\n\n`;
+        // Pass workspace-relative path so the agent can link back to meeting notes
+        const relativePath = path.relative(WorkDir, file.path);
+        message += `## Source File ${idx + 1}: ${relativePath}\n\n`;
         message += file.content;
         message += `\n\n---\n\n`;
     });
@@ -363,7 +364,19 @@ export async function buildGraph(sourceDir: string): Promise<void> {
     console.log(`[buildGraph] State loaded. Previously processed: ${previouslyProcessedCount} files`);
 
     // Get files that need processing (new or changed)
-    const filesToProcess = getFilesToProcess(sourceDir, state);
+    let filesToProcess = getFilesToProcess(sourceDir, state);
+
+    // For gmail_sync, only process emails that have been labeled (have YAML frontmatter)
+    if (sourceDir.endsWith('gmail_sync')) {
+        filesToProcess = filesToProcess.filter(filePath => {
+            try {
+                const content = fs.readFileSync(filePath, 'utf-8');
+                return content.startsWith('---');
+            } catch {
+                return false;
+            }
+        });
+    }
 
     if (filesToProcess.length === 0) {
         console.log(`[buildGraph] No new or changed files to process in ${path.basename(sourceDir)}`);
@@ -525,8 +538,6 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
 async function processAllSources(): Promise<void> {
     console.log('[GraphBuilder] Checking for new content in all sources...');
 
-    // Auto-configure strictness on first run if not already done
-    autoConfigureStrictnessIfNeeded();
 
     let anyFilesProcessed = false;
 
@@ -555,7 +566,19 @@ async function processAllSources(): Promise<void> {
         }
 
         try {
-            const filesToProcess = getFilesToProcess(sourceDir, state);
+            let filesToProcess = getFilesToProcess(sourceDir, state);
+
+            // For gmail_sync, only process emails that have been labeled (have YAML frontmatter)
+            if (folder === 'gmail_sync') {
+                filesToProcess = filesToProcess.filter(filePath => {
+                    try {
+                        const content = fs.readFileSync(filePath, 'utf-8');
+                        return content.startsWith('---');
+                    } catch {
+                        return false;
+                    }
+                });
+            }
 
             if (filesToProcess.length > 0) {
                 console.log(`[GraphBuilder] Found ${filesToProcess.length} new/changed files in ${folder}`);

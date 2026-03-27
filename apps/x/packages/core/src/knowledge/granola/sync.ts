@@ -17,13 +17,14 @@ import {
 const GRANOLA_CLIENT_VERSION = '6.462.1';
 const GRANOLA_API_BASE = 'https://api.granola.ai';
 const GRANOLA_CONFIG_PATH = path.join(homedir(), 'Library', 'Application Support', 'Granola', 'supabase.json');
-const SYNC_DIR = path.join(WorkDir, 'granola_notes');
-const STATE_FILE = path.join(SYNC_DIR, 'sync_state.json');
+const SYNC_DIR = path.join(WorkDir, 'knowledge', 'Meetings', 'granola');
+const STATE_FILE = path.join(WorkDir, 'granola_sync_state.json');
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const API_DELAY_MS = 1000; // 1 second delay between API calls
 const RATE_LIMIT_RETRY_DELAY_MS = 60 * 1000; // Wait 1 minute on rate limit
 const MAX_RETRIES = 3; // Maximum retries for rate-limited requests
 const MAX_BATCH_SIZE = 10; // Process max 10 documents per folder per sync
+const LOOKBACK_DAYS = 30; // Only sync documents from the last 30 days
 
 // --- Wake Signal for Immediate Sync Trigger ---
 let wakeResolve: (() => void) | null = null;
@@ -370,6 +371,10 @@ async function syncNotes(): Promise<void> {
         let hasMore = true;
         const changedTitles: string[] = [];
 
+        // Calculate lookback cutoff date
+        const lookbackCutoff = new Date();
+        lookbackCutoff.setDate(lookbackCutoff.getDate() - LOOKBACK_DAYS);
+
         // Fetch documents with pagination
         while (hasMore) {
             // Delay before API call (except first)
@@ -390,7 +395,16 @@ async function syncNotes(): Promise<void> {
             }
 
             // Process each document
+            let foundOldDoc = false;
             for (const doc of docsResponse.docs) {
+                // Skip documents outside the lookback period
+                const docDate = new Date(doc.created_at);
+                if (docDate < lookbackCutoff) {
+                    console.log(`[Granola] Document "${doc.title}" is older than ${LOOKBACK_DAYS} days, stopping pagination`);
+                    foundOldDoc = true;
+                    break;
+                }
+
                 const docUpdatedAt = doc.updated_at || doc.created_at;
                 const lastSyncedAt = state.syncedDocs[doc.id];
 
@@ -407,8 +421,15 @@ async function syncNotes(): Promise<void> {
 
                 // Convert to markdown and save
                 const markdown = documentToMarkdown(doc);
-                const filename = `${doc.id}_${cleanFilename(docTitle)}.md`;
-                const filePath = path.join(SYNC_DIR, filename);
+                const dateDir = path.join(
+                    SYNC_DIR,
+                    String(docDate.getFullYear()),
+                    String(docDate.getMonth() + 1).padStart(2, '0'),
+                    String(docDate.getDate()).padStart(2, '0')
+                );
+                ensureDir(dateDir);
+                const filename = `${cleanFilename(docTitle)}.md`;
+                const filePath = path.join(dateDir, filename);
 
                 fs.writeFileSync(filePath, markdown);
 
@@ -422,6 +443,12 @@ async function syncNotes(): Promise<void> {
 
                 // Update state
                 state.syncedDocs[doc.id] = docUpdatedAt;
+            }
+
+            // Stop if we hit a document outside the lookback period
+            if (foundOldDoc) {
+                hasMore = false;
+                break;
             }
 
             // Move to next page

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Bot,
   ChevronRight,
@@ -16,6 +16,7 @@ import {
   Mic,
   Network,
   Pencil,
+  Table2,
   Plug,
   LoaderIcon,
   Settings,
@@ -86,6 +87,7 @@ import { ConnectorsPopover } from "@/components/connectors-popover"
 import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
+import { useBilling } from "@/hooks/useBilling"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
 
@@ -101,6 +103,7 @@ type KnowledgeActions = {
   createNote: (parentPath?: string) => void
   createFolder: (parentPath?: string) => void
   openGraph: () => void
+  openBases: () => void
   expandAll: () => void
   collapseAll: () => void
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
@@ -399,6 +402,21 @@ export function SidebarContentPanel({
   const [connectorsOpen, setConnectorsOpen] = useState(false)
   const [openConnectorsAfterClose, setOpenConnectorsAfterClose] = useState(false)
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [isRowboatConnected, setIsRowboatConnected] = useState(false)
+  const [loggingIn, setLoggingIn] = useState(false)
+  const { billing } = useBilling(isRowboatConnected)
+
+  const handleRowboatLogin = useCallback(async () => {
+    try {
+      setLoggingIn(true)
+      const result = await window.ipc.invoke('oauth:connect', { provider: 'rowboat' })
+      if (!result.success) {
+        setLoggingIn(false)
+      }
+    } catch {
+      setLoggingIn(false)
+    }
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -410,6 +428,7 @@ export function SidebarContentPanel({
         const hasError = Object.values(config).some((entry) => Boolean(entry?.error))
         if (mounted) {
           setHasOauthError(hasError)
+          setIsRowboatConnected(config['rowboat']?.connected ?? false)
           if (!hasError) {
             setShowOauthAlert(true)
           }
@@ -418,6 +437,7 @@ export function SidebarContentPanel({
         console.error('Failed to fetch OAuth state:', error)
         if (mounted) {
           setHasOauthError(false)
+          setIsRowboatConnected(false)
           setShowOauthAlert(true)
         }
       }
@@ -426,6 +446,7 @@ export function SidebarContentPanel({
     refreshOauthError()
     const cleanup = window.ipc.on('oauth:didConnect', () => {
       refreshOauthError()
+      setLoggingIn(false)
     })
 
     return () => {
@@ -481,17 +502,42 @@ export function SidebarContentPanel({
           />
         )}
       </SidebarContent>
+      {/* Billing / upgrade CTA or Log in CTA */}
+      {isRowboatConnected && billing ? (
+        <div className="px-3 py-2">
+          <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
+            <span className="text-xs font-medium capitalize text-sidebar-foreground">
+              {billing.subscriptionPlan ?? 'Free'} plan
+            </span>
+            <button className="rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20">
+              Upgrade
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {/* Sign in CTA */}
+      {!isRowboatConnected && (
+        <div className="px-3 py-2">
+          <button
+            onClick={handleRowboatLogin}
+            disabled={loggingIn}
+            className="flex w-full items-center justify-center rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2.5 text-xs font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent/40 disabled:opacity-50"
+          >
+            {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
+          </button>
+        </div>
+      )}
       {/* Bottom actions */}
       <div className="border-t border-sidebar-border px-2 py-2">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
-            <ConnectorsPopover open={connectorsOpen} onOpenChange={setConnectorsOpen}>
+            <ConnectorsPopover open={connectorsOpen} onOpenChange={setConnectorsOpen} mode="unconnected">
               <button
                 ref={connectorsButtonRef}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
               >
                 <Plug className="size-4" />
-                <span>Connected accounts</span>
+                <span>Connect Accounts</span>
               </button>
             </ConnectorsPopover>
             {hasOauthError && (
@@ -606,6 +652,9 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
   const notePathRef = React.useRef<string | null>(null)
   const timestampRef = React.useRef<string | null>(null)
   const relativePathRef = React.useRef<string | null>(null)
+  // Keep a ref to always call the latest onNoteCreated (avoids stale closure in recorder.onstop)
+  const onNoteCreatedRef = React.useRef(onNoteCreated)
+  React.useEffect(() => { onNoteCreatedRef.current = onNoteCreated }, [onNoteCreated])
 
   React.useEffect(() => {
     window.ipc.invoke('workspace:readFile', {
@@ -640,11 +689,12 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
         recursive: true,
       })
 
-      const initialContent = `# Voice Memo
-
-**Type:** voice memo
-**Recorded:** ${now.toLocaleString()}
-**Path:** ${relativePath}
+      const initialContent = `---
+type: voice memo
+recorded: "${now.toISOString()}"
+path: ${relativePath}
+---
+# Voice Memo
 
 ## Transcript
 
@@ -657,7 +707,7 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
       })
 
       // Select the note so the user can see it
-      onNoteCreated?.(notePath)
+      onNoteCreatedRef.current?.(notePath)
 
       // Start actual recording
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -705,11 +755,12 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
         const currentNotePath = notePathRef.current
         const currentRelativePath = relativePathRef.current
         if (currentNotePath && currentRelativePath) {
-          const transcribingContent = `# Voice Memo
-
-**Type:** voice memo
-**Recorded:** ${new Date().toLocaleString()}
-**Path:** ${currentRelativePath}
+          const transcribingContent = `---
+type: voice memo
+recorded: "${new Date().toISOString()}"
+path: ${currentRelativePath}
+---
+# Voice Memo
 
 ## Transcript
 
@@ -726,21 +777,23 @@ function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => 
         const transcript = await transcribeWithDeepgram(blob)
         if (currentNotePath && currentRelativePath) {
           const finalContent = transcript
-            ? `# Voice Memo
-
-**Type:** voice memo
-**Recorded:** ${new Date().toLocaleString()}
-**Path:** ${currentRelativePath}
+            ? `---
+type: voice memo
+recorded: "${new Date().toISOString()}"
+path: ${currentRelativePath}
+---
+# Voice Memo
 
 ## Transcript
 
 ${transcript}
 `
-            : `# Voice Memo
-
-**Type:** voice memo
-**Recorded:** ${new Date().toLocaleString()}
-**Path:** ${currentRelativePath}
+            : `---
+type: voice memo
+recorded: "${new Date().toISOString()}"
+path: ${currentRelativePath}
+---
+# Voice Memo
 
 ## Transcript
 
@@ -753,7 +806,7 @@ ${transcript}
           })
 
           // Re-select to trigger refresh
-          onNoteCreated?.(currentNotePath)
+          onNoteCreatedRef.current?.(currentNotePath)
 
           if (transcript) {
             toast('Voice note transcribed', 'success')
@@ -855,6 +908,7 @@ function KnowledgeSection({
     { icon: FilePlus, label: "New Note", action: () => actions.createNote() },
     { icon: FolderPlus, label: "New Folder", action: () => actions.createFolder() },
     { icon: Network, label: "Graph View", action: () => actions.openGraph() },
+    { icon: Table2, label: "Bases", action: () => actions.openBases() },
   ]
 
   return (

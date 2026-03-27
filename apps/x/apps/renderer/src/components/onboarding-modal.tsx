@@ -2,8 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, Mic, Mail, CheckCircle2 } from "lucide-react"
-// import { MessageSquare } from "lucide-react"
+import { Loader2, Mic, Mail, Calendar, CheckCircle2, ArrowLeft, MessageSquare } from "lucide-react"
 
 import {
   Dialog,
@@ -23,10 +22,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
 import { getGoogleClientId, setGoogleClientId } from "@/lib/google-client-id-store"
 import { toast } from "sonner"
+import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
 
 interface ProviderState {
   isConnected: boolean
@@ -39,7 +38,9 @@ interface OnboardingModalProps {
   onComplete: () => void
 }
 
-type Step = 0 | 1 | 2
+type Step = 0 | 1 | 2 | 3 | 4
+
+type OnboardingPath = 'rowboat' | 'byok' | null
 
 type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
@@ -51,6 +52,7 @@ interface LlmModelOption {
 
 export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [currentStep, setCurrentStep] = useState<Step>(0)
+  const [onboardingPath, setOnboardingPath] = useState<OnboardingPath>(null)
 
   // LLM setup state
   const [llmProvider, setLlmProvider] = useState<LlmProviderFlavor>("openai")
@@ -80,11 +82,31 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [granolaLoading, setGranolaLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
 
-  // Composio/Slack state
+  // Composio API key state
   const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
-  const [slackConnected, setSlackConnected] = useState(false)
-  // const [slackLoading, setSlackLoading] = useState(true)
-  const [slackConnecting, setSlackConnecting] = useState(false)
+  const [, setComposioApiKeyTarget] = useState<'slack' | 'gmail'>('gmail')
+
+  // Slack state (agent-slack CLI)
+  const [slackEnabled, setSlackEnabled] = useState(false)
+  const [slackLoading, setSlackLoading] = useState(true)
+  const [slackWorkspaces, setSlackWorkspaces] = useState<Array<{ url: string; name: string }>>([])
+  const [slackAvailableWorkspaces, setSlackAvailableWorkspaces] = useState<Array<{ url: string; name: string }>>([])
+  const [slackSelectedUrls, setSlackSelectedUrls] = useState<Set<string>>(new Set())
+  const [slackPickerOpen, setSlackPickerOpen] = useState(false)
+  const [slackDiscovering, setSlackDiscovering] = useState(false)
+  const [slackDiscoverError, setSlackDiscoverError] = useState<string | null>(null)
+
+  // Composio/Gmail state
+  const [useComposioForGoogle, setUseComposioForGoogle] = useState(false)
+  const [gmailConnected, setGmailConnected] = useState(false)
+  const [gmailLoading, setGmailLoading] = useState(true)
+  const [gmailConnecting, setGmailConnecting] = useState(false)
+
+  // Composio/Google Calendar state
+  const [useComposioForGoogleCalendar, setUseComposioForGoogleCalendar] = useState(false)
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false)
+  const [googleCalendarLoading, setGoogleCalendarLoading] = useState(true)
+  const [googleCalendarConnecting, setGoogleCalendarConnecting] = useState(false)
 
   const updateProviderConfig = useCallback(
     (provider: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string }>) => {
@@ -113,7 +135,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     .filter(([, state]) => state.isConnected)
     .map(([provider]) => provider)
 
-  // Load available providers on mount
+  // Load available providers and composio-for-google flag on mount
   useEffect(() => {
     if (!open) return
 
@@ -129,7 +151,25 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         setProvidersLoading(false)
       }
     }
+    async function loadComposioForGoogleFlag() {
+      try {
+        const result = await window.ipc.invoke('composio:use-composio-for-google', null)
+        setUseComposioForGoogle(result.enabled)
+      } catch (error) {
+        console.error('Failed to check composio-for-google flag:', error)
+      }
+    }
+    async function loadComposioForGoogleCalendarFlag() {
+      try {
+        const result = await window.ipc.invoke('composio:use-composio-for-google-calendar', null)
+        setUseComposioForGoogleCalendar(result.enabled)
+      } catch (error) {
+        console.error('Failed to check composio-for-google-calendar flag:', error)
+      }
+    }
     loadProviders()
+    loadComposioForGoogleFlag()
+    loadComposioForGoogleCalendarFlag()
   }, [open])
 
   // Load LLM models catalog on open
@@ -212,49 +252,127 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
   }, [])
 
-  // Load Slack connection status
-  const refreshSlackStatus = useCallback(async () => {
+  // Load Slack config
+  const refreshSlackConfig = useCallback(async () => {
     try {
-      // setSlackLoading(true)
-      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'slack' })
-      setSlackConnected(result.isConnected)
+      setSlackLoading(true)
+      const result = await window.ipc.invoke('slack:getConfig', null)
+      setSlackEnabled(result.enabled)
+      setSlackWorkspaces(result.workspaces || [])
     } catch (error) {
-      console.error('Failed to load Slack status:', error)
-      setSlackConnected(false)
+      console.error('Failed to load Slack config:', error)
+      setSlackEnabled(false)
+      setSlackWorkspaces([])
     } finally {
-      // setSlackLoading(false)
+      setSlackLoading(false)
     }
   }, [])
 
-  // Start Slack connection
-  const startSlackConnect = useCallback(async () => {
+  // Enable Slack: discover workspaces
+  const handleSlackEnable = useCallback(async () => {
+    setSlackDiscovering(true)
+    setSlackDiscoverError(null)
     try {
-      setSlackConnecting(true)
-      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'slack' })
-      if (!result.success) {
-        toast.error(result.error || 'Failed to connect to Slack')
-        setSlackConnecting(false)
+      const result = await window.ipc.invoke('slack:listWorkspaces', null)
+      if (result.error || result.workspaces.length === 0) {
+        setSlackDiscoverError(result.error || 'No Slack workspaces found. Set up with: agent-slack auth import-desktop')
+        setSlackAvailableWorkspaces([])
+        setSlackPickerOpen(true)
+      } else {
+        setSlackAvailableWorkspaces(result.workspaces)
+        setSlackSelectedUrls(new Set(result.workspaces.map((w: { url: string }) => w.url)))
+        setSlackPickerOpen(true)
       }
-      // Success will be handled by composio:didConnect event
     } catch (error) {
-      console.error('Failed to connect to Slack:', error)
-      toast.error('Failed to connect to Slack')
-      setSlackConnecting(false)
+      console.error('Failed to discover Slack workspaces:', error)
+      setSlackDiscoverError('Failed to discover Slack workspaces')
+      setSlackPickerOpen(true)
+    } finally {
+      setSlackDiscovering(false)
     }
   }, [])
 
-  // Connect to Slack via Composio (checks if configured first)
-  /*
-  const handleConnectSlack = useCallback(async () => {
-    // Check if Composio is configured
+  // Load Gmail connection status
+  const refreshGmailStatus = useCallback(async () => {
+    try {
+      setGmailLoading(true)
+      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'gmail' })
+      setGmailConnected(result.isConnected)
+    } catch (error) {
+      console.error('Failed to load Gmail status:', error)
+      setGmailConnected(false)
+    } finally {
+      setGmailLoading(false)
+    }
+  }, [])
+
+  // Load Google Calendar connection status
+  const refreshGoogleCalendarStatus = useCallback(async () => {
+    try {
+      setGoogleCalendarLoading(true)
+      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'googlecalendar' })
+      setGoogleCalendarConnected(result.isConnected)
+    } catch (error) {
+      console.error('Failed to load Google Calendar status:', error)
+      setGoogleCalendarConnected(false)
+    } finally {
+      setGoogleCalendarLoading(false)
+    }
+  }, [])
+
+  // Connect to Gmail via Composio
+  const startGmailConnect = useCallback(async () => {
+    try {
+      setGmailConnecting(true)
+      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'gmail' })
+      if (!result.success) {
+        toast.error(result.error || 'Failed to connect to Gmail')
+        setGmailConnecting(false)
+      }
+    } catch (error) {
+      console.error('Failed to connect to Gmail:', error)
+      toast.error('Failed to connect to Gmail')
+      setGmailConnecting(false)
+    }
+  }, [])
+
+  // Handle Gmail connect button click
+  const handleConnectGmail = useCallback(async () => {
     const configResult = await window.ipc.invoke('composio:is-configured', null)
     if (!configResult.configured) {
+      setComposioApiKeyTarget('gmail')
       setComposioApiKeyOpen(true)
       return
     }
-    await startSlackConnect()
-  }, [startSlackConnect])
-  */
+    await startGmailConnect()
+  }, [startGmailConnect])
+
+  // Connect to Google Calendar via Composio
+  const startGoogleCalendarConnect = useCallback(async () => {
+    try {
+      setGoogleCalendarConnecting(true)
+      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'googlecalendar' })
+      if (!result.success) {
+        toast.error(result.error || 'Failed to connect to Google Calendar')
+        setGoogleCalendarConnecting(false)
+      }
+    } catch (error) {
+      console.error('Failed to connect to Google Calendar:', error)
+      toast.error('Failed to connect to Google Calendar')
+      setGoogleCalendarConnecting(false)
+    }
+  }, [])
+
+  // Handle Google Calendar connect button click
+  const handleConnectGoogleCalendar = useCallback(async () => {
+    const configResult = await window.ipc.invoke('composio:is-configured', null)
+    if (!configResult.configured) {
+      setComposioApiKeyTarget('gmail')
+      setComposioApiKeyOpen(true)
+      return
+    }
+    await startGoogleCalendarConnect()
+  }, [startGoogleCalendarConnect])
 
   // Handle Composio API key submission
   const handleComposioApiKeySubmit = useCallback(async (apiKey: string) => {
@@ -262,17 +380,69 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       await window.ipc.invoke('composio:set-api-key', { apiKey })
       setComposioApiKeyOpen(false)
       toast.success('Composio API key saved')
-      // Now start the Slack connection
-      await startSlackConnect()
+      await startGmailConnect()
     } catch (error) {
       console.error('Failed to save Composio API key:', error)
       toast.error('Failed to save API key')
     }
-  }, [startSlackConnect])
+  }, [startGmailConnect])
+
+  // Save selected Slack workspaces
+  const handleSlackSaveWorkspaces = useCallback(async () => {
+    const selected = slackAvailableWorkspaces.filter(w => slackSelectedUrls.has(w.url))
+    try {
+      setSlackLoading(true)
+      await window.ipc.invoke('slack:setConfig', { enabled: true, workspaces: selected })
+      setSlackEnabled(true)
+      setSlackWorkspaces(selected)
+      setSlackPickerOpen(false)
+      toast.success('Slack enabled')
+    } catch (error) {
+      console.error('Failed to save Slack config:', error)
+      toast.error('Failed to save Slack settings')
+    } finally {
+      setSlackLoading(false)
+    }
+  }, [slackAvailableWorkspaces, slackSelectedUrls])
+
+  // Disable Slack
+  const handleSlackDisable = useCallback(async () => {
+    try {
+      setSlackLoading(true)
+      await window.ipc.invoke('slack:setConfig', { enabled: false, workspaces: [] })
+      setSlackEnabled(false)
+      setSlackWorkspaces([])
+      setSlackPickerOpen(false)
+      toast.success('Slack disabled')
+    } catch (error) {
+      console.error('Failed to update Slack config:', error)
+      toast.error('Failed to update Slack settings')
+    } finally {
+      setSlackLoading(false)
+    }
+  }, [])
 
   const handleNext = () => {
-    if (currentStep < 2) {
+    if (currentStep < 4) {
       setCurrentStep((prev) => (prev + 1) as Step)
+    }
+  }
+
+  const handleBack = () => {
+    if (currentStep === 1) {
+      // BYOK upsell → back to sign-in page
+      setOnboardingPath(null)
+      setCurrentStep(0 as Step)
+    } else if (currentStep === 2) {
+      // LLM setup → back to BYOK upsell
+      setCurrentStep(1 as Step)
+    } else if (currentStep === 3) {
+      // Connect accounts → back depends on path
+      if (onboardingPath === 'rowboat') {
+        setCurrentStep(0 as Step)
+      } else {
+        setCurrentStep(2 as Step)
+      }
     }
   }
 
@@ -319,8 +489,18 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     // Refresh Granola
     refreshGranolaConfig()
 
-    // Refresh Slack status
-    refreshSlackStatus()
+    // Refresh Slack config
+    refreshSlackConfig()
+
+    // Refresh Gmail Composio status if enabled
+    if (useComposioForGoogle) {
+      refreshGmailStatus()
+    }
+
+    // Refresh Google Calendar Composio status if enabled
+    if (useComposioForGoogleCalendar) {
+      refreshGoogleCalendarStatus()
+    }
 
     // Refresh OAuth providers
     if (providers.length === 0) return
@@ -349,7 +529,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackStatus])
+  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshGmailStatus, useComposioForGoogle, refreshGoogleCalendarStatus, useComposioForGoogleCalendar])
 
   // Refresh statuses when modal opens or providers list changes
   useEffect(() => {
@@ -358,10 +538,10 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
   }, [open, providers, refreshAllStatuses])
 
-  // Listen for OAuth completion events
+  // Listen for OAuth completion events (state updates only — toasts handled by ConnectorsPopover)
   useEffect(() => {
     const cleanup = window.ipc.on('oauth:didConnect', (event) => {
-      const { provider, success, error } = event
+      const { provider, success } = event
 
       setProviderStates(prev => ({
         ...prev,
@@ -371,37 +551,43 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           isConnecting: false,
         }
       }))
-
-      if (success) {
-        const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
-        toast.success(`Connected to ${displayName}`)
-      } else {
-        toast.error(error || `Failed to connect to ${provider}`)
-      }
     })
 
     return cleanup
   }, [])
 
-  // Listen for Composio connection events
+  // Auto-advance from Rowboat sign-in step when OAuth completes
+  useEffect(() => {
+    if (onboardingPath !== 'rowboat' || currentStep !== 0) return
+
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      if (event.provider === 'rowboat' && event.success) {
+        setCurrentStep(3 as Step)
+      }
+    })
+
+    return cleanup
+  }, [onboardingPath, currentStep])
+
+  // Listen for Composio connection events (state updates only — toasts handled by ConnectorsPopover)
   useEffect(() => {
     const cleanup = window.ipc.on('composio:didConnect', (event) => {
-      const { toolkitSlug, success, error } = event
+      const { toolkitSlug, success } = event
 
-      if (toolkitSlug === 'slack') {
-        setSlackConnected(success)
-        setSlackConnecting(false)
+      if (toolkitSlug === 'gmail') {
+        setGmailConnected(success)
+        setGmailConnecting(false)
+      }
 
-        if (success) {
-          toast.success('Connected to Slack')
-        } else {
-          toast.error(error || 'Failed to connect to Slack')
-        }
+      if (toolkitSlug === 'googlecalendar') {
+        setGoogleCalendarConnected(success)
+        setGoogleCalendarConnecting(false)
       }
     })
 
     return cleanup
   }, [])
+
 
   const startConnect = useCallback(async (provider: string, clientId?: string) => {
     setProviderStates(prev => ({
@@ -450,20 +636,30 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     startConnect('google', clientId)
   }, [startConnect])
 
-  // Step indicator
-  const renderStepIndicator = () => (
-    <div className="flex gap-2 justify-center mb-6">
-      {[0, 1, 2].map((step) => (
-        <div
-          key={step}
-          className={cn(
-            "w-2 h-2 rounded-full transition-colors",
-            currentStep >= step ? "bg-primary" : "bg-muted"
-          )}
-        />
-      ))}
-    </div>
-  )
+  // Step indicator - dynamic based on path
+  const renderStepIndicator = () => {
+    // Rowboat path: Sign In (0), Connect (3), Done (4) = 3 dots
+    // BYOK path: Sign In (0), Upsell (1), Model (2), Connect (3), Done (4) = 5 dots
+    // Before path is chosen: show 3 dots (minimal)
+    const rowboatSteps = [0, 3, 4]
+    const byokSteps = [0, 1, 2, 3, 4]
+    const steps = onboardingPath === 'byok' ? byokSteps : rowboatSteps
+    const currentIndex = steps.indexOf(currentStep)
+
+    return (
+      <div className="flex gap-2 justify-center mb-6">
+        {steps.map((_, i) => (
+          <div
+            key={i}
+            className={cn(
+              "w-2 h-2 rounded-full transition-colors",
+              currentIndex >= i ? "bg-primary" : "bg-muted"
+            )}
+          />
+        ))}
+      </div>
+    )
+  }
 
   // Helper to render an OAuth provider row
   const renderOAuthProvider = (provider: string, displayName: string, icon: React.ReactNode, description: string) => {
@@ -545,29 +741,28 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     </div>
   )
 
-  // Render Slack row
-  /*
-  const renderSlackRow = () => (
+  // Render Gmail Composio row
+  const renderGmailRow = () => (
     <div className="flex items-center justify-between gap-3 rounded-md px-3 py-3 hover:bg-accent">
       <div className="flex items-center gap-3 min-w-0">
         <div className="flex size-10 items-center justify-center rounded-md bg-muted">
-          <MessageSquare className="size-5" />
+          <Mail className="size-5" />
         </div>
         <div className="flex flex-col min-w-0">
-          <span className="text-sm font-medium truncate">Slack</span>
-          {slackLoading ? (
+          <span className="text-sm font-medium truncate">Gmail</span>
+          {gmailLoading ? (
             <span className="text-xs text-muted-foreground">Checking...</span>
           ) : (
             <span className="text-xs text-muted-foreground truncate">
-              Send messages and view channels
+              Sync emails
             </span>
           )}
         </div>
       </div>
       <div className="shrink-0">
-        {slackLoading ? (
+        {gmailLoading ? (
           <Loader2 className="size-4 animate-spin text-muted-foreground" />
-        ) : slackConnected ? (
+        ) : gmailConnected ? (
           <div className="flex items-center gap-1.5 text-sm text-green-600">
             <CheckCircle2 className="size-4" />
             <span>Connected</span>
@@ -576,10 +771,10 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           <Button
             variant="default"
             size="sm"
-            onClick={handleConnectSlack}
-            disabled={slackConnecting}
+            onClick={handleConnectGmail}
+            disabled={gmailConnecting}
           >
-            {slackConnecting ? (
+            {gmailConnecting ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               "Connect"
@@ -589,9 +784,249 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       </div>
     </div>
   )
-  */
 
-  // Step 0: LLM Setup
+  // Render Google Calendar Composio row
+  const renderGoogleCalendarRow = () => (
+    <div className="flex items-center justify-between gap-3 rounded-md px-3 py-3 hover:bg-accent">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="flex size-10 items-center justify-center rounded-md bg-muted">
+          <Calendar className="size-5" />
+        </div>
+        <div className="flex flex-col min-w-0">
+          <span className="text-sm font-medium truncate">Google Calendar</span>
+          {googleCalendarLoading ? (
+            <span className="text-xs text-muted-foreground">Checking...</span>
+          ) : (
+            <span className="text-xs text-muted-foreground truncate">
+              Sync calendar events
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="shrink-0">
+        {googleCalendarLoading ? (
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        ) : googleCalendarConnected ? (
+          <div className="flex items-center gap-1.5 text-sm text-green-600">
+            <CheckCircle2 className="size-4" />
+            <span>Connected</span>
+          </div>
+        ) : (
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleConnectGoogleCalendar}
+            disabled={googleCalendarConnecting}
+          >
+            {googleCalendarConnecting ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              "Connect"
+            )}
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+
+  // Render Slack row
+  const renderSlackRow = () => (
+    <div className="rounded-md px-3 py-3 hover:bg-accent">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex size-10 items-center justify-center rounded-md bg-muted">
+            <MessageSquare className="size-5" />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-medium truncate">Slack</span>
+            {slackEnabled && slackWorkspaces.length > 0 ? (
+              <span className="text-xs text-muted-foreground truncate">
+                {slackWorkspaces.map(w => w.name).join(', ')}
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground truncate">
+                Send messages and view channels
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="shrink-0 flex items-center gap-2">
+          {(slackLoading || slackDiscovering) && (
+            <Loader2 className="size-3 animate-spin" />
+          )}
+          {slackEnabled ? (
+            <Switch
+              checked={true}
+              onCheckedChange={() => handleSlackDisable()}
+              disabled={slackLoading}
+            />
+          ) : (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleSlackEnable}
+              disabled={slackLoading || slackDiscovering}
+            >
+              Enable
+            </Button>
+          )}
+        </div>
+      </div>
+      {slackPickerOpen && (
+        <div className="mt-2 ml-13 space-y-2">
+          {slackDiscoverError ? (
+            <p className="text-xs text-muted-foreground">{slackDiscoverError}</p>
+          ) : (
+            <>
+              {slackAvailableWorkspaces.map(w => (
+                <label key={w.url} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={slackSelectedUrls.has(w.url)}
+                    onChange={(e) => {
+                      setSlackSelectedUrls(prev => {
+                        const next = new Set(prev)
+                        if (e.target.checked) next.add(w.url)
+                        else next.delete(w.url)
+                        return next
+                      })
+                    }}
+                    className="rounded border-border"
+                  />
+                  <span className="truncate">{w.name}</span>
+                </label>
+              ))}
+              <Button
+                size="sm"
+                onClick={handleSlackSaveWorkspaces}
+                disabled={slackSelectedUrls.size === 0 || slackLoading}
+              >
+                Save
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+
+  // Step 0: Sign in to Rowboat (with BYOK option)
+  const renderSignInStep = () => {
+    const rowboatState = providerStates['rowboat'] || { isConnected: false, isLoading: false, isConnecting: false }
+
+    return (
+      <div className="flex flex-col items-center text-center">
+        <div className="flex items-center justify-center gap-3 mb-3">
+          <span className="text-lg font-medium text-muted-foreground">Your AI coworker, with memory</span>
+        </div>
+        <DialogHeader className="space-y-3 mb-8">
+          <DialogTitle className="text-2xl">Sign in to Rowboat</DialogTitle>
+          <DialogDescription className="text-base max-w-md mx-auto">
+            Connect your Rowboat account for instant access to all models through our gateway — no API keys needed.
+          </DialogDescription>
+        </DialogHeader>
+
+        {rowboatState.isConnected ? (
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex items-center gap-2 text-green-600">
+              <CheckCircle2 className="size-5" />
+              <span className="text-sm font-medium">Connected to Rowboat</span>
+            </div>
+            <Button onClick={() => setCurrentStep(3 as Step)} size="lg" className="w-full max-w-xs">
+              Continue
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-4 w-full max-w-xs">
+            <Button
+              onClick={() => {
+                setOnboardingPath('rowboat')
+                startConnect('rowboat')
+              }}
+              size="lg"
+              className="w-full"
+              disabled={rowboatState.isConnecting}
+            >
+              {rowboatState.isConnecting ? (
+                <><Loader2 className="size-4 animate-spin mr-2" />Waiting for sign in...</>
+              ) : (
+                "Sign in with Rowboat"
+              )}
+            </Button>
+            {rowboatState.isConnecting && (
+              <p className="text-xs text-muted-foreground">
+                Complete sign in in your browser, then return here.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="w-full flex justify-end mt-8">
+          <button
+            onClick={() => {
+              setOnboardingPath('byok')
+              setCurrentStep(1 as Step)
+            }}
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Bring your own key
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Step 1: BYOK upsell — explain benefits of Rowboat before continuing with BYOK
+  const renderByokUpsellStep = () => (
+    <div className="flex flex-col">
+      <DialogHeader className="text-center mb-6">
+        <DialogTitle className="text-2xl">Before you continue</DialogTitle>
+        <DialogDescription className="text-base max-w-md mx-auto">
+          With a Rowboat account, you get:
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-3 mb-8">
+        <div className="flex items-start gap-3 rounded-md border px-4 py-3">
+          <CheckCircle2 className="size-5 text-green-600 mt-0.5 shrink-0" />
+          <div>
+            <div className="text-sm font-medium">Instant access to all models</div>
+            <div className="text-xs text-muted-foreground">GPT, Claude, Gemini, and more — no separate API keys needed</div>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 rounded-md border px-4 py-3">
+          <CheckCircle2 className="size-5 text-green-600 mt-0.5 shrink-0" />
+          <div>
+            <div className="text-sm font-medium">Simplified billing</div>
+            <div className="text-xs text-muted-foreground">One account for everything — no juggling multiple provider subscriptions</div>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 rounded-md border px-4 py-3">
+          <CheckCircle2 className="size-5 text-green-600 mt-0.5 shrink-0" />
+          <div>
+            <div className="text-sm font-medium">Automatic updates</div>
+            <div className="text-xs text-muted-foreground">New models are available as soon as they launch, with no configuration changes</div>
+          </div>
+        </div>
+      </div>
+
+      <p className="text-sm text-muted-foreground text-center mb-6">
+        By continuing, you'll set up your own API keys instead of using Rowboat's managed gateway.
+      </p>
+
+      <div className="flex items-center justify-between">
+        <Button variant="ghost" onClick={handleBack} className="gap-1">
+          <ArrowLeft className="size-4" />
+          Back
+        </Button>
+        <Button onClick={handleNext}>
+          I understand
+        </Button>
+      </div>
+    </div>
+  )
+
+  // Step 2 (BYOK path): LLM Setup
   const renderLlmSetupStep = () => {
     const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
       { id: "openai", name: "OpenAI", description: "Use your OpenAI API key" },
@@ -767,10 +1202,13 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           </div>
         )}
 
-        <div className="flex flex-col gap-3 mt-4">
+        <div className="flex items-center justify-between mt-4">
+          <Button variant="ghost" onClick={handleBack} className="gap-1">
+            <ArrowLeft className="size-4" />
+            Back
+          </Button>
           <Button
             onClick={handleTestAndSaveLlmConfig}
-            size="lg"
             disabled={!canTest || testState.status === "testing"}
           >
             {testState.status === "testing" ? (
@@ -784,7 +1222,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     )
   }
 
-  // Step 1: Connect Accounts
+  // Step 3: Connect Accounts
   const renderAccountConnectionStep = () => (
     <div className="flex flex-col">
       <DialogHeader className="text-center mb-6">
@@ -801,13 +1239,19 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           </div>
         ) : (
           <>
-            {/* Email & Calendar Section */}
-            {providers.includes('google') && (
+            {/* Email / Email & Calendar Section */}
+            {(useComposioForGoogle || useComposioForGoogleCalendar || providers.includes('google')) && (
               <div className="space-y-2">
                 <div className="px-3">
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Email & Calendar</span>
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    {(useComposioForGoogle || useComposioForGoogleCalendar) ? 'Email & Calendar' : 'Email & Calendar'}
+                  </span>
                 </div>
-                {renderOAuthProvider('google', 'Google', <Mail className="size-5" />, 'Sync emails and calendar events')}
+                {useComposioForGoogle
+                  ? renderGmailRow()
+                  : renderOAuthProvider('google', 'Google', <Mail className="size-5" />, 'Sync emails and calendar events')
+                }
+                {useComposioForGoogleCalendar && renderGoogleCalendarRow()}
               </div>
             )}
 
@@ -820,6 +1264,13 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
               {providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-5" />, 'AI meeting transcripts')}
             </div>
 
+            {/* Team Communication Section */}
+            <div className="space-y-2">
+              <div className="px-3">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Team Communication</span>
+              </div>
+              {renderSlackRow()}
+            </div>
           </>
         )}
       </div>
@@ -828,16 +1279,22 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         <Button onClick={handleNext} size="lg">
           Continue
         </Button>
-        <Button variant="ghost" onClick={handleNext} className="text-muted-foreground">
-          Skip for now
-        </Button>
+        <div className="flex items-center justify-between">
+          <Button variant="ghost" onClick={handleBack} className="gap-1">
+            <ArrowLeft className="size-4" />
+            Back
+          </Button>
+          <Button variant="ghost" onClick={handleNext} className="text-muted-foreground">
+            Skip for now
+          </Button>
+        </div>
       </div>
     </div>
   )
 
-  // Step 2: Completion
+  // Step 4: Completion
   const renderCompletionStep = () => {
-    const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackConnected
+    const hasConnections = connectedProviders.length > 0 || granolaEnabled || slackEnabled || gmailConnected || googleCalendarConnected
 
     return (
       <div className="flex flex-col items-center text-center">
@@ -860,6 +1317,18 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
             <div className="rounded-lg border bg-muted/50 p-4">
               <p className="text-sm font-medium mb-2">Connected accounts:</p>
               <div className="space-y-1">
+                {gmailConnected && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <CheckCircle2 className="size-4 text-green-600" />
+                    <span>Gmail (Email)</span>
+                  </div>
+                )}
+                {googleCalendarConnected && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <CheckCircle2 className="size-4 text-green-600" />
+                    <span>Google Calendar</span>
+                  </div>
+                )}
                 {connectedProviders.includes('google') && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <CheckCircle2 className="size-4 text-green-600" />
@@ -878,7 +1347,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                     <span>Granola (Local meeting notes)</span>
                   </div>
                 )}
-                {slackConnected && (
+                {slackEnabled && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <CheckCircle2 className="size-4 text-green-600" />
                     <span>Slack (Team communication)</span>
@@ -908,7 +1377,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       open={composioApiKeyOpen}
       onOpenChange={setComposioApiKeyOpen}
       onSubmit={handleComposioApiKeySubmit}
-      isSubmitting={slackConnecting}
+      isSubmitting={gmailConnecting}
     />
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
@@ -918,9 +1387,11 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         onEscapeKeyDown={(e) => e.preventDefault()}
       >
         {renderStepIndicator()}
-        {currentStep === 0 && renderLlmSetupStep()}
-        {currentStep === 1 && renderAccountConnectionStep()}
-        {currentStep === 2 && renderCompletionStep()}
+        {currentStep === 0 && renderSignInStep()}
+        {currentStep === 1 && renderByokUpsellStep()}
+        {currentStep === 2 && renderLlmSetupStep()}
+        {currentStep === 3 && renderAccountConnectionStep()}
+        {currentStep === 4 && renderCompletionStep()}
       </DialogContent>
     </Dialog>
     </>

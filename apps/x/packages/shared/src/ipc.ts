@@ -7,6 +7,7 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { UserMessageContent } from './message.js';
+import { RowboatApiConfig } from './rowboat-account.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -130,6 +131,9 @@ const ipcSchemas = {
     req: z.object({
       runId: z.string(),
       message: UserMessageContent,
+      voiceInput: z.boolean().optional(),
+      voiceOutput: z.enum(['summary', 'full']).optional(),
+      searchEnabled: z.boolean().optional(),
     }),
     res: z.object({
       messageId: z.string(),
@@ -249,6 +253,14 @@ const ipcSchemas = {
       })),
     }),
   },
+  'account:getRowboat': {
+    req: z.null(),
+    res: z.object({
+      signedIn: z.boolean(),
+      accessToken: z.string().nullable(),
+      config: RowboatApiConfig.nullable(),
+    }),
+  },
   'oauth:didConnect': {
     req: z.object({
       provider: z.string(),
@@ -269,6 +281,29 @@ const ipcSchemas = {
     }),
     res: z.object({
       success: z.literal(true),
+    }),
+  },
+  'slack:getConfig': {
+    req: z.null(),
+    res: z.object({
+      enabled: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+    }),
+  },
+  'slack:setConfig': {
+    req: z.object({
+      enabled: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  'slack:listWorkspaces': {
+    req: z.null(),
+    res: z.object({
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
     }),
   },
   'onboarding:getStatus': {
@@ -349,9 +384,21 @@ const ipcSchemas = {
       input: z.record(z.string(), z.unknown()),
     }),
     res: z.object({
-      success: z.boolean(),
       data: z.unknown(),
-      error: z.string().optional(),
+      successful: z.boolean(),
+      error: z.string().nullable(),
+    }),
+  },
+  'composio:use-composio-for-google': {
+    req: z.null(),
+    res: z.object({
+      enabled: z.boolean(),
+    }),
+  },
+  'composio:use-composio-for-google-calendar': {
+    req: z.null(),
+    res: z.object({
+      enabled: z.boolean(),
     }),
   },
   'composio:didConnect': {
@@ -377,9 +424,9 @@ const ipcSchemas = {
           tools_count: z.number(),
           triggers_count: z.number(),
         }),
-        no_auth: z.boolean(),
-        auth_schemes: z.array(z.string()),
-        composio_managed_auth_schemes: z.array(z.string()),
+        no_auth: z.boolean().optional(),
+        auth_schemes: z.array(z.string()).optional(),
+        composio_managed_auth_schemes: z.array(z.string()).optional(),
       })),
       nextCursor: z.string().nullable(),
       totalItems: z.number(),
@@ -510,6 +557,86 @@ const ipcSchemas = {
         preview: z.string(),
         path: z.string(),
       })),
+    }),
+  },
+  // Voice mode channels
+  'voice:getConfig': {
+    req: z.null(),
+    res: z.object({
+      deepgram: z.object({ apiKey: z.string() }).nullable(),
+      elevenlabs: z.object({ apiKey: z.string(), voiceId: z.string().optional() }).nullable(),
+    }),
+  },
+  'voice:synthesize': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      audioBase64: z.string(),
+      mimeType: z.string(),
+    }),
+  },
+  'meeting:summarize': {
+    req: z.object({
+      transcript: z.string(),
+      meetingStartTime: z.string().optional(),
+      calendarEventJson: z.string().optional(),
+    }),
+    res: z.object({
+      notes: z.string(),
+    }),
+  },
+  // Inline task schedule classification
+  'export:note': {
+    req: z.object({
+      markdown: z.string(),
+      format: z.enum(['md', 'pdf', 'docx']),
+      title: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'inline-task:classifySchedule': {
+    req: z.object({
+      instruction: z.string(),
+    }),
+    res: z.object({
+      schedule: z.union([
+        z.object({ type: z.literal('cron'), expression: z.string(), startDate: z.string(), endDate: z.string(), label: z.string() }),
+        z.object({ type: z.literal('window'), cron: z.string(), startTime: z.string(), endTime: z.string(), startDate: z.string(), endDate: z.string(), label: z.string() }),
+        z.object({ type: z.literal('once'), runAt: z.string(), label: z.string() }),
+      ]).nullable(),
+    }),
+  },
+  'inline-task:process': {
+    req: z.object({
+      instruction: z.string(),
+      noteContent: z.string(),
+      notePath: z.string(),
+    }),
+    res: z.object({
+      instruction: z.string(),
+      schedule: z.union([
+        z.object({ type: z.literal('cron'), expression: z.string(), startDate: z.string(), endDate: z.string() }),
+        z.object({ type: z.literal('window'), cron: z.string(), startTime: z.string(), endTime: z.string(), startDate: z.string(), endDate: z.string() }),
+        z.object({ type: z.literal('once'), runAt: z.string() }),
+      ]).nullable(),
+      scheduleLabel: z.string().nullable(),
+      response: z.string().nullable(),
+    }),
+  },
+  // Billing channels
+  'billing:getInfo': {
+    req: z.null(),
+    res: z.object({
+      userEmail: z.string().nullable(),
+      userId: z.string().nullable(),
+      subscriptionPlan: z.string().nullable(),
+      subscriptionStatus: z.string().nullable(),
+      sanctionedCredits: z.number(),
+      availableCredits: z.number(),
     }),
   },
 } as const;

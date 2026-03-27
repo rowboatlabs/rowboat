@@ -5,13 +5,14 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon, RadioIcon, SquareIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
 import { ChatInputWithMentions, type StagedAttachment } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
+import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
@@ -34,6 +35,7 @@ import {
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
+import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
@@ -44,9 +46,12 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
-import { OnboardingModal } from '@/components/onboarding-modal'
+import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
+import { OnboardingModal } from '@/components/onboarding'
 import { SearchDialog } from '@/components/search-dialog'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
@@ -60,6 +65,7 @@ import {
   type ToolCall,
   createEmptyChatTabViewState,
   getWebSearchCardData,
+  getAppActionCardData,
   inferRunTitleFromMessage,
   isChatMessage,
   isErrorMessage,
@@ -72,6 +78,9 @@ import {
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
+import { useVoiceMode } from '@/hooks/useVoiceMode'
+import { useVoiceTTS } from '@/hooks/useVoiceTTS'
+import { useMeetingTranscription, type MeetingTranscriptionState, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -105,6 +114,7 @@ const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 const TITLEBAR_BUTTONS_COLLAPSED = 5
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 4
 const GRAPH_TAB_PATH = '__rowboat_graph_view__'
+const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -232,6 +242,7 @@ const getAncestorDirectoryPaths = (path: string): string[] => {
 }
 
 const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
+const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
@@ -250,10 +261,18 @@ const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageMod
   }
 }
 
-// Sort nodes (dirs first, then alphabetically)
+// Pinned folders appear first in the sidebar (in this order)
+const PINNED_FOLDERS = ['Notes']
+
+// Sort nodes (dirs first, pinned folders at top, then alphabetically)
 function sortNodes(nodes: TreeNode[]): TreeNode[] {
   return nodes.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
+    const aPinned = PINNED_FOLDERS.indexOf(a.name)
+    const bPinned = PINNED_FOLDERS.indexOf(b.name)
+    if (aPinned !== -1 && bPinned !== -1) return aPinned - bPinned
+    if (aPinned !== -1) return -1
+    if (bPinned !== -1) return 1
     return a.name.localeCompare(b.name)
   }).map(node => {
     if (node.children) {
@@ -261,6 +280,73 @@ function sortNodes(nodes: TreeNode[]): TreeNode[] {
     }
     return node
   })
+}
+
+/**
+ * Organize Meetings/ source folders into date-grouped subfolders.
+ *
+ * - rowboat:  rowboat/2026-03-20/meeting-xxx.md  → keeps date folders as-is
+ * - granola:  granola/2026/03/18/Title.md         → collapses into "2026-03-18" folders
+ * - Files directly under a source folder (no date subfolder) are grouped
+ *   by the date prefix in their filename (e.g. meeting-2026-03-17T...).
+ */
+function flattenMeetingsTree(nodes: TreeNode[]): TreeNode[] {
+  return nodes.flatMap(node => {
+    if (node.kind !== 'dir' || node.name !== 'Meetings') return [node]
+
+    const flattenedSourceChildren = (node.children ?? []).flatMap(sourceNode => {
+      if (sourceNode.kind !== 'dir') return [sourceNode]
+
+      // Collect all files with their date group label
+      const dateGroups = new Map<string, TreeNode[]>()
+
+      function collectFiles(n: TreeNode, dateParts: string[]) {
+        for (const child of n.children ?? []) {
+          if (child.kind === 'file') {
+            const dateStr = dateParts.join('-')
+            // If file is at root of source folder, try to extract date from filename
+            const groupKey = dateStr || extractDateFromFilename(child.name) || 'other'
+            const group = dateGroups.get(groupKey) ?? []
+            group.push(child)
+            dateGroups.set(groupKey, group)
+          } else if (child.kind === 'dir') {
+            collectFiles(child, [...dateParts, child.name])
+          }
+        }
+      }
+      collectFiles(sourceNode, [])
+
+      if (dateGroups.size === 0) return []
+
+      // Build date folder nodes, sorted reverse chronologically
+      const dateFolderNodes: TreeNode[] = [...dateGroups.entries()]
+        .sort(([a], [b]) => b.localeCompare(a))
+        .map(([dateKey, files]) => {
+          // Sort files within each date group reverse chronologically
+          files.sort((a, b) => b.name.localeCompare(a.name))
+          return {
+            name: dateKey,
+            path: `${sourceNode.path}/${dateKey}`,
+            kind: 'dir' as const,
+            children: files,
+            loaded: true,
+          }
+        })
+
+      return [{ ...sourceNode, children: dateFolderNodes }]
+    })
+
+    // Hide Meetings folder entirely if no source folders have files
+    if (flattenedSourceChildren.length === 0) return []
+
+    return [{ ...node, children: flattenedSourceChildren }]
+  })
+}
+
+/** Extract YYYY-MM-DD from filenames like "meeting-2026-03-17T05-01-47.md" */
+function extractDateFromFilename(name: string): string | null {
+  const match = name.match(/(\d{4}-\d{2}-\d{2})/)
+  return match ? match[1] : null
 }
 
 // Build tree structure from flat entries
@@ -324,6 +410,10 @@ function FixedSidebarToggle({
   canNavigateForward,
   onNewChat,
   onOpenSearch,
+  meetingState,
+  meetingSummarizing,
+  meetingAvailable,
+  onToggleMeeting,
   leftInsetPx,
 }: {
   onNavigateBack: () => void
@@ -332,6 +422,10 @@ function FixedSidebarToggle({
   canNavigateForward: boolean
   onNewChat: () => void
   onOpenSearch: () => void
+  meetingState: MeetingTranscriptionState
+  meetingSummarizing: boolean
+  meetingAvailable: boolean
+  onToggleMeeting: () => void
   leftInsetPx: number
 }) {
   const { toggleSidebar, state } = useSidebar()
@@ -367,6 +461,37 @@ function FixedSidebarToggle({
       >
         <SearchIcon className="size-5" />
       </button>
+      {meetingAvailable && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onToggleMeeting}
+              disabled={meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:pointer-events-none",
+                meetingSummarizing
+                  ? "text-muted-foreground"
+                  : meetingState === 'recording'
+                    ? "text-red-500 hover:bg-accent"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              )}
+              style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
+            >
+              {meetingSummarizing ? (
+                <LoaderIcon className="size-4 animate-spin" />
+              ) : meetingState === 'recording' ? (
+                <SquareIcon className="size-4 animate-pulse" />
+              ) : (
+                <RadioIcon className="size-5" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {meetingSummarizing ? 'Generating meeting notes...' : meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
+          </TooltipContent>
+        </Tooltip>
+      )}
       {/* Back / Forward navigation */}
       {isCollapsed && (
         <>
@@ -469,6 +594,7 @@ function App() {
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
   const [isGraphOpen, setIsGraphOpen] = useState(false)
   const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
+  const [baseConfigByPath, setBaseConfigByPath] = useState<Record<string, BaseConfig>>({})
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
     nodes: [],
     edges: [],
@@ -494,6 +620,9 @@ function App() {
   const recentLocalMarkdownWritesRef = useRef<Map<string, number>>(new Map())
   const untitledRenameReadyPathsRef = useRef<Set<string>>(new Set())
 
+  // Pending app-navigation result to process once navigation functions are ready
+  const pendingAppNavRef = useRef<Record<string, unknown> | null>(null)
+
   // Global navigation history (back/forward) across views (chat/file/graph/task)
   const historyRef = useRef<{ back: ViewState[]; forward: ViewState[] }>({ back: [], forward: [] })
   const [viewHistory, setViewHistory] = useState(historyRef.current)
@@ -508,6 +637,9 @@ function App() {
   const debouncedContent = useDebounce(editorContent, 500)
   const initialContentRef = useRef<string>('')
   const renameInProgressRef = useRef(false)
+
+  // Frontmatter state: store raw frontmatter per file path
+  const frontmatterByPathRef = useRef<Map<string, string | null>>(new Map())
 
   // Version history state
   const [versionHistoryPath, setVersionHistoryPath] = useState<string | null>(null)
@@ -532,6 +664,104 @@ function App() {
   const [stopClickedAt, setStopClickedAt] = useState<number | null>(null)
   const [agentId] = useState<string>('copilot')
   const [presetMessage, setPresetMessage] = useState<string | undefined>(undefined)
+
+  // Voice mode state
+  const [voiceAvailable, setVoiceAvailable] = useState(false)
+  const [ttsAvailable, setTtsAvailable] = useState(false)
+  const [ttsEnabled, setTtsEnabled] = useState(false)
+  const ttsEnabledRef = useRef(false)
+  const [ttsMode, setTtsMode] = useState<'summary' | 'full'>('summary')
+  const ttsModeRef = useRef<'summary' | 'full'>('summary')
+  const [isRecording, setIsRecording] = useState(false)
+  const voiceTextBufferRef = useRef('')
+  const spokenIndexRef = useRef(0)
+  const isRecordingRef = useRef(false)
+
+  const tts = useVoiceTTS()
+  const ttsRef = useRef(tts)
+  ttsRef.current = tts
+
+  const voice = useVoiceMode()
+  const voiceRef = useRef(voice)
+  voiceRef.current = voice
+
+  const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
+  const meetingTranscription = useMeetingTranscription(() => {
+    handleToggleMeetingRef.current?.()
+  })
+
+  // Check if voice is available on mount and when OAuth state changes
+  const refreshVoiceAvailability = useCallback(() => {
+    Promise.all([
+      window.ipc.invoke('voice:getConfig', null),
+      window.ipc.invoke('oauth:getState', null),
+    ]).then(([config, oauthState]) => {
+      const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
+      setVoiceAvailable(!!config.deepgram || rowboatConnected)
+      setTtsAvailable(!!config.elevenlabs || rowboatConnected)
+    }).catch(() => {
+      setVoiceAvailable(false)
+      setTtsAvailable(false)
+    })
+  }, [])
+
+  useEffect(() => {
+    refreshVoiceAvailability()
+    const cleanup = window.ipc.on('oauth:didConnect', () => {
+      refreshVoiceAvailability()
+    })
+    return cleanup
+  }, [refreshVoiceAvailability])
+
+  const handleStartRecording = useCallback(() => {
+    setIsRecording(true)
+    isRecordingRef.current = true
+    voice.start()
+  }, [voice])
+
+  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean) => Promise<void>) | null>(null)
+  const pendingVoiceInputRef = useRef(false)
+
+  const handleSubmitRecording = useCallback(() => {
+    const text = voice.submit()
+    setIsRecording(false)
+    isRecordingRef.current = false
+    if (text) {
+      pendingVoiceInputRef.current = true
+      handlePromptSubmitRef.current?.({ text, files: [] })
+    }
+  }, [voice])
+
+  const handleToggleTts = useCallback(() => {
+    setTtsEnabled(prev => {
+      const next = !prev
+      ttsEnabledRef.current = next
+      if (!next) {
+        ttsRef.current.cancel()
+      }
+      return next
+    })
+  }, [])
+
+  const handleTtsModeChange = useCallback((mode: 'summary' | 'full') => {
+    setTtsMode(mode)
+    ttsModeRef.current = mode
+  }, [])
+
+  const handleCancelRecording = useCallback(() => {
+    voice.cancel()
+    setIsRecording(false)
+    isRecordingRef.current = false
+  }, [voice])
+
+  // Helper to cancel recording from any navigation handler
+  const cancelRecordingIfActive = useCallback(() => {
+    if (isRecordingRef.current) {
+      voiceRef.current.cancel()
+      setIsRecording(false)
+      isRecordingRef.current = false
+    }
+  }, [])
 
   // Runs history state
   type RunListItem = { id: string; title?: string; createdAt: string; agentId: string }
@@ -616,6 +846,8 @@ function App() {
 
   const getFileTabTitle = useCallback((tab: FileTab) => {
     if (isGraphTabPath(tab.path)) return 'Graph View'
+    if (tab.path === BASES_DEFAULT_TAB_PATH) return 'Bases'
+    if (tab.path.endsWith('.base')) return tab.path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
   }, [])
 
@@ -813,18 +1045,45 @@ function App() {
     }
   }, [runId, processingRunIds])
 
-  // Load directory tree
+  // Load directory tree (knowledge + bases)
   const loadDirectory = useCallback(async () => {
     try {
-      const result = await window.ipc.invoke('workspace:readdir', {
-        path: 'knowledge',
-        opts: { recursive: true, includeHidden: false }
-      })
-      return buildTree(result)
+      const [knowledgeResult, basesResult] = await Promise.all([
+        window.ipc.invoke('workspace:readdir', {
+          path: 'knowledge',
+          opts: { recursive: true, includeHidden: false, includeStats: true }
+        }),
+        window.ipc.invoke('workspace:readdir', {
+          path: 'bases',
+          opts: { recursive: false, includeHidden: false, includeStats: true }
+        }).catch(() => [] as DirEntry[]),
+      ])
+      const knowledgeTree = flattenMeetingsTree(buildTree(knowledgeResult))
+      const basesChildren: TreeNode[] = (basesResult as DirEntry[])
+        .filter((e) => e.name.endsWith('.base'))
+        .map((e) => ({ ...e, kind: 'file' as const }))
+      if (basesChildren.length > 0) {
+        const basesFolder: TreeNode = {
+          name: 'Bases',
+          path: 'bases',
+          kind: 'dir',
+          children: basesChildren,
+        }
+        return [...knowledgeTree, basesFolder]
+      }
+      return knowledgeTree
     } catch (err) {
       console.error('Failed to load directory:', err)
       return []
     }
+  }, [])
+
+  // Ensure bases/ and knowledge/Notes/ directories exist on startup
+  useEffect(() => {
+    window.ipc.invoke('workspace:mkdir', { path: 'bases', recursive: true })
+      .catch((err: unknown) => console.error('Failed to ensure bases directory:', err))
+    window.ipc.invoke('workspace:mkdir', { path: 'knowledge/Notes', recursive: true })
+      .catch((err: unknown) => console.error('Failed to ensure Notes directory:', err))
   }, [])
 
   // Load initial tree
@@ -892,12 +1151,14 @@ function App() {
           const result = await window.ipc.invoke('workspace:readFile', { path: pathToReload })
           if (selectedPathRef.current !== pathToReload) return
           setFileContent(result.data)
-          setEditorContent(result.data)
-          setEditorCacheForPath(pathToReload, result.data)
-          editorContentRef.current = result.data
+          const { raw: fm, body } = splitFrontmatter(result.data)
+          frontmatterByPathRef.current.set(pathToReload, fm)
+          setEditorContent(body)
+          setEditorCacheForPath(pathToReload, body)
+          editorContentRef.current = body
           editorPathRef.current = pathToReload
-          initialContentByPathRef.current.set(pathToReload, result.data)
-          initialContentRef.current = result.data
+          initialContentByPathRef.current.set(pathToReload, body)
+          initialContentRef.current = body
         }
       }
     })
@@ -913,6 +1174,31 @@ function App() {
       editorContentRef.current = ''
       initialContentRef.current = ''
       setLastSaved(null)
+      return
+    }
+    if (selectedPath === BASES_DEFAULT_TAB_PATH) {
+      // Virtual default base — no file to load, use DEFAULT_BASE_CONFIG
+      if (!baseConfigByPath[selectedPath]) {
+        setBaseConfigByPath((prev) => ({ ...prev, [selectedPath]: { ...DEFAULT_BASE_CONFIG } }))
+      }
+      return
+    }
+    if (selectedPath.endsWith('.base')) {
+      // Load base config from file only if not already cached
+      if (!baseConfigByPath[selectedPath]) {
+        window.ipc.invoke('workspace:readFile', { path: selectedPath, encoding: 'utf8' })
+          .then((result: { data: string }) => {
+            try {
+              const parsed = JSON.parse(result.data) as BaseConfig
+              setBaseConfigByPath((prev) => ({ ...prev, [selectedPath]: parsed }))
+            } catch {
+              setBaseConfigByPath((prev) => ({ ...prev, [selectedPath]: { ...DEFAULT_BASE_CONFIG } }))
+            }
+          })
+          .catch(() => {
+            setBaseConfigByPath((prev) => ({ ...prev, [selectedPath]: { ...DEFAULT_BASE_CONFIG } }))
+          })
+      }
       return
     }
     if (selectedPath.endsWith('.md')) {
@@ -934,39 +1220,46 @@ function App() {
     let cancelled = false
     ;(async () => {
       try {
-        const stat = await window.ipc.invoke('workspace:stat', { path: pathToLoad })
-        if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
-        if (stat.kind === 'file') {
-          const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
+        // For .md files (from the knowledge tree), skip stat and read directly.
+        // For other file types, stat first to check if it's a file vs directory.
+        const isKnownFile = pathToLoad.endsWith('.md')
+        if (!isKnownFile) {
+          const stat = await window.ipc.invoke('workspace:stat', { path: pathToLoad })
           if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
-          setFileContent(result.data)
-          const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
-          const isSameEditorFile = editorPathRef.current === pathToLoad
-          const knownBaseline = initialContentByPathRef.current.get(pathToLoad)
-          const hasKnownBaseline = knownBaseline !== undefined
-          const hasUnsavedEdits =
-            hasKnownBaseline
-            && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(knownBaseline)
-          const shouldPreserveActiveDraft = isSameEditorFile && hasUnsavedEdits
-          if (!shouldPreserveActiveDraft) {
-            setEditorContent(result.data)
-            if (pathToLoad.endsWith('.md')) {
-              setEditorCacheForPath(pathToLoad, result.data)
-            }
-            editorContentRef.current = result.data
-            editorPathRef.current = pathToLoad
-            initialContentByPathRef.current.set(pathToLoad, result.data)
-            initialContentRef.current = result.data
-            setLastSaved(null)
-          } else {
-            // Still update the editor's path so subsequent autosaves write to the correct file.
-            editorPathRef.current = pathToLoad
+          if (stat.kind !== 'file') {
+            setFileContent('')
+            setEditorContent('')
+            editorContentRef.current = ''
+            initialContentRef.current = ''
+            return
           }
+        }
+        const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
+        if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
+        setFileContent(result.data)
+        const { raw: fm, body } = splitFrontmatter(result.data)
+        frontmatterByPathRef.current.set(pathToLoad, fm)
+        const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
+        const isSameEditorFile = editorPathRef.current === pathToLoad
+        const knownBaseline = initialContentByPathRef.current.get(pathToLoad)
+        const hasKnownBaseline = knownBaseline !== undefined
+        const hasUnsavedEdits =
+          hasKnownBaseline
+          && normalizeForCompare(editorContentRef.current) !== normalizeForCompare(knownBaseline)
+        const shouldPreserveActiveDraft = isSameEditorFile && hasUnsavedEdits
+        if (!shouldPreserveActiveDraft) {
+          setEditorContent(body)
+          if (pathToLoad.endsWith('.md')) {
+            setEditorCacheForPath(pathToLoad, body)
+          }
+          editorContentRef.current = body
+          editorPathRef.current = pathToLoad
+          initialContentByPathRef.current.set(pathToLoad, body)
+          initialContentRef.current = body
+          setLastSaved(null)
         } else {
-          setFileContent('')
-          setEditorContent('')
-          editorContentRef.current = ''
-          initialContentRef.current = ''
+          // Still update the editor's path so subsequent autosaves write to the correct file.
+          editorPathRef.current = pathToLoad
         }
       } catch (err) {
         console.error('Failed to load file:', err)
@@ -1006,7 +1299,7 @@ function App() {
       const wasActiveAtStart = selectedPathRef.current === pathAtStart
       if (wasActiveAtStart) setIsSaving(true)
       let pathToSave = pathAtStart
-      let contentToSave = debouncedContent
+      let contentToSave = joinFrontmatter(frontmatterByPathRef.current.get(pathAtStart) ?? null, debouncedContent)
       let renamedFrom: string | null = null
       let renamedTo: string | null = null
       try {
@@ -1036,16 +1329,21 @@ function App() {
                 renameInProgressRef.current = true
                 await window.ipc.invoke('workspace:rename', { from: pathAtStart, to: targetPath })
                 pathToSave = targetPath
-                contentToSave = rewriteWikiLinksForRenamedFileInMarkdown(
+                const rewrittenBody = rewriteWikiLinksForRenamedFileInMarkdown(
                   debouncedContent,
                   pathAtStart,
                   targetPath
                 )
+                contentToSave = joinFrontmatter(frontmatterByPathRef.current.get(pathAtStart) ?? null, rewrittenBody)
                 renamedFrom = pathAtStart
                 renamedTo = targetPath
                 editorPathRef.current = targetPath
                 untitledRenameReadyPathsRef.current.delete(pathAtStart)
                 setFileTabs(prev => prev.map(tab => (tab.path === pathAtStart ? { ...tab, path: targetPath } : tab)))
+                // Migrate frontmatter entry
+                const fmEntry = frontmatterByPathRef.current.get(pathAtStart)
+                frontmatterByPathRef.current.delete(pathAtStart)
+                frontmatterByPathRef.current.set(targetPath, fmEntry ?? null)
                 initialContentByPathRef.current.delete(pathAtStart)
                 const cachedContent = editorContentByPathRef.current.get(pathAtStart)
                 if (cachedContent !== undefined) {
@@ -1070,8 +1368,9 @@ function App() {
                   })
                 }
                 if (selectedPathRef.current === pathAtStart) {
-                  editorContentRef.current = contentToSave
-                  setEditorContent(contentToSave)
+                  const bodyForEditor = splitFrontmatter(contentToSave).body
+                  editorContentRef.current = bodyForEditor
+                  setEditorContent(bodyForEditor)
                 }
               }
             }
@@ -1083,7 +1382,8 @@ function App() {
           opts: { encoding: 'utf8' }
         })
         markRecentLocalMarkdownWrite(pathToSave)
-        initialContentByPathRef.current.set(pathToSave, contentToSave)
+        // Store body-only baseline (matches what debouncedContent compares against)
+        initialContentByPathRef.current.set(pathToSave, splitFrontmatter(contentToSave).body)
 
         // If we renamed the active file, update state/history AFTER the write completes so the editor
         // doesn't reload stale on-disk content mid-typing (which can drop the latest character).
@@ -1104,7 +1404,7 @@ function App() {
 
         // Only update "current file" UI state if we're still on this file
         if (selectedPathRef.current === pathAtStart || selectedPathRef.current === pathToSave) {
-          initialContentRef.current = contentToSave
+          initialContentRef.current = splitFrontmatter(contentToSave).body
           setLastSaved(new Date())
         }
       } catch (err) {
@@ -1415,6 +1715,9 @@ function App() {
         if (!isActiveRun) return
         setIsProcessing(true)
         setModelUsage(null)
+        // Reset voice buffer for new response
+        voiceTextBufferRef.current = ''
+        spokenIndexRef.current = 0
         break
 
       case 'run-processing-end':
@@ -1464,6 +1767,20 @@ function App() {
           if (llmEvent.type === 'text-delta' && llmEvent.delta) {
             appendStreamingBuffer(event.runId, llmEvent.delta)
             setCurrentAssistantMessage(prev => prev + llmEvent.delta)
+
+            // Extract <voice> tags and send to TTS when enabled
+            voiceTextBufferRef.current += llmEvent.delta
+            const remaining = voiceTextBufferRef.current.substring(spokenIndexRef.current)
+            const voiceRegex = /<voice>([\s\S]*?)<\/voice>/g
+            let voiceMatch: RegExpExecArray | null
+            while ((voiceMatch = voiceRegex.exec(remaining)) !== null) {
+              const voiceContent = voiceMatch[1].trim()
+              console.log('[voice] extracted voice tag:', voiceContent)
+              if (voiceContent && ttsEnabledRef.current) {
+                ttsRef.current.speak(voiceContent)
+              }
+              spokenIndexRef.current += voiceMatch.index + voiceMatch[0].length
+            }
           } else if (llmEvent.type === 'tool-call') {
             setConversation(prev => [...prev, {
               id: llmEvent.toolCallId || `tool-${Date.now()}`,
@@ -1503,6 +1820,7 @@ function App() {
           if (msg.role === 'assistant') {
             setCurrentAssistantMessage(currentMsg => {
               if (currentMsg) {
+                const cleanedContent = currentMsg.replace(/<\/?voice>/g, '')
                 setConversation(prev => {
                   const exists = prev.some(m =>
                     m.id === event.messageId && 'role' in m && m.role === 'assistant'
@@ -1511,7 +1829,7 @@ function App() {
                   return [...prev, {
                     id: event.messageId,
                     role: 'assistant',
-                    content: currentMsg,
+                    content: cleanedContent,
                     timestamp: Date.now(),
                   }]
                 })
@@ -1584,6 +1902,15 @@ function App() {
             }
             return next
           })
+
+          // Handle app-navigation tool results — trigger UI side effects
+          if (event.toolName === 'app-navigation') {
+            const result = event.result as { success?: boolean; action?: string; [key: string]: unknown } | undefined
+            if (result?.success) {
+              pendingAppNavRef.current = result
+            }
+          }
+
           break
         }
 
@@ -1701,7 +2028,8 @@ function App() {
   const handlePromptSubmit = async (
     message: PromptInputMessage,
     mentions?: FileMention[],
-    stagedAttachments: StagedAttachment[] = []
+    stagedAttachments: StagedAttachment[] = [],
+    searchEnabled?: boolean,
   ) => {
     if (isProcessing) return
 
@@ -1797,6 +2125,9 @@ function App() {
         await window.ipc.invoke('runs:createMessage', {
           runId: currentRunId,
           message: attachmentPayload,
+          voiceInput: pendingVoiceInputRef.current || undefined,
+          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
+          searchEnabled: searchEnabled || undefined,
         })
       } else {
         // Legacy path: plain string with optional XML-formatted @mentions.
@@ -1825,10 +2156,15 @@ function App() {
         await window.ipc.invoke('runs:createMessage', {
           runId: currentRunId,
           message: formattedMessage,
+          voiceInput: pendingVoiceInputRef.current || undefined,
+          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
+          searchEnabled: searchEnabled || undefined,
         })
 
         titleSource = formattedMessage
       }
+
+      pendingVoiceInputRef.current = false
 
       if (isNewRun) {
         const inferredTitle = inferRunTitleFromMessage(titleSource)
@@ -1846,6 +2182,7 @@ function App() {
       console.error('Failed to send message:', error)
     }
   }
+  handlePromptSubmitRef.current = handlePromptSubmit
 
   const handleStop = useCallback(async () => {
     if (!runId) return
@@ -1975,6 +2312,7 @@ function App() {
   }, [])
 
   const openChatInNewTab = useCallback((targetRunId: string) => {
+    cancelRecordingIfActive()
     const existingTab = chatTabs.find(t => t.runId === targetRunId)
     if (existingTab) {
       // Cancel stale in-flight loads from previously focused tabs.
@@ -1990,12 +2328,18 @@ function App() {
     setChatTabs(prev => [...prev, { id, runId: targetRunId }])
     setActiveChatTabId(id)
     loadRun(targetRunId)
-  }, [chatTabs, loadRun, restoreChatTabState])
+  }, [chatTabs, loadRun, restoreChatTabState, cancelRecordingIfActive])
 
   const switchChatTab = useCallback((tabId: string) => {
     const tab = chatTabs.find(t => t.id === tabId)
     if (!tab) return
     if (tabId === activeChatTabId) return
+    // Cancel any active recording when switching tabs
+    if (isRecordingRef.current) {
+      voiceRef.current.cancel()
+      setIsRecording(false)
+      isRecordingRef.current = false
+    }
     saveChatScrollForTab(activeChatTabId)
     // Cancel stale in-flight loads from previously focused tabs.
     loadRunRequestIdRef.current += 1
@@ -2158,13 +2502,21 @@ function App() {
 
   const closeFileTab = useCallback((tabId: string) => {
     const closingTab = fileTabs.find(t => t.id === tabId)
-    if (closingTab && !isGraphTabPath(closingTab.path)) {
+    if (closingTab && !isGraphTabPath(closingTab.path) && !isBaseFilePath(closingTab.path)) {
       removeEditorCacheForPath(closingTab.path)
       initialContentByPathRef.current.delete(closingTab.path)
       untitledRenameReadyPathsRef.current.delete(closingTab.path)
+      frontmatterByPathRef.current.delete(closingTab.path)
       if (editorPathRef.current === closingTab.path) {
         editorPathRef.current = null
       }
+    }
+    if (closingTab && isBaseFilePath(closingTab.path)) {
+      setBaseConfigByPath((prev) => {
+        const next = { ...prev }
+        delete next[closingTab.path]
+        return next
+      })
     }
     setFileTabs(prev => {
       if (prev.length <= 1) {
@@ -2172,7 +2524,7 @@ function App() {
         setActiveFileTabId(null)
         setSelectedPath(null)
         setIsGraphOpen(false)
-        return []
+          return []
       }
       const idx = prev.findIndex(t => t.id === tabId)
       if (idx === -1) return prev
@@ -2186,7 +2538,7 @@ function App() {
           setIsGraphOpen(true)
         } else {
           setIsGraphOpen(false)
-          setSelectedPath(newActiveTab.path)
+              setSelectedPath(newActiveTab.path)
         }
       }
       return next
@@ -2294,7 +2646,7 @@ function App() {
 
     if (activeFileTabId) {
       const activeTab = fileTabs.find((tab) => tab.id === activeFileTabId)
-      if (activeTab && !isGraphTabPath(activeTab.path)) {
+      if (activeTab && !isGraphTabPath(activeTab.path) && !isBaseFilePath(activeTab.path)) {
         setFileTabs((prev) => prev.map((tab) => (
           tab.id === activeFileTabId ? { ...tab, path } : tab
         )))
@@ -2373,13 +2725,14 @@ function App() {
     const current = currentViewState
     if (viewStatesEqual(current, nextView)) return
 
+    cancelRecordingIfActive()
     const nextHistory = {
       back: appendUnique(historyRef.current.back, current),
       forward: [] as ViewState[],
     }
     setHistory(nextHistory)
     await applyViewState(nextView)
-  }, [appendUnique, applyViewState, currentViewState, setHistory])
+  }, [appendUnique, applyViewState, cancelRecordingIfActive, currentViewState, setHistory])
 
   const navigateBack = useCallback(async () => {
     const { back, forward } = historyRef.current
@@ -2438,6 +2791,146 @@ function App() {
   const navigateToFile = useCallback((path: string) => {
     void navigateToView({ type: 'file', path })
   }, [navigateToView])
+
+  const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
+    setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))
+  }, [])
+
+  const handleBaseSave = useCallback(async (name: string | null) => {
+    if (!selectedPath) return
+    const isDefault = selectedPath === BASES_DEFAULT_TAB_PATH
+    const config = baseConfigByPath[selectedPath] ?? DEFAULT_BASE_CONFIG
+
+    if (isDefault && name) {
+      // Save as new base file
+      const safeName = name.replace(/[\\/]/g, '-').trim()
+      const newPath = `bases/${safeName}.base`
+      const fileConfig = { ...config, name: safeName }
+      try {
+        await window.ipc.invoke('workspace:writeFile', {
+          path: newPath,
+          data: JSON.stringify(fileConfig, null, 2),
+        })
+        setBaseConfigByPath((prev) => ({ ...prev, [newPath]: fileConfig }))
+        // Refresh tree then navigate to the new file
+        const newTree = await loadDirectory()
+        setTree(newTree)
+        void navigateToView({ type: 'file', path: newPath })
+      } catch (err) {
+        console.error('Failed to save base:', err)
+      }
+    } else if (!isDefault) {
+      // Save in place
+      try {
+        await window.ipc.invoke('workspace:writeFile', {
+          path: selectedPath,
+          data: JSON.stringify(config, null, 2),
+        })
+      } catch (err) {
+        console.error('Failed to save base:', err)
+      }
+    }
+  }, [selectedPath, baseConfigByPath, loadDirectory, navigateToView])
+
+  // External search set by app-navigation tool (passed to BasesView)
+  const [externalBaseSearch, setExternalBaseSearch] = useState<string | undefined>(undefined)
+
+  // Process pending app-navigation results
+  useEffect(() => {
+    const result = pendingAppNavRef.current
+    if (!result) return
+    pendingAppNavRef.current = null
+
+    switch (result.action) {
+      case 'open-note':
+        navigateToFile(result.path as string)
+        break
+      case 'open-view':
+        if (result.view === 'graph') void navigateToView({ type: 'graph' })
+        if (result.view === 'bases') {
+          void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+        }
+        break
+      case 'update-base-view': {
+        // Navigate to bases if not already there
+        const targetPath = selectedPath && isBaseFilePath(selectedPath) ? selectedPath : BASES_DEFAULT_TAB_PATH
+        if (!selectedPath || !isBaseFilePath(selectedPath)) {
+          void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+        }
+
+        // Apply updates to the base config
+        const updates = result.updates as Record<string, unknown> | undefined
+        if (updates) {
+          setBaseConfigByPath(prev => {
+            const current = prev[targetPath] ?? { ...DEFAULT_BASE_CONFIG }
+            const next = { ...current }
+
+            // Apply filter updates
+            const filterUpdates = updates.filters as Record<string, unknown> | undefined
+            if (filterUpdates) {
+              if (filterUpdates.clear) {
+                next.filters = []
+              }
+              if (filterUpdates.set) {
+                next.filters = filterUpdates.set as Array<{ category: string; value: string }>
+              }
+              if (filterUpdates.add) {
+                const toAdd = filterUpdates.add as Array<{ category: string; value: string }>
+                const existing = next.filters
+                for (const f of toAdd) {
+                  if (!existing.some(e => e.category === f.category && e.value === f.value)) {
+                    existing.push(f)
+                  }
+                }
+              }
+              if (filterUpdates.remove) {
+                const toRemove = filterUpdates.remove as Array<{ category: string; value: string }>
+                next.filters = next.filters.filter(
+                  e => !toRemove.some(r => r.category === e.category && r.value === e.value)
+                )
+              }
+            }
+
+            // Apply column updates
+            const colUpdates = updates.columns as Record<string, unknown> | undefined
+            if (colUpdates) {
+              if (colUpdates.set) {
+                next.visibleColumns = colUpdates.set as string[]
+              }
+              if (colUpdates.add) {
+                const toAdd = colUpdates.add as string[]
+                for (const col of toAdd) {
+                  if (!next.visibleColumns.includes(col)) next.visibleColumns.push(col)
+                }
+              }
+              if (colUpdates.remove) {
+                const toRemove = new Set(colUpdates.remove as string[])
+                next.visibleColumns = next.visibleColumns.filter(c => !toRemove.has(c))
+              }
+            }
+
+            // Apply sort
+            if (updates.sort) {
+              next.sort = updates.sort as { field: string; dir: 'asc' | 'desc' }
+            }
+
+            return { ...prev, [targetPath]: next }
+          })
+
+          // Apply search externally
+          if (updates.search !== undefined) {
+            setExternalBaseSearch(updates.search as string || undefined)
+          }
+        }
+        break
+      }
+      case 'create-base':
+        if (result.path) {
+          navigateToFile(result.path as string)
+        }
+        break
+    }
+  })
 
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view
@@ -2709,7 +3202,7 @@ function App() {
   }, [])
 
   const knowledgeActions = React.useMemo(() => ({
-    createNote: async (parentPath: string = 'knowledge') => {
+    createNote: async (parentPath: string = 'knowledge/Notes') => {
       try {
         let index = 0
         let name = untitledBaseName
@@ -2732,7 +3225,7 @@ function App() {
         throw err
       }
     },
-    createFolder: async (parentPath: string = 'knowledge') => {
+    createFolder: async (parentPath: string = 'knowledge/Notes') => {
       try {
         await window.ipc.invoke('workspace:mkdir', {
           path: `${parentPath}/new-folder-${Date.now()}`,
@@ -2751,6 +3244,13 @@ function App() {
       }
       void navigateToView({ type: 'graph' })
     },
+    openBases: () => {
+      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
+        setIsChatSidebarOpen(false)
+        setIsRightPaneMaximized(false)
+      }
+      void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+    },
     expandAll: () => setExpandedPaths(new Set(collectDirPaths(tree))),
     collapseAll: () => setExpandedPaths(new Set()),
     rename: async (oldPath: string, newName: string, isDir: boolean) => {
@@ -2767,6 +3267,12 @@ function App() {
         setFileTabs(prev => prev.map(tab => (tab.path === oldPath ? { ...tab, path: newPath } : tab)))
         if (editorPathRef.current === oldPath) {
           editorPathRef.current = newPath
+        }
+        // Migrate frontmatter entry
+        const fmEntry = frontmatterByPathRef.current.get(oldPath)
+        if (fmEntry !== undefined) {
+          frontmatterByPathRef.current.delete(oldPath)
+          frontmatterByPathRef.current.set(newPath, fmEntry)
         }
         const baseline = initialContentByPathRef.current.get(oldPath)
         if (baseline !== undefined) {
@@ -2805,6 +3311,7 @@ function App() {
           removeEditorCacheForPath(path)
           initialContentByPathRef.current.delete(path)
           untitledRenameReadyPathsRef.current.delete(path)
+          frontmatterByPathRef.current.delete(path)
         }
         // Close any file tab showing the deleted file
         const tabForFile = fileTabs.find(t => t.path === path)
@@ -2845,9 +3352,157 @@ function App() {
       return newSet
     })
 
-    // Select the file to show it in the editor
+    // If tab already exists for this path (e.g. second call after transcription),
+    // force a content reload instead of creating a duplicate tab.
+    const existingTab = fileTabs.find(tab => tab.path === notePath)
+    if (existingTab) {
+      setActiveFileTabId(existingTab.id)
+      // Read fresh content from disk and update the editor
+      try {
+        const result = await window.ipc.invoke('workspace:readFile', { path: notePath, encoding: 'utf8' })
+        const { raw: fm, body } = splitFrontmatter(result.data)
+        frontmatterByPathRef.current.set(notePath, fm)
+        setFileContent(body)
+        setEditorContent(body)
+        editorContentRef.current = body
+        editorPathRef.current = notePath
+        initialContentRef.current = body
+        initialContentByPathRef.current.set(notePath, body)
+        setEditorContentByPath(prev => ({ ...prev, [notePath]: body }))
+        editorContentByPathRef.current.set(notePath, body)
+        // Bump editor session to force TipTap to pick up the new content
+        setEditorSessionByTabId(prev => ({
+          ...prev,
+          [existingTab.id]: (prev[existingTab.id] ?? 0) + 1,
+        }))
+      } catch {
+        // File read failed — ignore
+      }
+      return
+    }
+
+    // First call — open the file in a tab
     navigateToFile(notePath)
-  }, [loadDirectory, navigateToFile])
+  }, [loadDirectory, navigateToFile, fileTabs])
+
+  const meetingNotePathRef = useRef<string | null>(null)
+  const pendingCalendarEventRef = useRef<CalendarEventMeta | undefined>(undefined)
+  const [meetingSummarizing, setMeetingSummarizing] = useState(false)
+  const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
+
+  const startMeetingAfterPermissions = useCallback(async () => {
+    setShowMeetingPermissions(false)
+    localStorage.setItem('meeting-permissions-acknowledged', '1')
+    const calEvent = pendingCalendarEventRef.current
+    pendingCalendarEventRef.current = undefined
+    const notePath = await meetingTranscription.start(calEvent)
+    if (notePath) {
+      meetingNotePathRef.current = notePath
+      await handleVoiceNoteCreated(notePath)
+    }
+  }, [meetingTranscription, handleVoiceNoteCreated])
+
+  const handleToggleMeeting = useCallback(async () => {
+    if (meetingTranscription.state === 'recording') {
+      await meetingTranscription.stop()
+
+      // Read the final transcript and generate meeting notes via LLM
+      const notePath = meetingNotePathRef.current
+      if (notePath) {
+        setMeetingSummarizing(true)
+        try {
+          const result = await window.ipc.invoke('workspace:readFile', { path: notePath, encoding: 'utf8' })
+          const fileContent = result.data
+          if (fileContent && fileContent.trim()) {
+            // Extract meeting start time and calendar event from frontmatter
+            const dateMatch = fileContent.match(/^date:\s*"(.+)"$/m)
+            const meetingStartTime = dateMatch?.[1]
+            // If a calendar event was linked, pass it directly so the summarizer
+            // skips scanning and uses this event for attendee/title info.
+            const calEventMatch = fileContent.match(/^calendar_event:\s*'(.+)'$/m)
+            const calendarEventJson = calEventMatch?.[1]?.replace(/''/g, "'")
+            const { notes } = await window.ipc.invoke('meeting:summarize', { transcript: fileContent, meetingStartTime, calendarEventJson })
+            if (notes) {
+              // Prepend meeting notes below the title but above the transcript
+              const { raw: fm, body: transcriptBody } = splitFrontmatter(fileContent)
+              // Use frontmatter title as the heading (set from calendar event summary)
+              const fmTitleMatch = fileContent.match(/^title:\s*(.+)$/m)
+              const noteTitle = fmTitleMatch?.[1]?.trim() || 'Meeting note'
+              // Strip any existing top-level heading from body
+              const bodyWithoutTitle = transcriptBody.replace(/^#\s+.+\s*\n*/, '')
+              // Also strip any title/heading the LLM may have generated
+              const cleanedNotes = notes.replace(/^#{1,2}\s+.+\n+/, '')
+              const newBody = `# ${noteTitle}\n\n` + cleanedNotes + '\n\n---\n\n## Raw transcript\n\n' + bodyWithoutTitle
+              const newContent = fm ? `${fm}\n${newBody}` : newBody
+              await window.ipc.invoke('workspace:writeFile', {
+                path: notePath,
+                data: newContent,
+                opts: { encoding: 'utf8' },
+              })
+              // Refresh the file view
+              await handleVoiceNoteCreated(notePath)
+            }
+          }
+        } catch (err) {
+          console.error('[meeting] Failed to generate meeting notes:', err)
+        }
+        setMeetingSummarizing(false)
+        meetingNotePathRef.current = null
+      }
+    } else if (meetingTranscription.state === 'idle') {
+      // Show permissions modal on first use (macOS only — Windows works out of the box)
+      if (isMac && !localStorage.getItem('meeting-permissions-acknowledged')) {
+        setShowMeetingPermissions(true)
+        return
+      }
+      const calEvent = pendingCalendarEventRef.current
+      pendingCalendarEventRef.current = undefined
+      const notePath = await meetingTranscription.start(calEvent)
+      if (notePath) {
+        meetingNotePathRef.current = notePath
+        await handleVoiceNoteCreated(notePath)
+      }
+    }
+  }, [meetingTranscription, handleVoiceNoteCreated])
+  handleToggleMeetingRef.current = handleToggleMeeting
+
+  // Listen for calendar block "join meeting & take notes" events
+  useEffect(() => {
+    const handler = () => {
+      // Read calendar event data set by the calendar block on window
+      const pending = window.__pendingCalendarEvent
+      window.__pendingCalendarEvent = undefined
+      if (pending) {
+        pendingCalendarEventRef.current = {
+          summary: pending.summary,
+          start: pending.start,
+          end: pending.end,
+          location: pending.location,
+          htmlLink: pending.htmlLink,
+          conferenceLink: pending.conferenceLink,
+          source: pending.source,
+        }
+      }
+      // Use the same toggle flow — it will pick up pendingCalendarEventRef
+      handleToggleMeetingRef.current?.()
+    }
+    window.addEventListener('calendar-block:join-meeting', handler)
+    return () => window.removeEventListener('calendar-block:join-meeting', handler)
+  }, [])
+
+  // Email block: draft with assistant
+  useEffect(() => {
+    const handler = () => {
+      const pending = window.__pendingEmailDraft
+      if (pending) {
+        setPresetMessage(pending.prompt)
+        setIsChatSidebarOpen(true)
+        window.__pendingEmailDraft = undefined
+      }
+    }
+    window.addEventListener('email-block:draft-with-assistant', handler)
+    return () => window.removeEventListener('email-block:draft-with-assistant', handler)
+  }, [])
 
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
@@ -2901,12 +3556,17 @@ function App() {
         return
       }
 
-      const nodeSet = new Set(knowledgeFilePaths)
+      const graphFilePaths = knowledgeFilePaths.filter((p) => {
+        const normalized = stripKnowledgePrefix(p)
+        return !normalized.toLowerCase().startsWith('meetings/')
+      })
+
+      const nodeSet = new Set(graphFilePaths)
       const edges: GraphEdge[] = []
       const edgeKeys = new Set<string>()
 
       const contents = await Promise.all(
-        knowledgeFilePaths.map(async (path) => {
+        graphFilePaths.map(async (path) => {
           try {
             const result = await window.ipc.invoke('workspace:readFile', { path })
             return { path, data: result.data as string }
@@ -2965,7 +3625,7 @@ function App() {
         }
       }
 
-      const nodes = knowledgeFilePaths.map((path) => {
+      const nodes = graphFilePaths.map((path) => {
         const degree = degreeMap.get(path) ?? 0
         const radius = 6 + Math.min(18, degree * 2)
         const { group, depth } = getNodeGroup(path)
@@ -3046,6 +3706,10 @@ function App() {
     }
 
     if (isToolCall(item)) {
+      const appActionData = getAppActionCardData(item)
+      if (appActionData) {
+        return <AppActionCard key={item.id} data={appActionData} status={item.status} />
+      }
       const webSearchData = getWebSearchCardData(item)
       if (webSearchData) {
         return (
@@ -3135,7 +3799,11 @@ function App() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <SidebarSectionProvider defaultSection="tasks">
+      <SidebarSectionProvider defaultSection="tasks" onSectionChange={(section) => {
+        if (section === 'knowledge' && !selectedPath && !isGraphOpen) {
+          void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+        }
+      }}>
         <div className="flex h-svh w-full overflow-hidden">
           {/* Content sidebar with SidebarProvider for collapse functionality */}
           <SidebarProvider
@@ -3156,6 +3824,7 @@ function App() {
               tasksActions={{
                 onNewChat: handleNewChatTab,
                 onSelectRun: (runIdToLoad) => {
+                  cancelRecordingIfActive()
                   if (selectedPath || isGraphOpen) {
                     setIsChatSidebarOpen(true)
                   }
@@ -3243,7 +3912,7 @@ function App() {
                     getTabId={(t) => t.id}
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && isGraphOpen}
+                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
                   />
                 ) : (
                   <TabBar
@@ -3256,7 +3925,7 @@ function App() {
                     onCloseTab={closeChatTab}
                   />
                 )}
-                {selectedPath && (
+                {selectedPath && selectedPath.endsWith('.md') && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground self-center shrink-0 pl-2">
                     {isSaving ? (
                       <>
@@ -3345,7 +4014,20 @@ function App() {
                 )}
               </ContentHeader>
 
-              {isGraphOpen ? (
+              {selectedPath && isBaseFilePath(selectedPath) ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <BasesView
+                    tree={tree}
+                    onSelectNote={(path) => navigateToFile(path)}
+                    config={baseConfigByPath[selectedPath] ?? DEFAULT_BASE_CONFIG}
+                    onConfigChange={(cfg) => handleBaseConfigChange(selectedPath, cfg)}
+                    isDefaultBase={selectedPath === BASES_DEFAULT_TAB_PATH}
+                    onSave={(name) => void handleBaseSave(name)}
+                    externalSearch={externalBaseSearch}
+                    onExternalSearchConsumed={() => setExternalBaseSearch(undefined)}
+                  />
+                </div>
+              ) : isGraphOpen ? (
                 <div className="flex-1 min-h-0">
                   <GraphView
                     nodes={graphData.nodes}
@@ -3382,6 +4064,7 @@ function App() {
                           >
                             <MarkdownEditor
                               content={tabContent}
+                              notePath={tab.path}
                               onChange={(markdown) => { if (!isViewingHistory) handleEditorChange(tab.path, markdown) }}
                               onPrimaryHeadingCommit={() => {
                                 untitledRenameReadyPathsRef.current.add(tab.path)
@@ -3391,6 +4074,20 @@ function App() {
                               wikiLinks={wikiLinkConfig}
                               onImageUpload={handleImageUpload}
                               editorSessionKey={editorSessionByTabId[tab.id] ?? 0}
+                              frontmatter={frontmatterByPathRef.current.get(tab.path) ?? null}
+                              onFrontmatterChange={(newRaw) => {
+                                frontmatterByPathRef.current.set(tab.path, newRaw)
+                                // Write updated frontmatter to disk immediately
+                                const currentBody = editorContentRef.current
+                                const fullContent = joinFrontmatter(newRaw, currentBody)
+                                initialContentByPathRef.current.set(tab.path, splitFrontmatter(fullContent).body)
+                                initialContentRef.current = splitFrontmatter(fullContent).body
+                                void window.ipc.invoke('workspace:writeFile', {
+                                  path: tab.path,
+                                  data: fullContent,
+                                  opts: { encoding: 'utf8' },
+                                })
+                              }}
                               onHistoryHandlersChange={(handlers) => {
                                 if (handlers) {
                                   fileHistoryHandlersRef.current.set(tab.id, handlers)
@@ -3399,6 +4096,15 @@ function App() {
                                 }
                               }}
                               editable={!isViewingHistory}
+                              onExport={async (format) => {
+                                const markdown = tabContent
+                                const title = getBaseName(tab.path)
+                                try {
+                                  await window.ipc.invoke('export:note', { markdown, format, title })
+                                } catch (err) {
+                                  console.error('Export failed:', err)
+                                }
+                              }}
                             />
                           </div>
                         )
@@ -3531,7 +4237,7 @@ function App() {
                                 {tabState.currentAssistantMessage && (
                                   <Message from="assistant">
                                     <MessageContent>
-                                      <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
+                                      <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')}</MessageResponse>
                                     </MessageContent>
                                   </Message>
                                 )}
@@ -3582,6 +4288,18 @@ function App() {
                             runId={tabState.runId}
                             initialDraft={chatDraftsRef.current.get(tab.id)}
                             onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
+                            isRecording={isActive && isRecording}
+                            recordingText={isActive ? voice.interimText : undefined}
+                            recordingState={isActive ? (voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
+                            onStartRecording={isActive ? handleStartRecording : undefined}
+                            onSubmitRecording={isActive ? handleSubmitRecording : undefined}
+                            onCancelRecording={isActive ? handleCancelRecording : undefined}
+                            voiceAvailable={isActive && voiceAvailable}
+                            ttsAvailable={isActive && ttsAvailable}
+                            ttsEnabled={ttsEnabled}
+                            ttsMode={ttsMode}
+                            onToggleTts={isActive ? handleToggleTts : undefined}
+                            onTtsModeChange={isActive ? handleTtsModeChange : undefined}
                           />
                         </div>
                       )
@@ -3631,6 +4349,18 @@ function App() {
                 onToolOpenChangeForTab={setToolOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
                 onActivate={() => setActiveShortcutPane('right')}
+                isRecording={isRecording}
+                recordingText={voice.interimText}
+                recordingState={voice.state === 'connecting' ? 'connecting' : 'listening'}
+                onStartRecording={handleStartRecording}
+                onSubmitRecording={handleSubmitRecording}
+                onCancelRecording={handleCancelRecording}
+                voiceAvailable={voiceAvailable}
+                ttsAvailable={ttsAvailable}
+                ttsEnabled={ttsEnabled}
+                ttsMode={ttsMode}
+                onToggleTts={handleToggleTts}
+                onTtsModeChange={handleTtsModeChange}
               />
             )}
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}
@@ -3641,6 +4371,10 @@ function App() {
               canNavigateForward={canNavigateForward}
               onNewChat={handleNewChatTab}
               onOpenSearch={() => setIsSearchOpen(true)}
+              meetingState={meetingTranscription.state}
+              meetingSummarizing={meetingSummarizing}
+              meetingAvailable={voiceAvailable}
+              onToggleMeeting={() => { void handleToggleMeeting() }}
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
           </SidebarProvider>
@@ -3657,6 +4391,29 @@ function App() {
         open={showOnboarding}
         onComplete={handleOnboardingComplete}
       />
+      <Dialog open={showMeetingPermissions} onOpenChange={setShowMeetingPermissions}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Meeting transcription setup</DialogTitle>
+            <DialogDescription>
+              Rowboat needs <strong>Screen Recording</strong> permission to capture meeting audio from other apps (Zoom, Meet, etc.).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <p>To enable this:</p>
+            <ol className="list-decimal list-inside space-y-1.5">
+              <li>Open <strong>System Settings</strong> → <strong>Privacy & Security</strong></li>
+              <li>Click <strong>Screen Recording</strong></li>
+              <li>Toggle on <strong>Rowboat</strong></li>
+              <li>You may need to restart the app after granting permission</li>
+            </ol>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowMeetingPermissions(false)}>Cancel</Button>
+            <Button onClick={() => { void startMeetingAfterPermissions() }}>Continue</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   )
 }

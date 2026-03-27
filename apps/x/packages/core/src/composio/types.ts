@@ -45,11 +45,11 @@ export const ZToolkit = z.object({
     slug: z.string(),
     name: z.string(),
     meta: ZToolkitMeta,
-    no_auth: z.boolean(),
+    no_auth: z.boolean().optional(),
     // Use z.string() instead of ZAuthScheme to be resilient against
     // new auth types added by the Composio API over time.
-    auth_schemes: z.array(z.string()),
-    composio_managed_auth_schemes: z.array(z.string()),
+    auth_schemes: z.array(z.string()).optional(),
+    composio_managed_auth_schemes: z.array(z.string()).optional(),
 });
 
 /**
@@ -70,7 +70,7 @@ export const ZTool = z.object({
         required: z.array(z.string()).optional(),
         additionalProperties: z.boolean().optional(),
     }),
-    no_auth: z.boolean(),
+    no_auth: z.boolean().optional(),
 });
 
 /**
@@ -202,18 +202,19 @@ export const ZListResponse = <T extends z.ZodTypeAny>(schema: T) => z.object({
  * Execute action request
  */
 export const ZExecuteActionRequest = z.object({
-    action: z.string(),
     connected_account_id: z.string(),
-    input: z.record(z.string(), z.unknown()),
+    user_id: z.string(),
+    version: z.string(),
+    arguments: z.any().optional(),
 });
 
 /**
  * Execute action response
  */
 export const ZExecuteActionResponse = z.object({
-    success: z.boolean(),
     data: z.unknown(),
-    error: z.string().optional(),
+    successful: z.boolean(),
+    error: z.string().nullable(),
 });
 
 /**

@@ -46,13 +46,15 @@ export async function discoverConfiguration(
     console.log(`[OAuth] Using cached configuration for ${issuerUrl}`);
     return cached;
   }
-
   console.log(`[OAuth] Discovering authorization server metadata for ${issuerUrl}...`);
   const config = await client.discovery(
     new URL(issuerUrl),
     clientId,
     undefined, // no client_secret (PKCE flow)
-    client.None() // PKCE doesn't require client authentication
+    client.None(), // PKCE doesn't require client authentication
+    {
+      execute: [client.allowInsecureRequests],
+    }
   );
 
   configCache.set(cacheKey, config);
@@ -110,7 +112,10 @@ export async function registerClient(
       client_name: clientName,
       scope: scopes.join(' '),
     },
-    client.None()
+    client.None(),
+    {
+      execute: [client.allowInsecureRequests],
+    },
   );
 
   const metadata = config.clientMetadata();

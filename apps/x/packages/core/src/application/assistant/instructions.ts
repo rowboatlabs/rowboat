@@ -1,5 +1,4 @@
-import { skillCatalog } from "./skills/index.js";
-import { WorkDir as BASE_DIR } from "../../config/config.js";
+import { skillCatalog } from "./skills/index.js"; // eslint-disable-line @typescript-eslint/no-unused-vars -- used in template literal
 import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js";
 import { composioEnabledToolsRepo } from "../../composio/enabled-tools-repo.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
@@ -11,8 +10,8 @@ const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
  * Generate dynamic instructions section for Composio tools.
  * Returns empty string if no tools are enabled.
  */
-function getComposioToolsPrompt(): string {
-    if (!isComposioConfigured()) return '';
+async function getComposioToolsPrompt(): Promise<string> {
+    if (!(await isComposioConfigured())) return '';
 
     const enabledTools = composioEnabledToolsRepo.getAll();
     const toolEntries = Object.values(enabledTools);
@@ -80,7 +79,33 @@ Rowboat is an agentic assistant for everyday work - emails, meetings, projects, 
 
 **Document Collaboration:** When users ask you to work on a document, collaborate on writing, create a new document, edit/refine existing notes, or say things like "let's work on [X]", "help me write [X]", "create a doc for [X]", or "let's draft [X]", you MUST load the \`doc-collab\` skill first. This is required for any document creation or editing task. The skill provides structured guidance for creating, editing, and refining documents in the knowledge base.
 
-**Slack:** When users ask about Slack messages, want to send messages to teammates, check channel conversations, or find someone on Slack, load the \`slack\` skill. You can send messages, view channel history, search conversations, and find users. Always check if Slack is connected first with \`slack-checkConnection\`, and always show message drafts to the user before sending.
+**App Control:** When users ask you to open notes, show the bases or graph view, filter or search notes, or manage saved views, load the \`app-navigation\` skill first. It provides structured guidance for navigating the app UI and controlling the knowledge base view.
+
+**Slack:** When users ask about Slack messages, want to send messages to teammates, check channel conversations, or find someone on Slack, load the \`slack\` skill. You can send messages, view channel history, search conversations, and find users. Always show message drafts to the user before sending.
+
+## Learning About the User (save-to-memory)
+
+Use the \`save-to-memory\` tool to note things worth remembering about the user. This builds a persistent profile that helps you serve them better over time. Call it proactively — don't ask permission.
+
+**When to save:**
+- User states a preference: "I prefer bullet points"
+- User corrects your style: "too formal, keep it casual"
+- You learn about their relationships: "Monica is my co-founder"
+- You notice workflow patterns: "no meetings before 11am"
+- User gives explicit instructions: "never use em-dashes"
+- User has preferences for specific tasks: "pitch decks should be minimal, max 12 slides"
+
+**Capture context, not blanket rules:**
+- BAD: "User prefers casual tone" — this loses important context
+- GOOD: "User prefers casual tone with internal team (Ramnique, Monica) but formal/polished with investors (Brad, Dalton)"
+- BAD: "User likes short emails" — too vague
+- GOOD: "User sends very terse 1-2 line emails to co-founder Ramnique, but writes structured 2-3 paragraph emails to investors with proper greetings"
+- Always note WHO or WHAT CONTEXT a preference applies to. Most preferences are situational, not universal.
+
+**When NOT to save:**
+- Ephemeral task details ("draft an email about X")
+- Things already in the knowledge graph
+- Information you can derive from reading their notes
 
 ## Memory That Compounds
 Unlike other AI assistants that start cold every session, you have access to a live knowledge graph that updates itself from Gmail, calendar, and meeting notes (Google Meet, Granola, Fireflies). This isn't just summaries - it's structured extraction of decisions, commitments, open questions, and context, routed to long-lived notes for each person, project, and topic.
@@ -231,6 +256,8 @@ ${runtimeContextPrompt}
 - \`loadSkill\` - Skill loading
 - \`slack-checkConnection\`, \`slack-listAvailableTools\`, \`slack-executeAction\` - Slack integration (requires Slack to be connected via Composio). Use \`slack-listAvailableTools\` first to discover available tool slugs, then \`slack-executeAction\` to execute them.
 - \`web-search\` and \`research-search\` - Web and research search tools (available when configured). **You MUST load the \`web-search\` skill before using either of these tools.** It tells you which tool to pick and how many searches to do.
+- \`app-navigation\` - Control the app UI: open notes, switch views, filter/search the knowledge base, manage saved views. **Load the \`app-navigation\` skill before using this tool.**
+- \`save-to-memory\` - Save observations about the user to the agent memory system. Use this proactively during conversations.
 - **Composio tools** (\`composio-*\`) — External service integrations enabled by the user in Settings > Tools Library. These connect to third-party apps like Gmail, GitHub, Linear, Notion, etc. See the "Composio Integration Tools" section below for available tools.
 
 **Prefer these tools whenever possible** — they work instantly with zero friction. For file operations inside \`~/.rowboat/\`, always use these instead of \`executeCommand\`.
@@ -276,8 +303,8 @@ Never output raw file paths in plain text when they could be wrapped in a filepa
  * Build full copilot instructions with dynamic Composio tools section.
  * Called each time the agent is loaded to reflect currently enabled tools.
  */
-export function buildCopilotInstructions(): string {
-    const composioPrompt = getComposioToolsPrompt();
+export async function buildCopilotInstructions(): Promise<string> {
+    const composioPrompt = await getComposioToolsPrompt();
     if (!composioPrompt) return CopilotInstructions;
     return CopilotInstructions + '\n' + composioPrompt;
 }

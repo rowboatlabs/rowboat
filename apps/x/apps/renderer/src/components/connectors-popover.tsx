@@ -1,8 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { useState, useEffect, useCallback } from "react"
-import { AlertTriangle, Loader2, Mic, Mail, MessageSquare } from "lucide-react"
+import { useState } from "react"
+import { AlertTriangle, Loader2, Mic, Mail, Calendar, MessageSquare, User } from "lucide-react"
 
 import {
   Popover,
@@ -17,385 +17,41 @@ import {
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
-import { getGoogleClientId, setGoogleClientId, clearGoogleClientId } from "@/lib/google-client-id-store"
-import { toast } from "sonner"
-
-interface ProviderState {
-  isConnected: boolean
-  isLoading: boolean
-  isConnecting: boolean
-}
-
-interface ProviderStatus {
-  error?: string
-}
+import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
+import { useConnectors } from "@/hooks/useConnectors"
 
 interface ConnectorsPopoverProps {
   children: React.ReactNode
   tooltip?: string
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  mode?: "all" | "unconnected"
 }
 
-export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenChange }: ConnectorsPopoverProps) {
+export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenChange, mode = "all" }: ConnectorsPopoverProps) {
   const [openInternal, setOpenInternal] = useState(false)
   const isControlled = typeof openProp === "boolean"
   const open = isControlled ? openProp : openInternal
   const setOpen = onOpenChange ?? setOpenInternal
-  const [providers, setProviders] = useState<string[]>([])
-  const [providersLoading, setProvidersLoading] = useState(true)
-  const [providerStates, setProviderStates] = useState<Record<string, ProviderState>>({})
-  const [providerStatus, setProviderStatus] = useState<Record<string, ProviderStatus>>({})
-  const [googleClientIdOpen, setGoogleClientIdOpen] = useState(false)
-  const [googleClientIdDescription, setGoogleClientIdDescription] = useState<string | undefined>(undefined)
 
-  // Granola state
-  const [granolaEnabled, setGranolaEnabled] = useState(false)
-  const [granolaLoading, setGranolaLoading] = useState(true)
+  const c = useConnectors(open)
 
-  // Composio/Slack state
-  const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
-  const [slackConnected, setSlackConnected] = useState(false)
-  const [slackLoading, setSlackLoading] = useState(true)
-  const [slackConnecting, setSlackConnecting] = useState(false)
-
-  // Load available providers on mount
-  useEffect(() => {
-    async function loadProviders() {
-      try {
-        setProvidersLoading(true)
-        const result = await window.ipc.invoke('oauth:list-providers', null)
-        setProviders(result.providers || [])
-      } catch (error) {
-        console.error('Failed to get available providers:', error)
-        setProviders([])
-      } finally {
-        setProvidersLoading(false)
-      }
-    }
-    loadProviders()
-  }, [])
-
-  // Load Granola config
-  const refreshGranolaConfig = useCallback(async () => {
-    try {
-      setGranolaLoading(true)
-      const result = await window.ipc.invoke('granola:getConfig', null)
-      setGranolaEnabled(result.enabled)
-    } catch (error) {
-      console.error('Failed to load Granola config:', error)
-      setGranolaEnabled(false)
-    } finally {
-      setGranolaLoading(false)
-    }
-  }, [])
-
-  // Update Granola config
-  const handleGranolaToggle = useCallback(async (enabled: boolean) => {
-    try {
-      setGranolaLoading(true)
-      await window.ipc.invoke('granola:setConfig', { enabled })
-      setGranolaEnabled(enabled)
-      toast.success(enabled ? 'Granola sync enabled' : 'Granola sync disabled')
-    } catch (error) {
-      console.error('Failed to update Granola config:', error)
-      toast.error('Failed to update Granola sync settings')
-    } finally {
-      setGranolaLoading(false)
-    }
-  }, [])
-
-  // Load Slack connection status
-  const refreshSlackStatus = useCallback(async () => {
-    try {
-      setSlackLoading(true)
-      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'slack' })
-      setSlackConnected(result.isConnected)
-    } catch (error) {
-      console.error('Failed to load Slack status:', error)
-      setSlackConnected(false)
-    } finally {
-      setSlackLoading(false)
-    }
-  }, [])
-
-  // Connect to Slack via Composio
-  const startSlackConnect = useCallback(async () => {
-    try {
-      setSlackConnecting(true)
-      const result = await window.ipc.invoke('composio:initiate-connection', { toolkitSlug: 'slack' })
-      if (!result.success) {
-        toast.error(result.error || 'Failed to connect to Slack')
-        setSlackConnecting(false)
-      }
-      // Success will be handled by composio:didConnect event
-    } catch (error) {
-      console.error('Failed to connect to Slack:', error)
-      toast.error('Failed to connect to Slack')
-      setSlackConnecting(false)
-    }
-  }, [])
-
-  // Handle Slack connect button click
-  const handleConnectSlack = useCallback(async () => {
-    // Check if Composio is configured
-    const configResult = await window.ipc.invoke('composio:is-configured', null)
-    if (!configResult.configured) {
-      setComposioApiKeyOpen(true)
-      return
-    }
-    await startSlackConnect()
-  }, [startSlackConnect])
-
-  // Handle Composio API key submission
-  const handleComposioApiKeySubmit = useCallback(async (apiKey: string) => {
-    try {
-      await window.ipc.invoke('composio:set-api-key', { apiKey })
-      setComposioApiKeyOpen(false)
-      toast.success('Composio API key saved')
-      // Now start the Slack connection
-      await startSlackConnect()
-    } catch (error) {
-      console.error('Failed to save Composio API key:', error)
-      toast.error('Failed to save API key')
-    }
-  }, [startSlackConnect])
-
-  // Disconnect from Slack
-  const handleDisconnectSlack = useCallback(async () => {
-    try {
-      setSlackLoading(true)
-      const result = await window.ipc.invoke('composio:disconnect', { toolkitSlug: 'slack' })
-      if (result.success) {
-        setSlackConnected(false)
-        toast.success('Disconnected from Slack')
-      } else {
-        toast.error('Failed to disconnect from Slack')
-      }
-    } catch (error) {
-      console.error('Failed to disconnect from Slack:', error)
-      toast.error('Failed to disconnect from Slack')
-    } finally {
-      setSlackLoading(false)
-    }
-  }, [])
-
-  // Check connection status for all providers
-  const refreshAllStatuses = useCallback(async () => {
-    // Refresh Granola
-    refreshGranolaConfig()
-
-    // Refresh Slack status
-    refreshSlackStatus()
-
-    // Refresh OAuth providers
-    if (providers.length === 0) return
-
-    const newStates: Record<string, ProviderState> = {}
-
-    try {
-      const result = await window.ipc.invoke('oauth:getState', null)
-      const config = result.config || {}
-      const statusMap: Record<string, ProviderStatus> = {}
-
-      for (const provider of providers) {
-        const providerConfig = config[provider]
-        newStates[provider] = {
-          isConnected: providerConfig?.connected ?? false,
-          isLoading: false,
-          isConnecting: false,
-        }
-        if (providerConfig?.error) {
-          statusMap[provider] = { error: providerConfig.error }
-        }
-      }
-
-      setProviderStatus(statusMap)
-    } catch (error) {
-      console.error('Failed to check connection statuses:', error)
-      for (const provider of providers) {
-        newStates[provider] = {
-          isConnected: false,
-          isLoading: false,
-          isConnecting: false,
-        }
-      }
-      setProviderStatus({})
-    }
-
-    setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackStatus])
-
-  // Refresh statuses when popover opens or providers list changes
-  useEffect(() => {
-    if (open) {
-      refreshAllStatuses()
-    }
-  }, [open, providers, refreshAllStatuses])
-
-  // Listen for OAuth completion events
-  useEffect(() => {
-    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
-      const { provider, success, error } = event
-      
-      setProviderStates(prev => ({
-        ...prev,
-        [provider]: {
-          isConnected: success,
-          isLoading: false,
-          isConnecting: false,
-        }
-      }))
-
-      if (success) {
-        const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
-        // Show detailed message for Google and Fireflies (includes sync info)
-        if (provider === 'google' || provider === 'fireflies-ai') {
-          toast.success(`Connected to ${displayName}`, {
-            description: 'Syncing your data in the background. This may take a few minutes before changes appear.',
-            duration: 8000,
-          })
-        } else {
-          toast.success(`Connected to ${displayName}`)
-        }
-        // Refresh status to ensure consistency
-        refreshAllStatuses()
-      } else {
-        toast.error(error || `Failed to connect to ${provider}`)
-      }
-    })
-
-    return cleanup
-  }, [refreshAllStatuses])
-
-  // Listen for Composio connection events
-  useEffect(() => {
-    const cleanup = window.ipc.on('composio:didConnect', (event) => {
-      const { toolkitSlug, success, error } = event
-
-      if (toolkitSlug === 'slack') {
-        setSlackConnected(success)
-        setSlackConnecting(false)
-
-        if (success) {
-          toast.success('Connected to Slack')
-        } else {
-          toast.error(error || 'Failed to connect to Slack')
-        }
-      }
-    })
-
-    return cleanup
-  }, [])
-
-  const startConnect = useCallback(async (provider: string, clientId?: string) => {
-    setProviderStates(prev => ({
-      ...prev,
-      [provider]: { ...prev[provider], isConnecting: true }
-    }))
-
-    try {
-      const result = await window.ipc.invoke('oauth:connect', { provider, clientId })
-
-      if (result.success) {
-        // OAuth flow started - keep isConnecting state, wait for event
-        // Event listener will handle the actual completion
-      } else {
-        // Immediate failure (e.g., couldn't start flow)
-        toast.error(result.error || `Failed to connect to ${provider}`)
-        setProviderStates(prev => ({
-          ...prev,
-          [provider]: { ...prev[provider], isConnecting: false }
-        }))
-      }
-    } catch (error) {
-      console.error('Failed to connect:', error)
-      toast.error(`Failed to connect to ${provider}`)
-      setProviderStates(prev => ({
-        ...prev,
-        [provider]: { ...prev[provider], isConnecting: false }
-      }))
-    }
-  }, [])
-
-  // Connect to a provider
-  const handleConnect = useCallback(async (provider: string) => {
-    if (provider === 'google') {
-      setGoogleClientIdDescription(undefined)
-      const existingClientId = getGoogleClientId()
-      if (!existingClientId) {
-        setGoogleClientIdOpen(true)
-        return
-      }
-      await startConnect(provider, existingClientId)
-      return
-    }
-
-    await startConnect(provider)
-  }, [startConnect])
-
-  const handleGoogleClientIdSubmit = useCallback((clientId: string) => {
-    setGoogleClientId(clientId)
-    setGoogleClientIdOpen(false)
-    setGoogleClientIdDescription(undefined)
-    startConnect('google', clientId)
-  }, [startConnect])
-
-  // Disconnect from a provider
-  const handleDisconnect = useCallback(async (provider: string) => {
-    setProviderStates(prev => ({
-      ...prev,
-      [provider]: { ...prev[provider], isLoading: true }
-    }))
-
-    try {
-      const result = await window.ipc.invoke('oauth:disconnect', { provider })
-
-      if (result.success) {
-        if (provider === 'google') {
-          clearGoogleClientId()
-        }
-        const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
-        toast.success(`Disconnected from ${displayName}`)
-        setProviderStates(prev => ({
-          ...prev,
-          [provider]: {
-            isConnected: false,
-            isLoading: false,
-            isConnecting: false,
-          }
-        }))
-      } else {
-        toast.error(`Failed to disconnect from ${provider}`)
-        setProviderStates(prev => ({
-          ...prev,
-          [provider]: { ...prev[provider], isLoading: false }
-        }))
-      }
-    } catch (error) {
-      console.error('Failed to disconnect:', error)
-      toast.error(`Failed to disconnect from ${provider}`)
-      setProviderStates(prev => ({
-        ...prev,
-        [provider]: { ...prev[provider], isLoading: false }
-      }))
-    }
-  }, [])
-
-  const hasProviderError = Object.values(providerStatus).some(
-    (status) => Boolean(status?.error)
-  )
+  const isUnconnectedMode = mode === "unconnected"
 
   // Helper to render an OAuth provider row
   const renderOAuthProvider = (provider: string, displayName: string, icon: React.ReactNode, description: string) => {
-    const state = providerStates[provider] || {
+    const state = c.providerStates[provider] || {
       isConnected: false,
       isLoading: true,
       isConnecting: false,
     }
-    const needsReconnect = Boolean(providerStatus[provider]?.error)
+    const needsReconnect = Boolean(c.providerStatus[provider]?.error)
+
+    // In unconnected mode, skip connected providers (unless they need reconnect)
+    if (isUnconnectedMode && state.isConnected && !needsReconnect && !state.isLoading) {
+      return null
+    }
 
     return (
       <div
@@ -426,13 +82,13 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
               size="sm"
               onClick={() => {
                 if (provider === 'google') {
-                  setGoogleClientIdDescription(
+                  c.setGoogleClientIdDescription(
                     "To keep your Google account connected, please re-enter your client ID. You only need to do this once."
                   )
-                  setGoogleClientIdOpen(true)
+                  c.setGoogleClientIdOpen(true)
                   return
                 }
-                startConnect(provider)
+                c.startConnect(provider)
               }}
               className="h-7 px-2 text-xs"
             >
@@ -442,23 +98,23 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
             <Button
               variant="outline"
               size="sm"
-              onClick={() => handleDisconnect(provider)}
+              onClick={() => c.handleDisconnect(provider)}
               className="h-7 px-2 text-xs"
             >
-              Disconnect
+              {provider === 'rowboat' ? 'Log Out' : 'Disconnect'}
             </Button>
           ) : (
             <Button
               variant="default"
               size="sm"
-              onClick={() => handleConnect(provider)}
+              onClick={() => c.handleConnect(provider)}
               disabled={state.isConnecting}
               className="h-7 px-2 text-xs"
             >
               {state.isConnecting ? (
                 <Loader2 className="size-3 animate-spin" />
               ) : (
-                "Connect"
+                provider === 'rowboat' ? 'Log In' : 'Connect'
               )}
             </Button>
           )}
@@ -467,19 +123,57 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     )
   }
 
+  // Check if Gmail is unconnected (for filtering in unconnected mode)
+  const isGmailUnconnected = c.useComposioForGoogle ? !c.gmailConnected && !c.gmailLoading : true
+  const isGoogleCalendarUnconnected = c.useComposioForGoogleCalendar ? !c.googleCalendarConnected && !c.googleCalendarLoading : true
+  const isGranolaUnconnected = !c.granolaEnabled && !c.granolaLoading
+  const isSlackUnconnected = !c.slackEnabled && !c.slackLoading
+
+  // For unconnected mode, check if there's anything to show
+  const hasUnconnectedEmailCalendar = (() => {
+    if (!isUnconnectedMode) return true
+    if (c.useComposioForGoogle && isGmailUnconnected) return true
+    if (c.useComposioForGoogleCalendar && isGoogleCalendarUnconnected) return true
+    if (!c.useComposioForGoogle && c.providers.includes('google')) {
+      const googleState = c.providerStates['google']
+      if (!googleState?.isConnected || c.providerStatus['google']?.error) return true
+    }
+    return false
+  })()
+
+  const hasUnconnectedMeetingNotes = (() => {
+    if (!isUnconnectedMode) return true
+    if (isGranolaUnconnected) return true
+    if (c.providers.includes('fireflies-ai')) {
+      const firefliesState = c.providerStates['fireflies-ai']
+      if (!firefliesState?.isConnected || c.providerStatus['fireflies-ai']?.error) return true
+    }
+    return false
+  })()
+
+  const hasUnconnectedSlack = !isUnconnectedMode || isSlackUnconnected
+
+  const isRowboatUnconnected = (() => {
+    if (!c.providers.includes('rowboat')) return false
+    const rowboatState = c.providerStates['rowboat']
+    return !rowboatState?.isConnected || rowboatState?.isLoading
+  })()
+
+  const allConnected = isUnconnectedMode && !isRowboatUnconnected && !hasUnconnectedEmailCalendar && !hasUnconnectedMeetingNotes && !hasUnconnectedSlack
+
   return (
     <>
     <GoogleClientIdModal
-      open={googleClientIdOpen}
+      open={c.googleClientIdOpen}
       onOpenChange={(nextOpen) => {
-        setGoogleClientIdOpen(nextOpen)
+        c.setGoogleClientIdOpen(nextOpen)
         if (!nextOpen) {
-          setGoogleClientIdDescription(undefined)
+          c.setGoogleClientIdDescription(undefined)
         }
       }}
-      onSubmit={handleGoogleClientIdSubmit}
-      isSubmitting={providerStates.google?.isConnecting ?? false}
-      description={googleClientIdDescription}
+      onSubmit={c.handleGoogleClientIdSubmit}
+      isSubmitting={c.providerStates.google?.isConnecting ?? false}
+      description={c.googleClientIdDescription}
     />
     <Popover open={open} onOpenChange={setOpen}>
       {tooltip ? (
@@ -506,129 +200,295 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
       >
         <div className="p-4 border-b">
           <h4 className="font-semibold text-sm flex items-center gap-1.5">
-            Connected accounts
-            {hasProviderError && (
+            {isUnconnectedMode ? "Connect Accounts" : "Connected accounts"}
+            {!isUnconnectedMode && c.hasProviderError && (
               <AlertTriangle className="size-3 text-amber-500/80 animate-pulse" />
             )}
           </h4>
           <p className="text-xs text-muted-foreground mt-1">
-            Connect accounts to sync data
+            {isUnconnectedMode ? "Add new account connections" : "Connect accounts to sync data"}
           </p>
         </div>
         <div className="p-2">
-          {providersLoading ? (
+          {c.providersLoading ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
             </div>
+          ) : allConnected ? (
+            <div className="flex flex-col items-center py-6 px-4 gap-2">
+              <p className="text-sm text-muted-foreground text-center">All accounts connected</p>
+              <p className="text-xs text-muted-foreground text-center">
+                Manage your connections in Settings
+              </p>
+            </div>
           ) : (
             <>
-              {/* Email & Calendar Section - Google */}
-              {providers.includes('google') && (
+              {/* Rowboat Account - show in "all" mode always, or in "unconnected" mode only when not connected */}
+              {c.providers.includes('rowboat') && (() => {
+                const rowboatState = c.providerStates['rowboat']
+                const isRowboatConnected = rowboatState?.isConnected && !rowboatState?.isLoading
+                if (isUnconnectedMode && isRowboatConnected) return null
+                return (
+                  <>
+                    <div className="px-2 py-1.5">
+                      <span className="text-xs font-medium text-muted-foreground">Account</span>
+                    </div>
+                    {renderOAuthProvider('rowboat', 'Rowboat', <User className="size-4" />, 'Log in to your Rowboat account')}
+                    <Separator className="my-2" />
+                  </>
+                )
+              })()}
+
+              {/* Email & Calendar Section */}
+              {(c.useComposioForGoogle || c.useComposioForGoogleCalendar || c.providers.includes('google')) && hasUnconnectedEmailCalendar && (
                 <>
                   <div className="px-2 py-1.5">
-                    <span className="text-xs font-medium text-muted-foreground">Email & Calendar</span>
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Email & Calendar
+                    </span>
                   </div>
-                  {renderOAuthProvider('google', 'Google', <Mail className="size-4" />, 'Sync emails and calendar')}
+                  {c.useComposioForGoogle ? (
+                    // In unconnected mode, only show if not connected
+                    (!isUnconnectedMode || isGmailUnconnected) ? (
+                      <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                            <Mail className="size-4" />
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-sm font-medium truncate">Gmail</span>
+                            {c.gmailLoading ? (
+                              <span className="text-xs text-muted-foreground">Checking...</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground truncate">
+                                Sync emails
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="shrink-0">
+                          {c.gmailLoading ? (
+                            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                          ) : c.gmailConnected ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={c.handleDisconnectGmail}
+                              className="h-7 px-2 text-xs"
+                            >
+                              Disconnect
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={c.handleConnectGmail}
+                              disabled={c.gmailConnecting}
+                              className="h-7 px-2 text-xs"
+                            >
+                              {c.gmailConnecting ? (
+                                <Loader2 className="size-3 animate-spin" />
+                              ) : (
+                                "Connect"
+                              )}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ) : null
+                  ) : (
+                    renderOAuthProvider('google', 'Google', <Mail className="size-4" />, 'Sync emails and calendar')
+                  )}
+                  {c.useComposioForGoogleCalendar && (!isUnconnectedMode || isGoogleCalendarUnconnected) && (
+                    <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                          <Calendar className="size-4" />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-sm font-medium truncate">Google Calendar</span>
+                          {c.googleCalendarLoading ? (
+                            <span className="text-xs text-muted-foreground">Checking...</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground truncate">
+                              Sync calendar events
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        {c.googleCalendarLoading ? (
+                          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                        ) : c.googleCalendarConnected ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={c.handleDisconnectGoogleCalendar}
+                            className="h-7 px-2 text-xs"
+                          >
+                            Disconnect
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={c.handleConnectGoogleCalendar}
+                            disabled={c.googleCalendarConnecting}
+                            className="h-7 px-2 text-xs"
+                          >
+                            {c.googleCalendarConnecting ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              "Connect"
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <Separator className="my-2" />
                 </>
               )}
 
-              {/* Meeting Notes Section - Granola & Fireflies */}
-              <div className="px-2 py-1.5">
-                <span className="text-xs font-medium text-muted-foreground">Meeting Notes</span>
-              </div>
+              {/* Meeting Notes Section */}
+              {hasUnconnectedMeetingNotes && (
+                <>
+                  <div className="px-2 py-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">Meeting Notes</span>
+                  </div>
 
-              {/* Granola */}
-              <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                    <Mic className="size-4" />
-                  </div>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-sm font-medium truncate">Granola</span>
-                    <span className="text-xs text-muted-foreground truncate">
-                      Local meeting notes
-                    </span>
-                  </div>
-                </div>
-                <div className="shrink-0 flex items-center gap-2">
-                  {granolaLoading && (
-                    <Loader2 className="size-3 animate-spin" />
+                  {/* Granola - show in unconnected mode only if not enabled */}
+                  {(!isUnconnectedMode || isGranolaUnconnected) && (
+                    <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                          <Mic className="size-4" />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-sm font-medium truncate">Granola</span>
+                          <span className="text-xs text-muted-foreground truncate">
+                            Local meeting notes
+                          </span>
+                        </div>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-2">
+                        {c.granolaLoading && (
+                          <Loader2 className="size-3 animate-spin" />
+                        )}
+                        <Switch
+                          checked={c.granolaEnabled}
+                          onCheckedChange={c.handleGranolaToggle}
+                          disabled={c.granolaLoading}
+                        />
+                      </div>
+                    </div>
                   )}
-                  <Switch
-                    checked={granolaEnabled}
-                    onCheckedChange={handleGranolaToggle}
-                    disabled={granolaLoading}
-                  />
-                </div>
-              </div>
 
-              {/* Fireflies */}
-              {providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-4" />, 'AI meeting transcripts')}
+                  {/* Fireflies */}
+                  {c.providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-4" />, 'AI meeting transcripts')}
 
-              <Separator className="my-2" />
+                  <Separator className="my-2" />
+                </>
+              )}
 
-              {/* Team Communication Section - Slack */}
-              <div className="px-2 py-1.5">
-                <span className="text-xs font-medium text-muted-foreground">Team Communication</span>
-              </div>
-
-              {/* Slack */}
-              <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                    <MessageSquare className="size-4" />
+              {/* Team Communication Section */}
+              {hasUnconnectedSlack && (
+                <>
+                  <div className="px-2 py-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">Team Communication</span>
                   </div>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-sm font-medium truncate">Slack</span>
-                    {slackLoading ? (
-                      <span className="text-xs text-muted-foreground">Checking...</span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground truncate">
-                        Send messages and view channels
-                      </span>
+
+                  <div className="rounded-md px-3 py-2 hover:bg-accent">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                          <MessageSquare className="size-4" />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-sm font-medium truncate">Slack</span>
+                          {c.slackEnabled && c.slackWorkspaces.length > 0 ? (
+                            <span className="text-xs text-muted-foreground truncate">
+                              {c.slackWorkspaces.map(w => w.name).join(', ')}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground truncate">
+                              Send messages and view channels
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-2">
+                        {(c.slackLoading || c.slackDiscovering) && (
+                          <Loader2 className="size-3 animate-spin" />
+                        )}
+                        {c.slackEnabled ? (
+                          <Switch
+                            checked={true}
+                            onCheckedChange={() => c.handleSlackDisable()}
+                            disabled={c.slackLoading}
+                          />
+                        ) : (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={c.handleSlackEnable}
+                            disabled={c.slackLoading || c.slackDiscovering}
+                            className="h-7 px-2 text-xs"
+                          >
+                            Enable
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    {c.slackPickerOpen && (
+                      <div className="mt-2 ml-11 space-y-2">
+                        {c.slackDiscoverError ? (
+                          <p className="text-xs text-muted-foreground">{c.slackDiscoverError}</p>
+                        ) : (
+                          <>
+                            {c.slackAvailableWorkspaces.map(w => (
+                              <label key={w.url} className="flex items-center gap-2 text-sm cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={c.slackSelectedUrls.has(w.url)}
+                                  onChange={(e) => {
+                                    c.setSlackSelectedUrls(prev => {
+                                      const next = new Set(prev)
+                                      if (e.target.checked) next.add(w.url)
+                                      else next.delete(w.url)
+                                      return next
+                                    })
+                                  }}
+                                  className="rounded border-border"
+                                />
+                                <span className="truncate">{w.name}</span>
+                              </label>
+                            ))}
+                            <Button
+                              size="sm"
+                              onClick={c.handleSlackSaveWorkspaces}
+                              disabled={c.slackSelectedUrls.size === 0 || c.slackLoading}
+                              className="h-7 px-3 text-xs"
+                            >
+                              Save
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
-                </div>
-                <div className="shrink-0">
-                  {slackLoading ? (
-                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                  ) : slackConnected ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleDisconnectSlack}
-                      className="h-7 px-2 text-xs"
-                    >
-                      Disconnect
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={handleConnectSlack}
-                      disabled={slackConnecting}
-                      className="h-7 px-2 text-xs"
-                    >
-                      {slackConnecting ? (
-                        <Loader2 className="size-3 animate-spin" />
-                      ) : (
-                        "Connect"
-                      )}
-                    </Button>
-                  )}
-                </div>
-              </div>
+                </>
+              )}
             </>
           )}
         </div>
       </PopoverContent>
     </Popover>
     <ComposioApiKeyModal
-      open={composioApiKeyOpen}
-      onOpenChange={setComposioApiKeyOpen}
-      onSubmit={handleComposioApiKeySubmit}
-      isSubmitting={slackConnecting}
+      open={c.composioApiKeyOpen}
+      onOpenChange={c.setComposioApiKeyOpen}
+      onSubmit={c.handleComposioApiKeySubmit}
+      isSubmitting={c.gmailConnecting}
     />
     </>
   )
