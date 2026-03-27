@@ -1026,123 +1026,15 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     // ============================================================================
-    // Web Search (Brave Search API)
+    // Web Search (Exa Search API)
     // ============================================================================
 
     'web-search': {
-        description: 'Search the web using Brave Search. Returns web results with titles, URLs, and descriptions.',
-        inputSchema: z.object({
-            query: z.string().describe('The search query'),
-            count: z.number().optional().describe('Number of results to return (default: 5, max: 20)'),
-            freshness: z.string().optional().describe('Filter by freshness: pd (past day), pw (past week), pm (past month), py (past year)'),
-        }),
-        isAvailable: async () => {
-            if (await isSignedIn()) return true;
-            try {
-                const braveConfigPath = path.join(WorkDir, 'config', 'brave-search.json');
-                const raw = await fs.readFile(braveConfigPath, 'utf8');
-                const config = JSON.parse(raw);
-                return !!config.apiKey;
-            } catch {
-                return false;
-            }
-        },
-        execute: async ({ query, count, freshness }: { query: string; count?: number; freshness?: string }) => {
-            try {
-                const resultCount = Math.min(Math.max(count || 5, 1), 20);
-                const params = new URLSearchParams({
-                    q: query,
-                    count: String(resultCount),
-                });
-                if (freshness) {
-                    params.set('freshness', freshness);
-                }
-
-                let response: Response;
-
-                if (await isSignedIn()) {
-                    // Use proxy
-                    const accessToken = await getAccessToken();
-                    response = await fetch(`${API_URL}/v1/search/brave?${params.toString()}`, {
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`,
-                            'Accept': 'application/json',
-                        },
-                    });
-                } else {
-                    // Read API key from config
-                    const braveConfigPath = path.join(WorkDir, 'config', 'brave-search.json');
-
-                    let apiKey: string;
-                    try {
-                        const raw = await fs.readFile(braveConfigPath, 'utf8');
-                        const config = JSON.parse(raw);
-                        apiKey = config.apiKey;
-                    } catch {
-                        return {
-                            success: false,
-                            error: 'Brave Search API key not configured. Create ~/.rowboat/config/brave-search.json with { "apiKey": "<your-key>" }',
-                        };
-                    }
-
-                    if (!apiKey) {
-                        return {
-                            success: false,
-                            error: 'Brave Search API key is empty. Set "apiKey" in ~/.rowboat/config/brave-search.json',
-                        };
-                    }
-
-                    response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params.toString()}`, {
-                        headers: {
-                            'X-Subscription-Token': apiKey,
-                            'Accept': 'application/json',
-                        },
-                    });
-                }
-
-                if (!response.ok) {
-                    const body = await response.text();
-                    return {
-                        success: false,
-                        error: `Brave Search API error (${response.status}): ${body}`,
-                    };
-                }
-
-                const data = await response.json() as {
-                    web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
-                };
-
-                const results = (data.web?.results || []).map((r: { title?: string; url?: string; description?: string }) => ({
-                    title: r.title || '',
-                    url: r.url || '',
-                    description: r.description || '',
-                }));
-
-                return {
-                    success: true,
-                    query,
-                    results,
-                    count: results.length,
-                };
-            } catch (error) {
-                return {
-                    success: false,
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                };
-            }
-        },
-    },
-
-    // ============================================================================
-    // Research Search (Exa Search API)
-    // ============================================================================
-
-    'research-search': {
-        description: 'Use this for finding articles, blog posts, papers, companies, people, or exploring a topic in depth. Best for discovery and research where you need quality sources, not a quick fact.',
+        description: 'Search the web for articles, blog posts, papers, companies, people, news, or explore a topic in depth. Returns rich results with full text, highlights, and metadata.',
         inputSchema: z.object({
             query: z.string().describe('The search query'),
             numResults: z.number().optional().describe('Number of results to return (default: 5, max: 20)'),
-            category: z.enum(['company', 'research paper', 'news', 'tweet', 'personal site', 'financial report', 'people']).optional().describe('Filter results by category'),
+            category: z.enum(['general', 'company', 'research paper', 'news', 'tweet', 'personal site', 'financial report', 'people']).optional().describe('Search category. Defaults to "general" which searches the entire web. Only use a specific category when the query is clearly about that type (e.g. "research paper" for academic papers, "company" for company info). For everyday queries like weather, restaurants, prices, how-to, etc., use "general" or omit entirely.'),
         }),
         isAvailable: async () => {
             if (await isSignedIn()) return true;
@@ -1168,7 +1060,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         highlights: true,
                     },
                 };
-                if (category) {
+                if (category && category !== 'general') {
                     reqBody.category = category;
                 }
 

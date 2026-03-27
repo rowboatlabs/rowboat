@@ -117,33 +117,25 @@ export const getWebSearchCardData = (tool: ToolCall): WebSearchCardData | null =
   if (tool.name === 'web-search') {
     const input = normalizeToolInput(tool.input) as Record<string, unknown> | undefined
     const result = tool.result as Record<string, unknown> | undefined
-    return {
-      query: (input?.query as string) || '',
-      results: (result?.results as WebSearchCardResult[]) || [],
-    }
-  }
-
-  if (tool.name === 'research-search') {
-    const input = normalizeToolInput(tool.input) as Record<string, unknown> | undefined
-    const result = tool.result as Record<string, unknown> | undefined
     const rawResults = (result?.results as Array<{
       title: string
       url: string
+      description?: string
       highlights?: string[]
       text?: string
     }>) || []
     const mapped = rawResults.map((entry) => ({
       title: entry.title,
       url: entry.url,
-      description: entry.highlights?.[0] || (entry.text ? entry.text.slice(0, 200) : ''),
+      description: entry.description || entry.highlights?.[0] || (entry.text ? entry.text.slice(0, 200) : ''),
     }))
     const category = input?.category as string | undefined
     return {
       query: (input?.query as string) || '',
       results: mapped,
-      title: category
-        ? `${category.charAt(0).toUpperCase() + category.slice(1)} search`
-        : 'Researched the web',
+      title: (!category || category === 'general')
+        ? 'Web search'
+        : `${category.charAt(0).toUpperCase() + category.slice(1)} search`,
     }
   }
 
