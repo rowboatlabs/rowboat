@@ -13,6 +13,8 @@ const DEEPGRAM_PARAMS = new URLSearchParams({
     smart_format: 'true',
     punctuate: 'true',
     language: 'en',
+    endpointing: '100',
+    no_delay: 'true',
 });
 const DEEPGRAM_LISTEN_URL = `wss://api.deepgram.com/v1/listen?${DEEPGRAM_PARAMS.toString()}`;
 
