@@ -215,10 +215,35 @@ app.post('/browse/config', (req, res) => {
 });
 
 const PORT = 3001;
+const RETENTION_DAYS = 7;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+function cleanUpOldFiles(): void {
+    if (!fs.existsSync(CAPTURED_PAGES_DIR)) return;
+
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - RETENTION_DAYS);
+    const cutoffStr = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    for (const dateEntry of fs.readdirSync(CAPTURED_PAGES_DIR)) {
+        // only process date-formatted directories
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateEntry)) continue;
+        if (dateEntry >= cutoffStr) continue;
+
+        const datePath = path.join(CAPTURED_PAGES_DIR, dateEntry);
+        if (!fs.statSync(datePath).isDirectory()) continue;
+
+        fs.rmSync(datePath, { recursive: true, force: true });
+        console.log(`[ChromeSync] Cleaned up old captures: ${dateEntry}`);
+    }
+}
 
 export async function init(): Promise<void> {
     fs.mkdirSync(CAPTURED_PAGES_DIR, { recursive: true });
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
+
+    cleanUpOldFiles();
+    setInterval(cleanUpOldFiles, CLEANUP_INTERVAL_MS);
 
     app.listen(PORT, 'localhost', () => {
         console.log('[ChromeSync] Server starting.');
