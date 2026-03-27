@@ -1026,27 +1026,17 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     // ============================================================================
-    // Web Search (Brave Search API)
+    // Brave Search (disabled — replaced by Exa-based web-search below)
     // ============================================================================
 
-    'web-search': {
+    'brave-search-disabled': {
         description: 'Search the web using Brave Search. Returns web results with titles, URLs, and descriptions.',
         inputSchema: z.object({
             query: z.string().describe('The search query'),
             count: z.number().optional().describe('Number of results to return (default: 5, max: 20)'),
             freshness: z.string().optional().describe('Filter by freshness: pd (past day), pw (past week), pm (past month), py (past year)'),
         }),
-        isAvailable: async () => {
-            if (await isSignedIn()) return true;
-            try {
-                const braveConfigPath = path.join(WorkDir, 'config', 'brave-search.json');
-                const raw = await fs.readFile(braveConfigPath, 'utf8');
-                const config = JSON.parse(raw);
-                return !!config.apiKey;
-            } catch {
-                return false;
-            }
-        },
+        isAvailable: async () => false,
         execute: async ({ query, count, freshness }: { query: string; count?: number; freshness?: string }) => {
             try {
                 const resultCount = Math.min(Math.max(count || 5, 1), 20);
@@ -1134,15 +1124,15 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     // ============================================================================
-    // Research Search (Exa Search API)
+    // Web Search (Exa Search API) — renamed from research-search
     // ============================================================================
 
-    'research-search': {
-        description: 'Use this for finding articles, blog posts, papers, companies, people, or exploring a topic in depth. Best for discovery and research where you need quality sources, not a quick fact.',
+    'web-search': {
+        description: 'Search the web for articles, blog posts, papers, companies, people, news, or explore a topic in depth. Returns rich results with full text, highlights, and metadata.',
         inputSchema: z.object({
             query: z.string().describe('The search query'),
             numResults: z.number().optional().describe('Number of results to return (default: 5, max: 20)'),
-            category: z.enum(['company', 'research paper', 'news', 'tweet', 'personal site', 'financial report', 'people']).optional().describe('Filter results by category'),
+            category: z.enum(['general', 'company', 'research paper', 'news', 'tweet', 'personal site', 'financial report', 'people']).optional().describe('Search category. Defaults to "general" which searches the entire web. Only use a specific category when the query is clearly about that type (e.g. "research paper" for academic papers, "company" for company info). For everyday queries like weather, restaurants, prices, how-to, etc., use "general" or omit entirely.'),
         }),
         isAvailable: async () => {
             if (await isSignedIn()) return true;
@@ -1168,7 +1158,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         highlights: true,
                     },
                 };
-                if (category) {
+                if (category && category !== 'general') {
                     reqBody.category = category;
                 }
 
