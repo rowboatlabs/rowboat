@@ -703,13 +703,18 @@ function App() {
       window.ipc.invoke('oauth:getState', null),
     ]).then(([config, oauthState]) => {
       const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
-      setVoiceAvailable(!!config.deepgram || rowboatConnected)
+      const hasVoice = !!config.deepgram || rowboatConnected
+      setVoiceAvailable(hasVoice)
       setTtsAvailable(!!config.elevenlabs || rowboatConnected)
+      // Pre-cache auth details so mic click skips IPC round-trips
+      if (hasVoice) {
+        voice.warmup()
+      }
     }).catch(() => {
       setVoiceAvailable(false)
       setTtsAvailable(false)
     })
-  }, [])
+  }, [voice.warmup])
 
   useEffect(() => {
     refreshVoiceAvailability()
@@ -759,6 +764,22 @@ function App() {
     setIsRecording(false)
     isRecordingRef.current = false
   }, [voice])
+
+  // Enter to submit voice input, Escape to cancel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isRecordingRef.current) return
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        handleSubmitRecording()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        handleCancelRecording()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [handleSubmitRecording, handleCancelRecording])
 
   // Helper to cancel recording from any navigation handler
   const cancelRecordingIfActive = useCallback(() => {
