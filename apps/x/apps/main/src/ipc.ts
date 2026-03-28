@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
@@ -718,6 +718,16 @@ export function setupIpcHandlers() {
       }
 
       return { success: false, error: 'Unknown format' };
+    },
+    'meeting:checkScreenPermission': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('screen');
+      console.log('[meeting] Screen recording permission status:', status);
+      return { granted: status === 'granted' };
+    },
+    'meeting:openScreenRecordingSettings': async () => {
+      await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+      return { success: true };
     },
     'meeting:summarize': async (_event, args) => {
       const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);

@@ -3417,9 +3417,9 @@ function App() {
   const [meetingSummarizing, setMeetingSummarizing] = useState(false)
   const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
 
-  const startMeetingAfterPermissions = useCallback(async () => {
-    setShowMeetingPermissions(false)
-    localStorage.setItem('meeting-permissions-acknowledged', '1')
+  const [checkingPermission, setCheckingPermission] = useState(false)
+
+  const startMeetingNow = useCallback(async () => {
     const calEvent = pendingCalendarEventRef.current
     pendingCalendarEventRef.current = undefined
     const notePath = await meetingTranscription.start(calEvent)
@@ -3428,6 +3428,23 @@ function App() {
       await handleVoiceNoteCreated(notePath)
     }
   }, [meetingTranscription, handleVoiceNoteCreated])
+
+  const handleCheckPermissionAndRetry = useCallback(async () => {
+    setCheckingPermission(true)
+    try {
+      const { granted } = await window.ipc.invoke('meeting:checkScreenPermission', null)
+      if (granted) {
+        setShowMeetingPermissions(false)
+        await startMeetingNow()
+      }
+    } finally {
+      setCheckingPermission(false)
+    }
+  }, [startMeetingNow])
+
+  const handleOpenScreenRecordingSettings = useCallback(async () => {
+    await window.ipc.invoke('meeting:openScreenRecordingSettings', null)
+  }, [])
 
   const handleToggleMeeting = useCallback(async () => {
     if (meetingTranscription.state === 'recording') {
@@ -3477,20 +3494,18 @@ function App() {
         meetingNotePathRef.current = null
       }
     } else if (meetingTranscription.state === 'idle') {
-      // Show permissions modal on first use (macOS only — Windows works out of the box)
-      if (isMac && !localStorage.getItem('meeting-permissions-acknowledged')) {
-        setShowMeetingPermissions(true)
-        return
+      // On macOS, check screen recording permission before starting
+      if (isMac) {
+        const result = await window.ipc.invoke('meeting:checkScreenPermission', null)
+        console.log('[meeting] Permission check result:', result)
+        if (!result.granted) {
+          setShowMeetingPermissions(true)
+          return
+        }
       }
-      const calEvent = pendingCalendarEventRef.current
-      pendingCalendarEventRef.current = undefined
-      const notePath = await meetingTranscription.start(calEvent)
-      if (notePath) {
-        meetingNotePathRef.current = notePath
-        await handleVoiceNoteCreated(notePath)
-      }
+      await startMeetingNow()
     }
-  }, [meetingTranscription, handleVoiceNoteCreated])
+  }, [meetingTranscription, handleVoiceNoteCreated, startMeetingNow])
   handleToggleMeetingRef.current = handleToggleMeeting
 
   // Listen for calendar block "join meeting & take notes" events
@@ -4421,23 +4436,25 @@ function App() {
       <Dialog open={showMeetingPermissions} onOpenChange={setShowMeetingPermissions}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Meeting transcription setup</DialogTitle>
+            <DialogTitle>Screen recording permission required</DialogTitle>
             <DialogDescription>
-              Rowboat needs <strong>Screen Recording</strong> permission to capture meeting audio from other apps (Zoom, Meet, etc.).
+              Rowboat needs <strong>Screen Recording</strong> permission to capture meeting audio from other apps (Zoom, Meet, etc.). This feature won't work without it.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm text-muted-foreground">
             <p>To enable this:</p>
             <ol className="list-decimal list-inside space-y-1.5">
-              <li>Open <strong>System Settings</strong> → <strong>Privacy & Security</strong></li>
-              <li>Click <strong>Screen Recording</strong></li>
+              <li>Open <strong>System Settings</strong> → <strong>Privacy & Security</strong> → <strong>Screen Recording</strong></li>
               <li>Toggle on <strong>Rowboat</strong></li>
               <li>You may need to restart the app after granting permission</li>
             </ol>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowMeetingPermissions(false)}>Cancel</Button>
-            <Button onClick={() => { void startMeetingAfterPermissions() }}>Continue</Button>
+            <Button variant="outline" onClick={() => { void handleOpenScreenRecordingSettings() }}>Open System Settings</Button>
+            <Button onClick={() => { void handleCheckPermissionAndRetry() }} disabled={checkingPermission}>
+              {checkingPermission ? 'Checking...' : 'Check Again'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
