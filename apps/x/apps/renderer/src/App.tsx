@@ -484,7 +484,7 @@ function FixedSidebarToggle({
               )}
               style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
             >
-              {meetingSummarizing ? (
+              {meetingSummarizing || meetingState === 'connecting' ? (
                 <LoaderIcon className="size-4 animate-spin" />
               ) : meetingState === 'recording' ? (
                 <SquareIcon className="size-4 animate-pulse" />
@@ -494,7 +494,7 @@ function FixedSidebarToggle({
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            {meetingSummarizing ? 'Generating meeting notes...' : meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
+            {meetingSummarizing ? 'Generating meeting notes...' : meetingState === 'connecting' ? 'Starting transcription...' : meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
           </TooltipContent>
         </Tooltip>
       )}

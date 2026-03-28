@@ -187,52 +187,83 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         if (state !== 'idle') return null;
         setState('connecting');
 
-        // Detect headphones vs speakers
-        const usingHeadphones = await detectHeadphones();
-        console.log(`[meeting] Audio output mode: ${usingHeadphones ? 'headphones' : 'speakers'}`);
-
-        // Rowboat WebSocket + bearer token when signed in; else local Deepgram API key
-        let ws: WebSocket;
-        try {
-            const account = await refreshRowboatAccount();
-            if (
-                account?.signedIn &&
-                account.accessToken &&
-                account.config?.websocketApiUrl
-            ) {
-                const listenUrl = buildDeepgramListenUrl(account.config.websocketApiUrl, DEEPGRAM_PARAMS);
-                console.log('[meeting] Using Rowboat WebSocket');
-                ws = new WebSocket(listenUrl, ['bearer', account.accessToken]);
-            } else {
-                const config = await window.ipc.invoke('voice:getConfig', null);
-                if (!config?.deepgram) {
-                    console.error('[meeting] No Deepgram config available');
-                    setState('idle');
-                    return null;
+        // Run independent setup steps in parallel for faster startup
+        const [headphoneResult, wsResult, micResult, systemResult] = await Promise.allSettled([
+            // 1. Detect headphones vs speakers
+            detectHeadphones(),
+            // 2. Set up Deepgram WebSocket (account refresh + connect + wait for open)
+            (async () => {
+                const account = await refreshRowboatAccount();
+                let ws: WebSocket;
+                if (
+                    account?.signedIn &&
+                    account.accessToken &&
+                    account.config?.websocketApiUrl
+                ) {
+                    const listenUrl = buildDeepgramListenUrl(account.config.websocketApiUrl, DEEPGRAM_PARAMS);
+                    console.log('[meeting] Using Rowboat WebSocket');
+                    ws = new WebSocket(listenUrl, ['bearer', account.accessToken]);
+                } else {
+                    const config = await window.ipc.invoke('voice:getConfig', null);
+                    if (!config?.deepgram) {
+                        throw new Error('No Deepgram config available');
+                    }
+                    console.log('[meeting] Using Deepgram API key');
+                    ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['token', config.deepgram.apiKey]);
                 }
-                console.log('[meeting] Using Deepgram API key');
-                ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['token', config.deepgram.apiKey]);
-            }
-        } catch (err) {
-            console.error('[meeting] Failed to connect Deepgram:', err);
-            setState('idle');
-            return null;
-        }
-        wsRef.current = ws;
+                const ok = await new Promise<boolean>((resolve) => {
+                    ws.onopen = () => resolve(true);
+                    ws.onerror = () => resolve(false);
+                    setTimeout(() => resolve(false), 5000);
+                });
+                if (!ok) throw new Error('WebSocket failed to connect');
+                console.log('[meeting] WebSocket connected');
+                return ws;
+            })(),
+            // 3. Get mic stream
+            navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                },
+            }),
+            // 4. Get system audio via getDisplayMedia (loopback)
+            (async () => {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+                stream.getVideoTracks().forEach(t => t.stop());
+                if (stream.getAudioTracks().length === 0) {
+                    stream.getTracks().forEach(t => t.stop());
+                    throw new Error('No audio track from getDisplayMedia');
+                }
+                console.log('[meeting] System audio captured');
+                return stream;
+            })(),
+        ]);
 
-        // Wait for WS open
-        const wsOk = await new Promise<boolean>((resolve) => {
-            ws.onopen = () => resolve(true);
-            ws.onerror = () => resolve(false);
-            setTimeout(() => resolve(false), 5000);
-        });
-        if (!wsOk) {
-            console.error('[meeting] WebSocket failed to connect');
+        // Check for failures — clean up any successful resources if something failed
+        const failed = wsResult.status === 'rejected'
+            || micResult.status === 'rejected'
+            || systemResult.status === 'rejected';
+
+        if (failed) {
+            if (wsResult.status === 'rejected') console.error('[meeting] WebSocket setup failed:', wsResult.reason);
+            if (micResult.status === 'rejected') console.error('[meeting] Microphone access denied:', micResult.reason);
+            if (systemResult.status === 'rejected') console.error('[meeting] System audio access denied:', systemResult.reason);
+            // Clean up any resources that did succeed
+            if (wsResult.status === 'fulfilled') { wsResult.value.close(); }
+            if (micResult.status === 'fulfilled') { micResult.value.getTracks().forEach(t => t.stop()); }
+            if (systemResult.status === 'fulfilled') { systemResult.value.getTracks().forEach(t => t.stop()); }
             cleanup();
             setState('idle');
             return null;
         }
-        console.log('[meeting] WebSocket connected');
+
+        const usingHeadphones = headphoneResult.status === 'fulfilled' ? headphoneResult.value : false;
+        console.log(`[meeting] Audio output mode: ${usingHeadphones ? 'headphones' : 'speakers'}`);
+
+        const ws = wsResult.value;
+        wsRef.current = ws;
 
         // Set up WS message handler
         transcriptRef.current = [];
@@ -283,43 +314,10 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
             wsRef.current = null;
         };
 
-        // Get mic stream
-        let micStream: MediaStream;
-        try {
-            micStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true,
-                },
-            });
-        } catch (err) {
-            console.error('[meeting] Microphone access denied:', err);
-            cleanup();
-            setState('idle');
-            return null;
-        }
+        const micStream = micResult.value;
         micStreamRef.current = micStream;
 
-        // Get system audio via getDisplayMedia (loopback)
-        let systemStream: MediaStream;
-        try {
-            systemStream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
-            systemStream.getVideoTracks().forEach(t => t.stop());
-        } catch (err) {
-            console.error('[meeting] System audio access denied:', err);
-            cleanup();
-            setState('idle');
-            return null;
-        }
-        if (systemStream.getAudioTracks().length === 0) {
-            console.error('[meeting] No audio track from getDisplayMedia');
-            systemStream.getTracks().forEach(t => t.stop());
-            cleanup();
-            setState('idle');
-            return null;
-        }
-        console.log('[meeting] System audio captured');
+        const systemStream = systemResult.value;
         systemStreamRef.current = systemStream;
 
         // ----- Audio pipeline -----
