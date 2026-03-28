@@ -720,10 +720,10 @@ export function setupIpcHandlers() {
       return { success: false, error: 'Unknown format' };
     },
     'meeting:checkScreenPermission': async () => {
-      if (process.platform !== 'darwin') return { granted: true };
+      if (process.platform !== 'darwin') return { granted: true, status: 'non-darwin' };
       const status = systemPreferences.getMediaAccessStatus('screen');
       console.log('[meeting] Screen recording permission status:', status);
-      return { granted: status === 'granted' };
+      return { granted: status === 'granted', status };
     },
     'meeting:openScreenRecordingSettings': async () => {
       await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');

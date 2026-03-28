@@ -505,6 +505,7 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({
       granted: z.boolean(),
+      status: z.string(),
     }),
   },
   'meeting:openScreenRecordingSettings': {

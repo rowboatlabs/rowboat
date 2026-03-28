@@ -129,13 +129,18 @@ function createWindow() {
   // Auto-approve display media requests and route system audio as loopback.
   // Electron requires a video source in the callback even if we only want audio.
   // We pass the first available screen source; the renderer discards the video track.
+  // We use cached sources to avoid calling desktopCapturer.getSources() every time,
+  // which on macOS Sequoia triggers a native permission popup on each call.
+  let cachedScreenSources: Electron.DesktopCapturerSource[] | null = null;
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
-    const sources = await desktopCapturer.getSources({ types: ['screen'] });
-    if (sources.length === 0) {
+    if (!cachedScreenSources) {
+      cachedScreenSources = await desktopCapturer.getSources({ types: ['screen'] });
+    }
+    if (cachedScreenSources.length === 0) {
       callback({});
       return;
     }
-    callback({ video: sources[0], audio: 'loopback' });
+    callback({ video: cachedScreenSources[0], audio: 'loopback' });
   });
 
   // Show window when content is ready to prevent blank screen

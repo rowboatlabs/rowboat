@@ -3497,7 +3497,7 @@ function App() {
       // On macOS, check screen recording permission before starting
       if (isMac) {
         const result = await window.ipc.invoke('meeting:checkScreenPermission', null)
-        console.log('[meeting] Permission check result:', result)
+        console.log('[meeting] Permission check result:', result, 'raw status:', result.status)
         if (!result.granted) {
           setShowMeetingPermissions(true)
           return
