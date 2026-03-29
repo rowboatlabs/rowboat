@@ -1333,12 +1333,21 @@ function registerComposioTools(): void {
                         error: `Toolkit "${toolkitSlug}" is not connected. Please connect it in Settings > Tools Library.`,
                     };
                 }
-                return executeComposioAction(slug, {
-                    connected_account_id: account.id,
-                    user_id: 'rowboat-user',
-                    version: 'latest',
-                    arguments: input,
-                });
+                try {
+                    return await executeComposioAction(slug, {
+                        connected_account_id: account.id,
+                        user_id: 'rowboat-user',
+                        version: 'latest',
+                        arguments: input,
+                    });
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    console.error(`[Composio] Tool execution failed for ${slug}:`, message);
+                    return {
+                        success: false,
+                        error: `Failed to execute ${slug}: ${message}`,
+                    };
+                }
             },
             isAvailable: async () => {
                 return (await isComposioConfigured()) && composioAccountsRepo.isConnected(toolkitSlug);
