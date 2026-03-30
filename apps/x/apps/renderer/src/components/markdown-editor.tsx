@@ -108,39 +108,44 @@ function getMarkdownWithBlankLines(editor: Editor): string {
       const level = (node.attrs?.level as number) || 1
       const text = nodeToText(node)
       blocks.push('#'.repeat(level) + ' ' + text)
-    } else if (node.type === 'bulletList' || node.type === 'orderedList') {
-      // Handle lists - all items are part of one block
-      const listLines: string[] = []
-      const listItems = (node.content || []) as Array<{ content?: Array<unknown>; attrs?: Record<string, unknown> }>
-      listItems.forEach((item, index) => {
-        const prefix = node.type === 'orderedList' ? `${index + 1}. ` : '- '
-        const itemContent = (item.content || []) as Array<{ type?: string; content?: Array<{ type?: string; text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }>; attrs?: Record<string, unknown> }>
-        itemContent.forEach((para: { type?: string; content?: Array<{ type?: string; text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }>; attrs?: Record<string, unknown> }, paraIndex: number) => {
-          const text = nodeToText(para)
-          if (paraIndex === 0) {
-            listLines.push(prefix + text)
+    } else if (node.type === 'bulletList' || node.type === 'orderedList' || node.type === 'taskList') {
+      // Recursively serialize lists to handle nested bullets
+      const serializeList = (
+        listNode: { type?: string; content?: Array<Record<string, unknown>>; attrs?: Record<string, unknown> },
+        indent: number
+      ): string[] => {
+        const lines: string[] = []
+        const items = (listNode.content || []) as Array<{ content?: Array<Record<string, unknown>>; attrs?: Record<string, unknown> }>
+        items.forEach((item, index) => {
+          const indentStr = '  '.repeat(indent)
+          let prefix: string
+          if (listNode.type === 'taskList') {
+            const checked = item.attrs?.checked ? 'x' : ' '
+            prefix = `- [${checked}] `
+          } else if (listNode.type === 'orderedList') {
+            prefix = `${index + 1}. `
           } else {
-            listLines.push('  ' + text)
+            prefix = '- '
           }
+          const itemContent = (item.content || []) as Array<{ type?: string; content?: Array<{ type?: string; text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }>; attrs?: Record<string, unknown> }>
+          let firstPara = true
+          itemContent.forEach(child => {
+            if (child.type === 'bulletList' || child.type === 'orderedList' || child.type === 'taskList') {
+              lines.push(...serializeList(child, indent + 1))
+            } else {
+              const text = nodeToText(child)
+              if (firstPara) {
+                lines.push(indentStr + prefix + text)
+                firstPara = false
+              } else {
+                lines.push(indentStr + '  ' + text)
+              }
+            }
+          })
         })
-      })
-      blocks.push(listLines.join('\n'))
-    } else if (node.type === 'taskList') {
-      const listLines: string[] = []
-      const listItems = (node.content || []) as Array<{ content?: Array<unknown>; attrs?: Record<string, unknown> }>
-      listItems.forEach(item => {
-        const checked = item.attrs?.checked ? 'x' : ' '
-        const itemContent = (item.content || []) as Array<{ type?: string; content?: Array<{ type?: string; text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }>; attrs?: Record<string, unknown> }>
-        itemContent.forEach((para: { type?: string; content?: Array<{ type?: string; text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }>; attrs?: Record<string, unknown> }, paraIndex: number) => {
-          const text = nodeToText(para)
-          if (paraIndex === 0) {
-            listLines.push(`- [${checked}] ${text}`)
-          } else {
-            listLines.push('  ' + text)
-          }
-        })
-      })
-      blocks.push(listLines.join('\n'))
+        return lines
+      }
+      blocks.push(serializeList(node, 0).join('\n'))
     } else if (node.type === 'taskBlock') {
       blocks.push('```task\n' + (node.attrs?.data as string || '{}') + '\n```')
     } else if (node.type === 'imageBlock') {
