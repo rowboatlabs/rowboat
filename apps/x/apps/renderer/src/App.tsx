@@ -3470,7 +3470,7 @@ function App() {
               // Prepend meeting notes above the existing transcript block
               const { raw: fm, body } = splitFrontmatter(fileContent)
               const fmTitleMatch = fileContent.match(/^title:\s*(.+)$/m)
-              const noteTitle = fmTitleMatch?.[1]?.trim() || 'Meeting note'
+              const noteTitle = fmTitleMatch?.[1]?.trim() || 'Meeting Notes'
               const cleanedNotes = notes.replace(/^#{1,2}\s+.+\n+/, '')
               // Extract the existing transcript block and preserve it as-is
               const transcriptBlockMatch = body.match(/(```transcript\n[\s\S]*?\n```)/)

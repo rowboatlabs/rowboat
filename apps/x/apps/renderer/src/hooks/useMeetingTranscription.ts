@@ -60,7 +60,7 @@ export interface CalendarEventMeta {
 }
 
 function formatTranscript(entries: TranscriptEntry[], date: string, calendarEvent?: CalendarEventMeta): string {
-    const noteTitle = calendarEvent?.summary || 'Meeting note';
+    const noteTitle = calendarEvent?.summary || 'Meeting Notes';
     const lines = [
         '---',
         'type: meeting',
