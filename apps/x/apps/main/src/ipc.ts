@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
@@ -718,6 +718,24 @@ export function setupIpcHandlers() {
       }
 
       return { success: false, error: 'Unknown format' };
+    },
+    'meeting:checkScreenPermission': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('screen');
+      console.log('[meeting] Screen recording permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // Not granted — call desktopCapturer.getSources() to register the app
+      // in the macOS Screen Recording list. On first call this shows the
+      // native permission prompt (signed apps are remembered across restarts).
+      try { await desktopCapturer.getSources({ types: ['screen'] }); } catch { /* ignore */ }
+      // Re-check after the native prompt was dismissed
+      const statusAfter = systemPreferences.getMediaAccessStatus('screen');
+      console.log('[meeting] Screen recording permission status after prompt:', statusAfter);
+      return { granted: statusAfter === 'granted' };
+    },
+    'meeting:openScreenRecordingSettings': async () => {
+      await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+      return { success: true };
     },
     'meeting:summarize': async (_event, args) => {
       const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);
