@@ -618,7 +618,8 @@
 .tiptap-editor .ProseMirror .chart-block-wrapper,
 .tiptap-editor .ProseMirror .table-block-wrapper,
 .tiptap-editor .ProseMirror .calendar-block-wrapper,
-.tiptap-editor .ProseMirror .email-block-wrapper {
+.tiptap-editor .ProseMirror .email-block-wrapper,
+.tiptap-editor .ProseMirror .transcript-block-wrapper {
   margin: 8px 0;
 }
 
@@ -628,7 +629,8 @@
 .tiptap-editor .ProseMirror .table-block-card,
 .tiptap-editor .ProseMirror .calendar-block-card,
 .tiptap-editor .ProseMirror .email-block-card,
-.tiptap-editor .ProseMirror .email-draft-block-card {
+.tiptap-editor .ProseMirror .email-draft-block-card,
+.tiptap-editor .ProseMirror .transcript-block-card {
   position: relative;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -644,7 +646,8 @@
 .tiptap-editor .ProseMirror .table-block-card:hover,
 .tiptap-editor .ProseMirror .calendar-block-card:hover,
 .tiptap-editor .ProseMirror .email-block-card:hover,
-.tiptap-editor .ProseMirror .email-draft-block-card:hover {
+.tiptap-editor .ProseMirror .email-draft-block-card:hover,
+.tiptap-editor .ProseMirror .transcript-block-card:hover {
   background-color: color-mix(in srgb, var(--muted) 70%, transparent);
 }
 
@@ -1486,6 +1489,54 @@
   padding: 4px 0 0 8px;
   border-left: 2px solid color-mix(in srgb, var(--foreground) 10%, transparent);
   margin-left: 4px;
+}
+
+/* Transcript block */
+.tiptap-editor .ProseMirror .transcript-block-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--foreground) 60%, transparent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.tiptap-editor .ProseMirror .transcript-block-toggle:hover {
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .transcript-block-chevron {
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.tiptap-editor .ProseMirror .transcript-block-chevron-open {
+  transform: rotate(180deg);
+}
+
+.tiptap-editor .ProseMirror .transcript-block-content {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  font-size: 13px;
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--foreground) 70%, transparent);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tiptap-editor .ProseMirror .transcript-block-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  font-size: 13px;
 }
 
 /* Meeting event banner */

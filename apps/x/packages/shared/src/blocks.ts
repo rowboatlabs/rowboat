@@ -74,3 +74,9 @@ export const EmailBlockSchema = z.object({
 });
 
 export type EmailBlock = z.infer<typeof EmailBlockSchema>;
+
+export const TranscriptBlockSchema = z.object({
+  transcript: z.string(),
+});
+
+export type TranscriptBlock = z.infer<typeof TranscriptBlockSchema>;

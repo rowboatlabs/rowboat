@@ -3476,7 +3476,8 @@ function App() {
               const bodyWithoutTitle = transcriptBody.replace(/^#\s+.+\s*\n*/, '')
               // Also strip any title/heading the LLM may have generated
               const cleanedNotes = notes.replace(/^#{1,2}\s+.+\n+/, '')
-              const newBody = `# ${noteTitle}\n\n` + cleanedNotes + '\n\n---\n\n## Raw transcript\n\n' + bodyWithoutTitle
+              const transcriptData = JSON.stringify({ transcript: bodyWithoutTitle.trim() })
+              const newBody = `# ${noteTitle}\n\n` + cleanedNotes + '\n\n```transcript\n' + transcriptData + '\n```'
               const newContent = fm ? `${fm}\n${newBody}` : newBody
               await window.ipc.invoke('workspace:writeFile', {
                 path: notePath,
