@@ -89,13 +89,18 @@ function formatTranscript(entries: TranscriptEntry[], date: string, calendarEven
         `# ${noteTitle}`,
         '',
     );
+    // Build the raw transcript text
+    const transcriptLines: string[] = [];
     for (let i = 0; i < entries.length; i++) {
         if (i > 0 && entries[i].speaker !== entries[i - 1].speaker) {
-            lines.push('');
+            transcriptLines.push('');
         }
-        lines.push(`**${entries[i].speaker}:** ${entries[i].text}`);
-        lines.push('');
+        transcriptLines.push(`**${entries[i].speaker}:** ${entries[i].text}`);
+        transcriptLines.push('');
     }
+    const transcriptText = transcriptLines.join('\n').trim();
+    const transcriptData = JSON.stringify({ transcript: transcriptText });
+    lines.push('```transcript', transcriptData, '```');
     return lines.join('\n');
 }
 

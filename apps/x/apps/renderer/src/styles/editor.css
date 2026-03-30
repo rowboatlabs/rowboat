@@ -1524,6 +1524,26 @@
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tiptap-editor .ProseMirror .transcript-entry {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.tiptap-editor .ProseMirror .transcript-speaker {
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.tiptap-editor .ProseMirror .transcript-text {
+  color: color-mix(in srgb, var(--foreground) 75%, transparent);
+}
+
+.tiptap-editor .ProseMirror .transcript-raw {
   font-size: 13px;
   line-height: 1.6;
   color: color-mix(in srgb, var(--foreground) 70%, transparent);

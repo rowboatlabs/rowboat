@@ -3467,17 +3467,15 @@ function App() {
             const calendarEventJson = calEventMatch?.[1]?.replace(/''/g, "'")
             const { notes } = await window.ipc.invoke('meeting:summarize', { transcript: fileContent, meetingStartTime, calendarEventJson })
             if (notes) {
-              // Prepend meeting notes below the title but above the transcript
-              const { raw: fm, body: transcriptBody } = splitFrontmatter(fileContent)
-              // Use frontmatter title as the heading (set from calendar event summary)
+              // Prepend meeting notes above the existing transcript block
+              const { raw: fm, body } = splitFrontmatter(fileContent)
               const fmTitleMatch = fileContent.match(/^title:\s*(.+)$/m)
               const noteTitle = fmTitleMatch?.[1]?.trim() || 'Meeting note'
-              // Strip any existing top-level heading from body
-              const bodyWithoutTitle = transcriptBody.replace(/^#\s+.+\s*\n*/, '')
-              // Also strip any title/heading the LLM may have generated
               const cleanedNotes = notes.replace(/^#{1,2}\s+.+\n+/, '')
-              const transcriptData = JSON.stringify({ transcript: bodyWithoutTitle.trim() })
-              const newBody = `# ${noteTitle}\n\n` + cleanedNotes + '\n\n```transcript\n' + transcriptData + '\n```'
+              // Extract the existing transcript block and preserve it as-is
+              const transcriptBlockMatch = body.match(/(```transcript\n[\s\S]*?\n```)/)
+              const transcriptBlock = transcriptBlockMatch?.[1] || ''
+              const newBody = `# ${noteTitle}\n\n` + cleanedNotes + (transcriptBlock ? '\n\n' + transcriptBlock : '')
               const newContent = fm ? `${fm}\n${newBody}` : newBody
               await window.ipc.invoke('workspace:writeFile', {
                 path: notePath,
