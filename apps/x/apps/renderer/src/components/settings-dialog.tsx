@@ -754,6 +754,12 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [toolsLoading, setToolsLoading] = useState<string | null>(null)
   const [enabledToolSlugs, setEnabledToolSlugs] = useState<Set<string>>(new Set())
 
+  // Tool search state (per-toolkit, server-side via Composio API)
+  const [toolSearchQuery, setToolSearchQuery] = useState("")
+  const [toolSearchResults, setToolSearchResults] = useState<ToolInfo[] | null>(null)
+  const [toolSearchLoading, setToolSearchLoading] = useState(false)
+  const toolSearchTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // Check API key configuration
   const checkApiKey = useCallback(async () => {
     try {
@@ -909,6 +915,53 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
     }
   }
 
+  // Search tools within a toolkit (debounced, server-side)
+  const handleToolSearch = useCallback((toolkitSlug: string, query: string) => {
+    setToolSearchQuery(query)
+
+    // Clear pending timer
+    if (toolSearchTimerRef.current) {
+      clearTimeout(toolSearchTimerRef.current)
+      toolSearchTimerRef.current = null
+    }
+
+    // Empty query: clear search results, show all tools
+    if (!query.trim()) {
+      setToolSearchResults(null)
+      setToolSearchLoading(false)
+      return
+    }
+
+    setToolSearchLoading(true)
+
+    // Debounce 350ms before hitting the API
+    toolSearchTimerRef.current = setTimeout(async () => {
+      try {
+        const result = await window.ipc.invoke("composio:list-toolkit-tools", {
+          toolkitSlug,
+          search: query.trim(),
+        })
+        setToolSearchResults(result.items)
+      } catch {
+        toast.error("Search failed")
+        setToolSearchResults(null)
+      } finally {
+        setToolSearchLoading(false)
+      }
+    }, 350)
+  }, [])
+
+  // Clear tool search when switching toolkits
+  useEffect(() => {
+    setToolSearchQuery("")
+    setToolSearchResults(null)
+    setToolSearchLoading(false)
+    if (toolSearchTimerRef.current) {
+      clearTimeout(toolSearchTimerRef.current)
+      toolSearchTimerRef.current = null
+    }
+  }, [expandedToolkit])
+
   // Toggle toolkit expansion
   const handleToggleToolkit = (toolkitSlug: string) => {
     if (expandedToolkit === toolkitSlug) {
@@ -1059,7 +1112,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
               Loading toolkits...
             </div>
           ) : (
-            <div className="space-y-1.5 max-h-[340px] overflow-y-auto pr-1">
+            <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
               {filteredToolkits.map((toolkit) => {
                 const isConnected = connectedToolkits.has(toolkit.slug)
                 const isConnecting = connectingToolkit === toolkit.slug
@@ -1069,8 +1122,15 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                 const enabledCount = tools.filter(t => enabledToolSlugs.has(t.slug)).length
                 const allEnabled = tools.length > 0 && enabledCount === tools.length
 
+                // Use search results when actively searching, otherwise show all tools
+                const displayTools = (isExpanded && toolSearchResults !== null) ? toolSearchResults : tools
+                const isSearching = isExpanded && toolSearchQuery.trim().length > 0
+
                 return (
-                  <div key={toolkit.slug} className="border rounded-md overflow-hidden">
+                  <div key={toolkit.slug} className={cn(
+                    "border rounded-lg overflow-hidden transition-colors",
+                    isExpanded && "border-border/80 shadow-sm"
+                  )}>
                     {/* Toolkit card header */}
                     <button
                       onClick={() => handleToggleToolkit(toolkit.slug)}
@@ -1097,7 +1157,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm font-medium truncate">{toolkit.name}</span>
-                          <span className="text-[10px] text-muted-foreground">
+                          <span className="text-[10px] text-muted-foreground tabular-nums">
                             {toolkit.meta.tools_count} tools
                           </span>
                           {isConnected && (
@@ -1106,7 +1166,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                             </span>
                           )}
                           {enabledCount > 0 && (
-                            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+                            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary tabular-nums">
                               {enabledCount} enabled
                             </span>
                           )}
@@ -1126,7 +1186,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
 
                     {/* Expanded content */}
                     {isExpanded && (
-                      <div className="border-t px-3 py-2.5 space-y-2 bg-muted/20">
+                      <div className="border-t px-3 py-2.5 space-y-2.5 bg-muted/20">
                         {/* Connection controls */}
                         <div className="flex items-center gap-2">
                           {isConnected ? (
@@ -1170,25 +1230,74 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                           )}
                         </div>
 
-                        {/* Tools list (only if connected) */}
+                        {/* Tools section (only if connected) */}
                         {isConnected && (
-                          <div className="space-y-0.5">
+                          <div className="space-y-2">
+                            {/* Tool search input — shown when toolkit has many tools */}
+                            {!isLoadingTools && tools.length > 5 && (
+                              <div className="relative">
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+                                <input
+                                  type="text"
+                                  value={toolSearchQuery}
+                                  onChange={(e) => handleToolSearch(toolkit.slug, e.target.value)}
+                                  placeholder={`Search ${toolkit.meta.tools_count} tools...`}
+                                  className="w-full h-7 pl-7 pr-7 text-xs rounded-md border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                                />
+                                {toolSearchLoading && (
+                                  <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 size-3 animate-spin text-muted-foreground" />
+                                )}
+                                {!toolSearchLoading && toolSearchQuery && (
+                                  <button
+                                    onClick={() => handleToolSearch(toolkit.slug, "")}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                  >
+                                    <X className="size-3" />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Search results summary */}
+                            {isSearching && !toolSearchLoading && toolSearchResults !== null && (
+                              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                <span className="tabular-nums">{toolSearchResults.length}</span>
+                                <span>{toolSearchResults.length === 1 ? 'tool' : 'tools'} matching &ldquo;{toolSearchQuery}&rdquo;</span>
+                              </div>
+                            )}
+
+                            {/* Tool list */}
                             {isLoadingTools ? (
-                              <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                              <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
                                 <Loader2 className="size-3 animate-spin" />
                                 Loading tools...
                               </div>
-                            ) : tools.length === 0 ? (
-                              <p className="text-xs text-muted-foreground py-1">No tools found</p>
+                            ) : displayTools.length === 0 ? (
+                              <div className="py-3 text-center">
+                                <p className="text-xs text-muted-foreground">
+                                  {isSearching
+                                    ? `No tools found for "${toolSearchQuery}"`
+                                    : "No tools found"
+                                  }
+                                </p>
+                                {isSearching && (
+                                  <button
+                                    onClick={() => handleToolSearch(toolkit.slug, "")}
+                                    className="mt-1 text-[11px] text-primary hover:underline"
+                                  >
+                                    Clear search
+                                  </button>
+                                )}
+                              </div>
                             ) : (
-                              <div className="max-h-[200px] overflow-y-auto space-y-0.5">
-                                {tools.map((tool) => {
+                              <div className="max-h-[240px] overflow-y-auto space-y-0.5 -mx-1 px-1">
+                                {displayTools.map((tool) => {
                                   const isEnabled = enabledToolSlugs.has(tool.slug)
                                   return (
                                     <label
                                       key={tool.slug}
                                       className={cn(
-                                        "flex items-start gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors",
+                                        "flex items-start gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors",
                                         isEnabled ? "bg-primary/5" : "hover:bg-accent/50"
                                       )}
                                     >
@@ -1202,7 +1311,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                                             "size-4 rounded border flex items-center justify-center transition-colors cursor-pointer",
                                             isEnabled
                                               ? "bg-primary border-primary"
-                                              : "border-border"
+                                              : "border-border hover:border-primary/50"
                                           )}
                                         >
                                           {isEnabled && <Check className="size-3 text-primary-foreground" />}
@@ -1210,7 +1319,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                                       </div>
                                       <div className="flex-1 min-w-0">
                                         <div className="text-xs font-medium">{tool.name}</div>
-                                        <div className="text-[11px] text-muted-foreground line-clamp-1">
+                                        <div className="text-[11px] text-muted-foreground line-clamp-2">
                                           {tool.description}
                                         </div>
                                       </div>

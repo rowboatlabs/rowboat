@@ -314,7 +314,7 @@ export async function listToolkitToolsDetailed(
     url.searchParams.set('toolkit_slug', toolkitSlug);
     url.searchParams.set('limit', '200');
     if (searchQuery) {
-        url.searchParams.set('search', searchQuery);
+        url.searchParams.set('query', searchQuery);
     }
 
     console.log(`[Composio] Listing tools (detailed) for toolkit: ${toolkitSlug}`);
