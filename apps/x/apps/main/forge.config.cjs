@@ -11,6 +11,9 @@ module.exports = {
         icon: './icons/icon',  // .icns extension added automatically
         appBundleId: 'com.rowboat.app',
         appCategoryType: 'public.app-category.productivity',
+        extendInfo: {
+            NSAudioCaptureUsageDescription: 'Rowboat needs access to system audio to transcribe meetings from other apps (Zoom, Meet, etc.)',
+        },
         osxSign: {
             batchCodesignCalls: true,
             optionsForFile: () => ({

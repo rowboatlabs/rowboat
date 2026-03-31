@@ -33,6 +33,7 @@ import {
 } from '@/components/ai-elements/prompt-input';
 
 import { Shimmer } from '@/components/ai-elements/shimmer';
+import { useSmoothedText } from './hooks/useSmoothedText';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
@@ -92,6 +93,11 @@ interface TreeNode extends DirEntry {
 }
 
 const streamdownComponents = { pre: MarkdownPreOverride }
+
+function SmoothStreamingMessage({ text, components }: { text: string; components: typeof streamdownComponents }) {
+  const smoothText = useSmoothedText(text)
+  return <MessageResponse components={components}>{smoothText}</MessageResponse>
+}
 
 const DEFAULT_SIDEBAR_WIDTH = 256
 const wikiLinkRegex = /\[\[([^[\]]+)\]\]/g
@@ -478,7 +484,7 @@ function FixedSidebarToggle({
               )}
               style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
             >
-              {meetingSummarizing ? (
+              {meetingSummarizing || meetingState === 'connecting' ? (
                 <LoaderIcon className="size-4 animate-spin" />
               ) : meetingState === 'recording' ? (
                 <SquareIcon className="size-4 animate-pulse" />
@@ -488,7 +494,7 @@ function FixedSidebarToggle({
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            {meetingSummarizing ? 'Generating meeting notes...' : meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
+            {meetingSummarizing ? 'Generating meeting notes...' : meetingState === 'connecting' ? 'Starting transcription...' : meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
           </TooltipContent>
         </Tooltip>
       )}
@@ -697,13 +703,18 @@ function App() {
       window.ipc.invoke('oauth:getState', null),
     ]).then(([config, oauthState]) => {
       const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
-      setVoiceAvailable(!!config.deepgram || rowboatConnected)
+      const hasVoice = !!config.deepgram || rowboatConnected
+      setVoiceAvailable(hasVoice)
       setTtsAvailable(!!config.elevenlabs || rowboatConnected)
+      // Pre-cache auth details so mic click skips IPC round-trips
+      if (hasVoice) {
+        voice.warmup()
+      }
     }).catch(() => {
       setVoiceAvailable(false)
       setTtsAvailable(false)
     })
-  }, [])
+  }, [voice.warmup])
 
   useEffect(() => {
     refreshVoiceAvailability()
@@ -753,6 +764,22 @@ function App() {
     setIsRecording(false)
     isRecordingRef.current = false
   }, [voice])
+
+  // Enter to submit voice input, Escape to cancel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isRecordingRef.current) return
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        handleSubmitRecording()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        handleCancelRecording()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [handleSubmitRecording, handleCancelRecording])
 
   // Helper to cancel recording from any navigation handler
   const cancelRecordingIfActive = useCallback(() => {
@@ -3390,9 +3417,9 @@ function App() {
   const [meetingSummarizing, setMeetingSummarizing] = useState(false)
   const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
 
-  const startMeetingAfterPermissions = useCallback(async () => {
-    setShowMeetingPermissions(false)
-    localStorage.setItem('meeting-permissions-acknowledged', '1')
+  const [checkingPermission, setCheckingPermission] = useState(false)
+
+  const startMeetingNow = useCallback(async () => {
     const calEvent = pendingCalendarEventRef.current
     pendingCalendarEventRef.current = undefined
     const notePath = await meetingTranscription.start(calEvent)
@@ -3401,6 +3428,23 @@ function App() {
       await handleVoiceNoteCreated(notePath)
     }
   }, [meetingTranscription, handleVoiceNoteCreated])
+
+  const handleCheckPermissionAndRetry = useCallback(async () => {
+    setCheckingPermission(true)
+    try {
+      const { granted } = await window.ipc.invoke('meeting:checkScreenPermission', null)
+      if (granted) {
+        setShowMeetingPermissions(false)
+        await startMeetingNow()
+      }
+    } finally {
+      setCheckingPermission(false)
+    }
+  }, [startMeetingNow])
+
+  const handleOpenScreenRecordingSettings = useCallback(async () => {
+    await window.ipc.invoke('meeting:openScreenRecordingSettings', null)
+  }, [])
 
   const handleToggleMeeting = useCallback(async () => {
     if (meetingTranscription.state === 'recording') {
@@ -3423,16 +3467,15 @@ function App() {
             const calendarEventJson = calEventMatch?.[1]?.replace(/''/g, "'")
             const { notes } = await window.ipc.invoke('meeting:summarize', { transcript: fileContent, meetingStartTime, calendarEventJson })
             if (notes) {
-              // Prepend meeting notes below the title but above the transcript
-              const { raw: fm, body: transcriptBody } = splitFrontmatter(fileContent)
-              // Use frontmatter title as the heading (set from calendar event summary)
+              // Prepend meeting notes above the existing transcript block
+              const { raw: fm, body } = splitFrontmatter(fileContent)
               const fmTitleMatch = fileContent.match(/^title:\s*(.+)$/m)
-              const noteTitle = fmTitleMatch?.[1]?.trim() || 'Meeting note'
-              // Strip any existing top-level heading from body
-              const bodyWithoutTitle = transcriptBody.replace(/^#\s+.+\s*\n*/, '')
-              // Also strip any title/heading the LLM may have generated
+              const noteTitle = fmTitleMatch?.[1]?.trim() || 'Meeting Notes'
               const cleanedNotes = notes.replace(/^#{1,2}\s+.+\n+/, '')
-              const newBody = `# ${noteTitle}\n\n` + cleanedNotes + '\n\n---\n\n## Raw transcript\n\n' + bodyWithoutTitle
+              // Extract the existing transcript block and preserve it as-is
+              const transcriptBlockMatch = body.match(/(```transcript\n[\s\S]*?\n```)/)
+              const transcriptBlock = transcriptBlockMatch?.[1] || ''
+              const newBody = `# ${noteTitle}\n\n` + cleanedNotes + (transcriptBlock ? '\n\n' + transcriptBlock : '')
               const newContent = fm ? `${fm}\n${newBody}` : newBody
               await window.ipc.invoke('workspace:writeFile', {
                 path: notePath,
@@ -3450,20 +3493,18 @@ function App() {
         meetingNotePathRef.current = null
       }
     } else if (meetingTranscription.state === 'idle') {
-      // Show permissions modal on first use (macOS only — Windows works out of the box)
-      if (isMac && !localStorage.getItem('meeting-permissions-acknowledged')) {
-        setShowMeetingPermissions(true)
-        return
+      // On macOS, check screen recording permission before starting
+      if (isMac) {
+        const result = await window.ipc.invoke('meeting:checkScreenPermission', null)
+        console.log('[meeting] Permission check result:', result)
+        if (!result.granted) {
+          setShowMeetingPermissions(true)
+          return
+        }
       }
-      const calEvent = pendingCalendarEventRef.current
-      pendingCalendarEventRef.current = undefined
-      const notePath = await meetingTranscription.start(calEvent)
-      if (notePath) {
-        meetingNotePathRef.current = notePath
-        await handleVoiceNoteCreated(notePath)
-      }
+      await startMeetingNow()
     }
-  }, [meetingTranscription, handleVoiceNoteCreated])
+  }, [meetingTranscription, handleVoiceNoteCreated, startMeetingNow])
   handleToggleMeetingRef.current = handleToggleMeeting
 
   // Listen for calendar block "join meeting & take notes" events
@@ -4237,7 +4278,7 @@ function App() {
                                 {tabState.currentAssistantMessage && (
                                   <Message from="assistant">
                                     <MessageContent>
-                                      <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')}</MessageResponse>
+                                      <SmoothStreamingMessage text={tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')} components={streamdownComponents} />
                                     </MessageContent>
                                   </Message>
                                 )}
@@ -4394,23 +4435,25 @@ function App() {
       <Dialog open={showMeetingPermissions} onOpenChange={setShowMeetingPermissions}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Meeting transcription setup</DialogTitle>
+            <DialogTitle>Screen recording permission required</DialogTitle>
             <DialogDescription>
-              Rowboat needs <strong>Screen Recording</strong> permission to capture meeting audio from other apps (Zoom, Meet, etc.).
+              Rowboat needs <strong>Screen Recording</strong> permission to capture meeting audio from other apps (Zoom, Meet, etc.). This feature won't work without it.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm text-muted-foreground">
             <p>To enable this:</p>
             <ol className="list-decimal list-inside space-y-1.5">
-              <li>Open <strong>System Settings</strong> → <strong>Privacy & Security</strong></li>
-              <li>Click <strong>Screen Recording</strong></li>
+              <li>Open <strong>System Settings</strong> → <strong>Privacy & Security</strong> → <strong>Screen Recording</strong></li>
               <li>Toggle on <strong>Rowboat</strong></li>
               <li>You may need to restart the app after granting permission</li>
             </ol>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowMeetingPermissions(false)}>Cancel</Button>
-            <Button onClick={() => { void startMeetingAfterPermissions() }}>Continue</Button>
+            <Button variant="outline" onClick={() => { void handleOpenScreenRecordingSettings() }}>Open System Settings</Button>
+            <Button onClick={() => { void handleCheckPermissionAndRetry() }} disabled={checkingPermission}>
+              {checkingPermission ? 'Checking...' : 'Check Again'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

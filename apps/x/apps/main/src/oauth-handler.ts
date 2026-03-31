@@ -187,12 +187,12 @@ export async function connectProvider(provider: string, clientId?: string): Prom
 
     // Create callback server
     let callbackHandled = false;
-    const { server } = await createAuthServer(8080, async (code, receivedState) => {
+    const { server } = await createAuthServer(8080, async (params: Record<string, string>) => {
       // Guard against duplicate callbacks (browser may send multiple requests)
       if (callbackHandled) return;
       callbackHandled = true;
       // Validate state
-      if (receivedState !== state) {
+      if (params.state !== state) {
         throw new Error('Invalid state parameter - possible CSRF attack');
       }
 
@@ -203,7 +203,7 @@ export async function connectProvider(provider: string, clientId?: string): Prom
 
       try {
         // Build callback URL for token exchange
-        const callbackUrl = new URL(`${REDIRECT_URI}?code=${code}&state=${receivedState}`);
+        const callbackUrl = new URL(`${REDIRECT_URI}?${new URLSearchParams(params).toString()}`);
 
         // Exchange code for tokens
         console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);

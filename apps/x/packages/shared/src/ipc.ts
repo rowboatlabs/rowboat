@@ -576,6 +576,16 @@ const ipcSchemas = {
       mimeType: z.string(),
     }),
   },
+  'meeting:checkScreenPermission': {
+    req: z.null(),
+    res: z.object({
+      granted: z.boolean(),
+    }),
+  },
+  'meeting:openScreenRecordingSettings': {
+    req: z.null(),
+    res: z.object({ success: z.boolean() }),
+  },
   'meeting:summarize': {
     req: z.object({
       transcript: z.string(),

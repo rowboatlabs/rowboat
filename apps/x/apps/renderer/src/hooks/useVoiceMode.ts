@@ -13,8 +13,13 @@ const DEEPGRAM_PARAMS = new URLSearchParams({
     smart_format: 'true',
     punctuate: 'true',
     language: 'en',
+    endpointing: '100',
+    no_delay: 'true',
 });
 const DEEPGRAM_LISTEN_URL = `wss://api.deepgram.com/v1/listen?${DEEPGRAM_PARAMS.toString()}`;
+
+// Cache auth details so we don't need IPC round-trips on every mic click
+let cachedAuth: { type: 'rowboat'; url: string; token: string } | { type: 'local'; apiKey: string } | null = null;
 
 export function useVoiceMode() {
     const { refresh: refreshRowboatAccount } = useRowboatAccount();
@@ -26,32 +31,54 @@ export function useVoiceMode() {
     const audioCtxRef = useRef<AudioContext | null>(null);
     const transcriptBufferRef = useRef('');
     const interimRef = useRef('');
+    // Buffer audio chunks captured before the WebSocket is ready
+    const audioBufferRef = useRef<ArrayBuffer[]>([]);
 
-    // Connect (or reconnect) the Deepgram WebSocket.
-    // Refreshes Rowboat account before connect so access token is current.
-    const connectWs = useCallback(async () => {
-        if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return;
-
-        let ws: WebSocket;
-
+    // Refresh cached auth details (called on warmup, not on mic click)
+    const refreshAuth = useCallback(async () => {
         const account = await refreshRowboatAccount();
         if (
             account?.signedIn &&
             account.accessToken &&
             account.config?.websocketApiUrl
         ) {
-            const listenUrl = buildDeepgramListenUrl(account.config.websocketApiUrl, DEEPGRAM_PARAMS);
-            ws = new WebSocket(listenUrl, ['bearer', account.accessToken]);
+            cachedAuth = { type: 'rowboat', url: account.config.websocketApiUrl, token: account.accessToken };
         } else {
-            // Fall back to local API key (passed as subprotocol)
             const config = await window.ipc.invoke('voice:getConfig', null);
-            if (!config?.deepgram) return;
-            ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['token', config.deepgram.apiKey]);
+            if (config?.deepgram) {
+                cachedAuth = { type: 'local', apiKey: config.deepgram.apiKey };
+            }
+        }
+    }, [refreshRowboatAccount]);
+
+    // Create and connect a Deepgram WebSocket using cached auth.
+    // Starts the connection and returns immediately (does not wait for open).
+    const connectWs = useCallback(async () => {
+        if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return;
+
+        // Refresh auth if we don't have it cached yet
+        if (!cachedAuth) {
+            await refreshAuth();
+        }
+        if (!cachedAuth) return;
+
+        let ws: WebSocket;
+        if (cachedAuth.type === 'rowboat') {
+            const listenUrl = buildDeepgramListenUrl(cachedAuth.url, DEEPGRAM_PARAMS);
+            ws = new WebSocket(listenUrl, ['bearer', cachedAuth.token]);
+        } else {
+            ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['token', cachedAuth.apiKey]);
         }
         wsRef.current = ws;
 
         ws.onopen = () => {
             console.log('[voice] WebSocket connected');
+            // Flush any buffered audio captured while we were connecting
+            const buffered = audioBufferRef.current;
+            audioBufferRef.current = [];
+            for (const chunk of buffered) {
+                ws.send(chunk);
+            }
         };
 
         ws.onmessage = (event) => {
@@ -73,13 +100,15 @@ export function useVoiceMode() {
 
         ws.onerror = () => {
             console.error('[voice] WebSocket error');
+            // Auth may be stale — clear cache so next attempt refreshes
+            cachedAuth = null;
         };
 
         ws.onclose = () => {
             console.log('[voice] WebSocket closed');
             wsRef.current = null;
         };
-    }, [refreshRowboatAccount]);
+    }, [refreshAuth]);
 
     // Stop audio capture and close WS
     const stopAudioCapture = useCallback(() => {
@@ -100,6 +129,7 @@ export function useVoiceMode() {
             wsRef.current.close();
             wsRef.current = null;
         }
+        audioBufferRef.current = [];
         setInterimText('');
         transcriptBufferRef.current = '';
         interimRef.current = '';
@@ -112,60 +142,48 @@ export function useVoiceMode() {
         transcriptBufferRef.current = '';
         interimRef.current = '';
         setInterimText('');
+        audioBufferRef.current = [];
 
-        // If WS isn't connected, connect and wait for it
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-            setState('connecting');
-            connectWs();
-            // Wait for WS to be ready (up to 5 seconds)
-            const wsOk = await new Promise<boolean>((resolve) => {
-                const checkInterval = setInterval(() => {
-                    if (wsRef.current?.readyState === WebSocket.OPEN) {
-                        clearInterval(checkInterval);
-                        resolve(true);
-                    }
-                }, 50);
-                setTimeout(() => {
-                    clearInterval(checkInterval);
-                    resolve(false);
-                }, 5000);
-            });
-            if (!wsOk) {
-                setState('idle');
-                return;
-            }
-        }
-
+        // Show listening immediately — don't wait for WebSocket
         setState('listening');
 
-        // Start mic
-        let stream: MediaStream | null = null;
-        try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        } catch (err) {
-            console.error('Microphone access denied:', err);
+        // Kick off mic + WebSocket in parallel, don't await WebSocket
+        const [stream] = await Promise.all([
+            navigator.mediaDevices.getUserMedia({ audio: true }).catch((err) => {
+                console.error('Microphone access denied:', err);
+                return null;
+            }),
+            connectWs(),
+        ]);
+
+        if (!stream) {
             setState('idle');
             return;
         }
 
         mediaStreamRef.current = stream;
 
-        // Start audio capture
+        // Start audio capture immediately — buffer if WS isn't open yet
         const audioCtx = new AudioContext({ sampleRate: 16000 });
         audioCtxRef.current = audioCtx;
         const source = audioCtx.createMediaStreamSource(stream);
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        const processor = audioCtx.createScriptProcessor(2048, 1, 1);
         processorRef.current = processor;
 
         processor.onaudioprocess = (e) => {
-            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
             const float32 = e.inputBuffer.getChannelData(0);
             const int16 = new Int16Array(float32.length);
             for (let i = 0; i < float32.length; i++) {
                 const s = Math.max(-1, Math.min(1, float32[i]));
                 int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
             }
-            wsRef.current.send(int16.buffer);
+            const buffer = int16.buffer;
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(buffer);
+            } else {
+                // WebSocket still connecting — buffer the audio
+                audioBufferRef.current.push(buffer);
+            }
         };
 
         source.connect(processor);
@@ -188,5 +206,10 @@ export function useVoiceMode() {
         stopAudioCapture();
     }, [stopAudioCapture]);
 
-    return { state, interimText, start, submit, cancel };
+    /** Pre-cache auth details so mic click skips IPC round-trips */
+    const warmup = useCallback(() => {
+        refreshAuth().catch(() => {});
+    }, [refreshAuth]);
+
+    return { state, interimText, start, submit, cancel, warmup };
 }
