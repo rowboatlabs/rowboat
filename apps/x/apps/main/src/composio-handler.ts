@@ -147,7 +147,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         // Set up callback server
         let cleanupTimeout: NodeJS.Timeout;
         let callbackHandled = false;
-        const { server } = await createAuthServer(8081, async (_code, _state) => {
+        const { server } = await createAuthServer(8081, async () => {
             // Guard against duplicate callbacks (browser may send multiple requests)
             if (callbackHandled) return;
             callbackHandled = true;
