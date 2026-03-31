@@ -143,7 +143,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
 
         // Set up callback server
         let cleanupTimeout: NodeJS.Timeout;
-        const { server } = await createAuthServer(8081, async (_code, _state) => {
+        const { server } = await createAuthServer(8081, async () => {
             // OAuth callback received - sync the account status
             try {
                 const accountStatus = await composioClient.getConnectedAccount(connectedAccountId);
