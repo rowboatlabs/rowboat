@@ -9,12 +9,15 @@ function formatTime(dateStr: string): string {
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
-function getDateParts(dateStr: string): { day: number; month: string; weekday: string } {
+function getDateParts(dateStr: string): { day: number; month: string; weekday: string; isToday: boolean } {
   const d = new Date(dateStr)
+  const now = new Date()
+  const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
   return {
     day: d.getDate(),
-    month: d.toLocaleDateString([], { month: 'long' }),
-    weekday: d.toLocaleDateString([], { weekday: 'short' }),
+    month: d.toLocaleDateString([], { month: 'short' }).toUpperCase(),
+    weekday: d.toLocaleDateString([], { weekday: 'short' }).toUpperCase(),
+    isToday,
   }
 }
 
@@ -62,7 +65,8 @@ interface ResolvedEvent {
   conferenceLink?: string
 }
 
-const EVENT_BAR_COLOR = '#7ec8c8'
+const GCAL_EVENT_COLOR = '#039be5'
+const GCAL_TODAY_COLOR = '#1a73e8'
 
 function JoinMeetingSplitButton({ onJoinAndNotes, onNotesOnly }: {
   onJoinAndNotes: () => void
@@ -273,11 +277,8 @@ function CalendarBlockView({ node, deleteNode }: { node: { attrs: Record<string,
                     <div className="calendar-block-date-left">
                       {parts ? (
                         <>
-                          <span className="calendar-block-day">{parts.day}</span>
-                          <div className="calendar-block-month-weekday">
-                            <span className="calendar-block-month">{parts.month}</span>
-                            <span className="calendar-block-weekday">{parts.weekday}</span>
-                          </div>
+                          <span className="calendar-block-weekday" style={parts.isToday ? { color: GCAL_TODAY_COLOR } : undefined}>{parts.weekday}</span>
+                          <span className={`calendar-block-day${parts.isToday ? ' calendar-block-day-today' : ''}`}>{parts.day}</span>
                         </>
                       ) : (
                         <span className="calendar-block-day">?</span>
@@ -288,16 +289,13 @@ function CalendarBlockView({ node, deleteNode }: { node: { attrs: Record<string,
                         <div
                           key={event._idx}
                           className={`calendar-block-event ${event.htmlLink ? 'calendar-block-event-clickable' : ''}`}
+                          style={{ backgroundColor: GCAL_EVENT_COLOR }}
                           onMouseDown={(e) => e.stopPropagation()}
                           onClick={(e) => { e.stopPropagation(); handleEventClick(event) }}
                         >
-                          <div
-                            className="calendar-block-event-bar"
-                            style={{ backgroundColor: EVENT_BAR_COLOR }}
-                          />
                           <div className="calendar-block-event-content">
                             <div className="calendar-block-event-title">
-                              {event.summary || 'Untitled event'}
+                              {event.summary || '(No title)'}
                             </div>
                             <div className="calendar-block-event-time">
                               {getTimeRange(event)}

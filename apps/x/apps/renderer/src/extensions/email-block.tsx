@@ -17,9 +17,6 @@ function formatEmailDate(dateStr: string): string {
   }
 }
 
-function getInitials(name: string): string {
-  return name.split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
-}
 
 declare global {
   interface Window {
@@ -152,29 +149,31 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
     ? `https://mail.google.com/mail/u/0/#all/${config.threadId}`
     : null
 
+  const senderName = config.from || 'Unknown'
+
   // --- Render: Draft mode (draft_response present) ---
   if (hasDraft) {
     return (
       <NodeViewWrapper className="email-block-wrapper" data-type="email-block">
-        <div className="email-block-card" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="email-block-card email-block-card-gmail" onMouseDown={(e) => e.stopPropagation()}>
           <button className="email-block-delete" onClick={deleteNode} aria-label="Delete email block">
             <X size={14} />
           </button>
-          {/* Draft header */}
-          {config.to && (
-            <div className="email-draft-block-header">
+          {/* Draft header – Gmail compose style */}
+          <div className="email-draft-block-header">
+            {config.to && (
               <div className="email-draft-block-field">
                 <span className="email-draft-block-label">To</span>
                 <span className="email-draft-block-value">{config.to}</span>
               </div>
-              {config.subject && (
-                <div className="email-draft-block-field">
-                  <span className="email-draft-block-label">Subject</span>
-                  <span className="email-draft-block-value">{config.subject}</span>
-                </div>
-              )}
-            </div>
-          )}
+            )}
+            {config.subject && (
+              <div className="email-draft-block-field">
+                <span className="email-draft-block-label">Subject</span>
+                <span className="email-draft-block-value">{config.subject}</span>
+              </div>
+            )}
+          </div>
           {/* Editable draft body */}
           <textarea
             ref={bodyRef}
@@ -185,7 +184,7 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
             placeholder="Write your reply..."
             rows={3}
           />
-          {/* Action buttons */}
+          {/* Action buttons – Gmail style */}
           <div className="email-draft-block-actions">
             {(hasPastSummary || config.latest_email) && (
               <button
@@ -198,7 +197,7 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
               </button>
             )}
             <button
-              className="email-block-gmail-btn"
+              className="email-block-gmail-btn email-block-gmail-btn-primary"
               onClick={() => {
                 void navigator.clipboard.writeText(draftBody)
                 setCopied(true)
@@ -210,7 +209,7 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
             </button>
             {gmailUrl && (
               <button
-                className="email-block-gmail-btn"
+                className="email-block-gmail-btn email-block-gmail-btn-primary"
                 onClick={() => {
                   void navigator.clipboard.writeText(draftBody)
                   setCopied(true)
@@ -229,10 +228,12 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
               <div className="email-block-context-section">
                 <div className="email-block-message">
                   <div className="email-block-message-header">
-                    {config.from && <div className="email-block-avatar">{getInitials(config.from)}</div>}
                     <div className="email-block-sender-info">
-                      {config.from && <div className="email-block-sender-name">{config.from}</div>}
-                      {config.date && <div className="email-block-sender-date">{formatEmailDate(config.date)}</div>}
+                      <div className="email-block-sender-row">
+                        {config.from && <div className="email-block-sender-name">{config.from}</div>}
+                        {config.date && <div className="email-block-sender-date">{formatEmailDate(config.date)}</div>}
+                      </div>
+                      <div className="email-block-sender-to">to me</div>
                     </div>
                   </div>
                   <div className="email-block-message-body">{config.latest_email}</div>
@@ -254,7 +255,7 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
   // --- Render: Read mode (no draft_response) ---
   return (
     <NodeViewWrapper className="email-block-wrapper" data-type="email-block">
-      <div className="email-block-card" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="email-block-card email-block-card-gmail" onMouseDown={(e) => e.stopPropagation()}>
         <button className="email-block-delete" onClick={deleteNode} aria-label="Delete email block">
           <X size={14} />
         </button>
@@ -262,15 +263,17 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
         {/* Latest email message */}
         <div className="email-block-message">
           <div className="email-block-message-header">
-            {config.from && <div className="email-block-avatar">{getInitials(config.from)}</div>}
             <div className="email-block-sender-info">
-              {config.from && <div className="email-block-sender-name">{config.from}</div>}
-              {config.date && <div className="email-block-sender-date">{formatEmailDate(config.date)}</div>}
+              <div className="email-block-sender-row">
+                <div className="email-block-sender-name">{senderName}</div>
+                {config.date && <div className="email-block-sender-date">{formatEmailDate(config.date)}</div>}
+              </div>
+              <div className="email-block-sender-to">to me</div>
             </div>
           </div>
           <div className="email-block-message-body">{config.latest_email}</div>
         </div>
-        {/* Action buttons */}
+        {/* Action buttons – Gmail style */}
         <div className="email-draft-block-actions">
           {hasPastSummary && (
             <button
@@ -284,7 +287,7 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
           )}
           {responseMode === 'inline' && (
             <button
-              className="email-block-gmail-btn email-block-generate-btn"
+              className="email-block-gmail-btn email-block-gmail-btn-primary"
               onClick={generateResponse}
               disabled={generating}
             >
@@ -294,7 +297,7 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
           )}
           {responseMode === 'assistant' && (
             <button
-              className="email-block-gmail-btn email-block-generate-btn"
+              className="email-block-gmail-btn email-block-gmail-btn-primary"
               onClick={draftWithAssistant}
             >
               <MessageSquare size={13} />
