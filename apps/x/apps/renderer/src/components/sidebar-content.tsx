@@ -980,6 +980,11 @@ function KnowledgeSection({
   )
 }
 
+function countFiles(node: TreeNode): number {
+  if (node.kind === 'file') return 1
+  return (node.children ?? []).reduce((sum, child) => sum + countFiles(child), 0)
+}
+
 // Tree component for file browser
 function Tree({
   item,
@@ -1169,7 +1174,10 @@ function Tree({
             <CollapsibleTrigger asChild>
               <SidebarMenuButton>
                 <ChevronRight className="transition-transform size-4" />
-                <span>{item.name}</span>
+                <div className="flex w-full items-center gap-1 min-w-0">
+                  <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                  <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
+                </div>
               </SidebarMenuButton>
             </CollapsibleTrigger>
             <CollapsibleContent>
