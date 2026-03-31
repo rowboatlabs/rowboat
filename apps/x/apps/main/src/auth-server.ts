@@ -25,7 +25,7 @@ export interface AuthServerResult {
  */
 export function createAuthServer(
   port: number = DEFAULT_PORT,
-  onCallback: (code: string, state: string) => void | Promise<void>
+  onCallback: (params: Record<string, string>) => void | Promise<void>
 ): Promise<AuthServerResult> {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -67,7 +67,7 @@ export function createAuthServer(
 
         // Handle callback - either traditional OAuth with code/state or Composio-style notification
         // Composio callbacks may not have code/state, just a notification that the flow completed
-        onCallback(code || '', state || '');
+        onCallback(Object.fromEntries(url.searchParams.entries()));
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(`
