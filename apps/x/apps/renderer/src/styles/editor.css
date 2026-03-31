@@ -859,12 +859,13 @@
   font-size: 13px;
 }
 
-/* Calendar block */
+/* Calendar block – Google Calendar style */
 .tiptap-editor .ProseMirror .calendar-block-title {
   font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: var(--foreground);
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: color-mix(in srgb, var(--foreground) 70%, transparent);
+  letter-spacing: 0.01em;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-loading,
@@ -873,7 +874,7 @@
   align-items: center;
   justify-content: center;
   height: 60px;
-  font-size: 13px;
+  font-size: 14px;
   color: color-mix(in srgb, var(--foreground) 45%, transparent);
 }
 
@@ -897,66 +898,69 @@
 
 .tiptap-editor .ProseMirror .calendar-block-separator {
   border: none;
-  border-top: 1px dashed color-mix(in srgb, var(--foreground) 20%, transparent);
-  margin: 4px 0;
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  margin: 0;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-date-row {
   display: flex;
   align-items: flex-start;
-  gap: 0;
+  gap: 12px;
   padding: 12px 0;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-date-left {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  width: 140px;
-  flex-shrink: 0;
-  padding-top: 4px;
-}
-
-.tiptap-editor .ProseMirror .calendar-block-day {
-  font-size: 28px;
-  font-weight: 300;
-  line-height: 1;
-  color: color-mix(in srgb, var(--foreground) 70%, transparent);
-}
-
-.tiptap-editor .ProseMirror .calendar-block-month-weekday {
-  display: flex;
   flex-direction: column;
-  gap: 0;
-}
-
-.tiptap-editor .ProseMirror .calendar-block-month {
-  font-size: 12px;
-  color: color-mix(in srgb, var(--foreground) 50%, transparent);
-  line-height: 1.3;
+  align-items: center;
+  width: 56px;
+  flex-shrink: 0;
+  padding-top: 2px;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-weekday {
-  font-size: 12px;
-  color: color-mix(in srgb, var(--foreground) 40%, transparent);
-  line-height: 1.3;
+  font-size: 11px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+  line-height: 1;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-day {
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1;
+  color: color-mix(in srgb, var(--foreground) 65%, transparent);
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.tiptap-editor .ProseMirror .calendar-block-day-today {
+  background-color: #1a73e8;
+  color: #fff !important;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-events {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
+  padding-top: 4px;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-event {
   display: flex;
   align-items: stretch;
-  gap: 10px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: background-color 0.12s ease;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: filter 0.12s ease;
+  min-height: 0;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-event-clickable {
@@ -964,14 +968,7 @@
 }
 
 .tiptap-editor .ProseMirror .calendar-block-event-clickable:hover {
-  background-color: color-mix(in srgb, var(--foreground) 5%, transparent);
-}
-
-.tiptap-editor .ProseMirror .calendar-block-event-bar {
-  width: 3px;
-  border-radius: 2px;
-  flex-shrink: 0;
-  min-height: 32px;
+  filter: brightness(0.9);
 }
 
 .tiptap-editor .ProseMirror .calendar-block-event-content {
@@ -984,20 +981,22 @@
 .tiptap-editor .ProseMirror .calendar-block-event-title {
   font-size: 14px;
   font-weight: 500;
-  color: var(--foreground);
+  color: #fff;
+  line-height: 1.3;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-event-time {
   font-size: 12px;
-  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.3;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-split-btn {
   position: relative;
   display: inline-flex;
   align-items: stretch;
-  margin-top: 4px;
-  border-radius: 5px;
+  margin-top: 6px;
+  border-radius: 4px;
   overflow: visible;
 }
 
@@ -1008,17 +1007,17 @@
   padding: 4px 8px 4px 10px;
   font-size: 12px;
   font-weight: 500;
-  color: #7ec8c8;
-  background: color-mix(in srgb, #7ec8c8 12%, transparent);
-  border: 1px solid color-mix(in srgb, #7ec8c8 25%, transparent);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
   border-right: none;
-  border-radius: 5px 0 0 5px;
+  border-radius: 4px 0 0 4px;
   cursor: pointer;
   transition: background-color 0.12s ease;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-split-main:hover {
-  background: color-mix(in srgb, #7ec8c8 22%, transparent);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .tiptap-editor .ProseMirror .calendar-block-split-chevron-wrap {
@@ -1031,21 +1030,21 @@
   align-items: center;
   justify-content: center;
   padding: 4px 6px;
-  color: #7ec8c8;
-  background: color-mix(in srgb, #7ec8c8 12%, transparent);
-  border: 1px solid color-mix(in srgb, #7ec8c8 25%, transparent);
-  border-left: 1px solid color-mix(in srgb, #7ec8c8 20%, transparent);
-  border-radius: 0 5px 5px 0;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 0 4px 4px 0;
   cursor: pointer;
   transition: background-color 0.12s ease;
 }
 
 .tiptap-editor .ProseMirror .calendar-block-split-chevron:hover {
-  background: color-mix(in srgb, #7ec8c8 22%, transparent);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .tiptap-editor .ProseMirror .calendar-block-split-chevron-open {
-  border-radius: 0 5px 0 0;
+  border-radius: 0 4px 0 0;
   border-bottom-color: transparent;
 }
 
@@ -1054,10 +1053,11 @@
   top: calc(100% - 1px);
   right: 0;
   z-index: 50;
-  background: color-mix(in srgb, #7ec8c8 12%, transparent);
-  border: 1px solid color-mix(in srgb, #7ec8c8 25%, transparent);
-  border-top: none;
-  border-radius: 0 0 5px 5px;
+  background: #039be5;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0 0 4px 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 
 .tiptap-editor .ProseMirror .calendar-block-split-option {
@@ -1068,7 +1068,7 @@
   padding: 5px 10px;
   font-size: 12px;
   font-weight: 500;
-  color: #7ec8c8;
+  color: #fff;
   background: none;
   border: none;
   cursor: pointer;
@@ -1076,90 +1076,86 @@
 }
 
 .tiptap-editor .ProseMirror .calendar-block-split-option:hover {
-  background: color-mix(in srgb, #7ec8c8 22%, transparent);
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .tiptap-editor .ProseMirror .calendar-block-join-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-top: 4px;
+  margin-top: 6px;
   padding: 4px 10px;
   font-size: 12px;
   font-weight: 500;
-  color: #7ec8c8;
-  background: color-mix(in srgb, #7ec8c8 12%, transparent);
-  border: 1px solid color-mix(in srgb, #7ec8c8 25%, transparent);
-  border-radius: 5px;
-  cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
-  width: fit-content;
-}
-
-.tiptap-editor .ProseMirror .calendar-block-join-btn:hover {
-  background: color-mix(in srgb, #7ec8c8 22%, transparent);
-  border-color: color-mix(in srgb, #7ec8c8 40%, transparent);
-}
-
-/* Email block */
-.tiptap-editor .ProseMirror .email-block-subject {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--foreground);
-  margin-bottom: 8px;
-}
-
-.tiptap-editor .ProseMirror .email-block-loading,
-.tiptap-editor .ProseMirror .email-block-empty {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 50px;
-  justify-content: center;
-  font-size: 13px;
-  color: color-mix(in srgb, var(--foreground) 45%, transparent);
-}
-
-.tiptap-editor .ProseMirror .email-block-error,
-.tiptap-editor .ProseMirror .email-draft-block-error {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: color-mix(in srgb, var(--foreground) 55%, transparent);
-  font-size: 13px;
-}
-
-.tiptap-editor .ProseMirror .email-block-error-msg {
-  font-size: 13px;
-  color: #ef4444;
-  padding: 8px 0;
-}
-
-.tiptap-editor .ProseMirror .email-block-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.tiptap-editor .ProseMirror .email-block-thread-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--foreground) 50%, transparent);
-  background: color-mix(in srgb, var(--foreground) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
-  border-radius: 12px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.12s ease;
   width: fit-content;
 }
 
-.tiptap-editor .ProseMirror .email-block-thread-toggle:hover {
-  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+.tiptap-editor .ProseMirror .calendar-block-join-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Email block – Gmail style */
+.tiptap-editor .ProseMirror .email-block-card-gmail {
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1), 0 1px 3px 1px rgba(0, 0, 0, 0.06);
+}
+
+.tiptap-editor .ProseMirror .email-block-card-gmail:hover {
+  background-color: var(--background);
+}
+
+/* Email badge */
+.tiptap-editor .ProseMirror .email-block-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+  margin-bottom: 8px;
+}
+
+/* Summary */
+.tiptap-editor .ProseMirror .email-block-summary {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--foreground);
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
+/* Expand button */
+.tiptap-editor .ProseMirror .email-block-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.12s ease;
+  margin-bottom: 4px;
+}
+
+.tiptap-editor .ProseMirror .email-block-expand-btn:hover {
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .email-block-expand-meta {
+  color: color-mix(in srgb, var(--foreground) 35%, transparent);
 }
 
 .tiptap-editor .ProseMirror .email-block-toggle-chevron {
@@ -1170,111 +1166,156 @@
   transform: rotate(180deg);
 }
 
-.tiptap-editor .ProseMirror .email-block-message {
-  padding: 8px 0;
+/* Email details (expanded) */
+.tiptap-editor .ProseMirror .email-block-email-details {
+  margin-top: 10px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.tiptap-editor .ProseMirror .email-block-message + .email-block-message {
-  border-top: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+.tiptap-editor .ProseMirror .email-block-message {
+  padding: 0;
 }
 
 .tiptap-editor .ProseMirror .email-block-message-header {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.tiptap-editor .ProseMirror .email-block-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--primary) 20%, transparent);
-  color: var(--primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-  flex-shrink: 0;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .tiptap-editor .ProseMirror .email-block-sender-info {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.tiptap-editor .ProseMirror .email-block-sender-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .tiptap-editor .ProseMirror .email-block-sender-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--foreground);
 }
 
 .tiptap-editor .ProseMirror .email-block-sender-date {
-  font-size: 11px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tiptap-editor .ProseMirror .email-block-subject-line {
+  font-size: 12px;
   color: color-mix(in srgb, var(--foreground) 45%, transparent);
 }
 
 .tiptap-editor .ProseMirror .email-block-message-body {
-  font-size: 13px;
+  font-size: 14px;
   color: color-mix(in srgb, var(--foreground) 80%, transparent);
   white-space: pre-wrap;
-  line-height: 1.5;
-  padding-left: 36px;
-}
-
-.tiptap-editor .ProseMirror .email-block-context {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  line-height: 1.58;
 }
 
 .tiptap-editor .ProseMirror .email-block-context-section {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
 }
 
 .tiptap-editor .ProseMirror .email-block-context-label {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.07em;
   color: color-mix(in srgb, var(--foreground) 40%, transparent);
 }
 
 .tiptap-editor .ProseMirror .email-block-context-summary {
-  font-size: 13px;
+  font-size: 14px;
   color: color-mix(in srgb, var(--foreground) 65%, transparent);
-  line-height: 1.5;
+  line-height: 1.58;
   white-space: pre-wrap;
-  padding-left: 8px;
-  border-left: 2px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  padding-left: 12px;
+  border-left: 3px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
+/* Draft section */
+.tiptap-editor .ProseMirror .email-block-draft-section {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  border-radius: 6px;
+}
+
+.tiptap-editor .ProseMirror .email-block-draft-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--foreground) 40%, transparent);
+  margin-bottom: 4px;
+}
+
+.tiptap-editor .ProseMirror .email-draft-block-body-input {
+  width: 100%;
+  font-size: 14px;
+  color: var(--foreground);
+  background: none;
+  border: none;
+  outline: none;
+  padding: 4px 0;
+  font-family: inherit;
+  line-height: 1.58;
+  resize: none;
+  overflow: hidden;
+}
+
+.tiptap-editor .ProseMirror .email-draft-block-body-input::placeholder {
+  color: color-mix(in srgb, var(--foreground) 35%, transparent);
+}
+
+/* Action buttons */
+.tiptap-editor .ProseMirror .email-block-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .tiptap-editor .ProseMirror .email-block-gmail-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  margin-top: 8px;
-  padding: 5px 12px;
-  font-size: 12px;
+  gap: 6px;
+  padding: 7px 16px;
+  font-size: 14px;
   font-weight: 500;
   color: color-mix(in srgb, var(--foreground) 60%, transparent);
-  background: color-mix(in srgb, var(--foreground) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
-  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 18px;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
   width: fit-content;
+  letter-spacing: 0.01em;
 }
 
 .tiptap-editor .ProseMirror .email-block-gmail-btn:hover {
-  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1), 0 1px 3px 1px rgba(0, 0, 0, 0.06);
   color: var(--foreground);
 }
 
@@ -1283,212 +1324,25 @@
   cursor: default;
 }
 
-.tiptap-editor .ProseMirror .email-block-generate-btn {
-  color: var(--primary);
-  border-color: color-mix(in srgb, var(--primary) 25%, transparent);
+.tiptap-editor .ProseMirror .email-block-gmail-btn-primary {
+  color: #fff;
+  background: #1a73e8;
+  border-color: #1a73e8;
 }
 
-.tiptap-editor .ProseMirror .email-block-generate-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
-  color: var(--primary);
+.tiptap-editor .ProseMirror .email-block-gmail-btn-primary:hover:not(:disabled) {
+  background: #1765cc;
+  box-shadow: 0 1px 2px 0 rgba(26, 115, 232, 0.45), 0 1px 3px 1px rgba(26, 115, 232, 0.3);
+  color: #fff;
 }
 
-@keyframes email-block-spin {
-  to { transform: rotate(360deg); }
-}
-
-.tiptap-editor .ProseMirror .email-block-spinner {
-  animation: email-block-spin 1s linear infinite;
-}
-
-/* Email block split button (generate/assistant) */
-.tiptap-editor .ProseMirror .email-block-response-split {
-  position: relative;
-  display: inline-flex;
-  align-items: stretch;
-  margin-top: 8px;
-}
-
-.tiptap-editor .ProseMirror .email-block-response-split > button {
-  box-sizing: border-box;
-}
-
-.tiptap-editor .ProseMirror .email-block-split-main {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 8px 5px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--primary);
-  background: color-mix(in srgb, var(--foreground) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
-  border-right: none;
-  border-radius: 6px 0 0 6px;
-  cursor: pointer;
-  transition: background-color 0.12s ease;
-}
-
-.tiptap-editor .ProseMirror .email-block-split-main:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--foreground) 10%, transparent);
-}
-
-.tiptap-editor .ProseMirror .email-block-split-main:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.tiptap-editor .ProseMirror .email-block-split-chevron {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 5px 6px;
-  color: color-mix(in srgb, var(--foreground) 60%, transparent);
-  background: color-mix(in srgb, var(--foreground) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
-  border-left: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
-  border-radius: 0 6px 6px 0;
-  cursor: pointer;
-  transition: background-color 0.12s ease;
-}
-
-.tiptap-editor .ProseMirror .email-block-split-chevron:hover {
-  background: color-mix(in srgb, var(--foreground) 10%, transparent);
-}
-
-.tiptap-editor .ProseMirror .email-block-split-chevron-open {
-  border-radius: 0 6px 0 0;
-  border-bottom-color: transparent;
-}
-
-.tiptap-editor .ProseMirror .email-block-split-dropdown {
-  position: absolute;
-  top: calc(100% - 1px);
-  right: 0;
-  z-index: 50;
-  background: color-mix(in srgb, var(--foreground) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
-  border-top: none;
-  border-radius: 0 0 6px 6px;
-}
-
-.tiptap-editor .ProseMirror .email-block-split-option {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-  padding: 5px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--foreground) 60%, transparent);
-  background: none;
-  border: none;
-  border-radius: 0 0 6px 6px;
-  cursor: pointer;
-  transition: background-color 0.12s ease;
-}
-
-.tiptap-editor .ProseMirror .email-block-split-option:hover {
-  background: color-mix(in srgb, var(--foreground) 10%, transparent);
-  color: var(--foreground);
-}
-
-/* Email draft block */
-.tiptap-editor .ProseMirror .email-draft-block-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-field {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-label {
-  font-weight: 500;
-  color: color-mix(in srgb, var(--foreground) 45%, transparent);
-  min-width: 50px;
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-value {
-  color: var(--foreground);
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-input {
-  flex: 1;
-  font-size: 13px;
-  color: var(--foreground);
-  background: none;
-  border: none;
-  outline: none;
-  padding: 2px 0;
-  font-family: inherit;
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-input::placeholder {
-  color: color-mix(in srgb, var(--foreground) 30%, transparent);
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-body-input {
-  width: 100%;
-  font-size: 13px;
-  color: var(--foreground);
-  background: none;
-  border: none;
-  outline: none;
-  padding: 4px 0;
-  font-family: inherit;
-  line-height: 1.6;
-  resize: none;
-  overflow: hidden;
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-body-input::placeholder {
-  color: color-mix(in srgb, var(--foreground) 30%, transparent);
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-actions {
+.tiptap-editor .ProseMirror .email-block-error,
+.tiptap-editor .ProseMirror .email-draft-block-error {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-reply {
-  margin-top: 6px;
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-reply-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--foreground) 50%, transparent);
-  background: color-mix(in srgb, var(--foreground) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: background-color 0.12s ease;
-  width: fit-content;
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-reply-toggle:hover {
-  background: color-mix(in srgb, var(--foreground) 10%, transparent);
-}
-
-.tiptap-editor .ProseMirror .email-draft-block-reply-thread {
-  padding: 4px 0 0 8px;
-  border-left: 2px solid color-mix(in srgb, var(--foreground) 10%, transparent);
-  margin-left: 4px;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  font-size: 14px;
 }
 
 /* Transcript block */

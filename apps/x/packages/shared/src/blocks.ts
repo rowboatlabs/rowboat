@@ -63,6 +63,7 @@ export type CalendarBlock = z.infer<typeof CalendarBlockSchema>;
 
 export const EmailBlockSchema = z.object({
   threadId: z.string().optional(),
+  summary: z.string().optional(),
   subject: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
