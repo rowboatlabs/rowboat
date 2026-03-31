@@ -3,6 +3,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
 import { X, Mail, ChevronDown, ExternalLink, Copy, Check, Sparkles, Loader2, MessageSquare } from 'lucide-react'
 import { blocks } from '@x/shared'
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useTheme } from '@/contexts/theme-context'
 
 // --- Helpers ---
 
@@ -43,6 +44,8 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
   const hasDraft = !!config?.draft_response
   const hasPastSummary = !!config?.past_summary
   const responseMode = config?.response_mode || 'both'
+
+  const { resolvedTheme } = useTheme()
 
   // Local draft state for editing
   const [draftBody, setDraftBody] = useState(config?.draft_response || '')
@@ -176,6 +179,7 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
           </div>
           {/* Editable draft body */}
           <textarea
+            key={resolvedTheme}
             ref={bodyRef}
             className="email-draft-block-body-input"
             value={draftBody}
