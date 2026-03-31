@@ -3151,6 +3151,26 @@ function App() {
       return
     }
 
+    // Top-level knowledge folders (except Notes) open as a bases view with folder filter
+    const parts = path.split('/')
+    if (parts.length === 2 && parts[0] === 'knowledge' && parts[1] !== 'Notes') {
+      const folderName = parts[1]
+      setBaseConfigByPath((prev) => ({
+        ...prev,
+        [BASES_DEFAULT_TAB_PATH]: {
+          ...DEFAULT_BASE_CONFIG,
+          name: folderName,
+          filters: [{ category: 'folder', value: folderName }],
+        },
+      }))
+      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
+        setIsChatSidebarOpen(false)
+        setIsRightPaneMaximized(false)
+      }
+      void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+      return
+    }
+
     const newExpanded = new Set(expandedPaths)
     if (newExpanded.has(path)) {
       newExpanded.delete(path)

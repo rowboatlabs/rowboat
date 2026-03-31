@@ -10,6 +10,7 @@ import {
   Copy,
   ExternalLink,
   FilePlus,
+  Folder,
   FolderPlus,
   AlertTriangle,
   HelpCircle,
@@ -1129,6 +1130,29 @@ function Tree({
           />
         </div>
       </SidebarMenuItem>
+    )
+  }
+
+  // Top-level knowledge folders (except Notes) open bases view — render as flat items
+  const parts = item.path.split('/')
+  const isBasesFolder = isDir && parts.length === 2 && parts[0] === 'knowledge' && parts[1] !== 'Notes'
+
+  if (isBasesFolder) {
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => onSelect(item.path, item.kind)}>
+              <Folder className="size-4 shrink-0" />
+              <div className="flex w-full items-center gap-1 min-w-0">
+                <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
+              </div>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </ContextMenuTrigger>
+        {contextMenuContent}
+      </ContextMenu>
     )
   }
 
