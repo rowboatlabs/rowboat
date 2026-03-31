@@ -463,6 +463,13 @@ async function performSyncComposio() {
             events = data.items as Array<Record<string, unknown>>;
         } else if (Array.isArray(data.events)) {
             events = data.events as Array<Record<string, unknown>>;
+        } else if (data.event_data && typeof data.event_data === 'object') {
+            const nested = data.event_data as Record<string, unknown>;
+            if (Array.isArray(nested.event_data)) {
+                events = nested.event_data as Array<Record<string, unknown>>;
+            } else if (Array.isArray(data.event_data)) {
+                events = data.event_data as Array<Record<string, unknown>>;
+            }
         } else if (Array.isArray(data)) {
             events = data as unknown as Array<Record<string, unknown>>;
         }
