@@ -986,6 +986,11 @@ function countFiles(node: TreeNode): number {
   return (node.children ?? []).reduce((sum, child) => sum + countFiles(child), 0)
 }
 
+/** Display name overrides for top-level knowledge folders */
+const FOLDER_DISPLAY_NAMES: Record<string, string> = {
+  Notes: 'My Notes',
+}
+
 // Tree component for file browser
 function Tree({
   item,
@@ -1005,6 +1010,7 @@ function Tree({
   const isSelected = selectedPath === item.path
   const [isRenaming, setIsRenaming] = useState(false)
   const isSubmittingRef = React.useRef(false)
+  const displayName = (isDir && FOLDER_DISPLAY_NAMES[item.name]) || item.name
 
   // For files, strip .md extension for editing
   const baseName = !isDir && item.name.endsWith('.md')
@@ -1145,7 +1151,7 @@ function Tree({
             <SidebarMenuButton onClick={() => onSelect(item.path, item.kind)}>
               <Folder className="size-4 shrink-0" />
               <div className="flex w-full items-center gap-1 min-w-0">
-                <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                <span className="min-w-0 flex-1 truncate">{displayName}</span>
                 <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
               </div>
             </SidebarMenuButton>
@@ -1199,7 +1205,7 @@ function Tree({
               <SidebarMenuButton>
                 <ChevronRight className="transition-transform size-4" />
                 <div className="flex w-full items-center gap-1 min-w-0">
-                  <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                  <span className="min-w-0 flex-1 truncate">{displayName}</span>
                   <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
                 </div>
               </SidebarMenuButton>
