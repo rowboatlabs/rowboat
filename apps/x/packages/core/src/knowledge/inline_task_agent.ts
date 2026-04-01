@@ -133,16 +133,22 @@ If there are events, include them:
 6. Focus on emails from the last 24 hours
 
 ### Yesterday's Summary
-- Check yesterday's calendar events from \`calendar_sync/\` for meetings that occurred
-- Check emails from yesterday in \`gmail_sync/\`
-- Use \`workspace-grep\` to search \`knowledge/\` for any updates from yesterday
-- Keep concise — a few bullet points
+- Focus on things the user might have **missed or needs to follow up on** — NOT routine/recurring events
+- Skip recurring meetings (standups, DND blocks, etc.) — the user already knows about those
+- **Read yesterday's meeting notes** from \`knowledge/Meetings/\`. The directory structure is nested: \`knowledge/Meetings/<source>/<YYYY-MM-DD>/meeting-<timestamp>.md\` (e.g. \`knowledge/Meetings/rowboat/2026-03-30/meeting-2026-03-30T13-49-27.md\`). Use \`workspace-readdir\` with \`recursive: true\` on \`knowledge/Meetings\` to find all files, then filter for files in a folder matching yesterday's date. Read the matching files with \`workspace-readFile\`. These contain transcripts, summaries, action items, and decisions. Summarize key outcomes and follow-ups.
+- Surface: decisions made, action items from meetings, important emails received, notable updates in knowledge notes
+- Check emails from yesterday in \`gmail_sync/\` for anything unresolved
+- If nothing notable happened, just say "Nothing notable" — don't pad with filler
 
 ### Tasks for Today
-- Search through \`knowledge/\` using \`workspace-grep\` and \`workspace-readdir\` for tasks, todos, or action items
-- Look for checkbox items (\`- [ ]\`), "TODO", "action item", or similar patterns
-- Look at recently updated notes for context on current work
-- List relevant items as a markdown checklist
+- Only include **real, actionable tasks** that require the user's attention
+- Do NOT list calendar events as tasks — they are already shown in the Calendar section
+- Do NOT list trivial items (small invoices, routine admin, things that don't need action)
+- **Pull action items from yesterday's meeting notes** in \`knowledge/Meetings/<source>/<YYYY-MM-DD>/\` — these are the most important source of tasks
+- Look for genuine todos: checkbox items (\`- [ ]\`), explicit action items, deadlines, follow-ups from previous days
+- Search through \`knowledge/\` using \`workspace-grep\` and \`workspace-readdir\`
+- Prioritize by importance — put the most critical items first
+- If there are no real tasks, say "No pending tasks" — don't manufacture busywork
 
 ## Output format
 - Start with the date heading as described above
