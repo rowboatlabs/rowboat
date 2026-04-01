@@ -1,0 +1,26 @@
+pkgbase = rowboat-bin
+	pkgdesc = AI coworker with memory
+	pkgver = 0.1.56
+	pkgrel = 1
+	url = https://github.com/rowboatlabs/rowboat
+	arch = x86_64
+	license = Apache-2.0
+	depends = gtk3
+	depends = nss
+	depends = libxss
+	depends = libxtst
+	depends = alsa-lib
+	depends = libnotify
+	depends = libxrandr
+	depends = mesa
+	depends = at-spi2-atk
+	depends = libcups
+	depends = libdrm
+	depends = xdg-utils
+	provides = rowboat
+	conflicts = rowboat
+	conflicts = rowboat-git
+	source_x86_64 = https://github.com/rowboatlabs/rowboat/releases/download/v0.1.56/rowboat-linux_0.1.56_amd64.deb
+	sha256sums_x86_64 = SKIP
+ 
+pkgname = rowboat-bin

@@ -1,0 +1,34 @@
+pkgbase = rowboat-git
+	pkgdesc = AI coworker with memory
+	pkgver = r1.0000000
+	pkgrel = 1
+	url = https://github.com/rowboatlabs/rowboat
+	arch = x86_64
+	license = Apache-2.0
+	makedepends = nodejs
+	makedepends = pnpm
+	makedepends = git
+	makedepends = python
+	depends = electron39
+	depends = gtk3
+	depends = nss
+	depends = libxss
+	depends = libxtst
+	depends = alsa-lib
+	depends = libnotify
+	depends = libxrandr
+	depends = mesa
+	depends = at-spi2-atk
+	depends = libcups
+	depends = libdrm
+	depends = xdg-utils
+	provides = rowboat
+	conflicts = rowboat
+	conflicts = rowboat-bin
+    source = git+https://github.com/rowboatlabs/rowboat.git
+    source = rowboat.desktop
+    sha256sums = SKIP
+    sha256sums = SKIP
+
+
+pkgname = rowboat-git
