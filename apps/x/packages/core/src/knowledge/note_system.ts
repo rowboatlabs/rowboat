@@ -23,7 +23,7 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 **Email:** {email or leave blank}
 **Aliases:** {comma-separated: first name, nicknames, email}
 **First met:** {YYYY-MM-DD}
-**Last seen:** {YYYY-MM-DD}
+**Last update:** {YYYY-MM-DD}
 
 ## Summary
 {2-3 sentences: Who they are, why you know them, what you're working on together.}
@@ -56,7 +56,7 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 **Domain:** {primary email domain}
 **Aliases:** {comma-separated: short names, abbreviations}
 **First met:** {YYYY-MM-DD}
-**Last seen:** {YYYY-MM-DD}
+**Last update:** {YYYY-MM-DD}
 
 ## Summary
 {2-3 sentences: What this org is, what your relationship is.}
@@ -90,7 +90,7 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 **Type:** {deal|product|initiative|hiring|other}
 **Status:** {active|planning|on hold|completed|cancelled}
 **Started:** {YYYY-MM-DD or leave blank}
-**Last activity:** {YYYY-MM-DD}
+**Last update:** {YYYY-MM-DD}
 
 ## Summary
 {2-3 sentences: What this project is, goal, current state.}
@@ -131,7 +131,7 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 **Keywords:** {comma-separated}
 **Aliases:** {other ways this topic is referenced}
 **First mentioned:** {YYYY-MM-DD}
-**Last mentioned:** {YYYY-MM-DD}
+**Last update:** {YYYY-MM-DD}
 
 ## Related
 - [[People/{Person}]] — {relationship}

@@ -153,6 +153,12 @@ function getSortValue(note: NoteEntry, column: string): string | number {
   if (column === 'mtimeMs') return note.mtimeMs
   const v = note.fields[column]
   if (!v) return ''
+  // Sort date-like columns numerically
+  if (column === 'last_update' || column === 'first_met') {
+    const s = Array.isArray(v) ? v[0] ?? '' : v
+    const ms = Date.parse(s)
+    return isNaN(ms) ? 0 : ms
+  }
   return Array.isArray(v) ? v[0] ?? '' : v
 }
 
@@ -774,6 +780,17 @@ function CellRenderer({
   }
   if (column === 'mtimeMs') {
     return <span className="text-muted-foreground whitespace-nowrap truncate block">{formatDate(note.mtimeMs)}</span>
+  }
+
+  // Date-like frontmatter columns — render like Last Modified
+  if (column === 'last_update' || column === 'first_met') {
+    const value = note.fields[column]
+    if (!value || Array.isArray(value)) return null
+    const ms = Date.parse(value)
+    if (!isNaN(ms)) {
+      return <span className="text-muted-foreground whitespace-nowrap truncate block">{formatDate(ms)}</span>
+    }
+    return <span className="text-muted-foreground whitespace-nowrap truncate block">{value}</span>
   }
 
   // Frontmatter column
