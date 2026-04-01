@@ -143,7 +143,7 @@ async function tagNoteBatch(
 /**
  * Process all untagged notes in batches
  */
-async function processUntaggedNotes(): Promise<void> {
+export async function processUntaggedNotes(): Promise<void> {
     console.log('[NoteTagging] Checking for untagged notes...');
 
     const state = loadNoteTaggingState();

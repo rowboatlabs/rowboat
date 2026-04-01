@@ -14,6 +14,7 @@ import {
 
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const BATCH_SIZE = 15;
+const DEFAULT_CONCURRENCY = 3;
 const LABELING_AGENT = 'labeling_agent';
 const GMAIL_SYNC_DIR = path.join(WorkDir, 'gmail_sync');
 const MAX_CONTENT_LENGTH = 8000;
@@ -129,7 +130,7 @@ async function labelEmailBatch(
 /**
  * Process all unlabeled emails in batches
  */
-async function processUnlabeledEmails(): Promise<void> {
+export async function processUnlabeledEmails(concurrency: number = DEFAULT_CONCURRENCY): Promise<void> {
     console.log('[EmailLabeling] Checking for unlabeled emails...');
 
     const state = loadLabelingState();
@@ -140,7 +141,7 @@ async function processUnlabeledEmails(): Promise<void> {
         return;
     }
 
-    console.log(`[EmailLabeling] Found ${unlabeled.length} unlabeled emails`);
+    console.log(`[EmailLabeling] Found ${unlabeled.length} unlabeled emails (concurrency: ${concurrency})`);
 
     const run = await serviceLogger.startRun({
         service: 'email_labeling',
@@ -161,69 +162,81 @@ async function processUnlabeledEmails(): Promise<void> {
         truncated: limitedFiles.truncated,
     });
 
-    const totalBatches = Math.ceil(unlabeled.length / BATCH_SIZE);
-    let totalEdited = 0;
-    let hadError = false;
-
+    // Build all batches upfront
+    const batches: { batchNumber: number; files: { path: string; content: string }[] }[] = [];
     for (let i = 0; i < unlabeled.length; i += BATCH_SIZE) {
         const batchPaths = unlabeled.slice(i, i + BATCH_SIZE);
         const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
-
-        try {
-            // Read file contents for the batch
-            const files: { path: string; content: string }[] = [];
-            for (const filePath of batchPaths) {
-                try {
-                    const content = fs.readFileSync(filePath, 'utf-8');
-                    files.push({ path: filePath, content });
-                } catch (error) {
-                    console.error(`[EmailLabeling] Error reading ${filePath}:`, error);
-                }
+        const files: { path: string; content: string }[] = [];
+        for (const filePath of batchPaths) {
+            try {
+                const content = fs.readFileSync(filePath, 'utf-8');
+                files.push({ path: filePath, content });
+            } catch (error) {
+                console.error(`[EmailLabeling] Error reading ${filePath}:`, error);
             }
-
-            if (files.length === 0) {
-                continue;
-            }
-
-            console.log(`[EmailLabeling] Processing batch ${batchNumber}/${totalBatches} (${files.length} files)`);
-            await serviceLogger.log({
-                type: 'progress',
-                service: run.service,
-                runId: run.runId,
-                level: 'info',
-                message: `Processing batch ${batchNumber}/${totalBatches} (${files.length} files)`,
-                step: 'batch',
-                current: batchNumber,
-                total: totalBatches,
-                details: { filesInBatch: files.length },
-            });
-
-            const result = await labelEmailBatch(files);
-            totalEdited += result.filesEdited.size;
-
-            // Only mark files that were actually edited by the agent
-            for (const file of files) {
-                const relativePath = path.relative(WorkDir, file.path);
-                if (result.filesEdited.has(relativePath)) {
-                    markFileAsLabeled(file.path, state);
-                }
-            }
-
-            saveLabelingState(state);
-            console.log(`[EmailLabeling] Batch ${batchNumber}/${totalBatches} complete, ${result.filesEdited.size} files edited`);
-        } catch (error) {
-            hadError = true;
-            console.error(`[EmailLabeling] Error processing batch ${batchNumber}:`, error);
-            await serviceLogger.log({
-                type: 'error',
-                service: run.service,
-                runId: run.runId,
-                level: 'error',
-                message: `Error processing batch ${batchNumber}`,
-                error: error instanceof Error ? error.message : String(error),
-                context: { batchNumber },
-            });
         }
+        if (files.length > 0) {
+            batches.push({ batchNumber, files });
+        }
+    }
+
+    const totalBatches = batches.length;
+    let totalEdited = 0;
+    let hadError = false;
+
+    // Process batches with concurrency limit
+    for (let i = 0; i < batches.length; i += concurrency) {
+        const chunk = batches.slice(i, i + concurrency);
+
+        const promises = chunk.map(async ({ batchNumber, files }) => {
+            try {
+                console.log(`[EmailLabeling] Processing batch ${batchNumber}/${totalBatches} (${files.length} files)`);
+                await serviceLogger.log({
+                    type: 'progress',
+                    service: run.service,
+                    runId: run.runId,
+                    level: 'info',
+                    message: `Processing batch ${batchNumber}/${totalBatches} (${files.length} files)`,
+                    step: 'batch',
+                    current: batchNumber,
+                    total: totalBatches,
+                    details: { filesInBatch: files.length },
+                });
+
+                const result = await labelEmailBatch(files);
+
+                // Only mark files that were actually edited by the agent
+                for (const file of files) {
+                    const relativePath = path.relative(WorkDir, file.path);
+                    if (result.filesEdited.has(relativePath)) {
+                        markFileAsLabeled(file.path, state);
+                    }
+                }
+
+                console.log(`[EmailLabeling] Batch ${batchNumber}/${totalBatches} complete, ${result.filesEdited.size} files edited`);
+                return result.filesEdited.size;
+            } catch (error) {
+                hadError = true;
+                console.error(`[EmailLabeling] Error processing batch ${batchNumber}:`, error);
+                await serviceLogger.log({
+                    type: 'error',
+                    service: run.service,
+                    runId: run.runId,
+                    level: 'error',
+                    message: `Error processing batch ${batchNumber}`,
+                    error: error instanceof Error ? error.message : String(error),
+                    context: { batchNumber },
+                });
+                return 0;
+            }
+        });
+
+        const results = await Promise.all(promises);
+        totalEdited += results.reduce((sum, n) => sum + n, 0);
+
+        // Save state after each concurrent chunk completes
+        saveLabelingState(state);
     }
 
     state.lastRunTime = new Date().toISOString();

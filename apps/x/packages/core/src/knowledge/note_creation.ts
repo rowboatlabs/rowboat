@@ -868,6 +868,7 @@ If you discovered new name variants during resolution, add them to Aliases field
 - Note state changes with \`[Field → value]\` in activity
 - Escape quotes properly in shell commands
 - Write only one file per response (no multi-file write batches)
+- **Always set \`Last update\`** in the Info section to the YYYY-MM-DD date of the source email or meeting. When updating an existing note, update this field to the new source event's date.
 
 ---
 

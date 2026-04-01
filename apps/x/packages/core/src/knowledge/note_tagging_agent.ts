@@ -47,7 +47,7 @@ role: VP Engineering
 organization: Acme Corp
 email: sarah@acme.com
 first_met: "2024-06-15"
-last_seen: "2025-01-20"
+last_update: "2025-01-20"
 ---
 \`\`\`
 
@@ -80,7 +80,7 @@ Use these exact keys for each tag category:
 
 Extract all \`**Key:** value\` fields from the \`## Info\` (or \`## About\`) section into YAML frontmatter keys:
 
-1. **Convert keys to snake_case**: e.g. \`**First met:**\` → \`first_met\`, \`**Last activity:**\` → \`last_activity\`, \`**Last seen:**\` → \`last_seen\`.
+1. **Convert keys to snake_case**: e.g. \`**First met:**\` → \`first_met\`, \`**Last update:**\` → \`last_update\`.
 2. **Strip wiki-link syntax**: \`[[Organizations/Acme Corp]]\` → \`Acme Corp\`. Extract just the display name (last path segment).
 3. **Skip blank/placeholder values**: If a field says "leave blank", is empty, or contains only template placeholders like \`{role}\`, omit it from the frontmatter.
 4. **Quote dates**: Wrap date values in quotes, e.g. \`first_met: "2024-06-15"\`.
@@ -93,10 +93,10 @@ Extract all \`**Key:** value\` fields from the \`## Info\` (or \`## About\`) sec
 
 **Per note type, extract these fields:**
 
-- **People**: role, organization, email, aliases, first_met, last_seen
-- **Organizations**: type, industry, relationship, domain, aliases, first_met, last_seen
-- **Projects**: type, status, started, last_activity
-- **Topics** (from \`## About\`): keywords, aliases, first_mentioned, last_mentioned
+- **People**: role, organization, email, aliases, first_met, last_update
+- **Organizations**: type, industry, relationship, domain, aliases, first_met, last_update
+- **Projects**: type, status, started, last_update
+- **Topics** (from \`## About\`): keywords, aliases, first_mentioned, last_update
 - **Meetings**: Extract from the note content and file path:
   - \`date\`: meeting date (from the file path \`Meetings/{source}/YYYY/MM/DD/\` or from \`created_at\`/\`Date:\` in content)
   - \`source\`: \`granola\` or \`fireflies\` (from the file path)
