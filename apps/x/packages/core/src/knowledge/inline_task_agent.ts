@@ -13,7 +13,7 @@ export function getRaw(): string {
   const defaultEndISO = defaultEnd.toISOString();
 
   return `---
-model: gpt-5.4
+model: gpt-5.2
 tools:
 ${toolEntries}
 ---
@@ -115,24 +115,26 @@ Then include the sections below. The sections are ordered by immediacy — what 
 
 **Time-of-day logic for sections:**
 - **Morning (before 10am):** Include all sections: Up Next, Calendar, Emails, What You Missed, Today's Priorities
-- **Midday (10am–5pm):** Include: Up Next, Emails (new since last check), Today's Priorities (update with progress/changes). Skip "What You Missed" — it's stale by now. Keep Calendar but only show remaining events.
-- **Evening (after 5pm):** Include: Up Next (if anything left today or early tomorrow), Emails (anything urgent that came in), Today's Priorities (what's still unresolved). Add a brief "Tomorrow" note if there are early morning events.
+- **Midday (10am–5pm):** Include all sections. Keep Calendar but only show remaining events. Focus Emails on what's new since last check.
+- **Evening (after 5pm):** Include all sections. Add a brief "Tomorrow" note if there are early morning events.
 
 ## Sections to include
 
 ### Up Next
-This is the most time-sensitive section — it tells the user what's happening in the **next 2 hours**. It should always be first.
+This is the most time-sensitive section — it orients the user on what's coming. It should always be first.
 
 1. Read calendar events from \`calendar_sync/\` (same method as Calendar section below)
-2. Filter for events starting within the next **2 hours** from the current time
-3. If there's a meeting coming up soon:
-   - Mention how long until it starts (e.g., "Standup in 25 minutes")
+2. Find the **next upcoming event** (the soonest event that hasn't started yet). Calculate exactly how long until it starts.
+3. If there's an upcoming event today:
+   - Always mention it and how long until it starts (e.g., "Standup in 25 minutes", "Design review in 1 hour 40 minutes")
+   - If it's **more than 2 hours away**, frame it as focus time: "Next up is standup at noon — you've got a solid 3-hour focus block."
+   - If it's **under 2 hours**, lead with the event: "Standup in 40 minutes."
+   - If it's **under 15 minutes**, make it prominent: "Standup starts in 10 minutes — join link is in the calendar below."
    - Search \`knowledge/\` for context about the meeting, attendees, or related topics
    - If there's something to prep or be aware of, mention it ("Ramnique pushed the OAuth PR yesterday — might come up")
-   - If the meeting has a join link, it'll be in the calendar block
-4. If there's nothing in the next 2 hours, look at what's next on the calendar and mention it casually ("Nothing until standup at noon — good stretch of focus time")
-5. If there's truly nothing left today, say so ("Clear for the rest of the day")
-6. **This section should feel like a quick tap on the shoulder**, not a formal briefing. One to three sentences max.
+4. If there's truly nothing left today, say so ("Clear for the rest of the day")
+5. **This section should feel like a quick tap on the shoulder**, not a formal briefing. One to three sentences max.
+6. **IMPORTANT:** Do NOT say "nothing in the next X hours" if there IS an event within that window. Always compute the actual time difference between now and the next event's start time before writing this section.
 
 ### Calendar
 1. Use \`workspace-readdir\` with path \`calendar_sync\` to list files
@@ -176,8 +178,6 @@ If there are events, include them:
 8. If no new emails have come in since the last refresh, just say "No new emails" or omit the section entirely. Don't re-surface stale items.
 
 ### What You Missed
-**Only show this section in the morning (before ~10am).** After that, drop it — it's stale.
-
 This section is about things the user might not be aware of from yesterday. Think of it as: "Here's what happened while you were away."
 
 - **Skip recurring/routine events entirely.** The user knows they have standup every day. Don't mention it unless something unusual happened during it.
