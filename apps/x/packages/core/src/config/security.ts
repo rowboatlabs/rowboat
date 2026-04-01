@@ -6,15 +6,38 @@ import { WorkDir } from "./config.js";
 export const SECURITY_CONFIG_PATH = path.join(WorkDir, "config", "security.json");
 
 const DEFAULT_ALLOW_LIST = [
+    "awk",
+    "basename",
     "cat",
+    "cut",
     "date",
+    "df",
+    "diff",
+    "dirname",
+    "du",
     "echo",
+    "env",
+    "file",
+    "find",
     "grep",
+    "head",
+    "hostname",
     "jq",
     "ls",
+    "printenv",
     "pwd",
-    "yq",
-    "whoami"
+    "readlink",
+    "realpath",
+    "sort",
+    "stat",
+    "tail",
+    "tree",
+    "uname",
+    "uniq",
+    "wc",
+    "which",
+    "whoami",
+    "yq"
 ]
 
 let cachedAllowList: string[] | null = null;
