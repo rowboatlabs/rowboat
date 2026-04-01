@@ -15,6 +15,7 @@ import { WorkDir } from "../../config/config.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { composioEnabledToolsRepo } from "../../composio/enabled-tools-repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured } from "../../composio/client.js";
+import { invalidateCopilotInstructionsCache } from "../assistant/instructions.js";
 import type { ToolContext } from "./exec-tool.js";
 import { generateText, jsonSchema } from "ai";
 import { createProvider } from "../../models/models.js";
@@ -1256,10 +1257,12 @@ function registerComposioTools(): void {
 /**
  * Refresh dynamic Composio tools by unregistering all and re-registering from the repo.
  * Called after enabling/disabling tools or disconnecting a toolkit.
+ * Also invalidates the cached agent instructions so they reflect the new tool set.
  */
 export function refreshComposioTools(): void {
     unregisterComposioTools();
     registerComposioTools();
+    invalidateCopilotInstructionsCache();
 }
 
 // Register on module load

@@ -962,6 +962,15 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
     }
   }, [expandedToolkit])
 
+  // Clean up pending search timer on unmount
+  useEffect(() => {
+    return () => {
+      if (toolSearchTimerRef.current) {
+        clearTimeout(toolSearchTimerRef.current)
+      }
+    }
+  }, [])
+
   // Toggle toolkit expansion
   const handleToggleToolkit = (toolkitSlug: string) => {
     if (expandedToolkit === toolkitSlug) {

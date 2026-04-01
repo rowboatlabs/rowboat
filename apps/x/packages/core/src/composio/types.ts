@@ -149,7 +149,7 @@ export const ZCreateConnectedAccountRequest = z.object({
  */
 export const ZCreateConnectedAccountResponse = z.object({
     id: z.string(),
-    connectionData: ZConnectionData,
+    connectionData: ZConnectionData.optional(),
 });
 
 /**

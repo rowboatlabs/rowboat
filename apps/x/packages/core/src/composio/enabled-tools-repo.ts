@@ -52,7 +52,7 @@ function ensureStorageDir(): void {
     }
 }
 
-function loadStorage(): EnabledToolsStorage {
+function loadStorageFromDisk(): EnabledToolsStorage {
     try {
         if (fs.existsSync(ENABLED_TOOLS_FILE)) {
             const data = fs.readFileSync(ENABLED_TOOLS_FILE, 'utf-8');
@@ -64,64 +64,80 @@ function loadStorage(): EnabledToolsStorage {
     return { tools: {} };
 }
 
-function saveStorage(storage: EnabledToolsStorage): void {
+function saveStorageToDisk(storage: EnabledToolsStorage): void {
     ensureStorageDir();
     fs.writeFileSync(ENABLED_TOOLS_FILE, JSON.stringify(storage, null, 2));
 }
 
 /**
- * Repository for managing enabled Composio tools
+ * Repository for managing enabled Composio tools.
+ * Uses an in-memory cache loaded once from disk. Mutations write through to disk.
  */
 export class ComposioEnabledToolsRepo implements IComposioEnabledToolsRepo {
+    private cache: EnabledToolsStorage | null = null;
+
+    private getStorage(): EnabledToolsStorage {
+        if (!this.cache) {
+            this.cache = loadStorageFromDisk();
+        }
+        return this.cache;
+    }
+
+    private persist(): void {
+        if (this.cache) {
+            saveStorageToDisk(this.cache);
+        }
+    }
+
     getAll(): Record<string, EnabledTool> {
-        return loadStorage().tools;
+        return this.getStorage().tools;
     }
 
     getByToolkit(toolkitSlug: string): EnabledTool[] {
-        const storage = loadStorage();
+        const storage = this.getStorage();
         return Object.values(storage.tools).filter(t => t.toolkitSlug === toolkitSlug);
     }
 
     enable(tool: EnabledTool): void {
-        const storage = loadStorage();
+        const storage = this.getStorage();
         storage.tools[tool.slug] = tool;
-        saveStorage(storage);
+        this.persist();
     }
 
     enableBatch(tools: EnabledTool[]): void {
-        const storage = loadStorage();
+        const storage = this.getStorage();
         for (const tool of tools) {
             storage.tools[tool.slug] = tool;
         }
-        saveStorage(storage);
+        this.persist();
     }
 
     disable(toolSlug: string): void {
-        const storage = loadStorage();
+        const storage = this.getStorage();
         delete storage.tools[toolSlug];
-        saveStorage(storage);
+        this.persist();
     }
 
     disableBatch(toolSlugs: string[]): void {
-        const storage = loadStorage();
+        const storage = this.getStorage();
         for (const slug of toolSlugs) {
             delete storage.tools[slug];
         }
-        saveStorage(storage);
+        this.persist();
     }
 
     disableAllForToolkit(toolkitSlug: string): void {
-        const storage = loadStorage();
+        const storage = this.getStorage();
         for (const [slug, tool] of Object.entries(storage.tools)) {
             if (tool.toolkitSlug === toolkitSlug) {
                 delete storage.tools[slug];
             }
         }
-        saveStorage(storage);
+        this.persist();
     }
 
     isEnabled(toolSlug: string): boolean {
-        const storage = loadStorage();
+        const storage = this.getStorage();
         return toolSlug in storage.tools;
     }
 }

@@ -12,11 +12,13 @@ import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_
 
 const REDIRECT_URI = 'http://localhost:8081/oauth/callback';
 
-// Store active OAuth flows
+// Store active OAuth flows (keyed by toolkitSlug to prevent concurrent flows for the same toolkit)
 const activeFlows = new Map<string, {
     toolkitSlug: string;
     connectedAccountId: string;
     authConfigId: string;
+    server: import('http').Server;
+    timeout: NodeJS.Timeout;
 }>();
 
 /**
@@ -128,13 +130,14 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
             };
         }
 
-        // Store flow state
-        const flowKey = `${toolkitSlug}-${Date.now()}`;
-        activeFlows.set(flowKey, {
-            toolkitSlug,
-            connectedAccountId,
-            authConfigId,
-        });
+        // Abort any existing flow for this toolkit before starting a new one
+        const existingFlow = activeFlows.get(toolkitSlug);
+        if (existingFlow) {
+            console.log(`[Composio] Aborting existing flow for ${toolkitSlug}`);
+            clearTimeout(existingFlow.timeout);
+            existingFlow.server.close();
+            activeFlows.delete(toolkitSlug);
+        }
 
         // Save initial account state
         const account: LocalConnectedAccount = {
@@ -148,7 +151,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         composioAccountsRepo.saveAccount(account);
 
         // Set up callback server
-        let cleanupTimeout: NodeJS.Timeout;
+        const timeoutRef: { current: NodeJS.Timeout | null } = { current: null };
         let callbackHandled = false;
         const { server } = await createAuthServer(8081, async () => {
             // Guard against duplicate callbacks (browser may send multiple requests)
@@ -182,17 +185,17 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
                     error: error instanceof Error ? error.message : 'Unknown error',
                 });
             } finally {
-                activeFlows.delete(flowKey);
+                activeFlows.delete(toolkitSlug);
                 server.close();
-                clearTimeout(cleanupTimeout);
+                if (timeoutRef.current) clearTimeout(timeoutRef.current);
             }
         });
 
         // Timeout for abandoned flows (5 minutes)
-        cleanupTimeout = setTimeout(() => {
-            if (activeFlows.has(flowKey)) {
+        const cleanupTimeout = setTimeout(() => {
+            if (activeFlows.has(toolkitSlug)) {
                 console.log(`[Composio] Cleaning up abandoned flow for ${toolkitSlug}`);
-                activeFlows.delete(flowKey);
+                activeFlows.delete(toolkitSlug);
                 server.close();
                 emitComposioEvent({
                     toolkitSlug,
@@ -201,6 +204,16 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
                 });
             }
         }, 5 * 60 * 1000);
+        timeoutRef.current = cleanupTimeout;
+
+        // Store flow state (keyed by toolkit to prevent concurrent flows)
+        activeFlows.set(toolkitSlug, {
+            toolkitSlug,
+            connectedAccountId,
+            authConfigId,
+            server,
+            timeout: cleanupTimeout,
+        });
 
         // Open browser for OAuth
         shell.openExternal(redirectUrl);

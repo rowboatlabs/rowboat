@@ -301,49 +301,50 @@ export async function listToolkitTools(
 }
 
 /**
- * List available tools for a toolkit with full details including input_parameters
+ * Schema for the detailed tools response (preserves input_parameters).
+ * Uses passthrough so extra API fields don't cause validation failures.
+ */
+const ZDetailedTool = z.object({
+    slug: z.string(),
+    name: z.string(),
+    description: z.string(),
+    input_parameters: z.object({
+        type: z.literal('object').optional().default('object'),
+        properties: z.record(z.string(), z.unknown()).optional().default({}),
+        required: z.array(z.string()).optional(),
+    }).optional().default({ type: 'object', properties: {} }),
+}).passthrough();
+
+/**
+ * List available tools for a toolkit with full details including input_parameters.
+ * Uses composioApiCall for consistent error handling, logging, and validation.
  */
 export async function listToolkitToolsDetailed(
     toolkitSlug: string,
     searchQuery: string | null = null,
 ): Promise<{ items: Array<{ slug: string; name: string; description: string; toolkitSlug: string; inputParameters: { type: 'object'; properties: Record<string, unknown>; required?: string[] } }> }> {
-    const authHeaders = await getAuthHeaders();
-    const baseURL = await getBaseUrl();
-
-    const url = new URL(`${baseURL}/tools`);
-    url.searchParams.set('toolkit_slug', toolkitSlug);
-    url.searchParams.set('limit', '200');
+    const params: Record<string, string> = {
+        toolkit_slug: toolkitSlug,
+        limit: '200',
+    };
     if (searchQuery) {
-        url.searchParams.set('query', searchQuery);
+        params.search = searchQuery;
     }
 
-    console.log(`[Composio] Listing tools (detailed) for toolkit: ${toolkitSlug}`);
-
-    const response = await fetch(url.toString(), {
-        headers: authHeaders,
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to list tools: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json() as { items?: Array<Record<string, unknown>> };
+    const result = await composioApiCall(ZListResponse(ZDetailedTool), "/tools", params);
 
     return {
-        items: (data.items || []).map((item) => {
-            const inputParams = item.input_parameters as Record<string, unknown> | undefined;
-            return {
-                slug: String(item.slug ?? ''),
-                name: String(item.name ?? ''),
-                description: String(item.description ?? ''),
-                toolkitSlug,
-                inputParameters: {
-                    type: 'object' as const,
-                    properties: (inputParams?.properties as Record<string, unknown>) ?? {},
-                    required: Array.isArray(inputParams?.required) ? inputParams.required as string[] : undefined,
-                },
-            };
-        }),
+        items: result.items.map((item) => ({
+            slug: item.slug,
+            name: item.name,
+            description: item.description,
+            toolkitSlug,
+            inputParameters: {
+                type: 'object' as const,
+                properties: item.input_parameters?.properties ?? {},
+                required: item.input_parameters?.required,
+            },
+        })),
     };
 }
 

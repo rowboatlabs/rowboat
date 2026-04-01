@@ -300,11 +300,28 @@ This renders as an interactive card in the UI that the user can click to open th
 Never output raw file paths in plain text when they could be wrapped in a filepath block — unless the file does not exist yet.`;
 
 /**
+ * Cached Composio instructions. Invalidated by calling invalidateCopilotInstructionsCache().
+ */
+let cachedInstructions: string | null = null;
+
+/**
+ * Invalidate the cached instructions so the next buildCopilotInstructions() call
+ * regenerates the Composio tools section. Call this after enabling/disabling tools
+ * or connecting/disconnecting a toolkit.
+ */
+export function invalidateCopilotInstructionsCache(): void {
+    cachedInstructions = null;
+}
+
+/**
  * Build full copilot instructions with dynamic Composio tools section.
- * Called each time the agent is loaded to reflect currently enabled tools.
+ * Results are cached and reused until invalidated via invalidateCopilotInstructionsCache().
  */
 export async function buildCopilotInstructions(): Promise<string> {
+    if (cachedInstructions !== null) return cachedInstructions;
     const composioPrompt = await getComposioToolsPrompt();
-    if (!composioPrompt) return CopilotInstructions;
-    return CopilotInstructions + '\n' + composioPrompt;
+    cachedInstructions = composioPrompt
+        ? CopilotInstructions + '\n' + composioPrompt
+        : CopilotInstructions;
+    return cachedInstructions;
 }
