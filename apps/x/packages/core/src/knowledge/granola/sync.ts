@@ -24,6 +24,7 @@ const API_DELAY_MS = 1000; // 1 second delay between API calls
 const RATE_LIMIT_RETRY_DELAY_MS = 60 * 1000; // Wait 1 minute on rate limit
 const MAX_RETRIES = 3; // Maximum retries for rate-limited requests
 const MAX_BATCH_SIZE = 10; // Process max 10 documents per folder per sync
+const EARLY_TERMINATION_STREAK = 20; // Stop fetching after this many consecutive unchanged docs
 
 // --- Wake Signal for Immediate Sync Trigger ---
 let wakeResolve: (() => void) | null = null;
@@ -172,13 +173,17 @@ async function apiCall<T>(
     return data;
 }
 
-async function getDocuments(accessToken: string, limit: number, offset: number) {
+async function getDocuments(accessToken: string, limit: number, offset: number, updatedSince?: string) {
+    const body: Record<string, unknown> = {
+        limit,
+        offset,
+        include_last_viewed_panel: true,
+    };
+    if (updatedSince) {
+        body.updated_since = updatedSince;
+    }
     const response = await callWithRateLimit(
-        () => apiCall<unknown>('/v2/get-documents', accessToken, {
-            limit,
-            offset,
-            include_last_viewed_panel: true,
-        }),
+        () => apiCall<unknown>('/v2/get-documents', accessToken, body),
         'get-documents'
     );
     if (!response) return null;
@@ -368,7 +373,14 @@ async function syncNotes(): Promise<void> {
         let updatedCount = 0;
         let offset = 0;
         let hasMore = true;
+        let unchangedStreak = 0;
         const changedTitles: string[] = [];
+
+        // Use lastSyncDate for incremental fetch (API may ignore if unsupported)
+        const updatedSince = state.lastSyncDate || undefined;
+        if (updatedSince) {
+            console.log(`[Granola] Requesting docs updated since: ${updatedSince}`);
+        }
 
         // Fetch documents with pagination
         while (hasMore) {
@@ -377,7 +389,7 @@ async function syncNotes(): Promise<void> {
                 await sleep(API_DELAY_MS);
             }
 
-            const docsResponse = await getDocuments(accessToken, MAX_BATCH_SIZE, offset);
+            const docsResponse = await getDocuments(accessToken, MAX_BATCH_SIZE, offset, updatedSince);
             if (!docsResponse) {
                 console.log('[Granola] Failed to fetch documents');
                 break;
@@ -398,8 +410,20 @@ async function syncNotes(): Promise<void> {
                 const needsSync = !lastSyncedAt || lastSyncedAt !== docUpdatedAt;
 
                 if (!needsSync) {
+                    unchangedStreak++;
+                    // Early termination: if we hit many consecutive unchanged docs,
+                    // the API likely returned all docs (ignoring updated_since)
+                    // and we've reached the older unchanged portion
+                    if (unchangedStreak >= EARLY_TERMINATION_STREAK) {
+                        console.log(`[Granola] Early termination: ${unchangedStreak} consecutive unchanged docs`);
+                        hasMore = false;
+                        break;
+                    }
                     continue;
                 }
+
+                // Reset streak when we find a doc that needs sync
+                unchangedStreak = 0;
 
                 await ensureRun();
                 const docTitle = doc.title || 'Untitled';
