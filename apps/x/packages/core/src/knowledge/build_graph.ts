@@ -15,6 +15,7 @@ import {
 import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js';
 import { limitEventItems } from './limit_event_items.js';
 import { commitAll } from './version_history.js';
+import { getTagDefinitions } from './tag_system.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -34,6 +35,54 @@ const SOURCE_FOLDERS = [
 
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
 const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
+
+/**
+ * Parse YAML frontmatter from a markdown file and check if it has any noise/skip labels.
+ * Returns true if the email should be skipped (has noise filter tags).
+ */
+function hasNoiseLabels(content: string): boolean {
+    if (!content.startsWith('---')) return false;
+
+    const endIdx = content.indexOf('---', 3);
+    if (endIdx === -1) return false;
+
+    const frontmatter = content.slice(3, endIdx);
+
+    // Get all noise tags from the tag system
+    const noiseTags = new Set(
+        getTagDefinitions()
+            .filter(t => t.type === 'noise')
+            .map(t => t.tag)
+    );
+
+    // Extract filter array values from frontmatter
+    // Matches lines like "    - cold-outreach" under the filter: key
+    const filterMatch = frontmatter.match(/filter:\s*\n((?:\s+-\s+.+\n?)*)/);
+    if (filterMatch) {
+        const filterLines = filterMatch[1].match(/^\s+-\s+(.+)$/gm);
+        if (filterLines) {
+            for (const line of filterLines) {
+                const tag = line.replace(/^\s+-\s+/, '').trim().replace(/['"]/g, '');
+                if (noiseTags.has(tag)) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Also check for inline filter array like "filter: ['cold-outreach']" or "filter: [cold-outreach]"
+    const inlineMatch = frontmatter.match(/filter:\s*\[([^\]]*)\]/);
+    if (inlineMatch && inlineMatch[1].trim()) {
+        const tags = inlineMatch[1].split(',').map(t => t.trim().replace(/['"]/g, ''));
+        for (const tag of tags) {
+            if (noiseTags.has(tag)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
 
 function extractPathFromToolInput(input: string): string | null {
     try {
@@ -366,16 +415,24 @@ export async function buildGraph(sourceDir: string): Promise<void> {
     // Get files that need processing (new or changed)
     let filesToProcess = getFilesToProcess(sourceDir, state);
 
-    // For gmail_sync, only process emails that have been labeled (have YAML frontmatter)
+    // For gmail_sync, only process emails that have been labeled AND don't have noise filter tags
     if (sourceDir.endsWith('gmail_sync')) {
         filesToProcess = filesToProcess.filter(filePath => {
             try {
                 const content = fs.readFileSync(filePath, 'utf-8');
-                return content.startsWith('---');
+                if (!content.startsWith('---')) return false;
+                if (hasNoiseLabels(content)) {
+                    console.log(`[buildGraph] Skipping noise email: ${path.basename(filePath)}`);
+                    // Mark as processed so we don't re-check it
+                    markFileAsProcessed(filePath, state);
+                    return false;
+                }
+                return true;
             } catch {
                 return false;
             }
         });
+        saveState(state);
     }
 
     if (filesToProcess.length === 0) {
@@ -568,16 +625,23 @@ export async function processAllSources(): Promise<void> {
         try {
             let filesToProcess = getFilesToProcess(sourceDir, state);
 
-            // For gmail_sync, only process emails that have been labeled (have YAML frontmatter)
+            // For gmail_sync, only process emails that have been labeled AND don't have noise filter tags
             if (folder === 'gmail_sync') {
                 filesToProcess = filesToProcess.filter(filePath => {
                     try {
                         const content = fs.readFileSync(filePath, 'utf-8');
-                        return content.startsWith('---');
+                        if (!content.startsWith('---')) return false;
+                        if (hasNoiseLabels(content)) {
+                            console.log(`[GraphBuilder] Skipping noise email: ${path.basename(filePath)}`);
+                            markFileAsProcessed(filePath, state);
+                            return false;
+                        }
+                        return true;
                     } catch {
                         return false;
                     }
                 });
+                saveState(state);
             }
 
             if (filesToProcess.length > 0) {

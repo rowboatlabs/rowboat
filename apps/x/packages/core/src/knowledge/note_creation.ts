@@ -221,12 +221,14 @@ Emails containing calendar invites (\`.ics\` attachments or inline calendar data
 
 ---
 
-# Step 1: Source Filtering (Label-Based)
+# Step 1: Source Filtering
 
 ## For Meetings and Voice Memos
-Always process — no filtering needed.
+Always process — no filtering needed. Skip to Step 2.
 
-## For Emails — Read YAML Frontmatter
+## For Emails — TWO mandatory gates, BOTH must pass
+
+### Gate 1: Label Check
 
 Emails have YAML frontmatter with labels prepended by the labeling agent:
 
@@ -249,15 +251,51 @@ labeled_at: "2026-02-28T12:00:00Z"
 
 ${renderNoteEffectRules()}
 
-## Filter Decision Output
-
-If skipping:
+**Gate 1 verdict — if ANY filter/noise label is present, you MUST output:**
 \`\`\`
-SKIP
-Reason: Labels indicate skip-only categories: {list the labels}
+STOP — GATE 1 FAILED
+Labels: {list the filter labels}
+Action: Do not create any notes. Do not proceed to Gate 2. End here.
 \`\`\`
+**After outputting this, STOP. Do not write any files. Do not create any notes. Your task is complete.**
 
-If processing, continue to Step 2.
+If no filter labels are present, proceed to Gate 2.
+
+---
+
+### Gate 2: Engagement Test
+
+**This gate applies to ALL emails that passed Gate 1. It is a HARD STOP — not a suggestion.**
+
+The inbox owner is a busy startup founder who receives a high volume of unsolicited inbound. Most emails from strangers are noise. The labeling agent sometimes misclassifies cold outreach.
+
+**Read the email content and answer this single question: "Has the inbox owner ever engaged with this sender?"**
+
+Evidence of engagement (at least one MUST be true to proceed):
+- The inbox owner sent a reply in the thread
+- There is a prior meeting or introduction with this person
+- The person is from a company the owner is already doing business with (paying customer, active vendor under contract, investor)
+
+**If NONE of the above are true, you MUST output:**
+\`\`\`
+STOP — GATE 2 FAILED
+Reason: No evidence of two-way engagement — {brief explanation}
+Action: Do not create any notes. End here.
+\`\`\`
+**After outputting this, STOP. Do not write any files. Do not create any notes. Your task is complete.**
+
+This means NO notes for:
+- Cold outreach senders (even if labeled as prospect/candidate/partner)
+- Newsletter/digest/promo senders
+- Webinar speakers mentioned in marketing emails
+- People from community digests (Bookface, YC digest)
+- Anyone who followed up multiple times with no reply from the owner
+- Students/freelancers/developers cold-emailing about jobs or offering work
+- Event platform senders (Luma, Beehiiv, etc.)
+
+**When in doubt, STOP. A missed note can be created later. A junk note pollutes the knowledge base permanently.**
+
+If engagement evidence exists, proceed to Step 2.
 
 ---
 
@@ -506,18 +544,21 @@ For entities not resolved to existing notes, determine if they warrant new notes
 
 ### Who Gets a Note
 
+**The golden rule: only create notes for people the inbox owner has a real relationship with.** A "real relationship" means two-way engagement — the owner has met, replied to, or is actively doing business with this person. Passing through the label filter is necessary but NOT sufficient.
+
 **CREATE a note for people who are:**
-- External (not @user.domain)
-- Attendees in meetings
-- Email correspondents (emails that reach this step already passed label-based filtering)
-- Decision makers or contacts at customers, prospects, or partners
-- Investors or potential investors
-- Candidates you are interviewing
-- Advisors or mentors
-- Key collaborators
-- Introducers who connect you to valuable contacts
+- Attendees in meetings the owner participated in
+- People the owner has replied to or engaged with in email
+- People introduced via warm intros from known contacts
+- Contacts at companies the owner is actively doing business with (customers, investors, vendors under contract, partners)
+- Candidates the owner is actively interviewing (responded to, scheduled with)
 
 **DO NOT create notes for:**
+- Anyone from a one-time inbound email the owner never responded to
+- People mentioned in newsletters, digests, or community roundups
+- Speakers listed in webinar or event promotion emails
+- Senders from marketing/event platforms (Luma, Beehiiv, etc.)
+- Cold outreach senders, even after multiple follow-ups with no reply
 - Large group meeting attendees you didn't interact with
 - Internal colleagues (@user.domain)
 - Assistants handling only logistics
@@ -559,16 +600,19 @@ If role is not explicitly stated, infer from context:
 |-------------------|----------------------|------------------|
 | Customer (active deal) | Yes — key contacts | Yes |
 | Customer (support ticket) | No | Maybe update existing |
-| Prospect | Yes — decision makers | Yes |
+| Prospect (owner has engaged) | Yes — decision makers | Yes |
+| Prospect (no engagement) | No — this is cold outreach | No |
 | Investor | Yes | Yes |
-| Strategic partner | Yes — key contacts | Yes |
+| Strategic partner (mutual engagement) | Yes — key contacts | Yes |
 | Vendor (strategic) | Yes — main contact only | Yes |
 | Vendor (transactional) | No | Optional |
 | Bank/Financial services | No | Yes (one note) |
-| Candidate | Yes | No |
+| Candidate (owner is interviewing) | Yes | No |
+| Candidate (unsolicited) | No — this is cold outreach | No |
 | Service provider (one-time) | No | No |
-| Personalized outreach | Yes | Yes |
-| Generic cold outreach | No | No |
+| Cold outreach / unsolicited inbound | No | No |
+| Newsletter / digest / promo sender | No | No |
+| Event/webinar invite sender | No | No |
 
 ### Handling Non-Note-Worthy People
 
@@ -581,15 +625,23 @@ For people who don't warrant their own note, add to Organization note's Contacts
 
 ## Organizations
 
+**Only create org notes for organizations the user directly does business with.** The test is: "Does the user have an active, ongoing relationship with this organization?"
+
 **CREATE a note if:**
-- Someone from that org attended a meeting
-- They're a customer, prospect, investor, or partner
-- Someone from that org sent relevant personalized correspondence
+- They're a customer, investor, or partner the owner is actively engaged with
+- The owner is actively working with someone there (meetings, email exchanges, contracts)
+- They are a vendor the owner has a contract with or is actively evaluating
 
 **DO NOT create for:**
+- Organizations mentioned only as background context (a contact's previous employer, university, portfolio company, etc.)
+- A candidate's current or former employer — the person note is enough
+- Organizations from cold outreach emails
+- Organizations mentioned in newsletters, digests, or promotional emails
 - Tool/service providers mentioned in passing
 - One-time transactional vendors
-- Consumer service companies
+- Consumer service companies (banks, airlines, etc.)
+- Event/marketing platforms (Luma, Beehiiv, etc.)
+- Organizations referenced only because a contact works there, unless the user is doing business with that org directly
 
 ## Projects
 
@@ -601,8 +653,13 @@ For people who don't warrant their own note, add to Organization note's Contacts
 ## Topics
 
 **CREATE a note if:**
-- Recurring theme discussed
-- Will come up again across conversations
+- A substantive business topic discussed across multiple conversations with real contacts (e.g., "SOC 2 Compliance", "Series A Fundraise")
+- Has concrete facts, decisions, or action items attached to it
+
+**DO NOT create topic notes for:**
+- Internal system concepts (email filtering, labeling, noise categories, tags)
+- Abstract or meta categories (e.g., "cold outreach", "newsletters", "noise")
+- Topics only mentioned in skipped/noise emails
 
 ---
 
