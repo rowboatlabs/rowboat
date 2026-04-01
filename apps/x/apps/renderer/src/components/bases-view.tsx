@@ -153,7 +153,6 @@ function getSortValue(note: NoteEntry, column: string): string | number {
   if (column === 'mtimeMs') return note.mtimeMs
   const v = note.fields[column]
   if (!v) return ''
-  // Sort date-like columns numerically
   if (column === 'last_update' || column === 'first_met') {
     const s = Array.isArray(v) ? v[0] ?? '' : v
     const ms = Date.parse(s)

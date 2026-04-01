@@ -57,7 +57,7 @@ ${renderTagSystemForEmails()}
 # Instructions
 
 1. For each email file provided in the message, read its content carefully.
-2. Classify the email using the taxonomy above. Think like a **busy YC startup founder** triaging their inbox. You receive a mix of real business conversations and unsolicited inbound (cold pitches, marketing, newsletters). Your job is to tell them apart accurately — catch the noise without mislabeling real relationships.
+2. Classify the email using the taxonomy above. Think like a **YC startup founder** triaging their inbox — your time is your scarcest resource:
    - **Relationship**: Who is this from? An investor, customer, team member, vendor, candidate, etc.?
    - **Topic**: What is this about? Legal, finance, hiring, fundraising, security, infrastructure, etc.?
    - **Email Type**: Is this a warm intro or a followup on an existing conversation?
@@ -97,23 +97,23 @@ Before finalizing labels, ask: **"Would a busy YC founder want a note about this
 - Is a spam digest or Google Groups moderation report
 - Is routine operational correspondence where the transaction is complete and no follow-up remains
 
-# Cold Outreach vs Real Relationships
+# Cold Outreach Detection (Critical for Precision)
 
-**First, check for engagement signals. If ANY are present, it is NOT cold outreach — classify normally:**
-- The inbox owner replied in the thread
-- There is a calendar invite or scheduled meeting between the sender and inbox owner
-- The email references shared documents, Slack conversations, prior calls, or other collaboration
-- The sender was introduced via a warm intro
-- The sender is from a company the inbox owner is actively doing business with (customer, vendor under contract, investor)
-- The thread has messages from both sides
+Many emails disguise themselves as real relationships. Before assigning \`vendor\`, \`candidate\`, \`partner\`, or \`followup\`, apply these tests:
 
-**Only if NONE of the above are present, check if it's cold outreach:**
-- The sender is pitching a service or product TO the inbox owner (agencies, dev shops, freelancers, SaaS tools, etc.) → \`cold-outreach\`
-- A one-sided thread where the sender follows up on their own unanswered messages → \`cold-outreach\`
-- A stranger cold-emailing about jobs, internships, or offering free work → \`cold-outreach\`, not \`candidate\`
-- Someone referencing your YC batch or company name to seem personal, but with no prior engagement → \`cold-outreach\`
+**It's \`cold-outreach\` (noise), NOT a real relationship, if:**
+- The sender is pitching their own product or service — design agencies, compliance firms, content/copy writers, dev shops, freelancers, trademark services, company closure/winding-down services, hiring platforms, etc. — even if they reference your company by name, your YC batch, or offer something "free" or "exclusive for YC founders."
+- The thread consists entirely of the same sender following up on their own unanswered messages. A real followup requires prior two-way engagement.
+- A student, job-seeker, freelancer, or founder cold-emails asking for your time, feedback, or offering free work/trials. These are NOT \`candidate\` — they are \`cold-outreach\`.
+- Someone invites you to an event you didn't sign up for, especially if the email has marketing formatting (tracking links, unsubscribe footers, HTML banners). This is \`promotion\`, not \`event\`.
 
-**Remember:** A \`prospect\` is someone who wants to BUY from you. Someone pitching their services to you is \`cold-outreach\`, not \`prospect\` or \`partner\`.
+**It IS a real relationship (not noise) if:**
+- You (the inbox owner) are a participant in the thread (you sent a reply, or someone on your team did).
+- The sender is from a company you are already paying, or they are providing a service under contract (e.g., your law firm, your accountant, your cloud provider support).
+- The sender was introduced to you by someone you know (warm intro present in the thread).
+- The sender references a specific ongoing engagement with concrete details — e.g., they are your assigned compliance assessor for an audit you initiated, or they are following up after a call you participated in. This is NOT the same as a generic "I noticed your company uses X" pitch.
+
+**Key heuristic:** If every message in the thread is FROM the same external person and the inbox owner never replied, it's almost certainly cold outreach — regardless of how personalized it sounds. Label it \`cold-outreach\`.
 
 # Routine Operations & Finance (Often Missed as Noise)
 
@@ -156,13 +156,9 @@ These are noise even from a vendor you recognize or a platform you use:
 
 If the sender is \`noreply-spamdigest\` (Google Groups spam moderation reports), label it \`filter: ['spam']\`. Google already flagged these as spam. Do not evaluate the held messages inside — the digest itself is noise.
 
-# Filter and Relationship arrays — correct placement is critical
+# Filter array must only contain tags from the Noise category
 
-- The \`filter\` array must only contain tags from the **Noise** category.
-- The \`relationship\` array must only contain tags from the **Relationship** category.
-- **\`cold-outreach\` is a NOISE tag — it goes in \`filter\`, NEVER in \`relationship\`.** If an email is cold outreach, set \`filter: ['cold-outreach']\`. The relationship array should be empty \`[]\` for cold outreach emails.
-- Do not put topic or relationship tags into the filter array. If an email is an event promotion, use \`promotion\` in filter — not \`event\`.
-- If an email is cold outreach, do NOT also tag it as \`prospect\`, \`candidate\`, \`partner\`, or \`vendor\` in relationship. Cold outreach overrides — the relationship array should be \`[]\`.
+Do not put topic or relationship tags into the filter array. If an email is an event promotion, use \`promotion\` in filter — not \`event\`.
 
 # Frontmatter Format
 
