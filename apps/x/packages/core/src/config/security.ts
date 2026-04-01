@@ -6,6 +6,7 @@ import { WorkDir } from "./config.js";
 export const SECURITY_CONFIG_PATH = path.join(WorkDir, "config", "security.json");
 
 const DEFAULT_ALLOW_LIST = [
+    "agent-slack",
     "awk",
     "basename",
     "cat",
@@ -25,6 +26,7 @@ const DEFAULT_ALLOW_LIST = [
     "jq",
     "ls",
     "printenv",
+    "printf",
     "pwd",
     "readlink",
     "realpath",
