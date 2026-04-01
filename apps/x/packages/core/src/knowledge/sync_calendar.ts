@@ -434,71 +434,89 @@ async function performSyncComposio() {
     };
 
     try {
-        const result = await executeAction(
-            'GOOGLECALENDAR_FIND_EVENT',
-            {
-                connected_account_id: connectedAccountId,
-                user_id: 'rowboat-user',
-                version: 'latest',
-                arguments: {
-                    calendar_id: 'primary',
-                    time_min: timeMin,
-                    time_max: timeMax,
-                    single_events: true,
-                    order_by: 'startTime',
-                },
-            }
-        );
-
-        if (!result.successful || !result.data) {
-            console.error('[Calendar] Failed to list events via Composio:', result.error);
-            return;
-        }
-
-        const data = result.data as Record<string, unknown>;
-        // Composio may return events in different structures
-        let events: Array<Record<string, unknown>> = [];
-
-        if (Array.isArray(data.items)) {
-            events = data.items as Array<Record<string, unknown>>;
-        } else if (Array.isArray(data.events)) {
-            events = data.events as Array<Record<string, unknown>>;
-        } else if (data.event_data && typeof data.event_data === 'object') {
-            const nested = data.event_data as Record<string, unknown>;
-            if (Array.isArray(nested.event_data)) {
-                events = nested.event_data as Array<Record<string, unknown>>;
-            } else if (Array.isArray(data.event_data)) {
-                events = data.event_data as Array<Record<string, unknown>>;
-            }
-        } else if (Array.isArray(data)) {
-            events = data as unknown as Array<Record<string, unknown>>;
-        }
-
         const currentEventIds = new Set<string>();
         let newCount = 0;
         let updatedCount = 0;
         const changedTitles: string[] = [];
+        let pageToken: string | null = null;
+        const MAX_PAGES = 20;
 
-        if (events.length === 0) {
-            console.log('[Calendar] No events found in this window.');
-        } else {
-            console.log(`[Calendar] Found ${events.length} events.`);
-            for (const event of events) {
-                const eventId = event.id as string | undefined;
-                if (eventId) {
-                    const saveResult = saveComposioEvent(event, SYNC_DIR);
-                    currentEventIds.add(eventId);
+        for (let page = 0; page < MAX_PAGES; page++) {
+            const args: Record<string, unknown> = {
+                calendar_id: 'primary',
+                time_min: timeMin,
+                time_max: timeMax,
+                single_events: true,
+                order_by: 'startTime',
+            };
+            if (pageToken) {
+                args.page_token = pageToken;
+            }
 
-                    if (saveResult.changed) {
-                        await ensureRun();
-                        changedTitles.push(saveResult.title);
-                        if (saveResult.isNew) {
-                            newCount++;
-                        } else {
-                            updatedCount++;
+            const result = await executeAction(
+                'GOOGLECALENDAR_FIND_EVENT',
+                {
+                    connected_account_id: connectedAccountId,
+                    user_id: 'rowboat-user',
+                    version: 'latest',
+                    arguments: args,
+                }
+            );
+
+            if (!result.successful || !result.data) {
+                console.error('[Calendar] Failed to list events via Composio:', result.error);
+                return;
+            }
+
+            const data = result.data as Record<string, unknown>;
+            // Composio may return events in different structures
+            let events: Array<Record<string, unknown>> = [];
+
+            if (Array.isArray(data.items)) {
+                events = data.items as Array<Record<string, unknown>>;
+            } else if (Array.isArray(data.events)) {
+                events = data.events as Array<Record<string, unknown>>;
+            } else if (data.event_data && typeof data.event_data === 'object') {
+                const nested = data.event_data as Record<string, unknown>;
+                if (Array.isArray(nested.event_data)) {
+                    events = nested.event_data as Array<Record<string, unknown>>;
+                } else if (Array.isArray(data.event_data)) {
+                    events = data.event_data as Array<Record<string, unknown>>;
+                }
+            } else if (Array.isArray(data)) {
+                events = data as unknown as Array<Record<string, unknown>>;
+            }
+
+            if (events.length === 0 && page === 0) {
+                console.log('[Calendar] No events found in this window.');
+            } else if (events.length > 0) {
+                console.log(`[Calendar] Page ${page + 1}: found ${events.length} events.`);
+                for (const event of events) {
+                    const eventId = event.id as string | undefined;
+                    if (eventId) {
+                        const saveResult = saveComposioEvent(event, SYNC_DIR);
+                        currentEventIds.add(eventId);
+
+                        if (saveResult.changed) {
+                            await ensureRun();
+                            changedTitles.push(saveResult.title);
+                            if (saveResult.isNew) {
+                                newCount++;
+                            } else {
+                                updatedCount++;
+                            }
                         }
                     }
                 }
+            }
+
+            // Check for next page
+            const nextToken = data.nextPageToken as string | undefined;
+            if (nextToken) {
+                pageToken = nextToken;
+                console.log(`[Calendar] Fetching next page...`);
+            } else {
+                break;
             }
         }
 

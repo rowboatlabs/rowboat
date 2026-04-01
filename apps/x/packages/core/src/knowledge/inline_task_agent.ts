@@ -74,6 +74,83 @@ Current UTC time: ${nowISO}
 - For scheduled tasks: output ONLY the two markers (schedule + instruction), nothing else.
 - Do not modify the original note file — the system handles all insertions.
 
+# Daily Brief
+
+When the instruction is to "create a daily brief" (or similar), generate a comprehensive daily briefing.
+
+**IMPORTANT:** All workspace tools (workspace-readdir, workspace-readFile, workspace-grep, etc.) take paths **relative to the workspace root**. Use paths like \`calendar_sync/\`, \`gmail_sync/\`, \`knowledge/\` — NOT absolute paths.
+
+**IMPORTANT:** Check the current date. If the date has changed since the content was last generated, clear everything and start fresh for the new day.
+
+## Output structure
+
+Your output MUST start with the current date as a heading:
+
+\`## Monday, March 31, 2026\`
+
+(Use the actual current date in this format: **## Day, Month Date, Year**)
+
+Then include each section below.
+
+## Sections to include
+
+### Calendar
+1. Use \`workspace-readdir\` with path \`calendar_sync\` to list files
+2. Use \`workspace-readFile\` to read each \`.json\` event file (e.g. \`calendar_sync/eventid123.json\`)
+3. Filter for events happening **today** (compare the event's start dateTime or date to the current date)
+4. **Always** output a \\\`\\\`\\\`calendar block — even if there are no events today. If no events, output an empty events array:
+
+\`\`\`
+\\\`\\\`\\\`calendar
+{"title":"Today's Meetings","events":[],"showJoinButton":false}
+\\\`\\\`\\\`
+\`\`\`
+
+If there are events, include them:
+
+\`\`\`
+\\\`\\\`\\\`calendar
+{"title":"Today's Meetings","events":[{"summary":"Weekly Sync","start":{"dateTime":"2026-04-01T10:00:00+05:30"},"end":{"dateTime":"2026-04-01T11:00:00+05:30"},"location":"Google Meet","htmlLink":"...","conferenceLink":"..."}],"showJoinButton":true}
+\\\`\\\`\\\`
+\`\`\`
+
+5. For each upcoming meeting, add a brief note below the calendar block summarizing what the meeting is about. Use \`workspace-grep\` to search knowledge notes for relevant context about attendees or topics.
+6. Do NOT add any text like "No meetings found" — the empty calendar block is sufficient.
+
+### Emails
+1. Use \`workspace-readdir\` with path \`gmail_sync\` to list files (skip \`sync_state.json\` and \`attachments/\`)
+2. Use \`workspace-readFile\` to read the email markdown files (e.g. \`gmail_sync/threadid123.md\`)
+3. Check the frontmatter \`action\` field — emails with \`action: reply\` or \`action: respond\` need a response
+4. For emails needing a response, output \\\`\\\`\\\`email blocks with a \`draft_response\`. Example:
+
+\`\`\`
+\\\`\\\`\\\`email
+{"threadId":"abc123","summary":"Payment confirmation","subject":"Google services payment","from":"Sender <sender@example.com>","date":"2026-04-01T11:28:39+05:30","latest_email":"Hi, I've made the payment...","draft_response":"Thanks for confirming. I'll update our records."}
+\\\`\\\`\\\`
+\`\`\`
+
+5. For other important/recent emails, output \\\`\\\`\\\`email blocks without \`draft_response\` as FYI items
+6. Focus on emails from the last 24 hours
+
+### Yesterday's Summary
+- Check yesterday's calendar events from \`calendar_sync/\` for meetings that occurred
+- Check emails from yesterday in \`gmail_sync/\`
+- Use \`workspace-grep\` to search \`knowledge/\` for any updates from yesterday
+- Keep concise — a few bullet points
+
+### Tasks for Today
+- Search through \`knowledge/\` using \`workspace-grep\` and \`workspace-readdir\` for tasks, todos, or action items
+- Look for checkbox items (\`- [ ]\`), "TODO", "action item", or similar patterns
+- Look at recently updated notes for context on current work
+- List relevant items as a markdown checklist
+
+## Output format
+- Start with the date heading as described above
+- Use clean markdown with the section headers (## Calendar, ## Emails, etc.)
+- Use \\\`\\\`\\\`calendar and \\\`\\\`\\\`email code blocks where specified — these render as interactive UI blocks
+- Do NOT add filler text or commentary when sections are empty — just show the empty block
+- Keep the overall brief scannable and concise
+
 # Target Regions
 
 For recurring/scheduled tasks, the note will contain a **target region** delimited by HTML comment tags:
