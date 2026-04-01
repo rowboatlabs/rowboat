@@ -1,9 +1,16 @@
 import * as React from 'react'
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter, Filter, Search, Save } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter, Filter, Search, Save, ExternalLink, Copy, Pencil, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty, CommandGroup } from '@/components/ui/command'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import {
   Dialog,
   DialogContent,
@@ -91,6 +98,12 @@ type BasesViewProps = {
   externalSearch?: string
   /** Called after the external search has been consumed (applied to internal state). */
   onExternalSearchConsumed?: () => void
+  /** Actions for context menu */
+  actions?: {
+    rename: (oldPath: string, newName: string, isDir: boolean) => Promise<void>
+    remove: (path: string) => Promise<void>
+    copyPath: (path: string) => void
+  }
 }
 
 function collectFiles(nodes: TreeNode[]): { path: string; name: string; mtimeMs: number }[] {
@@ -143,7 +156,7 @@ function getSortValue(note: NoteEntry, column: string): string | number {
   return Array.isArray(v) ? v[0] ?? '' : v
 }
 
-export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaultBase, onSave, externalSearch, onExternalSearchConsumed }: BasesViewProps) {
+export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaultBase, onSave, externalSearch, onExternalSearchConsumed, actions }: BasesViewProps) {
   // Build notes instantly from tree
   const notes = useMemo<NoteEntry[]>(() => {
     return collectFiles(tree).map((f) => ({
@@ -652,22 +665,15 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
           </thead>
           <tbody>
             {pageNotes.map((note) => (
-              <tr
+              <NoteRow
                 key={note.path}
-                className="border-b border-border/50 hover:bg-accent/50 cursor-pointer transition-colors"
-                onClick={() => onSelectNote(note.path)}
-              >
-                {visibleColumns.map((col) => (
-                  <td key={col} className="px-4 py-2 overflow-hidden">
-                    <CellRenderer
-                      note={note}
-                      column={col}
-                      filters={filters}
-                      toggleFilter={toggleFilter}
-                    />
-                  </td>
-                ))}
-              </tr>
+                note={note}
+                visibleColumns={visibleColumns}
+                filters={filters}
+                toggleFilter={toggleFilter}
+                onSelectNote={onSelectNote}
+                actions={actions}
+              />
             ))}
             {pageNotes.length === 0 && (
               <tr>
@@ -798,6 +804,116 @@ function CellRenderer({
       active={hasFilter(filters, { category: column, value })}
       onClick={toggleFilter}
     />
+  )
+}
+
+function NoteRow({
+  note,
+  visibleColumns,
+  filters,
+  toggleFilter,
+  onSelectNote,
+  actions,
+}: {
+  note: NoteEntry
+  visibleColumns: string[]
+  filters: ActiveFilter[]
+  toggleFilter: (category: string, value: string) => void
+  onSelectNote: (path: string) => void
+  actions?: BasesViewProps['actions']
+}) {
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [newName, setNewName] = useState('')
+  const isSubmittingRef = useRef(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isRenaming) inputRef.current?.focus()
+  }, [isRenaming])
+
+  const baseName = note.name
+  const handleRenameSubmit = useCallback(async () => {
+    if (isSubmittingRef.current) return
+    const trimmed = newName.trim()
+    if (!trimmed || trimmed === baseName) {
+      setIsRenaming(false)
+      return
+    }
+    isSubmittingRef.current = true
+    try {
+      await actions?.rename(note.path, trimmed, false)
+    } catch {
+      // ignore
+    }
+    setIsRenaming(false)
+    isSubmittingRef.current = false
+  }, [newName, baseName, actions, note.path])
+
+  const handleCopyPath = useCallback(() => {
+    actions?.copyPath(note.path)
+  }, [actions, note.path])
+
+  const handleDelete = useCallback(() => {
+    void actions?.remove(note.path)
+  }, [actions, note.path])
+
+  const row = (
+    <tr
+      className="border-b border-border/50 hover:bg-accent/50 cursor-pointer transition-colors"
+      onClick={() => onSelectNote(note.path)}
+    >
+      {visibleColumns.map((col) => (
+        <td key={col} className="px-4 py-2 overflow-hidden">
+          {col === 'name' && isRenaming ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onBlur={() => void handleRenameSubmit()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void handleRenameSubmit()
+                if (e.key === 'Escape') setIsRenaming(false)
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-transparent text-sm font-medium outline-none ring-1 ring-ring rounded px-1"
+            />
+          ) : (
+            <CellRenderer
+              note={note}
+              column={col}
+              filters={filters}
+              toggleFilter={toggleFilter}
+            />
+          )}
+        </td>
+      ))}
+    </tr>
+  )
+
+  if (!actions) return row
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        {row}
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onClick={handleCopyPath}>
+          <Copy className="mr-2 size-4" />
+          Copy Path
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => { setNewName(baseName); isSubmittingRef.current = false; setIsRenaming(true) }}>
+          <Pencil className="mr-2 size-4" />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem variant="destructive" onClick={handleDelete}>
+          <Trash2 className="mr-2 size-4" />
+          Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 

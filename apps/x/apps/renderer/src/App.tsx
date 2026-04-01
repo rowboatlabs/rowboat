@@ -3410,7 +3410,14 @@ function App() {
     },
     copyPath: (path: string) => {
       const fullPath = workspaceRoot ? `${workspaceRoot}/${path}` : path
-      navigator.clipboard.writeText(fullPath)
+      navigator.clipboard.writeText(fullPath).catch(() => {
+        const textarea = document.createElement('textarea')
+        textarea.value = fullPath
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+      })
     },
     onOpenInNewTab: (path: string) => {
       openFileInNewTab(path)
@@ -4122,6 +4129,11 @@ function App() {
                     onSave={(name) => void handleBaseSave(name)}
                     externalSearch={externalBaseSearch}
                     onExternalSearchConsumed={() => setExternalBaseSearch(undefined)}
+                    actions={{
+                      rename: knowledgeActions.rename,
+                      remove: knowledgeActions.remove,
+                      copyPath: knowledgeActions.copyPath,
+                    }}
                   />
                 </div>
               ) : isGraphOpen ? (
