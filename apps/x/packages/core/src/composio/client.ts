@@ -167,7 +167,15 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
         }
 
         if (!response.ok) {
-            throw new Error(`Composio API error: ${response.status} ${response.statusText}`);
+            // Try to extract a human-readable message from the JSON body
+            let detail = '';
+            try {
+                const body = JSON.parse(rawText);
+                if (typeof body?.error === 'string') detail = body.error;
+                else if (typeof body?.message === 'string') detail = body.message;
+            } catch { /* body isn't JSON or has no message field */ }
+            const suffix = detail ? `: ${detail}` : '';
+            throw new Error(`Composio API error: ${response.status} ${response.statusText}${suffix}`);
         }
 
         if (!contentType.includes('application/json')) {
