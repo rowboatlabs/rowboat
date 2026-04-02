@@ -1863,7 +1863,7 @@ function App() {
             const inferredTitle = inferRunTitleFromMessage(msg.content)
             if (inferredTitle) {
               setRuns(prev => prev.map(run => (
-                run.id === event.runId && run.title !== inferredTitle
+                run.id === event.runId && !run.title
                   ? { ...run, title: inferredTitle }
                   : run
               )))
