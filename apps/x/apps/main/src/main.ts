@@ -24,8 +24,11 @@ import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
-import { execSync } from "node:child_process";
+import { execSync, exec } from "node:child_process";
+import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
+
+const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -183,6 +186,19 @@ app.whenReady().then(async () => {
       },
       notifyUser: true, // Shows native dialog when update is available
     });
+  }
+
+  // Ensure agent-slack CLI is available
+  try {
+    execSync('agent-slack --version', { stdio: 'ignore', timeout: 5000 });
+  } catch {
+    try {
+      console.log('agent-slack not found, installing...');
+      await execAsync('npm install -g agent-slack', { timeout: 60000 });
+      console.log('agent-slack installed successfully');
+    } catch (e) {
+      console.error('Failed to install agent-slack:', e);
+    }
   }
 
   // Initialize all config files before UI can access them

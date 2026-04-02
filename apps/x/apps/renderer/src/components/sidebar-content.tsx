@@ -10,6 +10,7 @@ import {
   Copy,
   ExternalLink,
   FilePlus,
+  Folder,
   FolderPlus,
   AlertTriangle,
   HelpCircle,
@@ -980,6 +981,16 @@ function KnowledgeSection({
   )
 }
 
+function countFiles(node: TreeNode): number {
+  if (node.kind === 'file') return 1
+  return (node.children ?? []).reduce((sum, child) => sum + countFiles(child), 0)
+}
+
+/** Display name overrides for top-level knowledge folders */
+const FOLDER_DISPLAY_NAMES: Record<string, string> = {
+  Notes: 'My Notes',
+}
+
 // Tree component for file browser
 function Tree({
   item,
@@ -999,6 +1010,7 @@ function Tree({
   const isSelected = selectedPath === item.path
   const [isRenaming, setIsRenaming] = useState(false)
   const isSubmittingRef = React.useRef(false)
+  const displayName = (isDir && FOLDER_DISPLAY_NAMES[item.name]) || item.name
 
   // For files, strip .md extension for editing
   const baseName = !isDir && item.name.endsWith('.md')
@@ -1127,6 +1139,29 @@ function Tree({
     )
   }
 
+  // Top-level knowledge folders (except Notes) open bases view — render as flat items
+  const parts = item.path.split('/')
+  const isBasesFolder = isDir && parts.length === 2 && parts[0] === 'knowledge' && parts[1] !== 'Notes'
+
+  if (isBasesFolder) {
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => onSelect(item.path, item.kind)}>
+              <Folder className="size-4 shrink-0" />
+              <div className="flex w-full items-center gap-1 min-w-0">
+                <span className="min-w-0 flex-1 truncate">{displayName}</span>
+                <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
+              </div>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </ContextMenuTrigger>
+        {contextMenuContent}
+      </ContextMenu>
+    )
+  }
+
   if (!isDir) {
     return (
       <ContextMenu>
@@ -1169,7 +1204,10 @@ function Tree({
             <CollapsibleTrigger asChild>
               <SidebarMenuButton>
                 <ChevronRight className="transition-transform size-4" />
-                <span>{item.name}</span>
+                <div className="flex w-full items-center gap-1 min-w-0">
+                  <span className="min-w-0 flex-1 truncate">{displayName}</span>
+                  <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
+                </div>
               </SidebarMenuButton>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1286,9 +1324,6 @@ function TasksSection({
                         }}
                       >
                         <div className="flex w-full items-center gap-2 min-w-0">
-                          {processingRunIds?.has(run.id) ? (
-                            <span className="size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
-                          ) : null}
                           <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
                           {run.createdAt ? (
                             <span className="shrink-0 text-[10px] text-muted-foreground">

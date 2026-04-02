@@ -267,18 +267,49 @@ const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageMod
   }
 }
 
-// Pinned folders appear first in the sidebar (in this order)
-const PINNED_FOLDERS = ['Notes']
+// Sidebar folder ordering — listed folders appear in this order, unlisted ones follow alphabetically
+const FOLDER_ORDER = ['People', 'Organizations', 'Projects', 'Topics', 'Meetings', 'Agent Notes', 'Notes']
 
-// Sort nodes (dirs first, pinned folders at top, then alphabetically)
+/**
+ * Per-folder base view config: which columns to show and default sort.
+ * Folders not listed here fall back to DEFAULT_BASE_CONFIG.
+ */
+const FOLDER_BASE_CONFIGS: Record<string, { visibleColumns: string[]; sort: { field: string; dir: 'asc' | 'desc' } }> = {
+  'Agent Notes': {
+    visibleColumns: ['name', 'folder', 'mtimeMs'],
+    sort: { field: 'mtimeMs', dir: 'desc' },
+  },
+  People: {
+    visibleColumns: ['name', 'relationship', 'organization', 'mtimeMs'],
+    sort: { field: 'name', dir: 'asc' },
+  },
+  Organizations: {
+    visibleColumns: ['name', 'relationship', 'mtimeMs'],
+    sort: { field: 'name', dir: 'asc' },
+  },
+  Projects: {
+    visibleColumns: ['name', 'status', 'topic', 'mtimeMs'],
+    sort: { field: 'name', dir: 'asc' },
+  },
+  Topics: {
+    visibleColumns: ['name', 'mtimeMs'],
+    sort: { field: 'name', dir: 'asc' },
+  },
+  Meetings: {
+    visibleColumns: ['name', 'topic', 'mtimeMs'],
+    sort: { field: 'mtimeMs', dir: 'desc' },
+  },
+}
+
+// Sort nodes (dirs first, ordered folders by FOLDER_ORDER, then alphabetically)
 function sortNodes(nodes: TreeNode[]): TreeNode[] {
   return nodes.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
-    const aPinned = PINNED_FOLDERS.indexOf(a.name)
-    const bPinned = PINNED_FOLDERS.indexOf(b.name)
-    if (aPinned !== -1 && bPinned !== -1) return aPinned - bPinned
-    if (aPinned !== -1) return -1
-    if (bPinned !== -1) return 1
+    const aOrder = FOLDER_ORDER.indexOf(a.name)
+    const bOrder = FOLDER_ORDER.indexOf(b.name)
+    if (aOrder !== -1 && bOrder !== -1) return aOrder - bOrder
+    if (aOrder !== -1) return -1
+    if (bOrder !== -1) return 1
     return a.name.localeCompare(b.name)
   }).map(node => {
     if (node.children) {
@@ -1832,7 +1863,7 @@ function App() {
             const inferredTitle = inferRunTitleFromMessage(msg.content)
             if (inferredTitle) {
               setRuns(prev => prev.map(run => (
-                run.id === event.runId && run.title !== inferredTitle
+                run.id === event.runId && !run.title
                   ? { ...run, title: inferredTitle }
                   : run
               )))
@@ -3151,6 +3182,31 @@ function App() {
       return
     }
 
+    // Top-level knowledge folders (except Notes) open as a bases view with folder filter
+    const parts = path.split('/')
+    if (parts.length === 2 && parts[0] === 'knowledge' && parts[1] !== 'Notes') {
+      const folderName = parts[1]
+      const folderCfg = FOLDER_BASE_CONFIGS[folderName]
+      setBaseConfigByPath((prev) => ({
+        ...prev,
+        [BASES_DEFAULT_TAB_PATH]: {
+          ...DEFAULT_BASE_CONFIG,
+          name: folderName,
+          filters: [{ category: 'folder', value: folderName }],
+          ...(folderCfg && {
+            visibleColumns: folderCfg.visibleColumns,
+            sort: folderCfg.sort,
+          }),
+        },
+      }))
+      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
+        setIsChatSidebarOpen(false)
+        setIsRightPaneMaximized(false)
+      }
+      void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+      return
+    }
+
     const newExpanded = new Set(expandedPaths)
     if (newExpanded.has(path)) {
       newExpanded.delete(path)
@@ -3354,7 +3410,14 @@ function App() {
     },
     copyPath: (path: string) => {
       const fullPath = workspaceRoot ? `${workspaceRoot}/${path}` : path
-      navigator.clipboard.writeText(fullPath)
+      navigator.clipboard.writeText(fullPath).catch(() => {
+        const textarea = document.createElement('textarea')
+        textarea.value = fullPath
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+      })
     },
     onOpenInNewTab: (path: string) => {
       openFileInNewTab(path)
@@ -4066,6 +4129,11 @@ function App() {
                     onSave={(name) => void handleBaseSave(name)}
                     externalSearch={externalBaseSearch}
                     onExternalSearchConsumed={() => setExternalBaseSearch(undefined)}
+                    actions={{
+                      rename: knowledgeActions.rename,
+                      remove: knowledgeActions.remove,
+                      copyPath: knowledgeActions.copyPath,
+                    }}
                   />
                 </div>
               ) : isGraphOpen ? (
@@ -4073,7 +4141,7 @@ function App() {
                   <GraphView
                     nodes={graphData.nodes}
                     edges={graphData.edges}
-                    isLoading={graphStatus === 'loading'}
+                    isLoading={false}
                     error={graphStatus === 'error' ? (graphError ?? 'Failed to build graph') : null}
                     onSelectNode={(path) => {
                       navigateToFile(path)

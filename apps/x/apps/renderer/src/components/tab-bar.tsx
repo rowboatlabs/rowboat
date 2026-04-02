@@ -67,9 +67,6 @@ export function TabBar<T>({
               )}
               style={layout === 'scroll' ? { flex: '0 0 auto' } : { flex: '1 1 0px' }}
             >
-              {processing && (
-                <span className="size-1.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
-              )}
               <span className="truncate flex-1 text-left">{title}</span>
               {(allowSingleTabClose || tabs.length > 1) && (
                 <span
