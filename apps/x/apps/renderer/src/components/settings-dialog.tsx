@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronDown, ChevronRight, Check, Link2, Unlink, Tags, Mail, BookOpen, User, Plug } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug } from "lucide-react"
 
 import {
   Dialog,
@@ -724,14 +724,6 @@ interface ToolkitInfo {
   composio_managed_auth_schemes: string[]
 }
 
-interface ToolInfo {
-  slug: string
-  name: string
-  description: string
-  toolkitSlug: string
-  inputParameters?: { type?: string; properties?: Record<string, unknown>; required?: string[] }
-}
-
 function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
   // API key state
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false)
@@ -747,18 +739,6 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
   // Connection state
   const [connectedToolkits, setConnectedToolkits] = useState<Set<string>>(new Set())
   const [connectingToolkit, setConnectingToolkit] = useState<string | null>(null)
-
-  // Tool selection state
-  const [expandedToolkit, setExpandedToolkit] = useState<string | null>(null)
-  const [toolkitTools, setToolkitTools] = useState<Record<string, ToolInfo[]>>({})
-  const [toolsLoading, setToolsLoading] = useState<string | null>(null)
-  const [enabledToolSlugs, setEnabledToolSlugs] = useState<Set<string>>(new Set())
-
-  // Tool search state (per-toolkit, server-side via Composio API)
-  const [toolSearchQuery, setToolSearchQuery] = useState("")
-  const [toolSearchResults, setToolSearchResults] = useState<ToolInfo[] | null>(null)
-  const [toolSearchLoading, setToolSearchLoading] = useState(false)
-  const toolSearchTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Check API key configuration
   const checkApiKey = useCallback(async () => {
@@ -783,16 +763,6 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
     }
   }, [])
 
-  // Load enabled tools
-  const loadEnabledTools = useCallback(async () => {
-    try {
-      const result = await window.ipc.invoke("composio:get-enabled-tools", null)
-      setEnabledToolSlugs(new Set(Object.keys(result.tools)))
-    } catch {
-      // ignore
-    }
-  }, [])
-
   // Load toolkits
   const loadToolkits = useCallback(async () => {
     setToolkitsLoading(true)
@@ -811,8 +781,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
     if (!dialogOpen) return
     checkApiKey()
     loadConnected()
-    loadEnabledTools()
-  }, [dialogOpen, checkApiKey, loadConnected, loadEnabledTools])
+  }, [dialogOpen, checkApiKey, loadConnected])
 
   // Load toolkits when API key is configured
   useEffect(() => {
@@ -883,148 +852,9 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
         next.delete(toolkitSlug)
         return next
       })
-      // Remove enabled tools for this toolkit from local state
-      setEnabledToolSlugs(prev => {
-        const toolsForToolkit = toolkitTools[toolkitSlug] || []
-        const next = new Set(prev)
-        for (const t of toolsForToolkit) {
-          next.delete(t.slug)
-        }
-        return next
-      })
-      if (expandedToolkit === toolkitSlug) {
-        setExpandedToolkit(null)
-      }
       toast.success(`Disconnected from ${toolkitSlug}`)
     } catch {
       toast.error("Failed to disconnect")
-    }
-  }
-
-  // Load tools for a toolkit
-  const loadToolsForToolkit = async (toolkitSlug: string) => {
-    if (toolkitTools[toolkitSlug]) return // Already loaded
-    setToolsLoading(toolkitSlug)
-    try {
-      const result = await window.ipc.invoke("composio:list-toolkit-tools", { toolkitSlug })
-      setToolkitTools(prev => ({ ...prev, [toolkitSlug]: result.items }))
-    } catch {
-      toast.error("Failed to load tools")
-    } finally {
-      setToolsLoading(null)
-    }
-  }
-
-  // Search tools within a toolkit (debounced, server-side)
-  const handleToolSearch = useCallback((toolkitSlug: string, query: string) => {
-    setToolSearchQuery(query)
-
-    // Clear pending timer
-    if (toolSearchTimerRef.current) {
-      clearTimeout(toolSearchTimerRef.current)
-      toolSearchTimerRef.current = null
-    }
-
-    // Empty query: clear search results, show all tools
-    if (!query.trim()) {
-      setToolSearchResults(null)
-      setToolSearchLoading(false)
-      return
-    }
-
-    setToolSearchLoading(true)
-
-    // Debounce 350ms before hitting the API
-    toolSearchTimerRef.current = setTimeout(async () => {
-      try {
-        const result = await window.ipc.invoke("composio:list-toolkit-tools", {
-          toolkitSlug,
-          search: query.trim(),
-        })
-        setToolSearchResults(result.items)
-      } catch {
-        toast.error("Search failed")
-        setToolSearchResults(null)
-      } finally {
-        setToolSearchLoading(false)
-      }
-    }, 350)
-  }, [])
-
-  // Clear tool search when switching toolkits
-  useEffect(() => {
-    setToolSearchQuery("")
-    setToolSearchResults(null)
-    setToolSearchLoading(false)
-    if (toolSearchTimerRef.current) {
-      clearTimeout(toolSearchTimerRef.current)
-      toolSearchTimerRef.current = null
-    }
-  }, [expandedToolkit])
-
-  // Clean up pending search timer on unmount
-  useEffect(() => {
-    return () => {
-      if (toolSearchTimerRef.current) {
-        clearTimeout(toolSearchTimerRef.current)
-      }
-    }
-  }, [])
-
-  // Toggle toolkit expansion
-  const handleToggleToolkit = (toolkitSlug: string) => {
-    if (expandedToolkit === toolkitSlug) {
-      setExpandedToolkit(null)
-    } else {
-      setExpandedToolkit(toolkitSlug)
-      if (connectedToolkits.has(toolkitSlug)) {
-        loadToolsForToolkit(toolkitSlug)
-      }
-    }
-  }
-
-  // Enable/disable a tool
-  const handleToggleTool = async (tool: ToolInfo, enable: boolean) => {
-    try {
-      if (enable) {
-        await window.ipc.invoke("composio:enable-tools", { tools: [tool] })
-        setEnabledToolSlugs(prev => new Set([...prev, tool.slug]))
-      } else {
-        await window.ipc.invoke("composio:disable-tools", { toolSlugs: [tool.slug] })
-        setEnabledToolSlugs(prev => {
-          const next = new Set(prev)
-          next.delete(tool.slug)
-          return next
-        })
-      }
-    } catch {
-      toast.error("Failed to update tool")
-    }
-  }
-
-  // Enable/disable all tools for a toolkit
-  const handleToggleAllTools = async (toolkitSlug: string, enable: boolean) => {
-    const tools = toolkitTools[toolkitSlug] || []
-    if (tools.length === 0) return
-
-    try {
-      if (enable) {
-        await window.ipc.invoke("composio:enable-tools", { tools })
-        setEnabledToolSlugs(prev => {
-          const next = new Set(prev)
-          for (const t of tools) next.add(t.slug)
-          return next
-        })
-      } else {
-        await window.ipc.invoke("composio:disable-tools", { toolSlugs: tools.map(t => t.slug) })
-        setEnabledToolSlugs(prev => {
-          const next = new Set(prev)
-          for (const t of tools) next.delete(t.slug)
-          return next
-        })
-      }
-    } catch {
-      toast.error("Failed to update tools")
     }
   }
 
@@ -1125,29 +955,10 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
               {filteredToolkits.map((toolkit) => {
                 const isConnected = connectedToolkits.has(toolkit.slug)
                 const isConnecting = connectingToolkit === toolkit.slug
-                const isExpanded = expandedToolkit === toolkit.slug
-                const tools = toolkitTools[toolkit.slug] || []
-                const isLoadingTools = toolsLoading === toolkit.slug
-                const enabledCount = tools.filter(t => enabledToolSlugs.has(t.slug)).length
-                const allEnabled = tools.length > 0 && enabledCount === tools.length
-
-                // Use search results when actively searching, otherwise show all tools
-                const displayTools = (isExpanded && toolSearchResults !== null) ? toolSearchResults : tools
-                const isSearching = isExpanded && toolSearchQuery.trim().length > 0
 
                 return (
-                  <div key={toolkit.slug} className={cn(
-                    "border rounded-lg overflow-hidden transition-colors",
-                    isExpanded && "border-border/80 shadow-sm"
-                  )}>
-                    {/* Toolkit card header */}
-                    <button
-                      onClick={() => handleToggleToolkit(toolkit.slug)}
-                      className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/50",
-                        isExpanded && "bg-accent/30"
-                      )}
-                    >
+                  <div key={toolkit.slug} className="border rounded-lg overflow-hidden">
+                    <div className="flex items-center gap-3 px-3 py-2.5">
                       {/* Logo */}
                       {toolkit.meta.logo ? (
                         <img
@@ -1166,17 +977,9 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm font-medium truncate">{toolkit.name}</span>
-                          <span className="text-[10px] text-muted-foreground tabular-nums">
-                            {toolkit.meta.tools_count} tools
-                          </span>
                           {isConnected && (
                             <span className="rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-green-600">
                               Connected
-                            </span>
-                          )}
-                          {enabledCount > 0 && (
-                            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary tabular-nums">
-                              {enabledCount} enabled
                             </span>
                           )}
                         </div>
@@ -1185,169 +988,31 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                         </p>
                       </div>
 
-                      {/* Expand icon */}
-                      {isExpanded ? (
-                        <ChevronDown className="size-4 text-muted-foreground flex-shrink-0" />
+                      {/* Connect / Disconnect button */}
+                      {isConnected ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDisconnect(toolkit.slug)}
+                          className="text-xs h-7 flex-shrink-0"
+                        >
+                          Disconnect
+                        </Button>
                       ) : (
-                        <ChevronRight className="size-4 text-muted-foreground flex-shrink-0" />
-                      )}
-                    </button>
-
-                    {/* Expanded content */}
-                    {isExpanded && (
-                      <div className="border-t px-3 py-2.5 space-y-2.5 bg-muted/20">
-                        {/* Connection controls */}
-                        <div className="flex items-center gap-2">
-                          {isConnected ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => { e.stopPropagation(); handleDisconnect(toolkit.slug) }}
-                              className="text-xs h-7"
-                            >
-                              <Unlink className="size-3 mr-1" />
-                              Disconnect
-                            </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleConnect(toolkit.slug)}
+                          disabled={isConnecting}
+                          className="text-xs h-7 flex-shrink-0"
+                        >
+                          {isConnecting ? (
+                            <><Loader2 className="size-3 animate-spin mr-1" />Connecting...</>
                           ) : (
-                            <Button
-                              size="sm"
-                              onClick={(e) => { e.stopPropagation(); handleConnect(toolkit.slug) }}
-                              disabled={isConnecting}
-                              className="text-xs h-7"
-                            >
-                              {isConnecting ? (
-                                <><Loader2 className="size-3 animate-spin mr-1" />Connecting...</>
-                              ) : (
-                                <><Link2 className="size-3 mr-1" />Connect</>
-                              )}
-                            </Button>
+                            <><Link2 className="size-3 mr-1" />Connect</>
                           )}
-
-                          {/* Enable/Disable all (only if connected and tools loaded) */}
-                          {isConnected && tools.length > 0 && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleToggleAllTools(toolkit.slug, !allEnabled)
-                              }}
-                              className="text-xs h-7 ml-auto"
-                            >
-                              {allEnabled ? "Disable All" : "Enable All"}
-                            </Button>
-                          )}
-                        </div>
-
-                        {/* Tools section (only if connected) */}
-                        {isConnected && (
-                          <div className="space-y-2">
-                            {/* Tool search input — shown when toolkit has many tools */}
-                            {!isLoadingTools && tools.length > 5 && (
-                              <div className="relative">
-                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-                                <input
-                                  type="text"
-                                  value={toolSearchQuery}
-                                  onChange={(e) => handleToolSearch(toolkit.slug, e.target.value)}
-                                  placeholder={`Search ${toolkit.meta.tools_count} tools...`}
-                                  className="w-full h-7 pl-7 pr-7 text-xs rounded-md border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                                />
-                                {toolSearchLoading && (
-                                  <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 size-3 animate-spin text-muted-foreground" />
-                                )}
-                                {!toolSearchLoading && toolSearchQuery && (
-                                  <button
-                                    onClick={() => handleToolSearch(toolkit.slug, "")}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                  >
-                                    <X className="size-3" />
-                                  </button>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Search results summary */}
-                            {isSearching && !toolSearchLoading && toolSearchResults !== null && (
-                              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                                <span className="tabular-nums">{toolSearchResults.length}</span>
-                                <span>{toolSearchResults.length === 1 ? 'tool' : 'tools'} matching &ldquo;{toolSearchQuery}&rdquo;</span>
-                              </div>
-                            )}
-
-                            {/* Tool list */}
-                            {isLoadingTools ? (
-                              <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
-                                <Loader2 className="size-3 animate-spin" />
-                                Loading tools...
-                              </div>
-                            ) : displayTools.length === 0 ? (
-                              <div className="py-3 text-center">
-                                <p className="text-xs text-muted-foreground">
-                                  {isSearching
-                                    ? `No tools found for "${toolSearchQuery}"`
-                                    : "No tools found"
-                                  }
-                                </p>
-                                {isSearching && (
-                                  <button
-                                    onClick={() => handleToolSearch(toolkit.slug, "")}
-                                    className="mt-1 text-[11px] text-primary hover:underline"
-                                  >
-                                    Clear search
-                                  </button>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="max-h-[240px] overflow-y-auto space-y-0.5 -mx-1 px-1">
-                                {displayTools.map((tool) => {
-                                  const isEnabled = enabledToolSlugs.has(tool.slug)
-                                  return (
-                                    <label
-                                      key={tool.slug}
-                                      className={cn(
-                                        "flex items-start gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors",
-                                        isEnabled ? "bg-primary/5" : "hover:bg-accent/50"
-                                      )}
-                                    >
-                                      <div className="pt-0.5">
-                                        <div
-                                          onClick={(e) => {
-                                            e.preventDefault()
-                                            handleToggleTool(tool, !isEnabled)
-                                          }}
-                                          className={cn(
-                                            "size-4 rounded border flex items-center justify-center transition-colors cursor-pointer",
-                                            isEnabled
-                                              ? "bg-primary border-primary"
-                                              : "border-border hover:border-primary/50"
-                                          )}
-                                        >
-                                          {isEnabled && <Check className="size-3 text-primary-foreground" />}
-                                        </div>
-                                      </div>
-                                      <div className="flex-1 min-w-0">
-                                        <div className="text-xs font-medium">{tool.name}</div>
-                                        <div className="text-[11px] text-muted-foreground line-clamp-2">
-                                          {tool.description}
-                                        </div>
-                                      </div>
-                                    </label>
-                                  )
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Not connected hint */}
-                        {!isConnected && (
-                          <p className="text-xs text-muted-foreground">
-                            Connect this toolkit to browse and enable its tools.
-                          </p>
-                        )}
-                      </div>
-                    )}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 )
               })}

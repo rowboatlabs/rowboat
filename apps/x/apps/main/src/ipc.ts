@@ -34,6 +34,7 @@ import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granol
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import * as composioHandler from './composio-handler.js';
+import { setConnectionInitiator } from '@x/core/dist/composio/connection-bridge.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
@@ -376,6 +377,9 @@ export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
 
+  // Wire the connection bridge so builtin tools (in core) can trigger OAuth (in main)
+  setConnectionInitiator(composioHandler.initiateConnection);
+
   registerIpcHandlers({
     'app:getVersions': async () => {
       // args is null for this channel (no request payload)
@@ -559,24 +563,9 @@ export function setupIpcHandlers() {
     'composio:list-connected': async () => {
       return composioHandler.listConnected();
     },
-    'composio:execute-action': async (_event, args) => {
-      return composioHandler.executeAction(args.actionSlug, args.toolkitSlug, args.input);
-    },
     // Composio Tools Library handlers
     'composio:list-toolkits': async (_event, args) => {
       return composioHandler.listToolkits(args.cursor);
-    },
-    'composio:list-toolkit-tools': async (_event, args) => {
-      return composioHandler.listToolkitToolsDetailed(args.toolkitSlug, args.search);
-    },
-    'composio:get-enabled-tools': async () => {
-      return composioHandler.getEnabledTools();
-    },
-    'composio:enable-tools': async (_event, args) => {
-      return composioHandler.enableTools(args.tools);
-    },
-    'composio:disable-tools': async (_event, args) => {
-      return composioHandler.disableTools(args.toolSlugs);
     },
     'composio:use-composio-for-google': async () => {
       return composioHandler.useComposioForGoogle();

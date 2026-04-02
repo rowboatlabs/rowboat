@@ -16,8 +16,9 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message'
 import { Shimmer } from '@/components/ai-elements/shimmer'
-import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
+import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
+import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { Suggestions } from '@/components/ai-elements/suggestions'
@@ -34,6 +35,8 @@ import {
   type PermissionResponse,
   createEmptyChatTabViewState,
   getWebSearchCardData,
+  getComposioConnectCardData,
+  getComposioActionCardData,
   isChatMessage,
   isErrorMessage,
   isToolCall,
@@ -121,6 +124,7 @@ interface ChatSidebarProps {
   ttsMode?: 'summary' | 'full'
   onToggleTts?: () => void
   onTtsModeChange?: (mode: 'summary' | 'full') => void
+  onComposioConnected?: (toolkitSlug: string) => void
 }
 
 export function ChatSidebar({
@@ -171,6 +175,7 @@ export function ChatSidebar({
   ttsMode,
   onToggleTts,
   onTtsModeChange,
+  onComposioConnected,
 }: ChatSidebarProps) {
   const [width, setWidth] = useState(() => getInitialPaneWidth(defaultWidth))
   const [isResizing, setIsResizing] = useState(false)
@@ -337,6 +342,21 @@ export function ChatSidebar({
           />
         )
       }
+      const composioConnectData = getComposioConnectCardData(item)
+      if (composioConnectData) {
+        return (
+          <ComposioConnectCard
+            key={item.id}
+            toolkitSlug={composioConnectData.toolkitSlug}
+            toolkitDisplayName={composioConnectData.toolkitDisplayName}
+            status={item.status}
+            alreadyConnected={composioConnectData.alreadyConnected}
+            onConnected={onComposioConnected}
+          />
+        )
+      }
+      const composioActionData = getComposioActionCardData(item)
+      const toolTitle = composioActionData ? composioActionData.label : item.name
       const errorText = item.status === 'error' ? 'Tool error' : ''
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
@@ -346,10 +366,9 @@ export function ChatSidebar({
           open={isToolOpenForTab?.(tabId, item.id) ?? false}
           onOpenChange={(open) => onToolOpenChangeForTab?.(tabId, item.id, open)}
         >
-          <ToolHeader title={item.name} type={`tool-${item.name}`} state={toToolState(item.status)} />
+          <ToolHeader title={toolTitle} type={`tool-${item.name}`} state={toToolState(item.status)} />
           <ToolContent>
-            <ToolInput input={input} />
-            {output !== null ? <ToolOutput output={output} errorText={errorText} /> : null}
+            <ToolTabbedContent input={input} output={output} errorText={errorText} />
           </ToolContent>
         </Tool>
       )

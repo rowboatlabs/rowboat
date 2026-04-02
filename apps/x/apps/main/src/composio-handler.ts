@@ -2,11 +2,9 @@ import { shell, BrowserWindow } from 'electron';
 import { createAuthServer } from './auth-server.js';
 import * as composioClient from '@x/core/dist/composio/client.js';
 import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
-import { composioEnabledToolsRepo } from '@x/core/dist/composio/enabled-tools-repo.js';
-import type { EnabledTool } from '@x/core/dist/composio/enabled-tools-repo.js';
-import type { LocalConnectedAccount, ZExecuteActionResponse } from '@x/core/dist/composio/types.js';
-import { refreshComposioTools } from '@x/core/dist/application/lib/builtin-tools.js';
-import { z } from 'zod';
+import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
+import { CURATED_TOOLKIT_SLUGS } from '@x/core/dist/composio/curated-toolkits.js';
+import type { LocalConnectedAccount } from '@x/core/dist/composio/types.js';
 import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 
@@ -163,6 +161,8 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
                 composioAccountsRepo.updateAccountStatus(toolkitSlug, accountStatus.status);
 
                 if (accountStatus.status === 'ACTIVE') {
+                    // Invalidate instructions cache so the copilot knows about the new connection
+                    invalidateCopilotInstructionsCache();
                     emitComposioEvent({ toolkitSlug, success: true });
                     if (toolkitSlug === 'gmail') {
                         triggerGmailSync();
@@ -273,23 +273,16 @@ export async function disconnect(toolkitSlug: string): Promise<{ success: boolea
     try {
         const account = composioAccountsRepo.getAccount(toolkitSlug);
         if (account) {
-            // Delete from Composio
             await composioClient.deleteConnectedAccount(account.id);
-            // Delete local record
-            composioAccountsRepo.deleteAccount(toolkitSlug);
         }
-        // Clean up enabled tools for this toolkit
-        composioEnabledToolsRepo.disableAllForToolkit(toolkitSlug);
-        refreshComposioTools();
-        return { success: true };
     } catch (error) {
         console.error('[Composio] Disconnect failed:', error);
-        // Still delete local record even if API call fails
+    } finally {
+        // Always clean up local state, even if the API call fails
         composioAccountsRepo.deleteAccount(toolkitSlug);
-        composioEnabledToolsRepo.disableAllForToolkit(toolkitSlug);
-        refreshComposioTools();
-        return { success: true };
+        invalidateCopilotInstructionsCache();
     }
+    return { success: true };
 }
 
 /**
@@ -314,42 +307,7 @@ export async function useComposioForGoogleCalendar(): Promise<{ enabled: boolean
 }
 
 /**
- * Execute a Composio action
- */
-export async function executeAction(
-    actionSlug: string,
-    toolkitSlug: string,
-    input: Record<string, unknown>
-): Promise<z.infer<typeof ZExecuteActionResponse>> {
-    try {
-        const account = composioAccountsRepo.getAccount(toolkitSlug);
-        if (!account || account.status !== 'ACTIVE') {
-            return {
-                data: null,
-                successful: false,
-                error: `Toolkit ${toolkitSlug} is not connected`,
-            };
-        }
-
-        const result = await composioClient.executeAction(actionSlug, {
-            connected_account_id: account.id,
-            user_id: 'rowboat-user',
-            version: 'latest',
-            arguments: input,
-        });
-        return result;
-    } catch (error) {
-        console.error('[Composio] Action execution failed:', error);
-        return {
-            successful: false,
-            data: null,
-            error: error instanceof Error ? error.message : 'Unknown error',
-        };
-    }
-}
-
-/**
- * List available Composio toolkits
+ * List available Composio toolkits — filtered to curated list only
  */
 export async function listToolkits(cursor?: string): Promise<{
     items: Array<{
@@ -363,79 +321,12 @@ export async function listToolkits(cursor?: string): Promise<{
     nextCursor: string | null;
     totalItems: number;
 }> {
+    // Fetch all toolkits and filter to curated list
     const result = await composioClient.listToolkits(cursor || null);
+    const filtered = result.items.filter(item => CURATED_TOOLKIT_SLUGS.has(item.slug));
     return {
-        items: result.items,
+        items: filtered,
         nextCursor: result.next_cursor,
-        totalItems: result.total_items,
+        totalItems: filtered.length,
     };
-}
-
-/**
- * List tools for a toolkit with full details
- */
-export async function listToolkitToolsDetailed(toolkitSlug: string, search?: string): Promise<{
-    items: Array<{
-        slug: string;
-        name: string;
-        description: string;
-        toolkitSlug: string;
-        inputParameters?: { type?: string; properties?: Record<string, unknown>; required?: string[] };
-    }>;
-}> {
-    return composioClient.listToolkitToolsDetailed(toolkitSlug, search || null);
-}
-
-/**
- * Get all enabled tools
- */
-export function getEnabledTools(): {
-    tools: Record<string, { slug: string; name: string; description: string; toolkitSlug: string }>;
-} {
-    const all = composioEnabledToolsRepo.getAll();
-    const tools: Record<string, { slug: string; name: string; description: string; toolkitSlug: string }> = {};
-    for (const [slug, tool] of Object.entries(all)) {
-        tools[slug] = {
-            slug: tool.slug,
-            name: tool.name,
-            description: tool.description,
-            toolkitSlug: tool.toolkitSlug,
-        };
-    }
-    return { tools };
-}
-
-/**
- * Enable specific tools from a toolkit
- */
-export function enableTools(tools: Array<{
-    slug: string;
-    name: string;
-    description: string;
-    toolkitSlug: string;
-    inputParameters?: { type?: string; properties?: Record<string, unknown>; required?: string[] };
-}>): { success: boolean } {
-    const enabledTools: EnabledTool[] = tools.map(t => ({
-        slug: t.slug,
-        name: t.name,
-        description: t.description,
-        toolkitSlug: t.toolkitSlug,
-        inputParameters: {
-            type: 'object' as const,
-            properties: t.inputParameters?.properties ?? {},
-            required: t.inputParameters?.required,
-        },
-    }));
-    composioEnabledToolsRepo.enableBatch(enabledTools);
-    refreshComposioTools();
-    return { success: true };
-}
-
-/**
- * Disable specific tools
- */
-export function disableTools(toolSlugs: string[]): { success: boolean } {
-    composioEnabledToolsRepo.disableBatch(toolSlugs);
-    refreshComposioTools();
-    return { success: true };
 }

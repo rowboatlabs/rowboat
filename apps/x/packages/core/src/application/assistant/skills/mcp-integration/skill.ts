@@ -3,9 +3,13 @@ export const skill = String.raw`
 
 **Load this skill proactively** when a user asks for ANY task that might require external capabilities (web search, internet access, APIs, data fetching, time/date, etc.). This skill provides complete guidance on discovering and executing MCP tools.
 
-## CRITICAL: Always Check MCP Tools First
+## CRITICAL: Composio Tools Take Priority Over MCP
 
-**IMPORTANT**: When a user asks for ANY task that might require external capabilities (web search, API calls, data fetching, etc.), ALWAYS:
+**If a Composio toolkit is connected for the service the user wants (GitHub, Gmail, Slack, etc.), use the \`composio-search-tools\` and \`composio-execute-tool\` builtin tools — NOT MCP tools.** Composio integrations are already authenticated and ready to use. Only fall back to MCP tools if the service is NOT available through Composio.
+
+## When to Check MCP Tools
+
+**IMPORTANT**: When a user asks for a task that requires external capabilities AND no Composio toolkit covers it, check MCP tools:
 
 1. **First check**: Call \`listMcpServers\` to see what's available
 2. **Then list tools**: Call \`listMcpTools\` on relevant servers
@@ -23,9 +27,7 @@ export const skill = String.raw`
 | "Read/write files" | filesystem | \`read_file\`, \`write_file\` |
 | "Get current time/date" | time | \`get_current_time\` |
 | "Make HTTP request" | fetch | \`fetch\`, \`post\` |
-| "GitHub operations" | github | \`create_issue\`, \`search_repos\` |
 | "Generate audio/speech" | elevenLabs | \`text_to_speech\` |
-| "Tweet/social media" | twitter, composio | Various social tools |
 
 ## Key concepts
 - MCP servers expose tools (web scraping, APIs, databases, etc.) declared in \`config/mcp.json\`.

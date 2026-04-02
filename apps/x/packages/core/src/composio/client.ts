@@ -292,6 +292,79 @@ export async function deleteConnectedAccount(connectedAccountId: string): Promis
 }
 
 /**
+ * Schema for search results: includes toolkit info and full input_parameters.
+ */
+const ZSearchResultTool = z.object({
+    slug: z.string(),
+    name: z.string(),
+    description: z.string(),
+    toolkit: z.object({
+        slug: z.string(),
+        name: z.string(),
+        logo: z.string(),
+    }).optional(),
+    input_parameters: z.object({
+        type: z.literal('object').optional().default('object'),
+        properties: z.record(z.string(), z.unknown()).optional().default({}),
+        required: z.array(z.string()).optional(),
+    }).optional().default({ type: 'object', properties: {} }),
+}).passthrough();
+
+/**
+ * Infer toolkit slug from a tool slug.
+ * Tool naming convention: TOOLKIT_ACTION (e.g., GITHUB_CREATE_ISSUE → github).
+ * For multi-word toolkit slugs (GOOGLECALENDAR_CREATE_EVENT), the prefix before
+ * the first underscore matches the toolkit slug.
+ */
+function inferToolkitSlug(toolSlug: string): string {
+    // Tool slugs are uppercase: GITHUB_CREATE_ISSUE, GMAIL_SEND_EMAIL, etc.
+    // The toolkit prefix is everything before the first action word.
+    // Strategy: lowercase the slug and try progressively shorter prefixes.
+    const lower = toolSlug.toLowerCase();
+    const parts = lower.split('_');
+    // Try joining from 1 part up to all-but-1 to find a known prefix
+    // Most common: single-word prefix (github, gmail, slack)
+    return parts[0] ?? lower;
+}
+
+/**
+ * Search for tools across all toolkits (or optionally filtered by specific toolkit slugs).
+ * Returns tools with full input_parameters so the agent knows what params to pass.
+ */
+export async function searchTools(
+    searchQuery: string,
+    toolkitSlugs?: string[],
+): Promise<{ items: Array<{ slug: string; name: string; description: string; toolkitSlug: string; inputParameters: { type: 'object'; properties: Record<string, unknown>; required?: string[] } }> }> {
+    const params: Record<string, string> = {
+        search: searchQuery,
+        limit: '15',
+    };
+    if (toolkitSlugs && toolkitSlugs.length === 1) {
+        params.toolkit_slug = toolkitSlugs[0];
+    }
+
+    const result = await composioApiCall(ZListResponse(ZSearchResultTool), "/tools", params);
+
+    const items = result.items.map((item) => ({
+        slug: item.slug,
+        name: item.name,
+        description: item.description,
+        // Use toolkit.slug from API response, fall back to inferring from tool slug,
+        // and finally fall back to the requested toolkit slug if one was provided.
+        toolkitSlug: item.toolkit?.slug
+            || inferToolkitSlug(item.slug)
+            || (toolkitSlugs?.length === 1 ? toolkitSlugs[0] : ''),
+        inputParameters: {
+            type: 'object' as const,
+            properties: item.input_parameters?.properties ?? {},
+            required: item.input_parameters?.required,
+        },
+    }));
+
+    return { items };
+}
+
+/**
  * List available tools for a toolkit
  */
 export async function listToolkitTools(
@@ -306,54 +379,6 @@ export async function listToolkitTools(
         params.search = searchQuery;
     }
     return composioApiCall(ZListResponse(ZTool), "/tools", params);
-}
-
-/**
- * Schema for the detailed tools response (preserves input_parameters).
- * Uses passthrough so extra API fields don't cause validation failures.
- */
-const ZDetailedTool = z.object({
-    slug: z.string(),
-    name: z.string(),
-    description: z.string(),
-    input_parameters: z.object({
-        type: z.literal('object').optional().default('object'),
-        properties: z.record(z.string(), z.unknown()).optional().default({}),
-        required: z.array(z.string()).optional(),
-    }).optional().default({ type: 'object', properties: {} }),
-}).passthrough();
-
-/**
- * List available tools for a toolkit with full details including input_parameters.
- * Uses composioApiCall for consistent error handling, logging, and validation.
- */
-export async function listToolkitToolsDetailed(
-    toolkitSlug: string,
-    searchQuery: string | null = null,
-): Promise<{ items: Array<{ slug: string; name: string; description: string; toolkitSlug: string; inputParameters: { type: 'object'; properties: Record<string, unknown>; required?: string[] } }> }> {
-    const params: Record<string, string> = {
-        toolkit_slug: toolkitSlug,
-        limit: '200',
-    };
-    if (searchQuery) {
-        params.search = searchQuery;
-    }
-
-    const result = await composioApiCall(ZListResponse(ZDetailedTool), "/tools", params);
-
-    return {
-        items: result.items.map((item) => ({
-            slug: item.slug,
-            name: item.name,
-            description: item.description,
-            toolkitSlug,
-            inputParameters: {
-                type: 'object' as const,
-                properties: item.input_parameters?.properties ?? {},
-                required: item.input_parameters?.required,
-            },
-        })),
-    };
 }
 
 /**

@@ -1,51 +1,55 @@
 import { skillCatalog } from "./skills/index.js"; // eslint-disable-line @typescript-eslint/no-unused-vars -- used in template literal
 import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js";
-import { composioEnabledToolsRepo } from "../../composio/enabled-tools-repo.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { isConfigured as isComposioConfigured } from "../../composio/client.js";
+import { CURATED_TOOLKITS } from "../../composio/curated-toolkits.js";
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
 
 /**
- * Generate dynamic instructions section for Composio tools.
- * Returns empty string if no tools are enabled.
+ * Generate dynamic instructions section for Composio integrations.
+ * Lists connected toolkits and explains the meta-tool discovery flow.
  */
 async function getComposioToolsPrompt(): Promise<string> {
     if (!(await isComposioConfigured())) return '';
 
-    const enabledTools = composioEnabledToolsRepo.getAll();
-    const toolEntries = Object.values(enabledTools);
-    if (toolEntries.length === 0) return '';
+    const connectedToolkits = composioAccountsRepo.getConnectedToolkits();
 
-    // Group tools by toolkit
-    const byToolkit: Record<string, Array<{ slug: string; name: string; description: string }>> = {};
-    for (const tool of toolEntries) {
-        if (!byToolkit[tool.toolkitSlug]) {
-            byToolkit[tool.toolkitSlug] = [];
-        }
-        byToolkit[tool.toolkitSlug].push(tool);
+    let prompt = `\n## Composio Integrations\n\n`;
+    prompt += `You can connect to external services (Gmail, Slack, GitHub, Notion, etc.) via Composio.\n\n`;
+
+    if (connectedToolkits.length > 0) {
+        const connectedNames = connectedToolkits
+            .map(slug => CURATED_TOOLKITS.find(t => t.slug === slug)?.displayName ?? slug)
+            .join(', ');
+        prompt += `**Currently connected:** ${connectedNames}\n\n`;
+    } else {
+        prompt += `**No services connected yet.** Use \`composio-list-toolkits\` to show available integrations, or \`composio-connect-toolkit\` to help the user connect one.\n\n`;
     }
 
-    // Check which toolkits are connected
-    const connectedToolkits = new Set(composioAccountsRepo.getConnectedToolkits());
+    prompt += `**CRITICAL: NEVER say "I can't access [service]" or "I don't have access to [service]" without FIRST trying Composio.** If a user asks about ANY third-party service (LinkedIn, Gmail, GitHub, Slack, etc.), your FIRST action must be to check \`composio-list-toolkits\` or try \`composio-connect-toolkit\`. Never give up before trying.\n\n`;
 
-    let prompt = `\n## Composio Integration Tools\n\n`;
-    prompt += `You have access to external service integrations via Composio. These tools are prefixed with \`composio-\` and connect to third-party services on the user's behalf. The user has enabled these tools in Settings > Tools Library.\n\n`;
-    prompt += `**How to use Composio tools:**\n`;
-    prompt += `- Each tool is named \`composio-{ACTION_SLUG}\` (e.g., \`composio-GMAIL_SEND_EMAIL\`)\n`;
-    prompt += `- Call them like any other builtin tool — pass the required parameters and they execute via the connected account\n`;
-    prompt += `- If a tool returns an error about the toolkit not being connected, inform the user they need to connect it in Settings > Tools Library\n`;
-    prompt += `- Always confirm with the user before taking actions that send messages, create items, or modify data in external services\n\n`;
+    prompt += `**Discovery & Execution Flow:**\n`;
+    prompt += `1. When the user asks to interact with a service (e.g., "get my LinkedIn profile", "check my email", "list GitHub issues"):\n`;
+    prompt += `   a. Check if the service is connected (via \`composio-list-toolkits\` or the connected list above)\n`;
+    prompt += `   b. If NOT connected, call \`composio-connect-toolkit\` immediately — do NOT ask for confirmation or tell the user you can't do it\n`;
+    prompt += `   c. If connected, proceed to search and execute\n`;
+    prompt += `2. Use \`composio-search-tools\` with SHORT keyword queries (e.g., "list issues", "send email", "get profile") — avoid long sentences.\n`;
+    prompt += `3. Read the \`inputSchema\` from search results carefully — note which fields are in \`required\`.\n`;
+    prompt += `4. Call \`composio-execute-tool\` with the tool slug, toolkit slug, AND all required \`arguments\`. For tools with empty \`properties: {}\`, pass \`arguments: {}\`.\n`;
 
-    for (const [toolkitSlug, tools] of Object.entries(byToolkit)) {
-        const isConnected = connectedToolkits.has(toolkitSlug);
-        const statusBadge = isConnected ? '(Connected)' : '(Not Connected)';
-        prompt += `### ${toolkitSlug.charAt(0).toUpperCase() + toolkitSlug.slice(1)} ${statusBadge}\n`;
-        for (const tool of tools) {
-            prompt += `- \`composio-${tool.slug}\` — ${tool.description}\n`;
-        }
-        prompt += `\n`;
-    }
+    prompt += `**Example — fetching GitHub issues for owner/repo:**\n`;
+    prompt += `1. \`composio-search-tools({ query: "list issues", toolkitSlug: "github" })\` → finds \`GITHUB_ISSUES_LIST_FOR_REPO\`\n`;
+    prompt += `2. Schema shows required: \`["owner", "repo"]\` — extract from user's request (e.g., "rowboatlabs/rowboat" → owner: "rowboatlabs", repo: "rowboat")\n`;
+    prompt += `3. \`composio-execute-tool({ toolSlug: "GITHUB_ISSUES_LIST_FOR_REPO", toolkitSlug: "github", arguments: { owner: "rowboatlabs", repo: "rowboat", state: "open", per_page: 100 } })\`\n\n`;
+
+    prompt += `**Important:**\n`;
+    prompt += `- Use short keyword search queries, NOT full sentences (good: "list issues", bad: "get all open issues for a GitHub repository")\n`;
+    prompt += `- ALWAYS pass required arguments to composio-execute-tool — read the inputSchema from search results\n`;
+    prompt += `- **If a tool call fails (e.g., missing fields), fix the arguments and retry IMMEDIATELY — do NOT stop and narrate the error to the user. Just fix it and continue.**\n`;
+    prompt += `- **Multi-part requests:** When the user asks to "connect X and then do Y", complete BOTH parts in one turn. If part 1 (connect) is already done, proceed directly to part 2 (the actual task).\n`;
+    prompt += `- Confirm with the user before executing tools that send messages, create items, or modify data (NOT for read-only queries or connecting)\n`;
+    prompt += `- Connecting a toolkit is always safe — just do it when needed, don't ask permission\n`;
 
     return prompt;
 }
@@ -71,7 +75,9 @@ You're an insightful, encouraging assistant who combines meticulous clarity with
 ## What Rowboat Is
 Rowboat is an agentic assistant for everyday work - emails, meetings, projects, and people. Users give you tasks like "draft a follow-up email," "prep me for this meeting," or "summarize where we are with this project." You figure out what context you need, pull from emails and meetings, and get it done.
 
-**Email Drafting:** When users ask you to draft emails or respond to emails, load the \`draft-emails\` skill first. It provides structured guidance for processing emails, gathering context from calendar and knowledge base, and creating well-informed draft responses.
+**Email Drafting:** When users ask you to **draft** or **compose** emails (e.g., "draft a follow-up to Monica", "write an email to John about the project"), load the \`draft-emails\` skill first. Do NOT load this skill for reading, fetching, or checking emails — use Composio tools for that instead.
+
+**Live Email/Calendar/Service Queries:** When users ask to **read**, **fetch**, **check**, or **view** emails, calendar events, or any data from a connected service (e.g., "what's my latest email?", "check my inbox", "what meetings do I have today?"), use \`composio-search-tools\` and \`composio-execute-tool\` to query the connected service directly. Do NOT look in local \`gmail_sync/\` or \`calendar_sync/\` folders — use Composio for live data.
 
 **Meeting Prep:** When users ask you to prepare for a meeting, prep for a call, or brief them on attendees, load the \`meeting-prep\` skill first. It provides structured guidance for gathering context about attendees from the knowledge base and creating useful meeting briefs.
 
@@ -212,13 +218,23 @@ Always consult this catalog first so you load the right skills before taking act
 - Never start a response with a heading. Lead with a sentence or two of context first.
 - Avoid deeply nested bullets. If nesting beyond 2 levels, restructure.
 
-## MCP Tool Discovery (CRITICAL)
+## Tool Priority: Composio First, Then MCP
 
-**ALWAYS check for MCP tools BEFORE saying you can't do something.**
+**When the user wants to interact with a third-party service (GitHub, Gmail, Slack, Notion, Jira, etc.):**
+1. **FIRST** use the \`composio-*\` builtin tools — they are already authenticated and ready. Do NOT load the mcp-integration skill or draft-emails skill for service queries.
+2. **ONLY** if the service is NOT available through Composio, fall back to MCP tools.
 
-When a user asks for ANY task that might require external capabilities (web search, internet access, APIs, data fetching, etc.), check MCP tools first using \`listMcpServers\` and \`listMcpTools\`. Load the "mcp-integration" skill for detailed guidance on discovering and executing MCP tools.
+**Common Composio tasks (use composio-search-tools + composio-execute-tool):**
+- "What's my latest email?" → search "fetch emails" in gmail toolkit
+- "Check my inbox" → search "fetch emails" in gmail toolkit
+- "What meetings do I have?" → search "list events" in googlecalendar toolkit
+- "Create a GitHub issue" → search "create issue" in github toolkit
+- "Send a Slack message" → search "send message" in slack toolkit
 
-**DO NOT** immediately respond with "I can't access the internet" or "I don't have that capability" without checking MCP tools first!
+**When the user wants capabilities that Composio does NOT cover** (web search, file scraping, audio generation, etc.):
+- Check MCP tools using \`listMcpServers\` and \`listMcpTools\`. Load the "mcp-integration" skill for guidance.
+
+**DO NOT** immediately respond with "I can't access the internet" or "I don't have that capability" without checking both Composio and MCP tools first!
 
 ## Execution Reminders
 - Explore existing files and structure before creating new assets.
@@ -258,7 +274,10 @@ ${runtimeContextPrompt}
 - \`web-search\` - Search the web. Returns rich results with full text, highlights, and metadata. The \`category\` parameter defaults to \`general\` (full web search) — only use a specific category like \`news\`, \`company\`, \`research paper\` etc. when the query is clearly about that type. For everyday queries (weather, restaurants, prices, how-to), use \`general\`.
 - \`app-navigation\` - Control the app UI: open notes, switch views, filter/search the knowledge base, manage saved views. **Load the \`app-navigation\` skill before using this tool.**
 - \`save-to-memory\` - Save observations about the user to the agent memory system. Use this proactively during conversations.
-- **Composio tools** (\`composio-*\`) — External service integrations enabled by the user in Settings > Tools Library. These connect to third-party apps like Gmail, GitHub, Linear, Notion, etc. See the "Composio Integration Tools" section below for available tools.
+- \`composio-list-toolkits\` — List available integrations (Gmail, Slack, GitHub, etc.) and their connection status
+- \`composio-search-tools\` — Search for tools by use case (e.g., "send email", "create issue"); returns tool slugs and input schemas
+- \`composio-execute-tool\` — Execute a Composio tool by slug with parameters from search results
+- \`composio-connect-toolkit\` — Connect a service (Gmail, Slack, GitHub, etc.) via OAuth directly from chat
 
 **Prefer these tools whenever possible** — they work instantly with zero friction. For file operations inside \`~/.rowboat/\`, always use these instead of \`executeCommand\`.
 
@@ -306,8 +325,7 @@ let cachedInstructions: string | null = null;
 
 /**
  * Invalidate the cached instructions so the next buildCopilotInstructions() call
- * regenerates the Composio tools section. Call this after enabling/disabling tools
- * or connecting/disconnecting a toolkit.
+ * regenerates the Composio section. Call this after connecting/disconnecting a toolkit.
  */
 export function invalidateCopilotInstructionsCache(): void {
     cachedInstructions = null;

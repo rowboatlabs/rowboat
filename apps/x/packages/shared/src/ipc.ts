@@ -377,18 +377,6 @@ const ipcSchemas = {
       toolkits: z.array(z.string()),
     }),
   },
-  'composio:execute-action': {
-    req: z.object({
-      actionSlug: z.string(),
-      toolkitSlug: z.string(),
-      input: z.record(z.string(), z.unknown()),
-    }),
-    res: z.object({
-      data: z.unknown(),
-      successful: z.boolean(),
-      error: z.string().nullable(),
-    }),
-  },
   'composio:use-composio-for-google': {
     req: z.null(),
     res: z.object({
@@ -431,58 +419,6 @@ const ipcSchemas = {
       nextCursor: z.string().nullable(),
       totalItems: z.number(),
     }),
-  },
-  'composio:list-toolkit-tools': {
-    req: z.object({
-      toolkitSlug: z.string(),
-      search: z.string().optional(),
-    }),
-    res: z.object({
-      items: z.array(z.object({
-        slug: z.string(),
-        name: z.string(),
-        description: z.string(),
-        toolkitSlug: z.string(),
-        inputParameters: z.object({
-          type: z.string().optional(),
-          properties: z.record(z.string(), z.unknown()).optional(),
-          required: z.array(z.string()).optional(),
-        }).optional(),
-      })),
-    }),
-  },
-  'composio:get-enabled-tools': {
-    req: z.null(),
-    res: z.object({
-      tools: z.record(z.string(), z.object({
-        slug: z.string(),
-        name: z.string(),
-        description: z.string(),
-        toolkitSlug: z.string(),
-      })),
-    }),
-  },
-  'composio:enable-tools': {
-    req: z.object({
-      tools: z.array(z.object({
-        slug: z.string(),
-        name: z.string(),
-        description: z.string(),
-        toolkitSlug: z.string(),
-        inputParameters: z.object({
-          type: z.string().optional(),
-          properties: z.record(z.string(), z.unknown()).optional(),
-          required: z.array(z.string()).optional(),
-        }).optional(),
-      })),
-    }),
-    res: z.object({ success: z.boolean() }),
-  },
-  'composio:disable-tools': {
-    req: z.object({
-      toolSlugs: z.array(z.string()),
-    }),
-    res: z.object({ success: z.boolean() }),
   },
   // Agent schedule channels
   'agent-schedule:getConfig': {

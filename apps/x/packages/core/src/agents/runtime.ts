@@ -370,8 +370,7 @@ function formatLlmStreamError(rawError: unknown): string {
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     if (id === "copilot" || id === "rowboatx") {
-        // Rebuild tools from current BuiltinTools to pick up dynamically
-        // registered Composio tools (added via refreshComposioTools).
+        // Rebuild tools from current BuiltinTools (includes Composio meta-tools).
         const tools: Record<string, z.infer<typeof ToolAttachment>> = {};
         for (const name of Object.keys(BuiltinTools)) {
             tools[name] = { type: "builtin", name };

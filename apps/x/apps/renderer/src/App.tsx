@@ -34,9 +34,10 @@ import {
 
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { useSmoothedText } from './hooks/useSmoothedText';
-import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
+import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
@@ -67,6 +68,8 @@ import {
   createEmptyChatTabViewState,
   getWebSearchCardData,
   getAppActionCardData,
+  getComposioConnectCardData,
+  getComposioActionCardData,
   inferRunTitleFromMessage,
   isChatMessage,
   isErrorMessage,
@@ -76,6 +79,7 @@ import {
   parseAttachedFiles,
   toToolState,
 } from '@/lib/chat-conversation'
+import { COMPOSIO_DISPLAY_NAMES as composioDisplayNames } from '@x/shared/src/composio.js'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
@@ -2242,6 +2246,12 @@ function App() {
   }
   handlePromptSubmitRef.current = handlePromptSubmit
 
+  const handleComposioConnected = useCallback((toolkitSlug: string) => {
+    // Auto-send a continuation message when a Composio toolkit connects
+    const name = composioDisplayNames[toolkitSlug] || toolkitSlug
+    handlePromptSubmitRef.current?.({ text: `${name} connected successfully.`, files: [] })
+  }, [])
+
   const handleStop = useCallback(async () => {
     if (!runId) return
     const now = Date.now()
@@ -3826,6 +3836,21 @@ function App() {
           />
         )
       }
+      const composioConnectData = getComposioConnectCardData(item)
+      if (composioConnectData) {
+        return (
+          <ComposioConnectCard
+            key={item.id}
+            toolkitSlug={composioConnectData.toolkitSlug}
+            toolkitDisplayName={composioConnectData.toolkitDisplayName}
+            status={item.status}
+            alreadyConnected={composioConnectData.alreadyConnected}
+            onConnected={handleComposioConnected}
+          />
+        )
+      }
+      const composioActionData = getComposioActionCardData(item)
+      const toolTitle = composioActionData ? composioActionData.label : item.name
       const errorText = item.status === 'error' ? 'Tool error' : ''
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
@@ -3836,15 +3861,12 @@ function App() {
           onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
         >
           <ToolHeader
-            title={item.name}
+            title={toolTitle}
             type={`tool-${item.name}`}
             state={toToolState(item.status)}
           />
           <ToolContent>
-            <ToolInput input={input} />
-            {output !== null ? (
-              <ToolOutput output={output} errorText={errorText} />
-            ) : null}
+            <ToolTabbedContent input={input} output={output} errorText={errorText} />
           </ToolContent>
         </Tool>
       )
@@ -4470,6 +4492,7 @@ function App() {
                 ttsMode={ttsMode}
                 onToggleTts={handleToggleTts}
                 onTtsModeChange={handleTtsModeChange}
+                onComposioConnected={handleComposioConnected}
               />
             )}
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}
