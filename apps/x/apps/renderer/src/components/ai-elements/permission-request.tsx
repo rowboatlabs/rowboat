@@ -36,7 +36,7 @@ export const PermissionRequest = ({
   ...props
 }: PermissionRequestProps) => {
   // Extract command from arguments if it's executeCommand
-  const command = toolCall.toolName === "executeCommand"
+  const command = toolCall.toolName === "executeCommand" 
     ? (typeof toolCall.arguments === "object" && toolCall.arguments !== null && "command" in toolCall.arguments
         ? String(toolCall.arguments.command)
         : JSON.stringify(toolCall.arguments))
@@ -80,12 +80,12 @@ export const PermissionRequest = ({
                 </p>
               </div>
               {isResponded && (
-                <Badge
-                  variant="secondary"
+                <Badge 
+                  variant="secondary" 
                   className={cn(
                     "shrink-0",
-                    isApproved
-                      ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400"
+                    isApproved 
+                      ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400" 
                       : "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400"
                   )}
                 >
