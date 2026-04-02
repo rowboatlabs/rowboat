@@ -1324,9 +1324,6 @@ function TasksSection({
                         }}
                       >
                         <div className="flex w-full items-center gap-2 min-w-0">
-                          {processingRunIds?.has(run.id) ? (
-                            <span className="size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
-                          ) : null}
                           <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
                           {run.createdAt ? (
                             <span className="shrink-0 text-[10px] text-muted-foreground">
