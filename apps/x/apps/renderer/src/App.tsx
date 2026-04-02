@@ -4141,7 +4141,7 @@ function App() {
                   <GraphView
                     nodes={graphData.nodes}
                     edges={graphData.edges}
-                    isLoading={graphStatus === 'loading'}
+                    isLoading={false}
                     error={graphStatus === 'error' ? (graphError ?? 'Failed to build graph') : null}
                     onSelectNode={(path) => {
                       navigateToFile(path)
