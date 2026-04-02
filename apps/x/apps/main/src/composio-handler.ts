@@ -309,7 +309,7 @@ export async function useComposioForGoogleCalendar(): Promise<{ enabled: boolean
 /**
  * List available Composio toolkits — filtered to curated list only
  */
-export async function listToolkits(cursor?: string): Promise<{
+export async function listToolkits(): Promise<{
     items: Array<{
         slug: string;
         name: string;
@@ -321,12 +321,21 @@ export async function listToolkits(cursor?: string): Promise<{
     nextCursor: string | null;
     totalItems: number;
 }> {
-    // Fetch all toolkits and filter to curated list
-    const result = await composioClient.listToolkits(cursor || null);
-    const filtered = result.items.filter(item => CURATED_TOOLKIT_SLUGS.has(item.slug));
+    // Paginate through all API pages to collect every curated toolkit
+    type ToolkitItem = Awaited<ReturnType<typeof composioClient.listToolkits>>['items'][number];
+    const allItems: ToolkitItem[] = [];
+    let cursor: string | null = null;
+    const maxPages = 10; // safety limit
+    for (let page = 0; page < maxPages; page++) {
+        const result = await composioClient.listToolkits(cursor);
+        allItems.push(...result.items);
+        cursor = result.next_cursor;
+        if (!cursor) break;
+    }
+    const filtered = allItems.filter(item => CURATED_TOOLKIT_SLUGS.has(item.slug));
     return {
         items: filtered,
-        nextCursor: result.next_cursor,
+        nextCursor: null,
         totalItems: filtered.length,
     };
 }

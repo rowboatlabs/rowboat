@@ -719,9 +719,9 @@ interface ToolkitInfo {
   slug: string
   name: string
   meta: { description: string; logo: string; tools_count: number; triggers_count: number }
-  no_auth: boolean
-  auth_schemes: string[]
-  composio_managed_auth_schemes: string[]
+  no_auth?: boolean
+  auth_schemes?: string[]
+  composio_managed_auth_schemes?: string[]
 }
 
 function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {

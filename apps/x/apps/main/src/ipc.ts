@@ -564,8 +564,8 @@ export function setupIpcHandlers() {
       return composioHandler.listConnected();
     },
     // Composio Tools Library handlers
-    'composio:list-toolkits': async (_event, args) => {
-      return composioHandler.listToolkits(args.cursor);
+    'composio:list-toolkits': async () => {
+      return composioHandler.listToolkits();
     },
     'composio:use-composio-for-google': async () => {
       return composioHandler.useComposioForGoogle();
