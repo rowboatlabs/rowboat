@@ -15,7 +15,6 @@ import { WorkDir } from "../../config/config.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../composio/client.js";
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
-import { getConnectionInitiator } from "../../composio/connection-bridge.js";
 import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
 import { createProvider } from "../../models/models.js";
@@ -1292,7 +1291,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'composio-connect-toolkit': {
-        description: 'Connect a Composio service (Gmail, Slack, GitHub, etc.) via OAuth. Opens the user\'s browser for authentication. After authenticating, the user can use tools from that service.',
+        description: 'Connect a Composio service (Gmail, Slack, GitHub, etc.) via OAuth. Shows a connect card for the user to authenticate.',
         inputSchema: z.object({
             toolkitSlug: z.string().describe('The toolkit slug to connect (e.g., "gmail", "github", "slack", "notion")'),
         }),
@@ -1315,35 +1314,13 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 };
             }
 
-            // Use the connection bridge to trigger OAuth
-            const initiator = getConnectionInitiator();
-            if (!initiator) {
-                return {
-                    success: false,
-                    error: 'Connection system not available. Please try connecting via Settings > Tools Library instead.',
-                };
-            }
-
-            try {
-                const result = await initiator(toolkitSlug);
-                if (result.success) {
-                    const toolkit = CURATED_TOOLKITS.find(t => t.slug === toolkitSlug);
-                    return {
-                        success: true,
-                        message: `Opening browser to authenticate with ${toolkit?.displayName ?? toolkitSlug}. Please complete the authentication in your browser, then let me know when you're done.`,
-                    };
-                }
-                return {
-                    success: false,
-                    error: result.error || 'Failed to initiate connection',
-                };
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                return {
-                    success: false,
-                    error: `Connection failed: ${message}`,
-                };
-            }
+            // Return signal — the UI renders a ComposioConnectCard with a Connect button.
+            // OAuth only starts when the user clicks that button.
+            const toolkit = CURATED_TOOLKITS.find(t => t.slug === toolkitSlug);
+            return {
+                success: true,
+                message: `Please connect ${toolkit?.displayName ?? toolkitSlug} to continue.`,
+            };
         },
         isAvailable: async () => isComposioConfigured(),
     },

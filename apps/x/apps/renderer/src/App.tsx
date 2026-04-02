@@ -69,7 +69,7 @@ import {
   getWebSearchCardData,
   getAppActionCardData,
   getComposioConnectCardData,
-  getComposioActionCardData,
+  getToolDisplayName,
   inferRunTitleFromMessage,
   isChatMessage,
   isErrorMessage,
@@ -3849,8 +3849,7 @@ function App() {
           />
         )
       }
-      const composioActionData = getComposioActionCardData(item)
-      const toolTitle = composioActionData ? composioActionData.label : item.name
+      const toolTitle = getToolDisplayName(item)
       const errorText = item.status === 'error' ? 'Tool error' : ''
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)

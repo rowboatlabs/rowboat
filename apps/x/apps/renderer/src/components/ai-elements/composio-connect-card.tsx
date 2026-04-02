@@ -5,7 +5,6 @@ import {
   CheckCircleIcon,
   Link2Icon,
   LoaderIcon,
-  WrenchIcon,
   XCircleIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -67,18 +66,21 @@ export function ComposioConnectCard({
   }, [toolkitSlug]);
 
   const isToolRunning = status === "pending" || status === "running";
+  const displayName = toolkitDisplayName || toolkitSlug;
 
   return (
     <div className="not-prose mb-4 flex items-center gap-3 rounded-lg border px-3 py-2.5">
+      {/* Toolkit initial */}
       <div className="size-7 rounded bg-muted flex items-center justify-center flex-shrink-0">
-        <WrenchIcon className="size-3.5 text-muted-foreground" />
+        <span className="text-xs font-bold text-muted-foreground">
+          {displayName.charAt(0).toUpperCase()}
+        </span>
       </div>
 
+      {/* Name & status */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium truncate">
-            {toolkitDisplayName || toolkitSlug}
-          </span>
+          <span className="text-sm font-medium truncate">{displayName}</span>
           {connectionState === "connected" && (
             <span className="rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-green-600">
               Connected
@@ -93,6 +95,7 @@ export function ComposioConnectCard({
         )}
       </div>
 
+      {/* Action area */}
       {connectionState === "connected" ? (
         <CheckCircleIcon className="size-4 text-green-600 flex-shrink-0" />
       ) : connectionState === "connecting" ? (

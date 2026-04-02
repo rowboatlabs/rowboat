@@ -34,7 +34,6 @@ import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granol
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import * as composioHandler from './composio-handler.js';
-import { setConnectionInitiator } from '@x/core/dist/composio/connection-bridge.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
@@ -376,9 +375,6 @@ export function stopServicesWatcher(): void {
 export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
-
-  // Wire the connection bridge so builtin tools (in core) can trigger OAuth (in main)
-  setConnectionInitiator(composioHandler.initiateConnection);
 
   registerIpcHandlers({
     'app:getVersions': async () => {

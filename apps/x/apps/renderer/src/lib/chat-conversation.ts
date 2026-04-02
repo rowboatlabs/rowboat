@@ -278,6 +278,51 @@ export const getComposioConnectCardData = (tool: ToolCall): ComposioConnectCardD
   }
 }
 
+// Human-friendly display names for builtin tools
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  'workspace-readFile': 'Reading file',
+  'workspace-writeFile': 'Writing file',
+  'workspace-edit': 'Editing file',
+  'workspace-readdir': 'Reading directory',
+  'workspace-exists': 'Checking path',
+  'workspace-stat': 'Getting file info',
+  'workspace-glob': 'Finding files',
+  'workspace-grep': 'Searching files',
+  'workspace-mkdir': 'Creating directory',
+  'workspace-rename': 'Renaming',
+  'workspace-copy': 'Copying file',
+  'workspace-remove': 'Removing',
+  'workspace-getRoot': 'Getting workspace root',
+  'loadSkill': 'Loading skill',
+  'parseFile': 'Parsing file',
+  'LLMParse': 'Extracting content',
+  'analyzeAgent': 'Analyzing agent',
+  'executeCommand': 'Running command',
+  'addMcpServer': 'Adding MCP server',
+  'listMcpServers': 'Listing MCP servers',
+  'listMcpTools': 'Listing MCP tools',
+  'executeMcpTool': 'Running MCP tool',
+  'web-search': 'Searching the web',
+  'save-to-memory': 'Saving to memory',
+  'app-navigation': 'Navigating app',
+  'composio-list-toolkits': 'Listing integrations',
+  'composio-search-tools': 'Searching tools',
+  'composio-execute-tool': 'Running tool',
+  'composio-connect-toolkit': 'Connecting service',
+}
+
+/**
+ * Get a human-friendly display name for a tool call.
+ * For Composio tools, returns a contextual label (e.g., "Found 3 tools for 'send email' in Gmail").
+ * For builtin tools, returns a static friendly name (e.g., "Reading file").
+ * Falls back to the raw tool name if no mapping exists.
+ */
+export const getToolDisplayName = (tool: ToolCall): string => {
+  const composioData = getComposioActionCardData(tool)
+  if (composioData) return composioData.label
+  return TOOL_DISPLAY_NAMES[tool.name] || tool.name
+}
+
 // Composio action card data (for search, execute, list tools)
 export type ComposioActionCardData = {
   actionType: 'search' | 'execute' | 'list'
