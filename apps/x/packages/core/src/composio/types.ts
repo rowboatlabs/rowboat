@@ -229,12 +229,5 @@ export const ZLocalConnectedAccount = z.object({
     lastUpdatedAt: z.string(),
 });
 
-export type AuthScheme = z.infer<typeof ZAuthScheme>;
-export type ConnectedAccountStatus = z.infer<typeof ZConnectedAccountStatus>;
-export type Toolkit = z.infer<typeof ZToolkit>;
-export type Tool = z.infer<typeof ZTool>;
-export type AuthConfig = z.infer<typeof ZAuthConfig>;
-export type ConnectedAccount = z.infer<typeof ZConnectedAccount>;
 export type LocalConnectedAccount = z.infer<typeof ZLocalConnectedAccount>;
-export type ExecuteActionRequest = z.infer<typeof ZExecuteActionRequest>;
-export type ExecuteActionResponse = z.infer<typeof ZExecuteActionResponse>;
+export type ConnectedAccountStatus = z.infer<typeof ZConnectedAccountStatus>;

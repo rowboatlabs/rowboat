@@ -29,14 +29,6 @@ export function ComposioConnectCard({
     "idle" | "connecting" | "connected" | "error"
   >(alreadyConnected ? "connected" : "idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [didFireCallback, setDidFireCallback] = useState(false);
-
-  // If the tool result already says connected, reflect that
-  useEffect(() => {
-    if (alreadyConnected) {
-      setConnectionState("connected");
-    }
-  }, [alreadyConnected]);
 
   // Listen for composio:didConnect events
   useEffect(() => {
@@ -47,6 +39,7 @@ export function ComposioConnectCard({
         if (event.success) {
           setConnectionState("connected");
           setErrorMessage(null);
+          if (!alreadyConnected) onConnected?.(toolkitSlug);
         } else {
           setConnectionState("error");
           setErrorMessage(event.error || "Connection failed");
@@ -54,15 +47,7 @@ export function ComposioConnectCard({
       }
     );
     return cleanup;
-  }, [toolkitSlug]);
-
-  // Fire onConnected callback once when connected
-  useEffect(() => {
-    if (connectionState === "connected" && !didFireCallback && !alreadyConnected) {
-      setDidFireCallback(true);
-      onConnected?.(toolkitSlug);
-    }
-  }, [connectionState, didFireCallback, alreadyConnected, onConnected, toolkitSlug]);
+  }, [toolkitSlug, alreadyConnected, onConnected]);
 
   const handleConnect = useCallback(async () => {
     setConnectionState("connecting");
@@ -75,7 +60,6 @@ export function ComposioConnectCard({
         setConnectionState("error");
         setErrorMessage(result.error || "Failed to initiate connection");
       }
-      // Success will be handled by composio:didConnect event
     } catch {
       setConnectionState("error");
       setErrorMessage("Failed to initiate connection");
@@ -86,12 +70,10 @@ export function ComposioConnectCard({
 
   return (
     <div className="not-prose mb-4 flex items-center gap-3 rounded-lg border px-3 py-2.5">
-      {/* Icon */}
       <div className="size-7 rounded bg-muted flex items-center justify-center flex-shrink-0">
         <WrenchIcon className="size-3.5 text-muted-foreground" />
       </div>
 
-      {/* Name & status text */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-medium truncate">
@@ -107,13 +89,10 @@ export function ComposioConnectCard({
           <p className="text-xs text-destructive truncate">{errorMessage}</p>
         )}
         {connectionState === "idle" && isToolRunning && (
-          <p className="text-xs text-muted-foreground">
-            Waiting to connect...
-          </p>
+          <p className="text-xs text-muted-foreground">Waiting to connect...</p>
         )}
       </div>
 
-      {/* Action area */}
       {connectionState === "connected" ? (
         <CheckCircleIcon className="size-4 text-green-600 flex-shrink-0" />
       ) : connectionState === "connecting" ? (
@@ -124,23 +103,14 @@ export function ComposioConnectCard({
       ) : connectionState === "error" ? (
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <XCircleIcon className="size-3.5 text-destructive" />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleConnect}
-            className="text-xs h-7"
-          >
+          <Button size="sm" variant="outline" onClick={handleConnect} className="text-xs h-7">
             Retry
           </Button>
         </div>
       ) : isToolRunning ? (
         <LoaderIcon className="size-3.5 animate-spin text-muted-foreground flex-shrink-0" />
       ) : (
-        <Button
-          size="sm"
-          onClick={handleConnect}
-          className="text-xs h-7 flex-shrink-0"
-        >
+        <Button size="sm" onClick={handleConnect} className="text-xs h-7 flex-shrink-0">
           <Link2Icon className="size-3 mr-1" />
           Connect
         </Button>

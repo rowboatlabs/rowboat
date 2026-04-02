@@ -399,9 +399,7 @@ const ipcSchemas = {
   },
   // Composio Tools Library channels
   'composio:list-toolkits': {
-    req: z.object({
-      cursor: z.string().optional(),
-    }),
+    req: z.object({}),
     res: z.object({
       items: z.array(z.object({
         slug: z.string(),

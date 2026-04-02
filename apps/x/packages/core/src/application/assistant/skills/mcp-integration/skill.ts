@@ -22,7 +22,7 @@ export const skill = String.raw`
 
 | User Request | Check For | Likely Tool |
 |--------------|-----------|-------------|
-| "Search the web/internet" | firecrawl, composio, fetch | \`firecrawl_search\`, \`COMPOSIO_SEARCH_WEB\` |
+| "Search the web/internet" | firecrawl, fetch | \`firecrawl_search\` |
 | "Scrape this website" | firecrawl | \`firecrawl_scrape\` |
 | "Read/write files" | filesystem | \`read_file\`, \`write_file\` |
 | "Get current time/date" | time | \`get_current_time\` |
@@ -244,7 +244,7 @@ The schema tells you:
 **Example schema from listMcpTools:**
 \`\`\`json
 {
-  "name": "COMPOSIO_SEARCH_WEB",
+  "name": "firecrawl_search",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -265,10 +265,10 @@ The schema tells you:
 **Correct executeMcpTool call:**
 \`\`\`json
 {
-  "serverName": "composio",
-  "toolName": "COMPOSIO_SEARCH_WEB",
+  "serverName": "firecrawl",
+  "toolName": "firecrawl_search",
   "arguments": {
-    "query": "elon musk latest news"
+    "query": "latest AI news"
   }
 }
 \`\`\`
@@ -276,18 +276,18 @@ The schema tells you:
 **WRONG - Missing arguments:**
 \`\`\`json
 {
-  "serverName": "composio",
-  "toolName": "COMPOSIO_SEARCH_WEB"
+  "serverName": "firecrawl",
+  "toolName": "firecrawl_search"
 }
 \`\`\`
 
 **WRONG - Wrong parameter name:**
 \`\`\`json
 {
-  "serverName": "composio",
-  "toolName": "COMPOSIO_SEARCH_WEB",
+  "serverName": "firecrawl",
+  "toolName": "firecrawl_search",
   "arguments": {
-    "search": "elon musk"  // Wrong! Should be "query"
+    "search": "latest AI news"  // Wrong! Should be "query"
   }
 }
 \`\`\`

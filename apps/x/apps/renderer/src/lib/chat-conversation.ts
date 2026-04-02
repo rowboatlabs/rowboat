@@ -261,8 +261,6 @@ export type ComposioConnectCardData = {
   alreadyConnected: boolean
 }
 
-// Display names imported from @x/shared/composio (single source of truth)
-const composioDisplayNames = COMPOSIO_DISPLAY_NAMES
 
 export const getComposioConnectCardData = (tool: ToolCall): ComposioConnectCardData | null => {
   if (tool.name !== 'composio-connect-toolkit') return null
@@ -275,7 +273,7 @@ export const getComposioConnectCardData = (tool: ToolCall): ComposioConnectCardD
 
   return {
     toolkitSlug,
-    toolkitDisplayName: composioDisplayNames[toolkitSlug] || toolkitSlug,
+    toolkitDisplayName: COMPOSIO_DISPLAY_NAMES[toolkitSlug] || toolkitSlug,
     alreadyConnected,
   }
 }
@@ -293,7 +291,7 @@ export const getComposioActionCardData = (tool: ToolCall): ComposioActionCardDat
   if (tool.name === 'composio-search-tools') {
     const query = (input?.query as string) || 'tools'
     const toolkitSlug = input?.toolkitSlug as string | undefined
-    const toolkit = toolkitSlug ? composioDisplayNames[toolkitSlug] || toolkitSlug : null
+    const toolkit = toolkitSlug ? COMPOSIO_DISPLAY_NAMES[toolkitSlug] || toolkitSlug : null
     const count = (result?.resultCount as number) ?? null
 
     let label = `Searching for "${query}"`
@@ -308,7 +306,7 @@ export const getComposioActionCardData = (tool: ToolCall): ComposioActionCardDat
   if (tool.name === 'composio-execute-tool') {
     const toolSlug = (input?.toolSlug as string) || ''
     const toolkitSlug = (input?.toolkitSlug as string) || ''
-    const toolkit = composioDisplayNames[toolkitSlug] || toolkitSlug
+    const toolkit = COMPOSIO_DISPLAY_NAMES[toolkitSlug] || toolkitSlug
     const successful = result?.successful as boolean | undefined
 
     // Make the tool slug human-readable: GITHUB_ISSUES_LIST_FOR_REPO → "Issues list for repo"

@@ -72,7 +72,7 @@ function loadConfig(): ComposioConfig {
 /**
  * Save Composio configuration
  */
-export function saveConfig(config: ComposioConfig): void {
+function saveConfig(config: ComposioConfig): void {
     const dir = path.dirname(CONFIG_FILE);
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -255,15 +255,6 @@ export async function createAuthConfig(
 }
 
 /**
- * Delete an auth config
- */
-export async function deleteAuthConfig(authConfigId: string): Promise<z.infer<typeof ZDeleteOperationResponse>> {
-    return composioApiCall(ZDeleteOperationResponse, `/auth_configs/${authConfigId}`, {}, {
-        method: 'DELETE',
-    });
-}
-
-/**
  * Create a connected account
  */
 export async function createConnectedAccount(
@@ -362,23 +353,6 @@ export async function searchTools(
     }));
 
     return { items };
-}
-
-/**
- * List available tools for a toolkit
- */
-export async function listToolkitTools(
-    toolkitSlug: string,
-    searchQuery: string | null = null,
-): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTool>>>> {
-    const params: Record<string, string> = {
-        toolkit_slug: toolkitSlug,
-        limit: '200',
-    };
-    if (searchQuery) {
-        params.search = searchQuery;
-    }
-    return composioApiCall(ZListResponse(ZTool), "/tools", params);
 }
 
 /**

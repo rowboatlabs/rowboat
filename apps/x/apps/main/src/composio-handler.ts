@@ -3,7 +3,7 @@ import { createAuthServer } from './auth-server.js';
 import * as composioClient from '@x/core/dist/composio/client.js';
 import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
-import { CURATED_TOOLKIT_SLUGS } from '@x/core/dist/composio/curated-toolkits.js';
+import { CURATED_TOOLKIT_SLUGS } from '@x/shared/dist/composio.js';
 import type { LocalConnectedAccount } from '@x/core/dist/composio/types.js';
 import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
