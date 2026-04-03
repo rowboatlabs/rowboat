@@ -12,6 +12,7 @@ import backgroundAgentsSkill from "./background-agents/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
+import codeWithAgentsSkill from "./code-with-agents/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
@@ -95,6 +96,12 @@ const definitions: SkillDefinition[] = [
     title: "App Navigation",
     summary: "Navigate the app UI - open notes, switch views, filter/search the knowledge base, and manage saved views.",
     content: appNavigationSkill,
+  },
+  {
+    id: "code-with-agents",
+    title: "Code with Agents",
+    summary: "Write code, build projects, create scripts, or fix bugs by delegating to Claude Code or Codex via acpx.",
+    content: codeWithAgentsSkill,
   },
 ];
 
