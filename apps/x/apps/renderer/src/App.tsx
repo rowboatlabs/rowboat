@@ -1972,6 +1972,21 @@ function App() {
           break
         }
 
+      case 'tool-output-stream':
+        {
+          if (!isActiveRun) return
+          setConversation(prev => prev.map(item => {
+            if (
+              isToolCall(item)
+              && item.id === event.toolCallId
+            ) {
+              return { ...item, streamingOutput: (item.streamingOutput ?? '') + event.output }
+            }
+            return item
+          }))
+          break
+        }
+
       case 'tool-permission-request': {
         if (!isActiveRun) return
         const key = event.toolCall.toolCallId
@@ -3842,7 +3857,16 @@ function App() {
           />
           <ToolContent>
             <ToolInput input={input} />
-            {output !== null ? (
+            {item.streamingOutput && item.status === 'running' ? (
+              <div className="space-y-2 p-4">
+                <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+                  Live Output
+                </h4>
+                <pre className="max-h-80 overflow-auto rounded-md border bg-zinc-950 p-4 font-mono text-xs text-green-400 whitespace-pre-wrap">
+                  {item.streamingOutput}
+                </pre>
+              </div>
+            ) : output !== null ? (
               <ToolOutput output={output} errorText={errorText} />
             ) : null}
           </ToolContent>

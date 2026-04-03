@@ -161,6 +161,7 @@ export class AgentRuntime implements IAgentRuntime {
                         modelConfigRepo: this.modelConfigRepo,
                         signal,
                         abortRegistry: this.abortRegistry,
+                        bus: this.bus,
                     })) {
                         eventCount++;
                         if (event.type !== "llm-stream-event") {
@@ -822,6 +823,7 @@ export async function* streamAgent({
     modelConfigRepo,
     signal,
     abortRegistry,
+    bus,
 }: {
     state: AgentState,
     idGenerator: IMonotonicallyIncreasingIdGenerator;
@@ -830,6 +832,7 @@ export async function* streamAgent({
     modelConfigRepo: IModelConfigRepo;
     signal: AbortSignal;
     abortRegistry: IAbortRegistry;
+    bus: IBus;
 }): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
     const logger = new PrefixLogger(`run-${runId}-${state.agentName}`);
 
@@ -942,6 +945,7 @@ export async function* streamAgent({
                     modelConfigRepo,
                     signal,
                     abortRegistry,
+                    bus,
                 })) {
                     yield* processEvent({
                         ...event,
@@ -952,7 +956,7 @@ export async function* streamAgent({
                     result = subflowState.finalResponse();
                 }
             } else {
-                result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments, { runId, signal, abortRegistry });
+                result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments, { runId, toolCallId, signal, abortRegistry, publish: (event) => bus.publish(event) });
             }
             const resultPayload = result === undefined ? null : result;
             const resultMsg: z.infer<typeof ToolMessage> = {

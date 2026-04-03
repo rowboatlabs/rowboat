@@ -81,6 +81,13 @@ export const RunErrorEvent = BaseRunEvent.extend({
     error: z.string(),
 });
 
+export const ToolOutputStreamEvent = BaseRunEvent.extend({
+    type: z.literal("tool-output-stream"),
+    toolCallId: z.string(),
+    toolName: z.string(),
+    output: z.string(),
+});
+
 export const RunStoppedEvent = BaseRunEvent.extend({
     type: z.literal("run-stopped"),
     reason: z.enum(["user-requested", "force-stopped"]).optional(),
@@ -95,6 +102,7 @@ export const RunEvent = z.union([
     MessageEvent,
     ToolInvocationEvent,
     ToolResultEvent,
+    ToolOutputStreamEvent,
     AskHumanRequestEvent,
     AskHumanResponseEvent,
     ToolPermissionRequestEvent,
