@@ -14,8 +14,10 @@ import {
     ZExecuteActionRequest,
     ZExecuteActionResponse,
     ZListResponse,
+    ZSearchResultTool,
     ZTool,
     ZToolkit,
+    type NormalizedToolResult,
 } from "./types.js";
 import { isSignedIn } from "../account/account.js";
 import { getAccessToken } from "../auth/tokens.js";
@@ -283,52 +285,34 @@ export async function deleteConnectedAccount(connectedAccountId: string): Promis
 }
 
 /**
- * Schema for search results: includes toolkit info and full input_parameters.
- */
-const ZSearchResultTool = z.object({
-    slug: z.string(),
-    name: z.string(),
-    description: z.string(),
-    toolkit: z.object({
-        slug: z.string(),
-        name: z.string(),
-        logo: z.string(),
-    }).optional(),
-    input_parameters: z.object({
-        type: z.literal('object').optional().default('object'),
-        properties: z.record(z.string(), z.unknown()).optional().default({}),
-        required: z.array(z.string()).optional(),
-    }).optional().default({ type: 'object', properties: {} }),
-}).passthrough();
-
-/**
- * Infer toolkit slug from a tool slug.
- * Tool naming convention: TOOLKIT_ACTION (e.g., GITHUB_CREATE_ISSUE → github).
- * For multi-word toolkit slugs (GOOGLECALENDAR_CREATE_EVENT), the prefix before
- * the first underscore matches the toolkit slug.
+ * Infer toolkit slug from a tool slug when the API omits the toolkit object.
+ * Convention: TOOLKIT_ACTION (e.g., GITHUB_CREATE_ISSUE → github).
+ *
+ * This fallback exists because the Composio /tools search endpoint occasionally
+ * returns results without the `toolkit` field — observed with certain search
+ * queries and when the tool is from a less-common integration. The inference is
+ * a best-effort heuristic: lowercase the first segment before the first underscore.
  */
 function inferToolkitSlug(toolSlug: string): string {
-    // Tool slugs are uppercase: GITHUB_CREATE_ISSUE, GMAIL_SEND_EMAIL, etc.
-    // The toolkit prefix is everything before the first action word.
-    // Strategy: lowercase the slug and try progressively shorter prefixes.
     const lower = toolSlug.toLowerCase();
     const parts = lower.split('_');
-    // Try joining from 1 part up to all-but-1 to find a known prefix
-    // Most common: single-word prefix (github, gmail, slack)
     return parts[0] ?? lower;
 }
 
 /**
  * Search for tools across all toolkits (or optionally filtered by specific toolkit slugs).
  * Returns tools with full input_parameters so the agent knows what params to pass.
+ *
+ * Uses a limit of 50 (not 15) to avoid the curated-filter-after-limit problem where
+ * in-scope results at position 16+ would be discarded if earlier results are out-of-scope.
  */
 export async function searchTools(
     searchQuery: string,
     toolkitSlugs?: string[],
-): Promise<{ items: Array<{ slug: string; name: string; description: string; toolkitSlug: string; inputParameters: { type: 'object'; properties: Record<string, unknown>; required?: string[] } }> }> {
+): Promise<{ items: NormalizedToolResult[] }> {
     const params: Record<string, string> = {
         search: searchQuery,
-        limit: '15',
+        limit: '50',
     };
     if (toolkitSlugs && toolkitSlugs.length === 1) {
         params.toolkit_slug = toolkitSlugs[0];
@@ -336,12 +320,10 @@ export async function searchTools(
 
     const result = await composioApiCall(ZListResponse(ZSearchResultTool), "/tools", params);
 
-    const items = result.items.map((item) => ({
+    const items: NormalizedToolResult[] = result.items.map((item) => ({
         slug: item.slug,
         name: item.name,
         description: item.description,
-        // Use toolkit.slug from API response, fall back to inferring from tool slug,
-        // and finally fall back to the requested toolkit slug if one was provided.
         toolkitSlug: item.toolkit?.slug
             || inferToolkitSlug(item.slug)
             || (toolkitSlugs?.length === 1 ? toolkitSlugs[0] : ''),

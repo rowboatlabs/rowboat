@@ -307,20 +307,10 @@ export async function useComposioForGoogleCalendar(): Promise<{ enabled: boolean
 }
 
 /**
- * List available Composio toolkits — filtered to curated list only
+ * List available Composio toolkits — filtered to curated list only.
+ * Return type matches the ZToolkit schema from core/composio/types.ts.
  */
-export async function listToolkits(): Promise<{
-    items: Array<{
-        slug: string;
-        name: string;
-        meta: { description: string; logo: string; tools_count: number; triggers_count: number };
-        no_auth?: boolean;
-        auth_schemes?: string[];
-        composio_managed_auth_schemes?: string[];
-    }>;
-    nextCursor: string | null;
-    totalItems: number;
-}> {
+export async function listToolkits() {
     // Paginate through all API pages to collect every curated toolkit
     type ToolkitItem = Awaited<ReturnType<typeof composioClient.listToolkits>>['items'][number];
     const allItems: ToolkitItem[] = [];
@@ -335,7 +325,7 @@ export async function listToolkits(): Promise<{
     const filtered = allItems.filter(item => CURATED_TOOLKIT_SLUGS.has(item.slug));
     return {
         items: filtered,
-        nextCursor: null,
+        nextCursor: null as string | null,
         totalItems: filtered.length,
     };
 }

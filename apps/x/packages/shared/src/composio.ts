@@ -1,6 +1,7 @@
 /**
  * Curated Composio toolkits available to Rowboat users.
  * Single source of truth for slugs, display names, and categories.
+ * Sorted by slug (ASC) for maintainability.
  */
 
 export type ToolkitCategory = 'communication' | 'productivity' | 'development' | 'crm' | 'social' | 'storage' | 'support';
@@ -12,46 +13,31 @@ export interface CuratedToolkit {
 }
 
 export const CURATED_TOOLKITS: CuratedToolkit[] = [
-    // Communication
+    { slug: 'airtable', displayName: 'Airtable', category: 'productivity' },
+    { slug: 'asana', displayName: 'Asana', category: 'productivity' },
+    { slug: 'cal', displayName: 'Cal.com', category: 'productivity' },
+    { slug: 'calendly', displayName: 'Calendly', category: 'productivity' },
+    { slug: 'dropbox', displayName: 'Dropbox', category: 'storage' },
+    { slug: 'github', displayName: 'GitHub', category: 'development' },
     { slug: 'gmail', displayName: 'Gmail', category: 'communication' },
-    { slug: 'slack', displayName: 'Slack', category: 'communication' },
-    { slug: 'microsoft_outlook', displayName: 'Microsoft Outlook', category: 'communication' },
-    { slug: 'microsoft_teams', displayName: 'Microsoft Teams', category: 'communication' },
-
-    // Productivity
     { slug: 'googlecalendar', displayName: 'Google Calendar', category: 'productivity' },
     { slug: 'googledocs', displayName: 'Google Docs', category: 'productivity' },
-    { slug: 'googlesheets', displayName: 'Google Sheets', category: 'productivity' },
-    { slug: 'notion', displayName: 'Notion', category: 'productivity' },
-    { slug: 'airtable', displayName: 'Airtable', category: 'productivity' },
-    { slug: 'calendly', displayName: 'Calendly', category: 'productivity' },
-    { slug: 'cal', displayName: 'Cal.com', category: 'productivity' },
-
-    // Storage
     { slug: 'googledrive', displayName: 'Google Drive', category: 'storage' },
-    { slug: 'dropbox', displayName: 'Dropbox', category: 'storage' },
-    { slug: 'onedrive', displayName: 'OneDrive', category: 'storage' },
-
-    // Development
-    { slug: 'github', displayName: 'GitHub', category: 'development' },
-    { slug: 'linear', displayName: 'Linear', category: 'development' },
-    { slug: 'jira', displayName: 'Jira', category: 'development' },
-
-    // Project Management
-    { slug: 'asana', displayName: 'Asana', category: 'productivity' },
-    { slug: 'trello', displayName: 'Trello', category: 'productivity' },
-
-    // CRM & Sales
+    { slug: 'googlesheets', displayName: 'Google Sheets', category: 'productivity' },
     { slug: 'hubspot', displayName: 'HubSpot', category: 'crm' },
-    { slug: 'salesforce', displayName: 'Salesforce', category: 'crm' },
-
-    // Social
-    { slug: 'linkedin', displayName: 'LinkedIn', category: 'social' },
-    { slug: 'twitter', displayName: 'X', category: 'social' },
-    { slug: 'reddit', displayName: 'Reddit', category: 'social' },
-
-    // Support
     { slug: 'intercom', displayName: 'Intercom', category: 'support' },
+    { slug: 'jira', displayName: 'Jira', category: 'development' },
+    { slug: 'linear', displayName: 'Linear', category: 'development' },
+    { slug: 'linkedin', displayName: 'LinkedIn', category: 'social' },
+    { slug: 'microsoft_outlook', displayName: 'Microsoft Outlook', category: 'communication' },
+    { slug: 'microsoft_teams', displayName: 'Microsoft Teams', category: 'communication' },
+    { slug: 'notion', displayName: 'Notion', category: 'productivity' },
+    { slug: 'onedrive', displayName: 'OneDrive', category: 'storage' },
+    { slug: 'reddit', displayName: 'Reddit', category: 'social' },
+    { slug: 'salesforce', displayName: 'Salesforce', category: 'crm' },
+    { slug: 'slack', displayName: 'Slack', category: 'communication' },
+    { slug: 'trello', displayName: 'Trello', category: 'productivity' },
+    { slug: 'twitter', displayName: 'X', category: 'social' },
     { slug: 'zendesk', displayName: 'Zendesk', category: 'support' },
 ];
 

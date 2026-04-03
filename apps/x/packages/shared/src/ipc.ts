@@ -398,6 +398,7 @@ const ipcSchemas = {
     res: z.null(),
   },
   // Composio Tools Library channels
+  // Response schema mirrors core/composio/types.ts ZToolkit (kept inline to avoid cross-package import)
   'composio:list-toolkits': {
     req: z.object({}),
     res: z.object({

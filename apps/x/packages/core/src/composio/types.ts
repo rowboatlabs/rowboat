@@ -231,3 +231,41 @@ export const ZLocalConnectedAccount = z.object({
 
 export type LocalConnectedAccount = z.infer<typeof ZLocalConnectedAccount>;
 export type ConnectedAccountStatus = z.infer<typeof ZConnectedAccountStatus>;
+
+/**
+ * Tool schema for search results.
+ * Unlike ZTool, `toolkit` is optional because the Composio /tools search endpoint
+ * sometimes omits the toolkit object from results. `input_parameters` uses
+ * lenient defaults so tools with no params (e.g. LINKEDIN_GET_MY_INFO) parse cleanly.
+ */
+export const ZSearchResultTool = z.object({
+    slug: z.string(),
+    name: z.string(),
+    description: z.string(),
+    toolkit: z.object({
+        slug: z.string(),
+        name: z.string(),
+        logo: z.string(),
+    }).optional(),
+    input_parameters: z.object({
+        type: z.literal('object').optional().default('object'),
+        properties: z.record(z.string(), z.unknown()).optional().default({}),
+        required: z.array(z.string()).optional(),
+    }).optional().default({ type: 'object', properties: {} }),
+}).passthrough();
+
+/**
+ * Normalized tool result returned from searchTools().
+ */
+export const ZNormalizedToolResult = z.object({
+    slug: z.string(),
+    name: z.string(),
+    description: z.string(),
+    toolkitSlug: z.string(),
+    inputParameters: z.object({
+        type: z.literal('object'),
+        properties: z.record(z.string(), z.unknown()),
+        required: z.array(z.string()).optional(),
+    }),
+});
+export type NormalizedToolResult = z.infer<typeof ZNormalizedToolResult>;
