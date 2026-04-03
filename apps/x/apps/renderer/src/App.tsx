@@ -1961,6 +1961,11 @@ function App() {
             return next
           })
 
+          // Auto-collapse tool after completion if it was auto-opened for streaming
+          if (event.toolCallId) {
+            setToolOpenForTab(activeChatTabIdRef.current, event.toolCallId, false)
+          }
+
           // Handle app-navigation tool results — trigger UI side effects
           if (event.toolName === 'app-navigation') {
             const result = event.result as { success?: boolean; action?: string; [key: string]: unknown } | undefined
@@ -1980,6 +1985,10 @@ function App() {
               isToolCall(item)
               && item.id === event.toolCallId
             ) {
+              // Auto-open the tool collapsible on first streaming chunk
+              if (!item.streamingOutput) {
+                setToolOpenForTab(activeChatTabIdRef.current, item.id, true)
+              }
               return { ...item, streamingOutput: (item.streamingOutput ?? '') + event.output }
             }
             return item

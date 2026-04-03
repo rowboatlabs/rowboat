@@ -14,48 +14,82 @@ function sanitizeToken(token: string): string {
   return token.trim().replace(/^['"()]+|['"()]+$/g, '');
 }
 
-export function extractCommandNames(command: string): string[] {
-  const discovered = new Set<string>();
-  const segments = command.split(COMMAND_SPLIT_REGEX);
+/**
+ * Extract command-name segments from a shell command string.
+ * Each segment is the leading tokens (after env-var assignments) of a
+ * pipeline / chain element, joined by spaces and lowercased.
+ * e.g. "cd ~/foo && npx acpx@latest claude exec 'hello'" → ["cd", "npx acpx@latest claude exec"]
+ */
+function extractCommandSegments(command: string): string[] {
+  const segments: string[] = [];
+  const stripped = command.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
+  const parts = stripped.split(COMMAND_SPLIT_REGEX);
 
-  for (const segment of segments) {
-    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+  for (const part of parts) {
+    const tokens = part.trim().split(/\s+/).filter(Boolean);
     if (!tokens.length) continue;
 
     let index = 0;
     while (index < tokens.length && ENV_ASSIGNMENT_REGEX.test(tokens[index])) {
       index++;
     }
-
     if (index >= tokens.length) continue;
 
-    const primary = sanitizeToken(tokens[index]).toLowerCase();
-    if (!primary) continue;
-
-    discovered.add(primary);
-
-    if (WRAPPER_COMMANDS.has(primary) && index + 1 < tokens.length) {
-      const wrapped = sanitizeToken(tokens[index + 1]).toLowerCase();
-      if (wrapped) {
-        discovered.add(wrapped);
-      }
+    const cmdTokens = tokens.slice(index).map(t => sanitizeToken(t).toLowerCase()).filter(Boolean);
+    if (cmdTokens.length) {
+      segments.push(cmdTokens.join(' '));
     }
   }
 
+  return segments;
+}
+
+export function extractCommandNames(command: string): string[] {
+  const discovered = new Set<string>();
+  for (const segment of extractCommandSegments(command)) {
+    const first = segment.split(/\s+/)[0];
+    if (first) discovered.add(first);
+  }
   return Array.from(discovered);
 }
 
+/**
+ * Prefix-based allow check: a command segment is allowed if any allowlist
+ * entry is a prefix of it. e.g. allowlist "npx" allows "npx acpx@latest ...",
+ * and allowlist "npx acpx@latest" also allows "npx acpx@latest claude exec ...".
+ */
+function isSegmentAllowed(segment: string, allowEntries: string[]): boolean {
+  for (const entry of allowEntries) {
+    // entry is a prefix of the segment (e.g. "npx" matches "npx acpx@latest claude exec")
+    if (segment === entry || segment.startsWith(entry + ' ')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function findBlockedCommands(command: string, sessionAllowedCommands?: Set<string>): string[] {
-  const invoked = extractCommandNames(command);
-  if (!invoked.length) return [];
+  const segments = extractCommandSegments(command);
+  if (!segments.length) return [];
 
   const allowList = getSecurityAllowList();
-  if (!allowList.length && (!sessionAllowedCommands || sessionAllowedCommands.size === 0)) return invoked;
+  if (!allowList.length && (!sessionAllowedCommands || sessionAllowedCommands.size === 0)) {
+    return segments.map(s => s.split(/\s+/)[0]);
+  }
 
   const allowSet = new Set(allowList);
   if (allowSet.has('*')) return [];
 
-  return invoked.filter((cmd) => !allowSet.has(cmd) && !sessionAllowedCommands?.has(cmd));
+  const allEntries = [...allowSet, ...(sessionAllowedCommands ?? [])];
+
+  const blocked: string[] = [];
+  for (const segment of segments) {
+    if (!isSegmentAllowed(segment, allEntries)) {
+      const first = segment.split(/\s+/)[0];
+      if (first) blocked.push(first);
+    }
+  }
+  return blocked;
 }
 
 export function isBlocked(command: string, sessionAllowedCommands?: Set<string>): boolean {
