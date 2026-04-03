@@ -3,6 +3,18 @@ export const skill = String.raw`
 
 Use this skill when the user asks you to write code, build a project, create scripts, fix bugs, or do any software development task that should be delegated to a coding agent (Claude Code or Codex).
 
+## Important: delegate ALL coding work
+
+Once the user has chosen to use Claude Code or Codex, you MUST delegate ALL code-related tasks to the coding agent. This includes:
+- Writing, editing, or refactoring code
+- Reading, summarizing, or explaining code
+- Debugging and fixing bugs
+- Running tests or build commands
+- Exploring project structure
+- Any other task that involves interacting with a codebase
+
+Do NOT attempt to do any of these yourself — no reading files, no running commands, no writing code. You are the coordinator; the coding agent does the work. Your job is to translate the user's request into a clear prompt and pass it to the agent.
+
 ## Prerequisites
 
 The user must have one of the following installed on their machine:
@@ -70,9 +82,10 @@ When constructing the prompt for the coding agent:
 
 ### Step 4: Report results
 
-After the command finishes:
-- Summarize what the agent did
-- If it failed, explain why and suggest fixes
+After the command finishes, present the coding agent's output directly to the user — do not rephrase, summarize, or add commentary on top of it. The agent's output is the result. Only add your own explanation if something went wrong (e.g. the command failed or the exit code is non-zero).
+
+Do NOT use file reference blocks (e.g. \`\`\`file:path/to/file\`\`\`) when mentioning code files — they may not open correctly. Just refer to file paths as plain text.
+
 - If the exit code is 5, it means permissions were denied — this should not happen with \`--approve-all\`, but if it does, let the user know
 `;
 
