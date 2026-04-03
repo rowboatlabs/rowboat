@@ -38,6 +38,7 @@ import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/componen
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
+import { TerminalOutput } from '@/components/terminal-output';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
 import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
@@ -3895,19 +3896,18 @@ function App() {
             state={toToolState(item.status)}
           />
           <ToolContent>
-            <ToolInput input={input} />
             {item.streamingOutput && item.status === 'running' ? (
-              <div className="space-y-2 p-4">
-                <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-                  Live Output
-                </h4>
-                <AutoScrollPre className="max-h-80 overflow-auto rounded-md border bg-zinc-950 p-4 font-mono text-xs text-green-400 whitespace-pre-wrap">
-                  {item.streamingOutput}
-                </AutoScrollPre>
-              </div>
-            ) : output !== null ? (
-              <ToolOutput output={output} errorText={errorText} />
-            ) : null}
+              <AutoScrollPre className="max-h-80 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre-wrap text-foreground/90">
+                <TerminalOutput raw={item.streamingOutput} />
+              </AutoScrollPre>
+            ) : (
+              <>
+                <ToolInput input={input} />
+                {output !== null ? (
+                  <ToolOutput output={output} errorText={errorText} />
+                ) : null}
+              </>
+            )}
           </ToolContent>
         </Tool>
       )
