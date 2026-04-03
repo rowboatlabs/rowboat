@@ -82,7 +82,7 @@ When constructing the prompt for the coding agent:
 
 ### Step 4: Report results
 
-After the command finishes, present the coding agent's output directly to the user — do not rephrase, summarize, or add commentary on top of it. The agent's output is the result. Only add your own explanation if something went wrong (e.g. the command failed or the exit code is non-zero).
+After the command finishes, look for the summary that the coding agent produced at the end of its output and pass that along to the user as-is. Do not rewrite or add to it. Only add your own explanation if the command failed or the exit code is non-zero.
 
 Do NOT use file reference blocks (e.g. \`\`\`file:path/to/file\`\`\`) when mentioning code files — they may not open correctly. Just refer to file paths as plain text.
 

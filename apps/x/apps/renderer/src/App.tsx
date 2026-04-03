@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useCallback, useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef, useLayoutEffect } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
@@ -612,6 +612,36 @@ function ContentHeader({
       ) : null}
       {children}
     </header>
+  )
+}
+
+/**
+ * A <pre> element that auto-scrolls to the bottom as content updates,
+ * but stops auto-scrolling when the user manually scrolls up.
+ */
+function AutoScrollPre({ className, children }: { className?: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null)
+  const stickToBottom = useRef(true)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el && stickToBottom.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [children])
+
+  const handleScroll = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    // Consider "at bottom" if within 24px of the bottom edge
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+    stickToBottom.current = atBottom
+  }, [])
+
+  return (
+    <pre ref={ref} onScroll={handleScroll} className={className}>
+      {children}
+    </pre>
   )
 }
 
@@ -3871,9 +3901,9 @@ function App() {
                 <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
                   Live Output
                 </h4>
-                <pre className="max-h-80 overflow-auto rounded-md border bg-zinc-950 p-4 font-mono text-xs text-green-400 whitespace-pre-wrap">
+                <AutoScrollPre className="max-h-80 overflow-auto rounded-md border bg-zinc-950 p-4 font-mono text-xs text-green-400 whitespace-pre-wrap">
                   {item.streamingOutput}
-                </pre>
+                </AutoScrollPre>
               </div>
             ) : output !== null ? (
               <ToolOutput output={output} errorText={errorText} />
