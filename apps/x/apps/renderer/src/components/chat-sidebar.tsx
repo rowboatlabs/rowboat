@@ -344,6 +344,7 @@ export function ChatSidebar({
       }
       const composioConnectData = getComposioConnectCardData(item)
       if (composioConnectData) {
+        if (composioConnectData.hidden) return null
         return (
           <ComposioConnectCard
             key={item.id}

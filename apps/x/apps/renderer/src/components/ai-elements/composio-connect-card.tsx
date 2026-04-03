@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CheckCircleIcon,
   Link2Icon,
@@ -28,6 +28,7 @@ export function ComposioConnectCard({
     "idle" | "connecting" | "connected" | "error"
   >(alreadyConnected ? "connected" : "idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const didFireCallback = useRef(alreadyConnected ?? false);
 
   // Listen for composio:didConnect events
   useEffect(() => {
@@ -38,7 +39,10 @@ export function ComposioConnectCard({
         if (event.success) {
           setConnectionState("connected");
           setErrorMessage(null);
-          if (!alreadyConnected) onConnected?.(toolkitSlug);
+          if (!didFireCallback.current) {
+            didFireCallback.current = true;
+            onConnected?.(toolkitSlug);
+          }
         } else {
           setConnectionState("error");
           setErrorMessage(event.error || "Connection failed");
@@ -46,7 +50,7 @@ export function ComposioConnectCard({
       }
     );
     return cleanup;
-  }, [toolkitSlug, alreadyConnected, onConnected]);
+  }, [toolkitSlug, onConnected]);
 
   const handleConnect = useCallback(async () => {
     setConnectionState("connecting");

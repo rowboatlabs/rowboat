@@ -3838,6 +3838,8 @@ function App() {
       }
       const composioConnectData = getComposioConnectCardData(item)
       if (composioConnectData) {
+        // Skip rendering if this is a duplicate "already connected" card
+        if (composioConnectData.hidden) return null
         return (
           <ComposioConnectCard
             key={item.id}

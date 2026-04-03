@@ -259,6 +259,8 @@ export type ComposioConnectCardData = {
   toolkitSlug: string
   toolkitDisplayName: string
   alreadyConnected: boolean
+  /** When true, the connect card should not be rendered (toolkit was already connected). */
+  hidden: boolean
 }
 
 
@@ -275,6 +277,9 @@ export const getComposioConnectCardData = (tool: ToolCall): ComposioConnectCardD
     toolkitSlug,
     toolkitDisplayName: COMPOSIO_DISPLAY_NAMES[toolkitSlug] || toolkitSlug,
     alreadyConnected,
+    // Don't render a connect card if the toolkit was already connected —
+    // the original card from the first connect call already shows the "Connected" state.
+    hidden: alreadyConnected,
   }
 }
 
