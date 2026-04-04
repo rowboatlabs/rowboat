@@ -15,6 +15,7 @@ export const Flavor = z.enum([
     "aigateway",
     "anthropic",
     "google",
+    "minimax",
     "ollama",
     "openai",
     "openai-compatible",
@@ -110,6 +111,14 @@ export async function getProvider(name: string = ""): Promise<ProviderV2> {
                 apiKey,
                 baseURL,
                 headers
+            });
+            break;
+        case "minimax":
+            providerMap[name] = createOpenAICompatible({
+                name: "minimax",
+                apiKey,
+                baseURL: baseURL || "https://api.minimax.io/v1",
+                headers,
             });
             break;
         default:
