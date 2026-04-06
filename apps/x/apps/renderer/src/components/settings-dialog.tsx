@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Tags, Mail, BookOpen, ChevronRight, Plus, X, User, Plug } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug } from "lucide-react"
 
 import {
   Dialog,
@@ -25,7 +25,7 @@ import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 
-type ConfigTab = "account" | "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "note-tagging"
+type ConfigTab = "account" | "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "tools" | "note-tagging"
 
 interface TabConfig {
   id: ConfigTab
@@ -74,6 +74,12 @@ const tabs: TabConfig[] = [
     label: "Appearance",
     icon: Palette,
     description: "Customize the look and feel",
+  },
+  {
+    id: "tools",
+    label: "Tools Library",
+    icon: Wrench,
+    description: "Browse and enable Composio toolkits",
   },
   {
     id: "note-tagging",
@@ -707,6 +713,323 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Tools Library Settings ---
+
+interface ToolkitInfo {
+  slug: string
+  name: string
+  meta: { description: string; logo: string; tools_count: number; triggers_count: number }
+  no_auth?: boolean
+  auth_schemes?: string[]
+  composio_managed_auth_schemes?: string[]
+}
+
+function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
+  // API key state
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false)
+  const [apiKeyInput, setApiKeyInput] = useState("")
+  const [apiKeySaving, setApiKeySaving] = useState(false)
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false)
+
+  // Toolkit browsing state
+  const [toolkits, setToolkits] = useState<ToolkitInfo[]>([])
+  const [toolkitsLoading, setToolkitsLoading] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+
+  // Connection state
+  const [connectedToolkits, setConnectedToolkits] = useState<Set<string>>(new Set())
+  const [connectingToolkit, setConnectingToolkit] = useState<string | null>(null)
+
+  // Check API key configuration
+  const checkApiKey = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke("composio:is-configured", null)
+      setApiKeyConfigured(result.configured)
+      if (!result.configured) {
+        setShowApiKeyInput(true)
+      }
+    } catch {
+      setApiKeyConfigured(false)
+    }
+  }, [])
+
+  // Load connected toolkits
+  const loadConnected = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke("composio:list-connected", null)
+      setConnectedToolkits(new Set(result.toolkits))
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  // Load toolkits
+  const loadToolkits = useCallback(async () => {
+    setToolkitsLoading(true)
+    try {
+      const result = await window.ipc.invoke("composio:list-toolkits", {})
+      setToolkits(result.items)
+    } catch {
+      toast.error("Failed to load toolkits")
+    } finally {
+      setToolkitsLoading(false)
+    }
+  }, [])
+
+  // Initial load
+  useEffect(() => {
+    if (!dialogOpen) return
+    checkApiKey()
+    loadConnected()
+  }, [dialogOpen, checkApiKey, loadConnected])
+
+  // Load toolkits when API key is configured
+  useEffect(() => {
+    if (dialogOpen && apiKeyConfigured) {
+      loadToolkits()
+    }
+  }, [dialogOpen, apiKeyConfigured, loadToolkits])
+
+  // Listen for composio connection events
+  useEffect(() => {
+    const cleanup = window.ipc.on('composio:didConnect', (event) => {
+      const { toolkitSlug, success, error } = event
+      setConnectingToolkit(null)
+      if (success) {
+        setConnectedToolkits(prev => new Set([...prev, toolkitSlug]))
+        toast.success(`Connected to ${toolkitSlug}`)
+      } else {
+        toast.error(error || `Failed to connect to ${toolkitSlug}`)
+      }
+    })
+    return cleanup
+  }, [])
+
+  // Save API key
+  const handleSaveApiKey = async () => {
+    const trimmed = apiKeyInput.trim()
+    if (!trimmed) return
+    setApiKeySaving(true)
+    try {
+      const result = await window.ipc.invoke("composio:set-api-key", { apiKey: trimmed })
+      if (result.success) {
+        setApiKeyConfigured(true)
+        setShowApiKeyInput(false)
+        setApiKeyInput("")
+        toast.success("Composio API key saved")
+      } else {
+        toast.error(result.error || "Failed to save API key")
+      }
+    } catch {
+      toast.error("Failed to save API key")
+    } finally {
+      setApiKeySaving(false)
+    }
+  }
+
+  // Connect a toolkit
+  const handleConnect = async (toolkitSlug: string) => {
+    setConnectingToolkit(toolkitSlug)
+    try {
+      const result = await window.ipc.invoke("composio:initiate-connection", { toolkitSlug })
+      if (!result.success) {
+        toast.error(result.error || "Failed to connect")
+        setConnectingToolkit(null)
+      }
+      // Success will be handled by composio:didConnect event
+    } catch {
+      toast.error("Failed to connect")
+      setConnectingToolkit(null)
+    }
+  }
+
+  // Disconnect a toolkit
+  const handleDisconnect = async (toolkitSlug: string) => {
+    try {
+      await window.ipc.invoke("composio:disconnect", { toolkitSlug })
+      setConnectedToolkits(prev => {
+        const next = new Set(prev)
+        next.delete(toolkitSlug)
+        return next
+      })
+      toast.success(`Disconnected from ${toolkitSlug}`)
+    } catch {
+      toast.error("Failed to disconnect")
+    }
+  }
+
+  // Filter toolkits by search
+  const filteredToolkits = searchQuery.trim()
+    ? toolkits.filter(t =>
+        t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.slug.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.meta.description.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : toolkits
+
+  return (
+    <div className="space-y-4">
+      {/* Section A: API Key */}
+      <div className="space-y-2">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Composio API Key</span>
+        {apiKeyConfigured && !showApiKeyInput ? (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-sm text-green-600">
+              <CheckCircle2 className="size-4" />
+              API key configured
+            </div>
+            <button
+              onClick={() => setShowApiKeyInput(true)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Change
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Enter your Composio API key to browse and enable tool integrations.
+              Get your key from{" "}
+              <a
+                href="https://app.composio.dev/settings"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                app.composio.dev/settings
+              </a>
+            </p>
+            <div className="flex gap-2">
+              <Input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder="Paste your Composio API key"
+                onKeyDown={(e) => e.key === "Enter" && handleSaveApiKey()}
+                className="flex-1"
+              />
+              <Button
+                onClick={handleSaveApiKey}
+                disabled={!apiKeyInput.trim() || apiKeySaving}
+                size="sm"
+              >
+                {apiKeySaving ? <Loader2 className="size-4 animate-spin" /> : "Save"}
+              </Button>
+              {apiKeyConfigured && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setShowApiKeyInput(false); setApiKeyInput("") }}
+                >
+                  Cancel
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Section B: Toolkit Browser (only when API key configured) */}
+      {apiKeyConfigured && (
+        <>
+          <div className="space-y-2">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Available Toolkits</span>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search toolkits..."
+                className="pl-8"
+              />
+            </div>
+          </div>
+
+          {toolkitsLoading ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+              <Loader2 className="size-4 animate-spin mr-2" />
+              Loading toolkits...
+            </div>
+          ) : (
+            <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
+              {filteredToolkits.map((toolkit) => {
+                const isConnected = connectedToolkits.has(toolkit.slug)
+                const isConnecting = connectingToolkit === toolkit.slug
+
+                return (
+                  <div key={toolkit.slug} className="border rounded-lg overflow-hidden">
+                    <div className="flex items-center gap-3 px-3 py-2.5">
+                      {/* Logo */}
+                      {toolkit.meta.logo ? (
+                        <img
+                          src={toolkit.meta.logo}
+                          alt=""
+                          className="size-7 rounded object-contain flex-shrink-0"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
+                      ) : (
+                        <div className="size-7 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                          <Wrench className="size-3.5 text-muted-foreground" />
+                        </div>
+                      )}
+
+                      {/* Name & description */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium truncate">{toolkit.name}</span>
+                          {isConnected && (
+                            <span className="rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-green-600">
+                              Connected
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {toolkit.meta.description}
+                        </p>
+                      </div>
+
+                      {/* Connect / Disconnect button */}
+                      {isConnected ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDisconnect(toolkit.slug)}
+                          className="text-xs h-7 flex-shrink-0"
+                        >
+                          Disconnect
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          onClick={() => handleConnect(toolkit.slug)}
+                          disabled={isConnecting}
+                          className="text-xs h-7 flex-shrink-0"
+                        >
+                          {isConnecting ? (
+                            <><Loader2 className="size-3 animate-spin mr-1" />Connecting...</>
+                          ) : (
+                            <><Link2 className="size-3 mr-1" />Connect</>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+
+              {filteredToolkits.length === 0 && !toolkitsLoading && (
+                <div className="text-center py-6 text-sm text-muted-foreground">
+                  {searchQuery ? "No toolkits match your search" : "No toolkits available"}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // --- Rowboat Model Settings (when signed in via Rowboat) ---
 
 function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
@@ -1312,7 +1635,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", activeTab === "models" ? "overflow-y-auto" : activeTab === "account" || activeTab === "connected-accounts" ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "tools" || activeTab === "account" || activeTab === "connected-accounts") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connected-accounts" ? (
@@ -1325,6 +1648,8 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
                 <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
+              ) : activeTab === "tools" ? (
+                <ToolsLibrarySettings dialogOpen={open} />
               ) : loading ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                   Loading...

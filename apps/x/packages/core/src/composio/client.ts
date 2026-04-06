@@ -14,8 +14,9 @@ import {
     ZExecuteActionRequest,
     ZExecuteActionResponse,
     ZListResponse,
-    ZTool,
+    ZSearchResultTool,
     ZToolkit,
+    type NormalizedToolResult,
 } from "./types.js";
 import { isSignedIn } from "../account/account.js";
 import { getAccessToken } from "../auth/tokens.js";
@@ -72,7 +73,7 @@ function loadConfig(): ComposioConfig {
 /**
  * Save Composio configuration
  */
-export function saveConfig(config: ComposioConfig): void {
+function saveConfig(config: ComposioConfig): void {
     const dir = path.dirname(CONFIG_FILE);
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -167,7 +168,15 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
         }
 
         if (!response.ok) {
-            throw new Error(`Composio API error: ${response.status} ${response.statusText}`);
+            // Try to extract a human-readable message from the JSON body
+            let detail = '';
+            try {
+                const body = JSON.parse(rawText);
+                if (typeof body?.error === 'string') detail = body.error;
+                else if (typeof body?.message === 'string') detail = body.message;
+            } catch { /* body isn't JSON or has no message field */ }
+            const suffix = detail ? `: ${detail}` : '';
+            throw new Error(`Composio API error: ${response.status} ${response.statusText}${suffix}`);
         }
 
         if (!contentType.includes('application/json')) {
@@ -247,15 +256,6 @@ export async function createAuthConfig(
 }
 
 /**
- * Delete an auth config
- */
-export async function deleteAuthConfig(authConfigId: string): Promise<z.infer<typeof ZDeleteOperationResponse>> {
-    return composioApiCall(ZDeleteOperationResponse, `/auth_configs/${authConfigId}`, {}, {
-        method: 'DELETE',
-    });
-}
-
-/**
  * Create a connected account
  */
 export async function createConnectedAccount(
@@ -284,20 +284,39 @@ export async function deleteConnectedAccount(connectedAccountId: string): Promis
 }
 
 /**
- * List available tools for a toolkit
+ * Search for tools across all toolkits (or optionally filtered by specific toolkit slugs).
+ * Returns tools with full input_parameters so the agent knows what params to pass.
+ *
+ * Uses a limit of 50 (not 15) to avoid the curated-filter-after-limit problem where
+ * in-scope results at position 16+ would be discarded if earlier results are out-of-scope.
  */
-export async function listToolkitTools(
-    toolkitSlug: string,
-    searchQuery: string | null = null,
-): Promise<z.infer<ReturnType<typeof ZListResponse<typeof ZTool>>>> {
+export async function searchTools(
+    searchQuery: string,
+    toolkitSlugs?: string[],
+): Promise<{ items: NormalizedToolResult[] }> {
     const params: Record<string, string> = {
-        toolkit_slug: toolkitSlug,
-        limit: '200',
+        query: searchQuery,
+        limit: '50',
     };
-    if (searchQuery) {
-        params.search = searchQuery;
+    if (toolkitSlugs && toolkitSlugs.length === 1) {
+        params.toolkit_slug = toolkitSlugs[0];
     }
-    return composioApiCall(ZListResponse(ZTool), "/tools", params);
+
+    const result = await composioApiCall(ZListResponse(ZSearchResultTool), "/tools", params);
+
+    const items: NormalizedToolResult[] = result.items.map((item) => ({
+        slug: item.slug,
+        name: item.name,
+        description: item.description,
+        toolkitSlug: item.toolkit.slug,
+        inputParameters: {
+            type: 'object' as const,
+            properties: item.input_parameters?.properties ?? {},
+            required: item.input_parameters?.required,
+        },
+    }));
+
+    return { items };
 }
 
 /**

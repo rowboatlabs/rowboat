@@ -559,8 +559,9 @@ export function setupIpcHandlers() {
     'composio:list-connected': async () => {
       return composioHandler.listConnected();
     },
-    'composio:execute-action': async (_event, args) => {
-      return composioHandler.executeAction(args.actionSlug, args.toolkitSlug, args.input);
+    // Composio Tools Library handlers
+    'composio:list-toolkits': async () => {
+      return composioHandler.listToolkits();
     },
     'composio:use-composio-for-google': async () => {
       return composioHandler.useComposioForGoogle();

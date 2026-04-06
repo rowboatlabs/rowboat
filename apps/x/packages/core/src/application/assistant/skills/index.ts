@@ -12,6 +12,7 @@ import backgroundAgentsSkill from "./background-agents/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
+import composioIntegrationSkill from "./composio-integration/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
@@ -83,6 +84,12 @@ const definitions: SkillDefinition[] = [
     title: "MCP Integration Guidance",
     summary: "Discovering, executing, and integrating MCP tools. Use this to check what external capabilities are available and execute MCP tools on behalf of users.",
     content: mcpIntegrationSkill,
+  },
+  {
+    id: "composio-integration",
+    title: "Composio Integration",
+    summary: "Interact with third-party services (Gmail, GitHub, Slack, LinkedIn, Notion, Jira, Google Sheets, etc.) via Composio. Search, connect, and execute tools.",
+    content: composioIntegrationSkill,
   },
   {
     id: "deletion-guardrails",

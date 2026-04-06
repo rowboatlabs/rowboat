@@ -1,6 +1,7 @@
 import type { ToolUIPart } from 'ai'
 import z from 'zod'
 import { AskHumanRequestEvent, ToolPermissionRequestEvent } from '@x/shared/src/runs.js'
+import { COMPOSIO_DISPLAY_NAMES } from '@x/shared/src/composio.js'
 
 export interface MessageAttachment {
   path: string
@@ -251,6 +252,142 @@ export const parseAttachedFiles = (content: string): { message: string; files: s
   }
 
   return { message: cleanMessage.trim(), files }
+}
+
+// Composio connect card data
+export type ComposioConnectCardData = {
+  toolkitSlug: string
+  toolkitDisplayName: string
+  alreadyConnected: boolean
+  /** When true, the connect card should not be rendered (toolkit was already connected). */
+  hidden: boolean
+}
+
+
+export const getComposioConnectCardData = (tool: ToolCall): ComposioConnectCardData | null => {
+  if (tool.name !== 'composio-connect-toolkit') return null
+
+  const input = normalizeToolInput(tool.input) as Record<string, unknown> | undefined
+  const result = tool.result as Record<string, unknown> | undefined
+
+  const toolkitSlug = (input?.toolkitSlug as string) || ''
+  const alreadyConnected = result?.alreadyConnected === true
+
+  return {
+    toolkitSlug,
+    toolkitDisplayName: COMPOSIO_DISPLAY_NAMES[toolkitSlug] || toolkitSlug,
+    alreadyConnected,
+    // Don't render a connect card if the toolkit was already connected —
+    // the original card from the first connect call already shows the "Connected" state.
+    hidden: alreadyConnected,
+  }
+}
+
+// Human-friendly display names for builtin tools
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  'workspace-readFile': 'Reading file',
+  'workspace-writeFile': 'Writing file',
+  'workspace-edit': 'Editing file',
+  'workspace-readdir': 'Reading directory',
+  'workspace-exists': 'Checking path',
+  'workspace-stat': 'Getting file info',
+  'workspace-glob': 'Finding files',
+  'workspace-grep': 'Searching files',
+  'workspace-mkdir': 'Creating directory',
+  'workspace-rename': 'Renaming',
+  'workspace-copy': 'Copying file',
+  'workspace-remove': 'Removing',
+  'workspace-getRoot': 'Getting workspace root',
+  'loadSkill': 'Loading skill',
+  'parseFile': 'Parsing file',
+  'LLMParse': 'Extracting content',
+  'analyzeAgent': 'Analyzing agent',
+  'executeCommand': 'Running command',
+  'addMcpServer': 'Adding MCP server',
+  'listMcpServers': 'Listing MCP servers',
+  'listMcpTools': 'Listing MCP tools',
+  'executeMcpTool': 'Running MCP tool',
+  'web-search': 'Searching the web',
+  'save-to-memory': 'Saving to memory',
+  'app-navigation': 'Navigating app',
+  'composio-list-toolkits': 'Listing integrations',
+  'composio-search-tools': 'Searching tools',
+  'composio-execute-tool': 'Running tool',
+  'composio-connect-toolkit': 'Connecting service',
+}
+
+/**
+ * Get a human-friendly display name for a tool call.
+ * For Composio tools, returns a contextual label (e.g., "Found 3 tools for 'send email' in Gmail").
+ * For builtin tools, returns a static friendly name (e.g., "Reading file").
+ * Falls back to the raw tool name if no mapping exists.
+ */
+export const getToolDisplayName = (tool: ToolCall): string => {
+  const composioData = getComposioActionCardData(tool)
+  if (composioData) return composioData.label
+  return TOOL_DISPLAY_NAMES[tool.name] || tool.name
+}
+
+// Composio action card data (for search, execute, list tools)
+export type ComposioActionCardData = {
+  actionType: 'search' | 'execute' | 'list'
+  label: string
+}
+
+export const getComposioActionCardData = (tool: ToolCall): ComposioActionCardData | null => {
+  const input = normalizeToolInput(tool.input) as Record<string, unknown> | undefined
+  const result = tool.result as Record<string, unknown> | undefined
+
+  if (tool.name === 'composio-search-tools') {
+    const query = (input?.query as string) || 'tools'
+    const toolkitSlug = input?.toolkitSlug as string | undefined
+    const toolkit = toolkitSlug ? COMPOSIO_DISPLAY_NAMES[toolkitSlug] || toolkitSlug : null
+    const count = (result?.resultCount as number) ?? null
+
+    let label = `Searching for "${query}"`
+    if (toolkit) label += ` in ${toolkit}`
+    if (count !== null && tool.status === 'completed') {
+      label = count > 0 ? `Found ${count} tool${count !== 1 ? 's' : ''} for "${query}"` : `No tools found for "${query}"`
+      if (toolkit) label += ` in ${toolkit}`
+    }
+    return { actionType: 'search', label }
+  }
+
+  if (tool.name === 'composio-execute-tool') {
+    const toolSlug = (input?.toolSlug as string) || ''
+    const toolkitSlug = (input?.toolkitSlug as string) || ''
+    const toolkit = COMPOSIO_DISPLAY_NAMES[toolkitSlug] || toolkitSlug
+    const successful = result?.successful as boolean | undefined
+
+    // Make the tool slug human-readable: GITHUB_ISSUES_LIST_FOR_REPO → "Issues list for repo"
+    const readableName = toolSlug
+      .replace(/^[A-Z]+_/, '') // Remove toolkit prefix
+      .toLowerCase()
+      .replace(/_/g, ' ')
+      .replace(/^\w/, c => c.toUpperCase())
+
+    let label = `Running ${readableName}`
+    if (toolkit) label += ` on ${toolkit}`
+    if (tool.status === 'completed') {
+      label = successful === false ? `Failed: ${readableName}` : `${readableName}`
+      if (toolkit) label += ` on ${toolkit}`
+    }
+    return { actionType: 'execute', label }
+  }
+
+  if (tool.name === 'composio-list-toolkits') {
+    const count = (result?.totalCount as number) ?? null
+    const connected = (result?.connectedCount as number) ?? null
+
+    let label = 'Listing available integrations'
+    if (count !== null && tool.status === 'completed') {
+      label = `${count} integrations available`
+      if (connected !== null && connected > 0) label += `, ${connected} connected`
+    }
+    return { actionType: 'list', label }
+  }
+
+  return null
 }
 
 export const inferRunTitleFromMessage = (content: string): string | undefined => {

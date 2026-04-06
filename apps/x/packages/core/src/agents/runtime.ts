@@ -10,7 +10,7 @@ import { LlmStepStreamEvent } from "@x/shared/dist/llm-step-events.js";
 import { execTool } from "../application/lib/exec-tool.js";
 import { AskHumanRequestEvent, RunEvent, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
 import { BuiltinTools } from "../application/lib/builtin-tools.js";
-import { CopilotAgent } from "../application/assistant/agent.js";
+import { buildCopilotAgent } from "../application/assistant/agent.js";
 import { isBlocked, extractCommandNames } from "../application/lib/command-executor.js";
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
@@ -369,7 +369,7 @@ function formatLlmStreamError(rawError: unknown): string {
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     if (id === "copilot" || id === "rowboatx") {
-        return CopilotAgent;
+        return buildCopilotAgent();
     }
 
     if (id === 'note_creation') {

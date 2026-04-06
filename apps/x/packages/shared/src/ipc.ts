@@ -8,6 +8,7 @@ import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
+import { ZListToolkitsResponse } from './composio.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -377,18 +378,6 @@ const ipcSchemas = {
       toolkits: z.array(z.string()),
     }),
   },
-  'composio:execute-action': {
-    req: z.object({
-      actionSlug: z.string(),
-      toolkitSlug: z.string(),
-      input: z.record(z.string(), z.unknown()),
-    }),
-    res: z.object({
-      data: z.unknown(),
-      successful: z.boolean(),
-      error: z.string().nullable(),
-    }),
-  },
   'composio:use-composio-for-google': {
     req: z.null(),
     res: z.object({
@@ -408,6 +397,11 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
     res: z.null(),
+  },
+  // Composio Tools Library channels
+  'composio:list-toolkits': {
+    req: z.object({}),
+    res: ZListToolkitsResponse,
   },
   // Agent schedule channels
   'agent-schedule:getConfig': {
