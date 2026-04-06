@@ -11,7 +11,17 @@ const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
  * Lists connected toolkits and explains the meta-tool discovery flow.
  */
 async function getComposioToolsPrompt(): Promise<string> {
-    if (!(await isComposioConfigured())) return '';
+    if (!(await isComposioConfigured())) {
+        return `
+## Composio Integrations
+
+**Composio is not configured.** Composio enables integrations with third-party services like Google Sheets, GitHub, Slack, Jira, Notion, LinkedIn, and 20+ others.
+
+When the user asks to interact with any third-party service (e.g., "connect to Google Sheets", "create a GitHub issue"), do NOT attempt to write code, use shell commands, or load the composio-integration skill. Instead, let the user know that these integrations are available through Composio, and they can enable them by adding their Composio API key in **Settings > Tools Library**. They can get their key from https://app.composio.dev/settings.
+
+**Exception — Email and Calendar:** For email-related requests (reading emails, sending emails, drafting replies) or calendar-related requests (checking schedule, listing events), do NOT direct the user to Composio. Instead, tell them to connect their email and calendar in **Settings > Connected Accounts**.
+`;
+    }
 
     const connectedToolkits = composioAccountsRepo.getConnectedToolkits();
     const connectedSection = connectedToolkits.length > 0
