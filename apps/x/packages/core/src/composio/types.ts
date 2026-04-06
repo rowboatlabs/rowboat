@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { ZToolkitMeta as ZSharedToolkitMeta, ZToolkitItem } from "@x/shared/dist/composio.js";
+
+// Re-export the shared toolkit schemas so existing imports continue to work
+export const ZToolkitMeta = ZSharedToolkitMeta;
 
 /**
  * Composio authentication schemes
@@ -29,28 +33,9 @@ export const ZConnectedAccountStatus = z.enum([
 ]);
 
 /**
- * Toolkit metadata
+ * Toolkit schema — same shape as ZToolkitItem from shared, re-exported for convenience.
  */
-export const ZToolkitMeta = z.object({
-    description: z.string(),
-    logo: z.string(),
-    tools_count: z.number(),
-    triggers_count: z.number(),
-});
-
-/**
- * Toolkit schema
- */
-export const ZToolkit = z.object({
-    slug: z.string(),
-    name: z.string(),
-    meta: ZToolkitMeta,
-    no_auth: z.boolean().optional(),
-    // Use z.string() instead of ZAuthScheme to be resilient against
-    // new auth types added by the Composio API over time.
-    auth_schemes: z.array(z.string()).optional(),
-    composio_managed_auth_schemes: z.array(z.string()).optional(),
-});
+export const ZToolkit = ZToolkitItem;
 
 /**
  * Tool schema
@@ -246,7 +231,7 @@ export const ZSearchResultTool = z.object({
         slug: z.string(),
         name: z.string(),
         logo: z.string(),
-    }).optional(),
+    }),
     input_parameters: z.object({
         type: z.literal('object').optional().default('object'),
         properties: z.record(z.string(), z.unknown()).optional().default({}),

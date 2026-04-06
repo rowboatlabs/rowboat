@@ -8,6 +8,7 @@ import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
+import { ZListToolkitsResponse } from './composio.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -398,26 +399,9 @@ const ipcSchemas = {
     res: z.null(),
   },
   // Composio Tools Library channels
-  // Response schema mirrors core/composio/types.ts ZToolkit (kept inline to avoid cross-package import)
   'composio:list-toolkits': {
     req: z.object({}),
-    res: z.object({
-      items: z.array(z.object({
-        slug: z.string(),
-        name: z.string(),
-        meta: z.object({
-          description: z.string(),
-          logo: z.string(),
-          tools_count: z.number(),
-          triggers_count: z.number(),
-        }),
-        no_auth: z.boolean().optional(),
-        auth_schemes: z.array(z.string()).optional(),
-        composio_managed_auth_schemes: z.array(z.string()).optional(),
-      })),
-      nextCursor: z.string().nullable(),
-      totalItems: z.number(),
-    }),
+    res: ZListToolkitsResponse,
   },
   // Agent schedule channels
   'agent-schedule:getConfig': {

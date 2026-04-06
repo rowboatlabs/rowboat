@@ -15,7 +15,6 @@ import {
     ZExecuteActionResponse,
     ZListResponse,
     ZSearchResultTool,
-    ZTool,
     ZToolkit,
     type NormalizedToolResult,
 } from "./types.js";
@@ -285,21 +284,6 @@ export async function deleteConnectedAccount(connectedAccountId: string): Promis
 }
 
 /**
- * Infer toolkit slug from a tool slug when the API omits the toolkit object.
- * Convention: TOOLKIT_ACTION (e.g., GITHUB_CREATE_ISSUE → github).
- *
- * This fallback exists because the Composio /tools search endpoint occasionally
- * returns results without the `toolkit` field — observed with certain search
- * queries and when the tool is from a less-common integration. The inference is
- * a best-effort heuristic: lowercase the first segment before the first underscore.
- */
-function inferToolkitSlug(toolSlug: string): string {
-    const lower = toolSlug.toLowerCase();
-    const parts = lower.split('_');
-    return parts[0] ?? lower;
-}
-
-/**
  * Search for tools across all toolkits (or optionally filtered by specific toolkit slugs).
  * Returns tools with full input_parameters so the agent knows what params to pass.
  *
@@ -311,7 +295,7 @@ export async function searchTools(
     toolkitSlugs?: string[],
 ): Promise<{ items: NormalizedToolResult[] }> {
     const params: Record<string, string> = {
-        search: searchQuery,
+        query: searchQuery,
         limit: '50',
     };
     if (toolkitSlugs && toolkitSlugs.length === 1) {
@@ -324,9 +308,7 @@ export async function searchTools(
         slug: item.slug,
         name: item.name,
         description: item.description,
-        toolkitSlug: item.toolkit?.slug
-            || inferToolkitSlug(item.slug)
-            || (toolkitSlugs?.length === 1 ? toolkitSlugs[0] : ''),
+        toolkitSlug: item.toolkit.slug,
         inputParameters: {
             type: 'object' as const,
             properties: item.input_parameters?.properties ?? {},

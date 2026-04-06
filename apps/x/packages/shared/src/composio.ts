@@ -1,3 +1,31 @@
+import { z } from 'zod';
+
+/**
+ * Zod schemas for Composio IPC responses.
+ * Defined here in shared so both ipc.ts and core/composio/types.ts can reference them.
+ */
+export const ZToolkitMeta = z.object({
+    description: z.string(),
+    logo: z.string(),
+    tools_count: z.number(),
+    triggers_count: z.number(),
+});
+
+export const ZToolkitItem = z.object({
+    slug: z.string(),
+    name: z.string(),
+    meta: ZToolkitMeta,
+    no_auth: z.boolean().optional(),
+    auth_schemes: z.array(z.string()).optional(),
+    composio_managed_auth_schemes: z.array(z.string()).optional(),
+});
+
+export const ZListToolkitsResponse = z.object({
+    items: z.array(ZToolkitItem),
+    nextCursor: z.string().nullable(),
+    totalItems: z.number(),
+});
+
 /**
  * Curated Composio toolkits available to Rowboat users.
  * Single source of truth for slugs, display names, and categories.

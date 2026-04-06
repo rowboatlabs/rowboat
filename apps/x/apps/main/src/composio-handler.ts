@@ -4,7 +4,7 @@ import * as composioClient from '@x/core/dist/composio/client.js';
 import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { CURATED_TOOLKIT_SLUGS } from '@x/shared/dist/composio.js';
-import type { LocalConnectedAccount } from '@x/core/dist/composio/types.js';
+import type { LocalConnectedAccount, Toolkit } from '@x/core/dist/composio/types.js';
 import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 
@@ -312,8 +312,7 @@ export async function useComposioForGoogleCalendar(): Promise<{ enabled: boolean
  */
 export async function listToolkits() {
     // Paginate through all API pages to collect every curated toolkit
-    type ToolkitItem = Awaited<ReturnType<typeof composioClient.listToolkits>>['items'][number];
-    const allItems: ToolkitItem[] = [];
+    const allItems: Toolkit[] = [];
     let cursor: string | null = null;
     const maxPages = 10; // safety limit
     for (let page = 0; page < maxPages; page++) {
