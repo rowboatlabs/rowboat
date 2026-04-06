@@ -79,7 +79,7 @@ const tabs: TabConfig[] = [
     id: "tools",
     label: "Tools Library",
     icon: Wrench,
-    description: "Browse and enable Composio toolkits",
+    description: "Browse and enable toolkits",
   },
   {
     id: "note-tagging",
@@ -724,7 +724,7 @@ interface ToolkitInfo {
   composio_managed_auth_schemes?: string[]
 }
 
-function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
+function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: boolean; rowboatConnected: boolean }) {
   // API key state
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState("")
@@ -869,65 +869,67 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
 
   return (
     <div className="space-y-4">
-      {/* Section A: API Key */}
-      <div className="space-y-2">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Composio API Key</span>
-        {apiKeyConfigured && !showApiKeyInput ? (
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 text-sm text-green-600">
-              <CheckCircle2 className="size-4" />
-              API key configured
+      {/* Section A: API Key (only in BYOK mode) */}
+      {!rowboatConnected && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Composio API Key</span>
+          {apiKeyConfigured && !showApiKeyInput ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 text-sm text-green-600">
+                <CheckCircle2 className="size-4" />
+                API key configured
+              </div>
+              <button
+                onClick={() => setShowApiKeyInput(true)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Change
+              </button>
             </div>
-            <button
-              onClick={() => setShowApiKeyInput(true)}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Change
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Enter your Composio API key to browse and enable tool integrations.
-              Get your key from{" "}
-              <a
-                href="https://app.composio.dev/settings"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline"
-              >
-                app.composio.dev/settings
-              </a>
-            </p>
-            <div className="flex gap-2">
-              <Input
-                type="password"
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                placeholder="Paste your Composio API key"
-                onKeyDown={(e) => e.key === "Enter" && handleSaveApiKey()}
-                className="flex-1"
-              />
-              <Button
-                onClick={handleSaveApiKey}
-                disabled={!apiKeyInput.trim() || apiKeySaving}
-                size="sm"
-              >
-                {apiKeySaving ? <Loader2 className="size-4 animate-spin" /> : "Save"}
-              </Button>
-              {apiKeyConfigured && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => { setShowApiKeyInput(false); setApiKeyInput("") }}
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Enter your Composio API key to browse and enable tool integrations.
+                Get your key from{" "}
+                <a
+                  href="https://app.composio.dev/settings"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
                 >
-                  Cancel
+                  app.composio.dev/settings
+                </a>
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="Paste your Composio API key"
+                  onKeyDown={(e) => e.key === "Enter" && handleSaveApiKey()}
+                  className="flex-1"
+                />
+                <Button
+                  onClick={handleSaveApiKey}
+                  disabled={!apiKeyInput.trim() || apiKeySaving}
+                  size="sm"
+                >
+                  {apiKeySaving ? <Loader2 className="size-4 animate-spin" /> : "Save"}
                 </Button>
-              )}
+                {apiKeyConfigured && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setShowApiKeyInput(false); setApiKeyInput("") }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Section B: Toolkit Browser (only when API key configured) */}
       {apiKeyConfigured && (
@@ -964,11 +966,11 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                         <img
                           src={toolkit.meta.logo}
                           alt=""
-                          className="size-7 rounded object-contain flex-shrink-0"
+                          className="size-7 rounded object-contain shrink-0"
                           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                         />
                       ) : (
-                        <div className="size-7 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                        <div className="size-7 rounded bg-muted flex items-center justify-center shrink-0">
                           <Wrench className="size-3.5 text-muted-foreground" />
                         </div>
                       )}
@@ -994,7 +996,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                           variant="outline"
                           size="sm"
                           onClick={() => handleDisconnect(toolkit.slug)}
-                          className="text-xs h-7 flex-shrink-0"
+                          className="text-xs h-7 shrink-0"
                         >
                           Disconnect
                         </Button>
@@ -1003,7 +1005,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
                           size="sm"
                           onClick={() => handleConnect(toolkit.slug)}
                           disabled={isConnecting}
-                          className="text-xs h-7 flex-shrink-0"
+                          className="text-xs h-7 shrink-0"
                         >
                           {isConnecting ? (
                             <><Loader2 className="size-3 animate-spin mr-1" />Connecting...</>
@@ -1649,7 +1651,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
               ) : activeTab === "tools" ? (
-                <ToolsLibrarySettings dialogOpen={open} />
+                <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
               ) : loading ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                   Loading...
