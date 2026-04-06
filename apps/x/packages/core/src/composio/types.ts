@@ -214,6 +214,7 @@ export const ZLocalConnectedAccount = z.object({
     lastUpdatedAt: z.string(),
 });
 
+export type Toolkit = z.infer<typeof ZToolkit>;
 export type LocalConnectedAccount = z.infer<typeof ZLocalConnectedAccount>;
 export type ConnectedAccountStatus = z.infer<typeof ZConnectedAccountStatus>;
 
