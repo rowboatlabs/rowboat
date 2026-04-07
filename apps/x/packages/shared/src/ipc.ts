@@ -564,7 +564,7 @@ const ipcSchemas = {
       userId: z.string().nullable(),
       subscriptionPlan: z.string().nullable(),
       subscriptionStatus: z.string().nullable(),
-      trialDaysRemaining: z.number().nullable(),
+      trialDaysRemaining: z.number().nullable().optional(),
       sanctionedCredits: z.number(),
       availableCredits: z.number(),
     }),

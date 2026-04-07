@@ -25,7 +25,10 @@ export function useBilling(isRowboatConnected: boolean) {
     try {
       setIsLoading(true)
       const result = await window.ipc.invoke('billing:getInfo', null)
-      setBilling(result)
+      setBilling({
+        ...result,
+        trialDaysRemaining: result.trialDaysRemaining ?? null,
+      })
     } catch (error) {
       console.error('Failed to fetch billing info:', error)
       setBilling(null)
@@ -34,6 +37,7 @@ export function useBilling(isRowboatConnected: boolean) {
     }
   }, [isRowboatConnected])
 
+  // Fetch on mount / when connection state changes, and poll every 5 minutes
   useEffect(() => {
     fetchBilling()
 
@@ -53,6 +57,16 @@ export function useBilling(isRowboatConnected: boolean) {
       }
     }
   }, [fetchBilling, isRowboatConnected])
+
+  // Also refetch when OAuth connection completes (e.g. on app launch auto-reconnect)
+  useEffect(() => {
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      if (event.provider === 'rowboat') {
+        fetchBilling()
+      }
+    })
+    return cleanup
+  }, [fetchBilling])
 
   return { billing, isLoading, refresh: fetchBilling }
 }
