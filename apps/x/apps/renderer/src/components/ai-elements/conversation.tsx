@@ -3,163 +3,250 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ArrowDownIcon } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
+import type { ComponentProps, ReactNode, RefObject } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
-// Context to share scroll preservation state
-interface ScrollPreservationContextValue {
-  registerScrollContainer: (container: HTMLElement | null) => void;
-  markUserEngaged: () => void;
-  resetEngagement: () => void;
+const BOTTOM_THRESHOLD_PX = 8;
+const MAX_ANCHOR_RETRIES = 6;
+
+interface ConversationContextValue {
+  contentRef: RefObject<HTMLDivElement | null>;
+  isAtBottom: boolean;
+  scrollRef: RefObject<HTMLDivElement | null>;
+  scrollToBottom: () => void;
 }
 
-const ScrollPreservationContext = createContext<ScrollPreservationContextValue | null>(null);
+const ConversationContext = createContext<ConversationContextValue | null>(null);
 
-export type ConversationProps = ComponentProps<typeof StickToBottom> & {
+export type ConversationProps = ComponentProps<"div"> & {
+  anchorMessageId?: string | null;
+  anchorRequestKey?: number;
   children?: ReactNode;
 };
 
-export const Conversation = ({ className, children, ...props }: ConversationProps) => {
-  const [scrollContainer, setScrollContainer] = useState<HTMLElement | null>(null);
-  const isUserEngagedRef = useRef(false);
-  const savedScrollTopRef = useRef<number>(0);
-  const lastScrollHeightRef = useRef<number>(0);
+export const Conversation = ({
+  anchorMessageId = null,
+  anchorRequestKey,
+  children,
+  className,
+  ...props
+}: ConversationProps) => {
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const spacerRef = useRef<HTMLDivElement | null>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
-  const contextValue: ScrollPreservationContextValue = {
-    registerScrollContainer: (container) => {
-      setScrollContainer(container);
-    },
-    markUserEngaged: () => {
-      // Only save position on first engagement, not on repeated calls
-      if (!isUserEngagedRef.current && scrollContainer) {
-        savedScrollTopRef.current = scrollContainer.scrollTop;
-        lastScrollHeightRef.current = scrollContainer.scrollHeight;
+  const updateBottomState = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    setIsAtBottom(distanceFromBottom <= BOTTOM_THRESHOLD_PX);
+  }, []);
+
+  const applyAnchorLayout = useCallback(
+    (scrollToAnchor: boolean): boolean => {
+      const container = scrollRef.current;
+      const content = contentRef.current;
+      const spacer = spacerRef.current;
+
+      if (!container || !content || !spacer) {
+        return false;
       }
-      isUserEngagedRef.current = true;
-    },
-    resetEngagement: () => {
-      isUserEngagedRef.current = false;
-    },
-  };
 
-  // Watch for content changes and restore scroll position if user was engaged
+      if (!anchorMessageId) {
+        spacer.style.height = "0px";
+        updateBottomState();
+        return true;
+      }
+
+      const anchor = content.querySelector<HTMLElement>(
+        `[data-message-id="${anchorMessageId}"]`
+      );
+
+      if (!anchor) {
+        spacer.style.height = "0px";
+        updateBottomState();
+        return false;
+      }
+
+      spacer.style.height = "0px";
+
+      const anchorTop = anchor.offsetTop;
+      const requiredSlack = Math.max(
+        0,
+        anchorTop - (content.scrollHeight - container.clientHeight)
+      );
+
+      spacer.style.height = `${Math.ceil(requiredSlack)}px`;
+
+      if (scrollToAnchor) {
+        container.scrollTop = anchorTop;
+      }
+
+      updateBottomState();
+      return true;
+    },
+    [anchorMessageId, updateBottomState]
+  );
+
   useEffect(() => {
-    if (!scrollContainer) return;
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      updateBottomState();
+    };
+
+    handleScroll();
+    container.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+    };
+  }, [updateBottomState]);
+
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return;
 
     let rafId: number | null = null;
 
-    const checkAndRestoreScroll = () => {
-      if (!isUserEngagedRef.current) return;
-
-      const currentScrollTop = scrollContainer.scrollTop;
-      const currentScrollHeight = scrollContainer.scrollHeight;
-      const savedScrollTop = savedScrollTopRef.current;
-
-      // If scroll position jumped significantly (auto-scroll happened)
-      // and scroll height also changed (content changed), restore position
-      if (
-        Math.abs(currentScrollTop - savedScrollTop) > 50 &&
-        currentScrollHeight !== lastScrollHeightRef.current
-      ) {
-        scrollContainer.scrollTop = savedScrollTop;
+    const schedule = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
       }
-
-      lastScrollHeightRef.current = currentScrollHeight;
+      rafId = requestAnimationFrame(() => {
+        applyAnchorLayout(false);
+      });
     };
 
-    // Use ResizeObserver to detect content changes
-    const resizeObserver = new ResizeObserver(() => {
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(checkAndRestoreScroll);
-    });
-
-    resizeObserver.observe(scrollContainer);
+    const observer = new ResizeObserver(schedule);
+    observer.observe(container);
+    observer.observe(content);
+    schedule();
 
     return () => {
-      resizeObserver.disconnect();
-      if (rafId) cancelAnimationFrame(rafId);
+      observer.disconnect();
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
     };
-  }, [scrollContainer]);
+  }, [applyAnchorLayout]);
+
+  useLayoutEffect(() => {
+    if (anchorRequestKey === undefined) return;
+
+    let attempts = 0;
+    let rafId: number | null = null;
+
+    const tryAnchor = () => {
+      if (applyAnchorLayout(true)) {
+        return;
+      }
+      if (attempts >= MAX_ANCHOR_RETRIES) {
+        return;
+      }
+      attempts += 1;
+      rafId = requestAnimationFrame(tryAnchor);
+    };
+
+    tryAnchor();
+
+    return () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+    };
+  }, [anchorRequestKey, applyAnchorLayout]);
+
+  const scrollToBottom = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+    updateBottomState();
+  }, [updateBottomState]);
+
+  const contextValue = useMemo<ConversationContextValue>(
+    () => ({
+      contentRef,
+      isAtBottom,
+      scrollRef,
+      scrollToBottom,
+    }),
+    [isAtBottom, scrollToBottom]
+  );
 
   return (
-    <ScrollPreservationContext.Provider value={contextValue}>
-      <StickToBottom
-        className={cn("relative flex-1 overflow-y-hidden", className)}
-        initial="smooth"
-        resize="smooth"
+    <ConversationContext.Provider value={contextValue}>
+      <div
+        className={cn("relative flex-1 overflow-hidden", className)}
         role="log"
         {...props}
       >
-        {children}
-      </StickToBottom>
-    </ScrollPreservationContext.Provider>
+        <div
+          className="h-full w-full overflow-y-auto [scrollbar-gutter:stable]"
+          ref={scrollRef}
+        >
+          {children}
+          <div ref={spacerRef} aria-hidden="true" />
+        </div>
+      </div>
+    </ConversationContext.Provider>
   );
 };
 
-/**
- * Component that tracks scroll engagement and preserves position.
- * Must be used inside Conversation component.
- */
-export const ScrollPositionPreserver = () => {
-  const { isAtBottom, scrollRef } = useStickToBottomContext();
-  const preservationContext = useContext(ScrollPreservationContext);
-  const containerFoundRef = useRef(false);
+const useConversationContext = () => {
+  const context = useContext(ConversationContext);
 
-  // Find and register scroll container on mount
-  useLayoutEffect(() => {
-    if (containerFoundRef.current || !preservationContext) return;
+  if (!context) {
+    throw new Error(
+      "Conversation components must be used within a Conversation component."
+    );
+  }
 
-    // Use the local StickToBottom scroll container for this conversation instance.
-    const container = scrollRef.current;
-    if (container) {
-      preservationContext.registerScrollContainer(container);
-      containerFoundRef.current = true;
-    }
-  }, [preservationContext, scrollRef]);
-
-  // Track engagement based on scroll position
-  useEffect(() => {
-    if (!preservationContext) return;
-
-    if (!isAtBottom) {
-      // User is not at bottom - mark as engaged
-      preservationContext.markUserEngaged();
-    } else {
-      // User is back at bottom - reset
-      preservationContext.resetEngagement();
-    }
-  }, [isAtBottom, preservationContext]);
-
-  return null;
+  return context;
 };
 
-export type ConversationContentProps = ComponentProps<
-  typeof StickToBottom.Content
->;
+export type ConversationContentProps = ComponentProps<"div">;
 
 export const ConversationContent = ({
   className,
   ...props
-}: ConversationContentProps) => (
-  <StickToBottom.Content
-    className={cn("flex flex-col gap-8 p-4", className)}
-    {...props}
-  />
-);
+}: ConversationContentProps) => {
+  const { contentRef } = useConversationContext();
+
+  return (
+    <div
+      className={cn("flex flex-col gap-8 p-4", className)}
+      ref={contentRef}
+      {...props}
+    />
+  );
+};
 
 export type ConversationEmptyStateProps = ComponentProps<"div"> & {
-  title?: string;
   description?: string;
-  icon?: React.ReactNode;
+  icon?: ReactNode;
+  title?: string;
 };
 
 export const ConversationEmptyState = ({
+  children,
   className,
-  title = "No messages yet",
   description = "Start a conversation to see messages here",
   icon,
-  children,
+  title = "No messages yet",
   ...props
 }: ConversationEmptyStateProps) => (
   <div
@@ -183,13 +270,15 @@ export const ConversationEmptyState = ({
   </div>
 );
 
+export const ScrollPositionPreserver = () => null;
+
 export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
 
 export const ConversationScrollButton = ({
   className,
   ...props
 }: ConversationScrollButtonProps) => {
-  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
+  const { isAtBottom, scrollToBottom } = useConversationContext();
 
   const handleScrollToBottom = useCallback(() => {
     scrollToBottom();
