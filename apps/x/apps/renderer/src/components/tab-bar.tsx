@@ -29,7 +29,6 @@ export function TabBar<T>({
   activeTabId,
   getTabTitle,
   getTabId,
-  isProcessing,
   onSwitchTab,
   onCloseTab,
   layout = 'fill',
@@ -47,7 +46,6 @@ export function TabBar<T>({
       {tabs.map((tab, index) => {
         const tabId = getTabId(tab)
         const isActive = tabId === activeTabId
-        const processing = isProcessing?.(tab) ?? false
         const title = getTabTitle(tab)
 
         return (

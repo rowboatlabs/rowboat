@@ -48,7 +48,7 @@ const FLOAT_VARIANCE = 2
 const FLOAT_SPEED_BASE = 0.0006
 const FLOAT_SPEED_VARIANCE = 0.00025
 
-export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: GraphViewProps) {
+export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const positionsRef = useRef<Map<string, NodePosition>>(new Map())
   const motionSeedsRef = useRef<Map<string, { phase: number; amplitude: number; speed: number }>>(new Map())
