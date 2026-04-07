@@ -16,8 +16,8 @@ import {
   WrenchIcon,
   XCircleIcon,
 } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
-import { isValidElement } from "react";
+import { type ComponentProps, type ReactNode, isValidElement, useState } from "react";
+
 const formatToolValue = (value: unknown) => {
   if (typeof value === "string") return value;
   try {
@@ -37,7 +37,7 @@ const ToolCode = ({
 }) => (
   <pre
     className={cn(
-      "whitespace-pre-wrap text-xs font-mono",
+      "whitespace-pre-wrap text-xs font-mono break-all",
       className
     )}
   >
@@ -129,64 +129,90 @@ export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   />
 );
 
-export type ToolInputProps = ComponentProps<"div"> & {
+/* ── Tabbed content (Parameters / Result) ────────────────────────── */
+
+export type ToolTabbedContentProps = {
   input: ToolUIPart["input"];
-};
-
-export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
-  <div className={cn("space-y-2 overflow-hidden p-4", className)} {...props}>
-    <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-      Parameters
-    </h4>
-    <div className="rounded-md border bg-muted/50 p-4 text-foreground">
-      <ToolCode code={formatToolValue(input ?? {})} />
-    </div>
-  </div>
-);
-
-export type ToolOutputProps = ComponentProps<"div"> & {
   output: ToolUIPart["output"];
-  errorText: ToolUIPart["errorText"];
+  errorText?: ToolUIPart["errorText"];
 };
 
-export const ToolOutput = ({
-  className,
+export const ToolTabbedContent = ({
+  input,
   output,
   errorText,
-  ...props
-}: ToolOutputProps) => {
-  if (!(output || errorText)) {
-    return null;
-  }
+}: ToolTabbedContentProps) => {
+  const [activeTab, setActiveTab] = useState<"parameters" | "result">("parameters");
+  const hasOutput = output != null || !!errorText;
 
-  let Output = <div>{output as ReactNode}</div>;
-
-  if (typeof output === "object" && !isValidElement(output)) {
-    Output = <ToolCode code={formatToolValue(output ?? null)} />;
-  } else if (typeof output === "string") {
-    Output = <ToolCode code={formatToolValue(output)} />;
+  let OutputNode: ReactNode = null;
+  if (errorText) {
+    OutputNode = <ToolCode code={errorText} className="text-destructive" />;
+  } else if (output != null) {
+    if (typeof output === "object" && !isValidElement(output)) {
+      OutputNode = <ToolCode code={formatToolValue(output)} />;
+    } else if (typeof output === "string") {
+      OutputNode = <ToolCode code={output} />;
+    } else {
+      OutputNode = <div>{output as ReactNode}</div>;
+    }
   }
 
   return (
-    <div className={cn("space-y-2 p-4", className)} {...props}>
-      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        {errorText ? "Error" : "Result"}
-      </h4>
-      <div
-        className={cn(
-          "overflow-x-auto rounded-md border p-4 text-xs [&_table]:w-full",
-          errorText
-            ? "bg-destructive/10 text-destructive"
-            : "bg-muted/50 text-foreground"
-        )}
-      >
-        {errorText && (
-          <div className="mb-2 font-sans text-xs text-destructive">
-            {errorText}
+    <div className="border-t">
+      {/* Tabs */}
+      <div className="flex">
+        <button
+          type="button"
+          className={cn(
+            "px-4 py-2 text-xs font-medium transition-colors border-b-2",
+            activeTab === "parameters"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          )}
+          onClick={() => setActiveTab("parameters")}
+        >
+          Parameters
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "px-4 py-2 text-xs font-medium transition-colors border-b-2",
+            activeTab === "result"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          )}
+          onClick={() => setActiveTab("result")}
+        >
+          Result
+        </button>
+      </div>
+
+      {/* Tab content */}
+      <div className="p-3">
+        {activeTab === "parameters" && (
+          <div className="rounded-md border bg-muted/50 p-3 max-h-64 overflow-auto">
+            <ToolCode code={formatToolValue(input ?? {})} />
           </div>
         )}
-        {Output}
+        {activeTab === "result" && (
+          <div
+            className={cn(
+              "rounded-md border p-3 max-h-64 overflow-auto",
+              errorText ? "bg-destructive/10" : "bg-muted/50"
+            )}
+          >
+            {hasOutput ? (
+              <div className={cn(errorText && "text-destructive")}>
+                {OutputNode}
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground">(pending...)</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 };
+

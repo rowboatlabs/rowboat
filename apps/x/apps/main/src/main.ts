@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol, net, shell } from "electron";
+import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session } from "electron";
 import path from "node:path";
 import {
   setupIpcHandlers,
@@ -17,15 +17,46 @@ import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.j
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
+import { init as initEmailLabeling } from "@x/core/dist/knowledge/label_emails.js";
+import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
+import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
+import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
+import { execSync, exec } from "node:child_process";
+import { promisify } from "node:util";
+import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
+
+const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // run this as early in the main process as possible
 if (started) app.quit();
+
+// Fix PATH for packaged Electron apps on macOS/Linux.
+// Packaged apps inherit a minimal environment that doesn't include paths from
+// the user's shell profile (nvm, Homebrew, etc.). Spawn the user's login shell
+// to resolve the full PATH, using delimiters to safely extract it from any
+// surrounding shell output (motd, greeting messages, etc.).
+if (process.platform !== 'win32') {
+  try {
+    const userShell = process.env.SHELL || '/bin/zsh';
+    const delimiter = '__ROWBOAT_PATH__';
+    const output = execSync(
+      `${userShell} -lc 'echo -n "${delimiter}$PATH${delimiter}"'`,
+      { encoding: 'utf-8', timeout: 5000 },
+    );
+    const match = output.match(new RegExp(`${delimiter}(.+?)${delimiter}`));
+    if (match?.[1]) {
+      process.env.PATH = match[1];
+    }
+  } catch {
+    // Silently fall back to the existing PATH if shell resolution fails
+  }
+}
 
 // Path resolution differs between development and production:
 const preloadPath = app.isPackaged
@@ -89,8 +120,30 @@ function createWindow() {
     },
   });
 
+  // Grant microphone and display-capture permissions
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (permission === 'media' || permission === 'display-capture') {
+      callback(true);
+    } else {
+      callback(false);
+    }
+  });
+
+  // Auto-approve display media requests and route system audio as loopback.
+  // Electron requires a video source in the callback even if we only want audio.
+  // We pass the first available screen source; the renderer discards the video track.
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    if (sources.length === 0) {
+      callback({});
+      return;
+    }
+    callback({ video: sources[0], audio: 'loopback' });
+  });
+
   // Show window when content is ready to prevent blank screen
   win.once("ready-to-show", () => {
+    win.maximize();
     win.show();
   });
 
@@ -135,6 +188,19 @@ app.whenReady().then(async () => {
     });
   }
 
+  // Ensure agent-slack CLI is available
+  try {
+    execSync('agent-slack --version', { stdio: 'ignore', timeout: 5000 });
+  } catch {
+    try {
+      console.log('agent-slack not found, installing...');
+      await execAsync('npm install -g agent-slack', { timeout: 60000 });
+      console.log('agent-slack installed successfully');
+    } catch (e) {
+      console.error('Failed to install agent-slack:', e);
+    }
+  }
+
   // Initialize all config files before UI can access them
   await initConfigs();
 
@@ -170,8 +236,23 @@ app.whenReady().then(async () => {
   // start knowledge graph builder
   initGraphBuilder();
 
+  // start email labeling service
+  initEmailLabeling();
+
+  // start note tagging service
+  initNoteTagging();
+
+  // start inline task service (@rowboat: mentions)
+  initInlineTasks();
+
   // start background agent runner (scheduled agents)
   initAgentRunner();
+
+  // start agent notes learning service
+  initAgentNotes();
+
+  // start chrome extension sync server
+  initChromeSync();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

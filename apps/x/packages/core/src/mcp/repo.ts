@@ -5,10 +5,6 @@ import path from "path";
 import z from "zod";
 
 const DEFAULT_MCP_SERVERS = {
-    exa: {
-        type: "http" as const,
-        url: "https://mcp.exa.ai/mcp",
-    },
 };
 
 export interface IMcpConfigRepo {

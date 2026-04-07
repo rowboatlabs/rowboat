@@ -8,7 +8,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
-  ScrollPositionPreserver,
+  ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import {
   Message,
@@ -16,8 +16,9 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message'
 import { Shimmer } from '@/components/ai-elements/shimmer'
-import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
+import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
+import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { Suggestions } from '@/components/ai-elements/suggestions'
@@ -29,11 +30,14 @@ import { ChatInputWithMentions, type StagedAttachment } from '@/components/chat-
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { wikiLabel } from '@/lib/wiki-links'
 import {
+  type ChatViewportAnchorState,
   type ChatTabViewState,
   type ConversationItem,
   type PermissionResponse,
   createEmptyChatTabViewState,
   getWebSearchCardData,
+  getComposioConnectCardData,
+  getToolDisplayName,
   isChatMessage,
   isErrorMessage,
   isToolCall,
@@ -44,6 +48,54 @@ import {
 } from '@/lib/chat-conversation'
 
 const streamdownComponents = { pre: MarkdownPreOverride }
+
+/* ─── Billing error helpers ─── */
+
+const BILLING_ERROR_PATTERNS = [
+  {
+    pattern: /upgrade required/i,
+    title: 'A subscription is required',
+    subtitle: 'Get started with a plan to access AI features in Rowboat.',
+    cta: 'Subscribe',
+  },
+  {
+    pattern: /not enough credits/i,
+    title: 'You\'ve run out of credits',
+    subtitle: 'Upgrade your plan for more credits, or wait for your billing cycle to reset.',
+    cta: 'Upgrade plan',
+  },
+  {
+    pattern: /subscription not active/i,
+    title: 'Your subscription is inactive',
+    subtitle: 'Reactivate your subscription to continue using AI features.',
+    cta: 'Reactivate',
+  },
+] as const
+
+function matchBillingError(message: string) {
+  return BILLING_ERROR_PATTERNS.find(({ pattern }) => pattern.test(message)) ?? null
+}
+
+function BillingErrorCTA({ label }: { label: string }) {
+  const [appUrl, setAppUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    window.ipc.invoke('account:getRowboat', null)
+      .then((account: any) => setAppUrl(account.config?.appUrl ?? null))
+      .catch(() => {})
+  }, [])
+
+  if (!appUrl) return null
+
+  return (
+    <button
+      onClick={() => window.open(`${appUrl}?intent=upgrade`)}
+      className="mt-1 rounded-md bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/30"
+    >
+      {label}
+    </button>
+  )
+}
 
 const MIN_WIDTH = 360
 const MAX_WIDTH = 1600
@@ -87,6 +139,7 @@ interface ChatSidebarProps {
   conversation: ConversationItem[]
   currentAssistantMessage: string
   chatTabStates?: Record<string, ChatTabViewState>
+  viewportAnchors?: Record<string, ChatViewportAnchorState>
   isProcessing: boolean
   isStopping?: boolean
   onStop?: () => void
@@ -108,6 +161,20 @@ interface ChatSidebarProps {
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
   onOpenKnowledgeFile?: (path: string) => void
   onActivate?: () => void
+  // Voice / TTS props
+  isRecording?: boolean
+  recordingText?: string
+  recordingState?: 'connecting' | 'listening'
+  onStartRecording?: () => void
+  onSubmitRecording?: () => void
+  onCancelRecording?: () => void
+  voiceAvailable?: boolean
+  ttsAvailable?: boolean
+  ttsEnabled?: boolean
+  ttsMode?: 'summary' | 'full'
+  onToggleTts?: () => void
+  onTtsModeChange?: (mode: 'summary' | 'full') => void
+  onComposioConnected?: (toolkitSlug: string) => void
 }
 
 export function ChatSidebar({
@@ -125,6 +192,7 @@ export function ChatSidebar({
   conversation,
   currentAssistantMessage,
   chatTabStates = {},
+  viewportAnchors = {},
   isProcessing,
   isStopping,
   onStop,
@@ -146,6 +214,19 @@ export function ChatSidebar({
   onToolOpenChangeForTab,
   onOpenKnowledgeFile,
   onActivate,
+  isRecording,
+  recordingText,
+  recordingState,
+  onStartRecording,
+  onSubmitRecording,
+  onCancelRecording,
+  voiceAvailable,
+  ttsAvailable,
+  ttsEnabled,
+  ttsMode,
+  onToggleTts,
+  onTtsModeChange,
+  onComposioConnected,
 }: ChatSidebarProps) {
   const [width, setWidth] = useState(() => getInitialPaneWidth(defaultWidth))
   const [isResizing, setIsResizing] = useState(false)
@@ -259,7 +340,7 @@ export function ChatSidebar({
       if (item.role === 'user') {
         if (item.attachments && item.attachments.length > 0) {
           return (
-            <Message key={item.id} from={item.role}>
+            <Message key={item.id} from={item.role} data-message-id={item.id}>
               <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
                 <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
@@ -271,7 +352,7 @@ export function ChatSidebar({
         }
         const { message, files } = parseAttachedFiles(item.content)
         return (
-          <Message key={item.id} from={item.role}>
+          <Message key={item.id} from={item.role} data-message-id={item.id}>
             <MessageContent>
               {files.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
@@ -291,7 +372,7 @@ export function ChatSidebar({
         )
       }
       return (
-        <Message key={item.id} from={item.role}>
+        <Message key={item.id} from={item.role} data-message-id={item.id}>
           <MessageContent>
             <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
           </MessageContent>
@@ -312,6 +393,21 @@ export function ChatSidebar({
           />
         )
       }
+      const composioConnectData = getComposioConnectCardData(item)
+      if (composioConnectData) {
+        if (composioConnectData.hidden) return null
+        return (
+          <ComposioConnectCard
+            key={item.id}
+            toolkitSlug={composioConnectData.toolkitSlug}
+            toolkitDisplayName={composioConnectData.toolkitDisplayName}
+            status={item.status}
+            alreadyConnected={composioConnectData.alreadyConnected}
+            onConnected={onComposioConnected}
+          />
+        )
+      }
+      const toolTitle = getToolDisplayName(item)
       const errorText = item.status === 'error' ? 'Tool error' : ''
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
@@ -321,18 +417,31 @@ export function ChatSidebar({
           open={isToolOpenForTab?.(tabId, item.id) ?? false}
           onOpenChange={(open) => onToolOpenChangeForTab?.(tabId, item.id, open)}
         >
-          <ToolHeader title={item.name} type={`tool-${item.name}`} state={toToolState(item.status)} />
+          <ToolHeader title={toolTitle} type={`tool-${item.name}`} state={toToolState(item.status)} />
           <ToolContent>
-            <ToolInput input={input} />
-            {output !== null ? <ToolOutput output={output} errorText={errorText} /> : null}
+            <ToolTabbedContent input={input} output={output} errorText={errorText} />
           </ToolContent>
         </Tool>
       )
     }
 
     if (isErrorMessage(item)) {
+      const billingError = matchBillingError(item.message)
+      if (billingError) {
+        return (
+          <Message key={item.id} from="assistant" data-message-id={item.id}>
+            <MessageContent className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-amber-200">{billingError.title}</p>
+                <p className="text-xs text-amber-300/80">{billingError.subtitle}</p>
+                <BillingErrorCTA label={billingError.cta} />
+              </div>
+            </MessageContent>
+          </Message>
+        )
+      }
       return (
-        <Message key={item.id} from="assistant">
+        <Message key={item.id} from="assistant" data-message-id={item.id}>
           <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
             <pre className="whitespace-pre-wrap font-mono text-xs">{item.message}</pre>
           </MessageContent>
@@ -441,9 +550,12 @@ export function ChatSidebar({
                       )}
                       data-chat-tab-panel={tab.id}
                       aria-hidden={!isActive}
-                    >
-                      <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-                        <ScrollPositionPreserver />
+                      >
+                        <Conversation
+                          anchorMessageId={viewportAnchors[tab.id]?.messageId}
+                          anchorRequestKey={viewportAnchors[tab.id]?.requestKey}
+                          className="relative flex-1"
+                      >
                         <ConversationContent className={tabHasConversation ? 'mx-auto w-full max-w-4xl px-3 pb-28' : 'mx-auto w-full max-w-4xl min-h-full items-center justify-center px-3 pb-0'}>
                           {!tabHasConversation ? (
                             <ConversationEmptyState className="h-auto">
@@ -501,10 +613,11 @@ export function ChatSidebar({
                                 </Message>
                               )}
                             </>
-                          )}
-                        </ConversationContent>
-                      </Conversation>
-                    </div>
+                            )}
+                          </ConversationContent>
+                          <ConversationScrollButton />
+                        </Conversation>
+                      </div>
                   )
                 })}
               </div>
@@ -542,6 +655,18 @@ export function ChatSidebar({
                           runId={tabState.runId}
                           initialDraft={getInitialDraft?.(tab.id)}
                           onDraftChange={onDraftChangeForTab ? (text) => onDraftChangeForTab(tab.id, text) : undefined}
+                          isRecording={isActive && isRecording}
+                          recordingText={isActive ? recordingText : undefined}
+                          recordingState={isActive ? recordingState : undefined}
+                          onStartRecording={isActive ? onStartRecording : undefined}
+                          onSubmitRecording={isActive ? onSubmitRecording : undefined}
+                          onCancelRecording={isActive ? onCancelRecording : undefined}
+                          voiceAvailable={isActive && voiceAvailable}
+                          ttsAvailable={isActive && ttsAvailable}
+                          ttsEnabled={ttsEnabled}
+                          ttsMode={ttsMode}
+                          onToggleTts={isActive ? onToggleTts : undefined}
+                          onTtsModeChange={isActive ? onTtsModeChange : undefined}
                         />
                       </div>
                     )

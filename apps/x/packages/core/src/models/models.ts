@@ -8,6 +8,8 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
 import z from "zod";
+import { isSignedIn } from "../account/account.js";
+import { getGatewayProvider } from "./gateway.js";
 
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
@@ -62,7 +64,7 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
                 apiKey,
                 baseURL,
                 headers,
-            });
+            }) as unknown as ProviderV2;
         default:
             throw new Error(`Unsupported provider flavor: ${config.flavor}`);
     }
@@ -78,7 +80,9 @@ export async function testModelConnection(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), effectiveTimeout);
     try {
-        const provider = createProvider(providerConfig);
+        const provider = await isSignedIn()
+            ? await getGatewayProvider()
+            : createProvider(providerConfig);
         const languageModel = provider.languageModel(model);
         await generateText({
             model: languageModel,

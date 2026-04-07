@@ -155,7 +155,7 @@ export class GoogleClientFactory {
         }
 
         console.log(`[OAuth] Initializing Google OAuth configuration...`);
-        const providerConfig = getProviderConfig(this.PROVIDER_NAME);
+        const providerConfig = await getProviderConfig(this.PROVIDER_NAME);
 
         if (providerConfig.discovery.mode === 'issuer') {
             if (providerConfig.client.mode === 'static') {

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { ZToolkitMeta as ZSharedToolkitMeta, ZToolkitItem } from "@x/shared/dist/composio.js";
+
+// Re-export the shared toolkit schemas so existing imports continue to work
+export const ZToolkitMeta = ZSharedToolkitMeta;
 
 /**
  * Composio authentication schemes
@@ -29,26 +33,9 @@ export const ZConnectedAccountStatus = z.enum([
 ]);
 
 /**
- * Toolkit metadata
+ * Toolkit schema — same shape as ZToolkitItem from shared, re-exported for convenience.
  */
-export const ZToolkitMeta = z.object({
-    description: z.string(),
-    logo: z.string(),
-    tools_count: z.number(),
-    triggers_count: z.number(),
-});
-
-/**
- * Toolkit schema
- */
-export const ZToolkit = z.object({
-    slug: z.string(),
-    name: z.string(),
-    meta: ZToolkitMeta,
-    no_auth: z.boolean(),
-    auth_schemes: z.array(ZAuthScheme),
-    composio_managed_auth_schemes: z.array(ZAuthScheme),
-});
+export const ZToolkit = ZToolkitItem;
 
 /**
  * Tool schema
@@ -68,7 +55,7 @@ export const ZTool = z.object({
         required: z.array(z.string()).optional(),
         additionalProperties: z.boolean().optional(),
     }),
-    no_auth: z.boolean(),
+    no_auth: z.boolean().optional(),
 });
 
 /**
@@ -147,7 +134,7 @@ export const ZCreateConnectedAccountRequest = z.object({
  */
 export const ZCreateConnectedAccountResponse = z.object({
     id: z.string(),
-    connectionData: ZConnectionData,
+    connectionData: ZConnectionData.optional(),
 });
 
 /**
@@ -200,18 +187,19 @@ export const ZListResponse = <T extends z.ZodTypeAny>(schema: T) => z.object({
  * Execute action request
  */
 export const ZExecuteActionRequest = z.object({
-    action: z.string(),
     connected_account_id: z.string(),
-    input: z.record(z.string(), z.unknown()),
+    user_id: z.string(),
+    version: z.string(),
+    arguments: z.any().optional(),
 });
 
 /**
  * Execute action response
  */
 export const ZExecuteActionResponse = z.object({
-    success: z.boolean(),
     data: z.unknown(),
-    error: z.string().optional(),
+    successful: z.boolean(),
+    error: z.string().nullable(),
 });
 
 /**
@@ -226,12 +214,44 @@ export const ZLocalConnectedAccount = z.object({
     lastUpdatedAt: z.string(),
 });
 
-export type AuthScheme = z.infer<typeof ZAuthScheme>;
-export type ConnectedAccountStatus = z.infer<typeof ZConnectedAccountStatus>;
 export type Toolkit = z.infer<typeof ZToolkit>;
-export type Tool = z.infer<typeof ZTool>;
-export type AuthConfig = z.infer<typeof ZAuthConfig>;
-export type ConnectedAccount = z.infer<typeof ZConnectedAccount>;
 export type LocalConnectedAccount = z.infer<typeof ZLocalConnectedAccount>;
-export type ExecuteActionRequest = z.infer<typeof ZExecuteActionRequest>;
-export type ExecuteActionResponse = z.infer<typeof ZExecuteActionResponse>;
+export type ConnectedAccountStatus = z.infer<typeof ZConnectedAccountStatus>;
+
+/**
+ * Tool schema for search results.
+ * Unlike ZTool, `toolkit` is optional because the Composio /tools search endpoint
+ * sometimes omits the toolkit object from results. `input_parameters` uses
+ * lenient defaults so tools with no params (e.g. LINKEDIN_GET_MY_INFO) parse cleanly.
+ */
+export const ZSearchResultTool = z.object({
+    slug: z.string(),
+    name: z.string(),
+    description: z.string(),
+    toolkit: z.object({
+        slug: z.string(),
+        name: z.string(),
+        logo: z.string(),
+    }),
+    input_parameters: z.object({
+        type: z.literal('object').optional().default('object'),
+        properties: z.record(z.string(), z.unknown()).optional().default({}),
+        required: z.array(z.string()).optional(),
+    }).optional().default({ type: 'object', properties: {} }),
+}).passthrough();
+
+/**
+ * Normalized tool result returned from searchTools().
+ */
+export const ZNormalizedToolResult = z.object({
+    slug: z.string(),
+    name: z.string(),
+    description: z.string(),
+    toolkitSlug: z.string(),
+    inputParameters: z.object({
+        type: z.literal('object'),
+        properties: z.record(z.string(), z.unknown()),
+        required: z.array(z.string()).optional(),
+    }),
+});
+export type NormalizedToolResult = z.infer<typeof ZNormalizedToolResult>;

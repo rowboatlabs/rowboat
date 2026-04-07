@@ -3,14 +3,18 @@ import { UserMessageContent } from "@x/shared/dist/message.js";
 import z from "zod";
 
 export type UserMessageContentType = z.infer<typeof UserMessageContent>;
+export type VoiceOutputMode = 'summary' | 'full';
 
 type EnqueuedMessage = {
     messageId: string;
     message: UserMessageContentType;
+    voiceInput?: boolean;
+    voiceOutput?: VoiceOutputMode;
+    searchEnabled?: boolean;
 };
 
 export interface IMessageQueue {
-    enqueue(runId: string, message: UserMessageContentType): Promise<string>;
+    enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean): Promise<string>;
     dequeue(runId: string): Promise<EnqueuedMessage | null>;
 }
 
@@ -26,7 +30,7 @@ export class InMemoryMessageQueue implements IMessageQueue {
         this.idGenerator = idGenerator;
     }
 
-    async enqueue(runId: string, message: UserMessageContentType): Promise<string> {
+    async enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean): Promise<string> {
         if (!this.store[runId]) {
             this.store[runId] = [];
         }
@@ -34,6 +38,9 @@ export class InMemoryMessageQueue implements IMessageQueue {
         this.store[runId].push({
             messageId: id,
             message,
+            voiceInput,
+            voiceOutput,
+            searchEnabled,
         });
         return id;
     }

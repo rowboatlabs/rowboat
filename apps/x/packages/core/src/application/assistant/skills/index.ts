@@ -7,10 +7,11 @@ import draftEmailsSkill from "./draft-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
-import slackSkill from "./slack/skill.js";
 import backgroundAgentsSkill from "./background-agents/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
-import webSearchSkill from "./web-search/skill.js";
+
+import appNavigationSkill from "./app-navigation/skill.js";
+import composioIntegrationSkill from "./composio-integration/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
@@ -60,12 +61,6 @@ const definitions: SkillDefinition[] = [
     content: organizeFilesSkill,
   },
   {
-    id: "slack",
-    title: "Slack Integration",
-    summary: "Send Slack messages, view channel history, search conversations, find users, and manage team communication.",
-    content: slackSkill,
-  },
-  {
     id: "background-agents",
     title: "Background Agents",
     summary: "Creating, editing, and scheduling background agents. Configure schedules in agent-schedule.json and build multi-agent workflows.",
@@ -84,16 +79,22 @@ const definitions: SkillDefinition[] = [
     content: mcpIntegrationSkill,
   },
   {
-    id: "web-search",
-    title: "Web Search",
-    summary: "Searching the web or researching a topic. Guidance on when to use web-search vs research-search, and how many searches to do.",
-    content: webSearchSkill,
+    id: "composio-integration",
+    title: "Composio Integration",
+    summary: "Interact with third-party services (Gmail, GitHub, Slack, LinkedIn, Notion, Jira, Google Sheets, etc.) via Composio. Search, connect, and execute tools.",
+    content: composioIntegrationSkill,
   },
   {
     id: "deletion-guardrails",
     title: "Deletion Guardrails",
     summary: "Following the confirmation process before removing workflows or agents and their dependencies.",
     content: deletionGuardrailsSkill,
+  },
+  {
+    id: "app-navigation",
+    title: "App Navigation",
+    summary: "Navigate the app UI - open notes, switch views, filter/search the knowledge base, and manage saved views.",
+    content: appNavigationSkill,
   },
 ];
 

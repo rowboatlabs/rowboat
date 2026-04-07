@@ -75,7 +75,7 @@ function getClientRegistrationRepo(): IClientRegistrationRepo {
  * Get or create OAuth configuration for a provider
  */
 async function getProviderConfiguration(provider: string, clientIdOverride?: string): Promise<Configuration> {
-  const config = getProviderConfig(provider);
+  const config = await getProviderConfig(provider);
   const resolveClientId = async (): Promise<string> => {
     if (config.client.mode === 'static' && config.client.clientId) {
       return config.client.clientId;
@@ -156,7 +156,7 @@ export async function connectProvider(provider: string, clientId?: string): Prom
     cancelActiveFlow('new_flow_started');
 
     const oauthRepo = getOAuthRepo();
-    const providerConfig = getProviderConfig(provider);
+    const providerConfig = await getProviderConfig(provider);
 
     if (provider === 'google') {
       if (!clientId) {
@@ -186,7 +186,11 @@ export async function connectProvider(provider: string, clientId?: string): Prom
     });
 
     // Create callback server
+    let callbackHandled = false;
     const { server } = await createAuthServer(8080, async (params: Record<string, string>) => {
+      // Guard against duplicate callbacks (browser may send multiple requests)
+      if (callbackHandled) return;
+      callbackHandled = true;
       // Validate state
       if (params.state !== state) {
         throw new Error('Invalid state parameter - possible CSRF attack');
@@ -282,6 +286,8 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
   try {
     const oauthRepo = getOAuthRepo();
     await oauthRepo.delete(provider);
+    // Notify renderer so sidebar, voice, and billing re-check state
+    emitOAuthEvent({ provider, success: false });
     return { success: true };
   } catch (error) {
     console.error('OAuth disconnect failed:', error);

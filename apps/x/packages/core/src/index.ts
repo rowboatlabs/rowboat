@@ -9,3 +9,6 @@ export { initConfigs } from './config/initConfigs.js';
 
 // Knowledge version history
 export * as versionHistory from './knowledge/version_history.js';
+
+// Voice mode (config + TTS)
+export * as voice from './voice/voice.js';

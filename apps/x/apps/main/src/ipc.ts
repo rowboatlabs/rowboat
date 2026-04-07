@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
@@ -15,23 +15,100 @@ import { bus } from '@x/core/dist/runs/bus.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import z from 'zod';
+
+const execAsync = promisify(exec);
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection } from '@x/core/dist/models/models.js';
+import { isSignedIn } from '@x/core/dist/account/account.js';
+import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
+import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import * as composioHandler from './composio-handler.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 import { search } from '@x/core/dist/search/search.js';
-import { versionHistory } from '@x/core';
+import { versionHistory, voice } from '@x/core';
+import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
+import { getBillingInfo } from '@x/core/dist/billing/billing.js';
+import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
+import { getAccessToken } from '@x/core/dist/auth/tokens.js';
+import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
+
+/**
+ * Convert markdown to a styled HTML document for PDF/DOCX export.
+ */
+function markdownToHtml(markdown: string, title: string): string {
+  // Simple markdown to HTML conversion for export purposes
+  let html = markdown
+    // Resolve wiki links [[Folder/Note Name]] or [[Folder/Note Name|Display]] to plain text
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, (_match, _path, display) => display.trim())
+    .replace(/\[\[([^\]]+)\]\]/g, (_match, linkPath: string) => {
+      // Use the last segment (filename) as the display name
+      const segments = linkPath.trim().split('/')
+      return segments[segments.length - 1]
+    })
+    // Escape HTML entities (but preserve markdown syntax)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  // Headings (must come before other processing)
+  html = html.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>')
+  html = html.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>')
+  html = html.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>')
+  html = html.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
+  html = html.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
+  html = html.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>')
+
+  // Bold and italic
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
+
+  // Horizontal rules
+  html = html.replace(/^---$/gm, '<hr>')
+
+  // Unordered lists
+  html = html.replace(/^[-*]\s+(.+)$/gm, '<li>$1</li>')
+
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+
+  // Blockquotes
+  html = html.replace(/^&gt;\s+(.+)$/gm, '<blockquote>$1</blockquote>')
+
+  // Paragraphs: wrap remaining lines that aren't already wrapped in HTML tags
+  html = html.replace(/^(?!<[a-z/])((?!^\s*$).+)$/gm, '<p>$1</p>')
+
+  // Clean up consecutive list items into lists
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${title}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; line-height: 1.6; font-size: 14px; }
+  h1 { font-size: 1.8em; margin-top: 1em; } h2 { font-size: 1.4em; margin-top: 1em; } h3 { font-size: 1.2em; }
+  code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+  blockquote { border-left: 3px solid #ddd; margin: 1em 0; padding: 0.5em 1em; color: #555; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
+  ul { padding-left: 1.5em; }
+  a { color: #0066cc; }
+</style></head><body>${html}</body></html>`
+}
 
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
@@ -69,10 +146,10 @@ export function registerIpcHandlers(handlers: InvokeHandlers) {
     ipcMain.handle(channel, async (event, rawArgs) => {
       // Validate request payload
       const args = ipc.validateRequest(channel, rawArgs);
-      
+
       // Call handler
       const result = await handler(event, args);
-      
+
       // Validate response payload
       return ipc.validateResponse(channel, result);
     });
@@ -344,7 +421,7 @@ export function setupIpcHandlers() {
       return runsCore.createRun(args);
     },
     'runs:createMessage': async (_event, args) => {
-      return { messageId: await runsCore.createMessage(args.runId, args.message) };
+      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled) };
     },
     'runs:authorizePermission': async (_event, args) => {
       await runsCore.authorizePermission(args.runId, args.authorization);
@@ -369,6 +446,9 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'models:list': async () => {
+      if (await isSignedIn()) {
+        return await listGatewayModels();
+      }
       return await listOnboardingModels();
     },
     'models:test': async (_event, args) => {
@@ -393,6 +473,21 @@ export function setupIpcHandlers() {
       const config = await repo.getClientFacingConfig();
       return { config };
     },
+    'account:getRowboat': async () => {
+      const signedIn = await isSignedIn();
+      if (!signedIn) {
+        return { signedIn: false, accessToken: null, config: null };
+      }
+
+      const config = await getRowboatConfig();
+
+      try {
+        const accessToken = await getAccessToken();
+        return { signedIn: true, accessToken, config };
+      } catch {
+        return { signedIn: true, accessToken: null, config };
+      }
+    },
     'granola:getConfig': async () => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
       const config = await repo.getConfig();
@@ -408,6 +503,30 @@ export function setupIpcHandlers() {
       }
 
       return { success: true };
+    },
+    'slack:getConfig': async () => {
+      const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
+      const config = await repo.getConfig();
+      return { enabled: config.enabled, workspaces: config.workspaces };
+    },
+    'slack:setConfig': async (_event, args) => {
+      const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
+      await repo.setConfig({ enabled: args.enabled, workspaces: args.workspaces });
+      return { success: true };
+    },
+    'slack:listWorkspaces': async () => {
+      try {
+        const { stdout } = await execAsync('agent-slack auth whoami', { timeout: 10000 });
+        const parsed = JSON.parse(stdout);
+        const workspaces = (parsed.workspaces || []).map((w: { workspace_url?: string; workspace_name?: string }) => ({
+          url: w.workspace_url || '',
+          name: w.workspace_name || '',
+        }));
+        return { workspaces };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Failed to list Slack workspaces';
+        return { workspaces: [], error: message };
+      }
     },
     'onboarding:getStatus': async () => {
       // Show onboarding if it hasn't been completed yet
@@ -440,8 +559,15 @@ export function setupIpcHandlers() {
     'composio:list-connected': async () => {
       return composioHandler.listConnected();
     },
-    'composio:execute-action': async (_event, args) => {
-      return composioHandler.executeAction(args.actionSlug, args.toolkitSlug, args.input);
+    // Composio Tools Library handlers
+    'composio:list-toolkits': async () => {
+      return composioHandler.listToolkits();
+    },
+    'composio:use-composio-for-google': async () => {
+      return composioHandler.useComposioForGoogle();
+    },
+    'composio:use-composio-for-google-calendar': async () => {
+      return composioHandler.useComposioForGoogleCalendar();
     },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
@@ -530,6 +656,108 @@ export function setupIpcHandlers() {
     // Search handler
     'search:query': async (_event, args) => {
       return search(args.query, args.limit, args.types);
+    },
+    // Inline task schedule classification
+    'export:note': async (event, args) => {
+      const { markdown, format, title } = args;
+      const sanitizedTitle = title.replace(/[/\\?%*:|"<>]/g, '-').trim() || 'Untitled';
+
+      const filterMap: Record<string, Electron.FileFilter[]> = {
+        md: [{ name: 'Markdown', extensions: ['md'] }],
+        pdf: [{ name: 'PDF', extensions: ['pdf'] }],
+        docx: [{ name: 'Word Document', extensions: ['docx'] }],
+      };
+
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showSaveDialog(win!, {
+        defaultPath: `${sanitizedTitle}.${format}`,
+        filters: filterMap[format],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { success: false };
+      }
+
+      const filePath = result.filePath;
+
+      if (format === 'md') {
+        await fs.writeFile(filePath, markdown, 'utf8');
+        return { success: true };
+      }
+
+      if (format === 'pdf') {
+        // Render markdown as HTML in a hidden window, then print to PDF
+        const htmlContent = markdownToHtml(markdown, sanitizedTitle);
+        const hiddenWin = new BrowserWindow({
+          show: false,
+          width: 800,
+          height: 600,
+          webPreferences: { offscreen: true },
+        });
+        await hiddenWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+        // Small delay to ensure CSS/fonts render
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const pdfBuffer = await hiddenWin.webContents.printToPDF({
+          printBackground: true,
+          pageSize: 'A4',
+        });
+        hiddenWin.destroy();
+        await fs.writeFile(filePath, pdfBuffer);
+        return { success: true };
+      }
+
+      if (format === 'docx') {
+        const htmlContent = markdownToHtml(markdown, sanitizedTitle);
+        const { default: htmlToDocx } = await import('html-to-docx');
+        const docxBuffer = await htmlToDocx(htmlContent, undefined, {
+          table: { row: { cantSplit: true } },
+          footer: false,
+          header: false,
+        });
+        await fs.writeFile(filePath, Buffer.from(docxBuffer as ArrayBuffer));
+        return { success: true };
+      }
+
+      return { success: false, error: 'Unknown format' };
+    },
+    'meeting:checkScreenPermission': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('screen');
+      console.log('[meeting] Screen recording permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // Not granted — call desktopCapturer.getSources() to register the app
+      // in the macOS Screen Recording list. On first call this shows the
+      // native permission prompt (signed apps are remembered across restarts).
+      try { await desktopCapturer.getSources({ types: ['screen'] }); } catch { /* ignore */ }
+      // Re-check after the native prompt was dismissed
+      const statusAfter = systemPreferences.getMediaAccessStatus('screen');
+      console.log('[meeting] Screen recording permission status after prompt:', statusAfter);
+      return { granted: statusAfter === 'granted' };
+    },
+    'meeting:openScreenRecordingSettings': async () => {
+      await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+      return { success: true };
+    },
+    'meeting:summarize': async (_event, args) => {
+      const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);
+      return { notes };
+    },
+    'inline-task:classifySchedule': async (_event, args) => {
+      const schedule = await classifySchedule(args.instruction);
+      return { schedule };
+    },
+    'inline-task:process': async (_event, args) => {
+      return await processRowboatInstruction(args.instruction, args.noteContent, args.notePath);
+    },
+    'voice:getConfig': async () => {
+      return voice.getVoiceConfig();
+    },
+    'voice:synthesize': async (_event, args) => {
+      return voice.synthesizeSpeech(args.text);
+    },
+    // Billing handler
+    'billing:getInfo': async () => {
+      return await getBillingInfo();
     },
   });
 }

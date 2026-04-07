@@ -14,6 +14,7 @@ import { FSGranolaConfigRepo, IGranolaConfigRepo } from "../knowledge/granola/re
 import { IAbortRegistry, InMemoryAbortRegistry } from "../runs/abort-registry.js";
 import { FSAgentScheduleRepo, IAgentScheduleRepo } from "../agent-schedule/repo.js";
 import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
+import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -37,6 +38,7 @@ container.register({
     granolaConfigRepo: asClass<IGranolaConfigRepo>(FSGranolaConfigRepo).singleton(),
     agentScheduleRepo: asClass<IAgentScheduleRepo>(FSAgentScheduleRepo).singleton(),
     agentScheduleStateRepo: asClass<IAgentScheduleStateRepo>(FSAgentScheduleStateRepo).singleton(),
+    slackConfigRepo: asClass<ISlackConfigRepo>(FSSlackConfigRepo).singleton(),
 });
 
 export default container;

@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { autoConfigureStrictnessIfNeeded } from '../config/strictness_analyzer.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
@@ -16,6 +15,7 @@ import {
 import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js';
 import { limitEventItems } from './limit_event_items.js';
 import { commitAll } from './version_history.js';
+import { getTagDefinitions } from './tag_system.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -26,15 +26,57 @@ const NOTES_OUTPUT_DIR = path.join(WorkDir, 'knowledge');
 const NOTE_CREATION_AGENT = 'note_creation';
 
 // Configuration for the graph builder service
-const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
+const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const SOURCE_FOLDERS = [
     'gmail_sync',
-    'fireflies_transcripts',
-    'granola_notes',
+    path.join('knowledge', 'Meetings', 'fireflies'),
+    path.join('knowledge', 'Meetings', 'granola'),
 ];
 
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
 const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
+
+/**
+ * Check if email frontmatter contains any noise/skip filter tags.
+ * Returns true if the email should be skipped.
+ */
+function hasNoiseLabels(content: string): boolean {
+    if (!content.startsWith('---')) return false;
+
+    const endIdx = content.indexOf('---', 3);
+    if (endIdx === -1) return false;
+
+    const frontmatter = content.slice(3, endIdx);
+
+    const noiseTags = new Set(
+        getTagDefinitions()
+            .filter(t => t.type === 'noise')
+            .map(t => t.tag)
+    );
+
+    // Match list items under filter: key
+    const filterMatch = frontmatter.match(/filter:\s*\n((?:\s+-\s+.+\n?)*)/);
+    if (filterMatch) {
+        const filterLines = filterMatch[1].match(/^\s+-\s+(.+)$/gm);
+        if (filterLines) {
+            for (const line of filterLines) {
+                const tag = line.replace(/^\s+-\s+/, '').trim().replace(/['"]/g, '');
+                if (noiseTags.has(tag)) return true;
+            }
+        }
+    }
+
+    // Match inline array like filter: ['cold-outreach'] or filter: [cold-outreach]
+    const inlineMatch = frontmatter.match(/filter:\s*\[([^\]]*)\]/);
+    if (inlineMatch && inlineMatch[1].trim()) {
+        const tags = inlineMatch[1].split(',').map(t => t.trim().replace(/['"]/g, ''));
+        for (const tag of tags) {
+            if (noiseTags.has(tag)) return true;
+        }
+    }
+
+    return false;
+}
 
 function extractPathFromToolInput(input: string): string | null {
     try {
@@ -193,7 +235,9 @@ async function createNotesFromBatch(
     // Add each file's content
     message += `# Source Files to Process\n\n`;
     files.forEach((file, idx) => {
-        message += `## Source File ${idx + 1}: ${path.basename(file.path)}\n\n`;
+        // Pass workspace-relative path so the agent can link back to meeting notes
+        const relativePath = path.relative(WorkDir, file.path);
+        message += `## Source File ${idx + 1}: ${relativePath}\n\n`;
         message += file.content;
         message += `\n\n---\n\n`;
     });
@@ -363,7 +407,26 @@ export async function buildGraph(sourceDir: string): Promise<void> {
     console.log(`[buildGraph] State loaded. Previously processed: ${previouslyProcessedCount} files`);
 
     // Get files that need processing (new or changed)
-    const filesToProcess = getFilesToProcess(sourceDir, state);
+    let filesToProcess = getFilesToProcess(sourceDir, state);
+
+    // For gmail_sync, only process emails that have been labeled AND don't have noise filter tags
+    if (sourceDir.endsWith('gmail_sync')) {
+        filesToProcess = filesToProcess.filter(filePath => {
+            try {
+                const content = fs.readFileSync(filePath, 'utf-8');
+                if (!content.startsWith('---')) return false;
+                if (hasNoiseLabels(content)) {
+                    console.log(`[buildGraph] Skipping noise email: ${path.basename(filePath)}`);
+                    markFileAsProcessed(filePath, state);
+                    return false;
+                }
+                return true;
+            } catch {
+                return false;
+            }
+        });
+        saveState(state);
+    }
 
     if (filesToProcess.length === 0) {
         console.log(`[buildGraph] No new or changed files to process in ${path.basename(sourceDir)}`);
@@ -522,11 +585,9 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
 /**
  * Process all configured source directories
  */
-async function processAllSources(): Promise<void> {
+export async function processAllSources(): Promise<void> {
     console.log('[GraphBuilder] Checking for new content in all sources...');
 
-    // Auto-configure strictness on first run if not already done
-    autoConfigureStrictnessIfNeeded();
 
     let anyFilesProcessed = false;
 
@@ -555,7 +616,26 @@ async function processAllSources(): Promise<void> {
         }
 
         try {
-            const filesToProcess = getFilesToProcess(sourceDir, state);
+            let filesToProcess = getFilesToProcess(sourceDir, state);
+
+            // For gmail_sync, only process emails that have been labeled AND don't have noise filter tags
+            if (folder === 'gmail_sync') {
+                filesToProcess = filesToProcess.filter(filePath => {
+                    try {
+                        const content = fs.readFileSync(filePath, 'utf-8');
+                        if (!content.startsWith('---')) return false;
+                        if (hasNoiseLabels(content)) {
+                            console.log(`[GraphBuilder] Skipping noise email: ${path.basename(filePath)}`);
+                            markFileAsProcessed(filePath, state);
+                            return false;
+                        }
+                        return true;
+                    } catch {
+                        return false;
+                    }
+                });
+                saveState(state);
+            }
 
             if (filesToProcess.length > 0) {
                 console.log(`[GraphBuilder] Found ${filesToProcess.length} new/changed files in ${folder}`);

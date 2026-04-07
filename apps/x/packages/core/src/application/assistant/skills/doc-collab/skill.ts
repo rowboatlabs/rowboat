@@ -173,6 +173,56 @@ Documents are stored in \`~/.rowboat/knowledge/\` with subfolders:
 - \`Topics/\` - Subject matter notes
 - Root level for general documents
 
+## Rich Blocks
+
+Notes support rich block types beyond standard Markdown. Blocks are fenced code blocks with a language identifier and a JSON body. Use these when the user asks for visual content like charts, tables, images, or embeds.
+
+### Image Block
+Displays an image with optional alt text and caption.
+\`\`\`image
+{"src": "https://example.com/photo.png", "alt": "Description", "caption": "Optional caption"}
+\`\`\`
+- \`src\` (required): URL or relative path to the image
+- \`alt\` (optional): Alt text
+- \`caption\` (optional): Caption displayed below the image
+
+### Embed Block
+Embeds external content (YouTube videos, Figma designs, or generic links).
+\`\`\`embed
+{"provider": "youtube", "url": "https://www.youtube.com/watch?v=VIDEO_ID", "caption": "Video title"}
+\`\`\`
+- \`provider\` (required): \`"youtube"\`, \`"figma"\`, or \`"generic"\`
+- \`url\` (required): Full URL to the content
+- \`caption\` (optional): Caption displayed below the embed
+- YouTube and Figma render as iframes; generic shows a link card
+
+### Chart Block
+Renders a chart from inline data.
+\`\`\`chart
+{"chart": "bar", "title": "Q1 Revenue", "data": [{"month": "Jan", "revenue": 50000}, {"month": "Feb", "revenue": 62000}], "x": "month", "y": "revenue"}
+\`\`\`
+- \`chart\` (required): \`"line"\`, \`"bar"\`, or \`"pie"\`
+- \`title\` (optional): Chart title
+- \`data\` (optional): Array of objects with the data points
+- \`source\` (optional): Relative path to a JSON file containing the data array (alternative to inline data)
+- \`x\` (required): Key name for the x-axis / label field
+- \`y\` (required): Key name for the y-axis / value field
+
+### Table Block
+Renders a styled table from structured data.
+\`\`\`table
+{"title": "Team", "columns": ["name", "role"], "data": [{"name": "Alice", "role": "Eng"}, {"name": "Bob", "role": "Design"}]}
+\`\`\`
+- \`columns\` (required): Array of column names (determines display order)
+- \`data\` (required): Array of row objects
+- \`title\` (optional): Table title
+
+### Block Guidelines
+- The JSON must be valid and on a single line (no pretty-printing)
+- Insert blocks using \`workspace-editFile\` just like any other content
+- When the user asks for a chart, table, or embed — use blocks rather than plain Markdown tables or image links
+- When editing a note that already contains blocks, preserve them unless the user asks to change them
+
 ## Best Practices
 
 **Writing style:**
