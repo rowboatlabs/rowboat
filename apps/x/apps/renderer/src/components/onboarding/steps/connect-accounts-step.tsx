@@ -1,4 +1,4 @@
-import { Loader2, CheckCircle2, ArrowLeft, Calendar } from "lucide-react"
+import { Loader2, CheckCircle2, ArrowLeft, Calendar, FileText } from "lucide-react"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -98,7 +98,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
         Connect Your Accounts
       </h2>
       <p className="text-base text-muted-foreground text-center leading-relaxed mb-8">
-        Connect your accounts to give Rowboat context about your work. You can always add more later.
+        Rowboat gets smarter the more it knows about your work. Connect your accounts to get started. You can find more tools in Settings.
       </p>
 
       {providersLoading ? (
@@ -116,7 +116,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
               {useComposioForGoogle ? (
                 <ProviderCard
                   name="Gmail"
-                  description="Sync your email for context-aware assistance"
+                  description="Read emails for context and drafts."
                   icon={<GmailIcon />}
                   iconBg="bg-red-500/10"
                   iconColor="text-red-500"
@@ -139,7 +139,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
               {useComposioForGoogleCalendar && (
                 <ProviderCard
                   name="Google Calendar"
-                  description="Sync calendar events for scheduling awareness"
+                  description="Read meetings and your schedule."
                   icon={<Calendar className="size-5" />}
                   iconBg="bg-blue-500/10"
                   iconColor="text-blue-500"
@@ -152,14 +152,35 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
           )}
 
           {/* Meeting Notes */}
-          {providers.includes('fireflies-ai') && (
-            <div className="space-y-3">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Meeting Notes
-              </span>
+          <div className="space-y-3">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Meeting Notes
+            </span>
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: cardIndex++ * 0.06 }}
+              className="flex items-center justify-between gap-4 rounded-xl border border-green-200 bg-green-50/50 dark:border-green-800/50 dark:bg-green-900/10 p-4"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="size-10 rounded-lg flex items-center justify-center shrink-0 bg-green-500/10">
+                  <span className="text-green-500"><FileText className="size-5" /></span>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">Rowboat Meeting Notes</div>
+                  <div className="text-xs text-muted-foreground truncate">Built in. Ready to use.</div>
+                </div>
+              </div>
+              <div className="shrink-0">
+                <div className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
+                  <CheckCircle2 className="size-4" />
+                </div>
+              </div>
+            </motion.div>
+            {providers.includes('fireflies-ai') && (
               <ProviderCard
                 name="Fireflies"
-                description="Import AI-powered meeting transcripts automatically"
+                description="Import existing notes."
                 icon={<FirefliesIcon />}
                 iconBg="bg-amber-500/10"
                 iconColor="text-amber-500"
@@ -167,8 +188,8 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                 onConnect={() => handleConnect('fireflies-ai')}
                 index={cardIndex++}
               />
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
