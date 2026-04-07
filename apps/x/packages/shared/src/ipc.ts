@@ -251,6 +251,7 @@ const ipcSchemas = {
       config: z.record(z.string(), z.object({
         connected: z.boolean(),
         error: z.string().nullable().optional(),
+        userId: z.string().optional(),
       })),
     }),
   },
@@ -267,6 +268,7 @@ const ipcSchemas = {
       provider: z.string(),
       success: z.boolean(),
       error: z.string().optional(),
+      userId: z.string().optional(),
     }),
     res: z.null(),
   },

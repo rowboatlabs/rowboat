@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Loader2, Mic, Mail, Calendar } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
 import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
 import { useConnectors } from "@/hooks/useConnectors"
