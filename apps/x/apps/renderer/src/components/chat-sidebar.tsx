@@ -8,7 +8,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
-  ScrollPositionPreserver,
+  ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import {
   Message,
@@ -30,6 +30,7 @@ import { ChatInputWithMentions, type StagedAttachment } from '@/components/chat-
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { wikiLabel } from '@/lib/wiki-links'
 import {
+  type ChatViewportAnchorState,
   type ChatTabViewState,
   type ConversationItem,
   type PermissionResponse,
@@ -90,6 +91,7 @@ interface ChatSidebarProps {
   conversation: ConversationItem[]
   currentAssistantMessage: string
   chatTabStates?: Record<string, ChatTabViewState>
+  viewportAnchors?: Record<string, ChatViewportAnchorState>
   isProcessing: boolean
   isStopping?: boolean
   onStop?: () => void
@@ -142,6 +144,7 @@ export function ChatSidebar({
   conversation,
   currentAssistantMessage,
   chatTabStates = {},
+  viewportAnchors = {},
   isProcessing,
   isStopping,
   onStop,
@@ -289,7 +292,7 @@ export function ChatSidebar({
       if (item.role === 'user') {
         if (item.attachments && item.attachments.length > 0) {
           return (
-            <Message key={item.id} from={item.role}>
+            <Message key={item.id} from={item.role} data-message-id={item.id}>
               <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
                 <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
@@ -301,7 +304,7 @@ export function ChatSidebar({
         }
         const { message, files } = parseAttachedFiles(item.content)
         return (
-          <Message key={item.id} from={item.role}>
+          <Message key={item.id} from={item.role} data-message-id={item.id}>
             <MessageContent>
               {files.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
@@ -321,7 +324,7 @@ export function ChatSidebar({
         )
       }
       return (
-        <Message key={item.id} from={item.role}>
+        <Message key={item.id} from={item.role} data-message-id={item.id}>
           <MessageContent>
             <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
           </MessageContent>
@@ -376,7 +379,7 @@ export function ChatSidebar({
 
     if (isErrorMessage(item)) {
       return (
-        <Message key={item.id} from="assistant">
+        <Message key={item.id} from="assistant" data-message-id={item.id}>
           <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
             <pre className="whitespace-pre-wrap font-mono text-xs">{item.message}</pre>
           </MessageContent>
@@ -485,9 +488,12 @@ export function ChatSidebar({
                       )}
                       data-chat-tab-panel={tab.id}
                       aria-hidden={!isActive}
-                    >
-                      <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-                        <ScrollPositionPreserver />
+                      >
+                        <Conversation
+                          anchorMessageId={viewportAnchors[tab.id]?.messageId}
+                          anchorRequestKey={viewportAnchors[tab.id]?.requestKey}
+                          className="relative flex-1"
+                      >
                         <ConversationContent className={tabHasConversation ? 'mx-auto w-full max-w-4xl px-3 pb-28' : 'mx-auto w-full max-w-4xl min-h-full items-center justify-center px-3 pb-0'}>
                           {!tabHasConversation ? (
                             <ConversationEmptyState className="h-auto">
@@ -545,10 +551,11 @@ export function ChatSidebar({
                                 </Message>
                               )}
                             </>
-                          )}
-                        </ConversationContent>
-                      </Conversation>
-                    </div>
+                            )}
+                          </ConversationContent>
+                          <ConversationScrollButton />
+                        </Conversation>
+                      </div>
                   )
                 })}
               </div>

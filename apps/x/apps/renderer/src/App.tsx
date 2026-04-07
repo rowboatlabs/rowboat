@@ -20,7 +20,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
-  ScrollPositionPreserver,
+  ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import {
   Message,
@@ -62,6 +62,7 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
 import {
   type ChatMessage,
+  type ChatViewportAnchorState,
   type ChatTabViewState,
   type ConversationItem,
   type ToolCall,
@@ -841,6 +842,7 @@ function App() {
   const chatDraftsRef = useRef(new Map<string, string>())
   const chatScrollTopByTabRef = useRef(new Map<string, number>())
   const [toolOpenByTab, setToolOpenByTab] = useState<Record<string, Record<string, boolean>>>({})
+  const [chatViewportAnchorByTab, setChatViewportAnchorByTab] = useState<Record<string, ChatViewportAnchorState>>({})
   const activeChatTabIdRef = useRef(activeChatTabId)
   activeChatTabIdRef.current = activeChatTabId
   const setChatDraftForTab = useCallback((tabId: string, text: string) => {
@@ -862,6 +864,18 @@ function App() {
         [tabId]: {
           ...prevForTab,
           [toolId]: open,
+        },
+      }
+    })
+  }, [])
+  const setChatViewportAnchor = useCallback((tabId: string, messageId: string | null) => {
+    setChatViewportAnchorByTab((prev) => {
+      const prevForTab = prev[tabId]
+      return {
+        ...prev,
+        [tabId]: {
+          messageId,
+          requestKey: (prevForTab?.requestKey ?? 0) + 1,
         },
       }
     })
@@ -960,6 +974,22 @@ function App() {
       for (const tabId of tabIds) {
         if (!next[tabId]) {
           next[tabId] = createEmptyChatTabViewState()
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [chatTabs])
+
+  useEffect(() => {
+    const tabIds = new Set(chatTabs.map((tab) => tab.id))
+    setChatViewportAnchorByTab((prev) => {
+      let changed = false
+      const next: Record<string, ChatViewportAnchorState> = {}
+      for (const [tabId, state] of Object.entries(prev)) {
+        if (tabIds.has(tabId)) {
+          next[tabId] = state
+        } else {
           changed = true
         }
       }
@@ -2095,6 +2125,7 @@ function App() {
   ) => {
     if (isProcessing) return
 
+    const submitTabId = activeChatTabIdRef.current
     const { text } = message
     const userMessage = text.trim()
     const hasAttachments = stagedAttachments.length > 0
@@ -2119,6 +2150,7 @@ function App() {
       attachments: displayAttachments,
       timestamp: Date.now(),
     }])
+    setChatViewportAnchor(submitTabId, userMessageId)
 
     try {
       let currentRunId = runId
@@ -2133,7 +2165,7 @@ function App() {
         setRunId(currentRunId)
         // Update active chat tab's runId to the new run
         setChatTabs((prev) => prev.map((tab) => (
-          tab.id === activeChatTabId
+          tab.id === submitTabId
             ? { ...tab, runId: currentRunId }
             : tab
         )))
@@ -2329,11 +2361,12 @@ function App() {
     setAllPermissionRequests(new Map())
     setPermissionResponses(new Map())
     setSelectedBackgroundTask(null)
+    setChatViewportAnchor(activeChatTabIdRef.current, null)
     setChatViewStateByTab(prev => ({
       ...prev,
       [activeChatTabIdRef.current]: createEmptyChatTabViewState(),
     }))
-  }, [])
+  }, [setChatViewportAnchor])
 
   // Chat tab operations
   const applyChatTab = useCallback((tab: ChatTab) => {
@@ -2351,8 +2384,9 @@ function App() {
       setPendingAskHumanRequests(new Map())
       setAllPermissionRequests(new Map())
       setPermissionResponses(new Map())
+      setChatViewportAnchor(tab.id, null)
     }
-  }, [loadRun])
+  }, [loadRun, setChatViewportAnchor])
 
   const restoreChatTabState = useCallback((tabId: string, fallbackRunId: string | null): boolean => {
     const cached = chatViewStateByTabRef.current[tabId]
@@ -3779,7 +3813,7 @@ function App() {
       if (item.role === 'user') {
         if (item.attachments && item.attachments.length > 0) {
           return (
-            <Message key={item.id} from={item.role}>
+            <Message key={item.id} from={item.role} data-message-id={item.id}>
               <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
                 <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
@@ -3791,7 +3825,7 @@ function App() {
         }
         const { message, files } = parseAttachedFiles(item.content)
         return (
-          <Message key={item.id} from={item.role}>
+          <Message key={item.id} from={item.role} data-message-id={item.id}>
             <MessageContent>
               {files.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-2">
@@ -3811,7 +3845,7 @@ function App() {
         )
       }
       return (
-        <Message key={item.id} from={item.role}>
+        <Message key={item.id} from={item.role} data-message-id={item.id}>
           <MessageContent>
             <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
           </MessageContent>
@@ -3875,7 +3909,7 @@ function App() {
 
     if (isErrorMessage(item)) {
       return (
-        <Message key={item.id} from="assistant">
+        <Message key={item.id} from="assistant" data-message-id={item.id}>
           <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
             <pre className="whitespace-pre-wrap font-mono text-xs">{item.message}</pre>
           </MessageContent>
@@ -4321,8 +4355,11 @@ function App() {
                         data-chat-tab-panel={tab.id}
                         aria-hidden={!isActive}
                       >
-                        <Conversation className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-                          <ScrollPositionPreserver />
+                        <Conversation
+                          anchorMessageId={chatViewportAnchorByTab[tab.id]?.messageId}
+                          anchorRequestKey={chatViewportAnchorByTab[tab.id]?.requestKey}
+                          className="relative flex-1"
+                        >
                           <ConversationContent className={tabConversationContentClassName}>
                             {!tabHasConversation ? (
                               <ConversationEmptyState className="h-auto">
@@ -4384,6 +4421,7 @@ function App() {
                               </>
                             )}
                           </ConversationContent>
+                          <ConversationScrollButton />
                         </Conversation>
                       </div>
                     )
@@ -4460,6 +4498,7 @@ function App() {
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
                 chatTabStates={chatViewStateByTab}
+                viewportAnchors={chatViewportAnchorByTab}
                 isProcessing={isProcessing}
                 isStopping={isStopping}
                 onStop={handleStop}
