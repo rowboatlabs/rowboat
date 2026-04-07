@@ -6,6 +6,7 @@ export interface BillingInfo {
   userId: string | null;
   subscriptionPlan: string | null;
   subscriptionStatus: string | null;
+  trialExpiresAt: string | null;
   sanctionedCredits: number;
   availableCredits: number;
 }
@@ -26,6 +27,7 @@ export async function getBillingInfo(): Promise<BillingInfo> {
     billing: {
       plan: string | null;
       status: string | null;
+      trialExpiresAt: string | null;
       usage: {
         sanctionedCredits: number;
         availableCredits: number;
@@ -37,6 +39,7 @@ export async function getBillingInfo(): Promise<BillingInfo> {
     userId: body.user.id ?? null,
     subscriptionPlan: body.billing.plan,
     subscriptionStatus: body.billing.status,
+    trialExpiresAt: body.billing.trialExpiresAt ?? null,
     sanctionedCredits: body.billing.usage.sanctionedCredits,
     availableCredits: body.billing.usage.availableCredits,
   };

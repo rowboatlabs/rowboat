@@ -5,6 +5,7 @@ interface BillingInfo {
   userId: string | null
   subscriptionPlan: string | null
   subscriptionStatus: string | null
+  trialExpiresAt: string | null
   sanctionedCredits: number
   availableCredits: number
 }
