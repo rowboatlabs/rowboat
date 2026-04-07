@@ -1,17 +1,21 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 interface BillingInfo {
   userEmail: string | null
   userId: string | null
   subscriptionPlan: string | null
   subscriptionStatus: string | null
+  trialDaysRemaining: number | null
   sanctionedCredits: number
   availableCredits: number
 }
 
+const POLLING_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
+
 export function useBilling(isRowboatConnected: boolean) {
   const [billing, setBilling] = useState<BillingInfo | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchBilling = useCallback(async () => {
     if (!isRowboatConnected) {
@@ -32,7 +36,23 @@ export function useBilling(isRowboatConnected: boolean) {
 
   useEffect(() => {
     fetchBilling()
-  }, [fetchBilling])
+
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+
+    if (isRowboatConnected) {
+      intervalRef.current = setInterval(fetchBilling, POLLING_INTERVAL_MS)
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
+  }, [fetchBilling, isRowboatConnected])
 
   return { billing, isLoading, refresh: fetchBilling }
 }
