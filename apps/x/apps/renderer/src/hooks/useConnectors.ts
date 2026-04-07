@@ -426,6 +426,9 @@ export function useConnectors(active: boolean) {
     try {
       const result = await window.ipc.invoke('oauth:getState', null)
       const config = result.config || {}
+      if (config.google?.clientId) {
+        setGoogleClientId(config.google.clientId)
+      }
       const statusMap: Record<string, ProviderStatus> = {}
 
       for (const provider of providers) {
