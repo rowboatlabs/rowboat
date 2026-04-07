@@ -1,9 +1,8 @@
 import { Loader2, CheckCircle2, ArrowLeft, Calendar } from "lucide-react"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
-import { GmailIcon, SlackIcon, FirefliesIcon, GranolaIcon } from "../provider-icons"
+import { GmailIcon, FirefliesIcon } from "../provider-icons"
 import type { OnboardingState, ProviderState } from "../use-onboarding-state"
 
 interface ConnectAccountsStepProps {
@@ -85,11 +84,6 @@ function ProviderCard({
 export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
   const {
     providers, providersLoading, providerStates, handleConnect,
-    granolaEnabled, granolaLoading, handleGranolaToggle,
-    slackEnabled, slackLoading, slackWorkspaces, slackAvailableWorkspaces,
-    slackSelectedUrls, setSlackSelectedUrls, slackPickerOpen,
-    slackDiscovering, slackDiscoverError,
-    handleSlackEnable, handleSlackSaveWorkspaces, handleSlackDisable,
     useComposioForGoogle, gmailConnected, gmailLoading, gmailConnecting, handleConnectGmail,
     useComposioForGoogleCalendar, googleCalendarConnected, googleCalendarLoading, googleCalendarConnecting, handleConnectGoogleCalendar,
     handleNext, handleBack,
@@ -158,30 +152,11 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
           )}
 
           {/* Meeting Notes */}
-          <div className="space-y-3">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Meeting Notes
-            </span>
-            <ProviderCard
-              name="Granola"
-              description="Sync your local meeting notes for richer context"
-              icon={<GranolaIcon />}
-              iconBg="bg-purple-500/10"
-              iconColor="text-purple-500"
-              providerState={{ isConnected: granolaEnabled, isLoading: false, isConnecting: false }}
-              rightSlot={
-                <div className="flex items-center gap-2">
-                  {granolaLoading && <Loader2 className="size-3 animate-spin" />}
-                  <Switch
-                    checked={granolaEnabled}
-                    onCheckedChange={handleGranolaToggle}
-                    disabled={granolaLoading}
-                  />
-                </div>
-              }
-              index={cardIndex++}
-            />
-            {providers.includes('fireflies-ai') && (
+          {providers.includes('fireflies-ai') && (
+            <div className="space-y-3">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Meeting Notes
+              </span>
               <ProviderCard
                 name="Fireflies"
                 description="Import AI-powered meeting transcripts automatically"
@@ -192,85 +167,8 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                 onConnect={() => handleConnect('fireflies-ai')}
                 index={cardIndex++}
               />
-            )}
-          </div>
-
-          {/* Team Communication */}
-          <div className="space-y-3">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Team Communication
-            </span>
-            <div>
-              <ProviderCard
-                name="Slack"
-                description={
-                  slackEnabled && slackWorkspaces.length > 0
-                    ? slackWorkspaces.map(w => w.name).join(', ')
-                    : "Enable Rowboat to understand your team conversations and provide relevant context"
-                }
-                icon={<SlackIcon />}
-                iconBg="bg-emerald-500/10"
-                iconColor="text-emerald-500"
-                providerState={{ isConnected: slackEnabled, isLoading: false, isConnecting: false }}
-                rightSlot={
-                  <div className="flex items-center gap-2">
-                    {(slackLoading || slackDiscovering) && <Loader2 className="size-3 animate-spin" />}
-                    {slackEnabled ? (
-                      <Switch
-                        checked={true}
-                        onCheckedChange={() => handleSlackDisable()}
-                        disabled={slackLoading}
-                      />
-                    ) : (
-                      <Button
-                        size="sm"
-                        onClick={handleSlackEnable}
-                        disabled={slackLoading || slackDiscovering}
-                      >
-                        Enable
-                      </Button>
-                    )}
-                  </div>
-                }
-                index={cardIndex++}
-              />
-              {slackPickerOpen && (
-                <div className="mt-2 ml-[3.25rem] space-y-2 pl-4 border-l-2 border-muted">
-                  {slackDiscoverError ? (
-                    <p className="text-xs text-muted-foreground">{slackDiscoverError}</p>
-                  ) : (
-                    <>
-                      {slackAvailableWorkspaces.map(w => (
-                        <label key={w.url} className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={slackSelectedUrls.has(w.url)}
-                            onChange={(e) => {
-                              setSlackSelectedUrls(prev => {
-                                const next = new Set(prev)
-                                if (e.target.checked) next.add(w.url)
-                                else next.delete(w.url)
-                                return next
-                              })
-                            }}
-                            className="rounded border-border"
-                          />
-                          <span className="truncate">{w.name}</span>
-                        </label>
-                      ))}
-                      <Button
-                        size="sm"
-                        onClick={handleSlackSaveWorkspaces}
-                        disabled={slackSelectedUrls.size === 0 || slackLoading}
-                      >
-                        Save
-                      </Button>
-                    </>
-                  )}
-                </div>
-              )}
             </div>
-          </div>
+          )}
         </div>
       )}
 
