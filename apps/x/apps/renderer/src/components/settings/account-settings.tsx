@@ -27,6 +27,7 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
   const [connectionLoading, setConnectionLoading] = useState(true)
   const [disconnecting, setDisconnecting] = useState(false)
   const [connecting, setConnecting] = useState(false)
+  const [appUrl, setAppUrl] = useState<string | null>(null)
   const { billing, isLoading: billingLoading } = useBilling(isRowboatConnected)
 
   const checkConnection = useCallback(async () => {
@@ -47,6 +48,14 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
       checkConnection()
     }
   }, [dialogOpen, checkConnection])
+
+  useEffect(() => {
+    if (isRowboatConnected) {
+      window.ipc.invoke('account:getRowboat', null)
+        .then((account) => setAppUrl(account.config?.appUrl ?? null))
+        .catch(() => {})
+    }
+  }, [isRowboatConnected])
 
   useEffect(() => {
     const cleanup = window.ipc.on('oauth:didConnect', (event) => {
@@ -158,7 +167,7 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
                   <p className="text-xs text-muted-foreground capitalize">{billing.subscriptionStatus}</p>
                 )}
               </div>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={() => appUrl && window.open(appUrl)}>
                 Upgrade
               </Button>
             </div>

@@ -405,6 +405,7 @@ export function SidebarContentPanel({
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
+  const [appUrl, setAppUrl] = useState<string | null>(null)
   const { billing } = useBilling(isRowboatConnected)
 
   const handleRowboatLogin = useCallback(async () => {
@@ -427,12 +428,19 @@ export function SidebarContentPanel({
         const result = await window.ipc.invoke('oauth:getState', null)
         const config = result.config || {}
         const hasError = Object.values(config).some((entry) => Boolean(entry?.error))
+        const connected = config['rowboat']?.connected ?? false
         if (mounted) {
           setHasOauthError(hasError)
-          setIsRowboatConnected(config['rowboat']?.connected ?? false)
+          setIsRowboatConnected(connected)
           if (!hasError) {
             setShowOauthAlert(true)
           }
+        }
+        if (connected && mounted) {
+          try {
+            const account = await window.ipc.invoke('account:getRowboat', null)
+            if (mounted) setAppUrl(account.config?.appUrl ?? null)
+          } catch { /* ignore */ }
         }
       } catch (error) {
         console.error('Failed to fetch OAuth state:', error)
@@ -510,7 +518,10 @@ export function SidebarContentPanel({
             <span className="text-xs font-medium capitalize text-sidebar-foreground">
               {billing.subscriptionPlan ?? 'Free'} plan
             </span>
-            <button className="rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20">
+            <button
+              onClick={() => appUrl && window.open(appUrl)}
+              className="rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
+            >
               Upgrade
             </button>
           </div>
