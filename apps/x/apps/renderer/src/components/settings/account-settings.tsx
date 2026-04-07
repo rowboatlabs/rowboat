@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, User, CreditCard, LogOut } from "lucide-react"
+import { Loader2, User, CreditCard, LogOut, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -162,18 +162,56 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
           <div className="rounded-lg border p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium capitalize">{billing.subscriptionPlan ?? 'Free'} Plan</p>
-                {billing.subscriptionStatus && (
+                <p className="text-sm font-medium capitalize">
+                  {billing.subscriptionPlan ? `${billing.subscriptionPlan} Plan` : 'No Plan'}
+                </p>
+                {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt ? (() => {
+                  const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+                  return (
+                    <p className="text-xs text-muted-foreground">
+                      Trial · {days === 0 ? 'expires today' : days === 1 ? '1 day left' : `${days} days left`}
+                    </p>
+                  )
+                })() : billing.subscriptionStatus ? (
                   <p className="text-xs text-muted-foreground capitalize">{billing.subscriptionStatus}</p>
+                ) : null}
+                {!billing.subscriptionPlan && (
+                  <p className="text-xs text-muted-foreground">Subscribe to access AI features</p>
                 )}
               </div>
-              <Button variant="outline" size="sm" onClick={() => appUrl && window.open(appUrl)}>
-                Upgrade
+              <Button variant="outline" size="sm" onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}>
+                {!billing.subscriptionPlan ? 'Subscribe' : 'Change plan'}
               </Button>
             </div>
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">Unable to load plan details</p>
+        )}
+      </div>
+
+      <Separator />
+
+      {/* Payment Section */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <CreditCard className="size-4 text-muted-foreground" />
+          <h4 className="text-sm font-medium">Payment</h4>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Manage invoices, payment methods, and billing details.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!billing?.subscriptionPlan}
+          onClick={() => appUrl && window.open(appUrl)}
+          className="gap-1.5"
+        >
+          <ExternalLink className="size-3" />
+          Manage in Stripe
+        </Button>
+        {!billing?.subscriptionPlan && (
+          <p className="text-[11px] text-muted-foreground">Subscribe to a plan first</p>
         )}
       </div>
 

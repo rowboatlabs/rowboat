@@ -515,14 +515,24 @@ export function SidebarContentPanel({
       {isRowboatConnected && billing ? (
         <div className="px-3 py-2">
           <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
-            <span className="text-xs font-medium capitalize text-sidebar-foreground">
-              {billing.subscriptionPlan ?? 'Free'} plan
-            </span>
+            <div className="min-w-0">
+              <span className="text-xs font-medium capitalize text-sidebar-foreground">
+                {billing.subscriptionPlan ? `${billing.subscriptionPlan} plan` : 'No plan'}
+              </span>
+              {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt && (() => {
+                const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+                return (
+                  <p className="text-[10px] text-sidebar-foreground/60">
+                    {days === 0 ? 'Trial expires today' : days === 1 ? '1 day left' : `${days} days left`}
+                  </p>
+                )
+              })()}
+            </div>
             <button
-              onClick={() => appUrl && window.open(appUrl)}
-              className="rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
+              onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
+              className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
             >
-              Upgrade
+              {!billing.subscriptionPlan ? 'Subscribe' : billing.subscriptionPlan === 'starter' ? 'Upgrade' : 'Manage'}
             </button>
           </div>
         </div>

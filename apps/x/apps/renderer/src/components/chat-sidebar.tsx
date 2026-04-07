@@ -49,6 +49,54 @@ import {
 
 const streamdownComponents = { pre: MarkdownPreOverride }
 
+/* ─── Billing error helpers ─── */
+
+const BILLING_ERROR_PATTERNS = [
+  {
+    pattern: /upgrade required/i,
+    title: 'A subscription is required',
+    subtitle: 'Get started with a plan to access AI features in Rowboat.',
+    cta: 'Subscribe',
+  },
+  {
+    pattern: /not enough credits/i,
+    title: 'You\'ve run out of credits',
+    subtitle: 'Upgrade your plan for more credits, or wait for your billing cycle to reset.',
+    cta: 'Upgrade plan',
+  },
+  {
+    pattern: /subscription not active/i,
+    title: 'Your subscription is inactive',
+    subtitle: 'Reactivate your subscription to continue using AI features.',
+    cta: 'Reactivate',
+  },
+] as const
+
+function matchBillingError(message: string) {
+  return BILLING_ERROR_PATTERNS.find(({ pattern }) => pattern.test(message)) ?? null
+}
+
+function BillingErrorCTA({ label }: { label: string }) {
+  const [appUrl, setAppUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    window.ipc.invoke('account:getRowboat', null)
+      .then((account: any) => setAppUrl(account.config?.appUrl ?? null))
+      .catch(() => {})
+  }, [])
+
+  if (!appUrl) return null
+
+  return (
+    <button
+      onClick={() => window.open(`${appUrl}?intent=upgrade`)}
+      className="mt-1 rounded-md bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/30"
+    >
+      {label}
+    </button>
+  )
+}
+
 const MIN_WIDTH = 360
 const MAX_WIDTH = 1600
 const MIN_MAIN_PANE_WIDTH = 420
@@ -378,6 +426,20 @@ export function ChatSidebar({
     }
 
     if (isErrorMessage(item)) {
+      const billingError = matchBillingError(item.message)
+      if (billingError) {
+        return (
+          <Message key={item.id} from="assistant" data-message-id={item.id}>
+            <MessageContent className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-amber-200">{billingError.title}</p>
+                <p className="text-xs text-amber-300/80">{billingError.subtitle}</p>
+                <BillingErrorCTA label={billingError.cta} />
+              </div>
+            </MessageContent>
+          </Message>
+        )
+      }
       return (
         <Message key={item.id} from="assistant" data-message-id={item.id}>
           <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
