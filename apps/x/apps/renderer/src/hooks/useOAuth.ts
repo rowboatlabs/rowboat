@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from '@/lib/toast';
+import posthog from 'posthog-js';
+import * as analytics from '@/lib/analytics';
 
 /**
  * Hook for managing OAuth connection state for a specific provider
@@ -40,6 +42,8 @@ export function useOAuth(provider: string) {
         setIsLoading(false);
   
         if (event.success) {
+          analytics.oauthConnected(provider);
+          posthog.people.set({ [`${provider}_connected`]: true });
           toast(`Successfully connected to ${provider}`, 'success');
           // Refresh connection status to ensure consistency
           checkConnection();
@@ -75,6 +79,8 @@ export function useOAuth(provider: string) {
       setIsLoading(true);
       const result = await window.ipc.invoke('oauth:disconnect', { provider });
       if (result.success) {
+        analytics.oauthDisconnected(provider);
+        posthog.people.set({ [`${provider}_connected`]: false });
         toast(`Disconnected from ${provider}`, 'success');
         setIsConnected(false);
       } else {

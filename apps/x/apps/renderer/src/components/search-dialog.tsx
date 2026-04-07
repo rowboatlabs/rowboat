@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import posthog from 'posthog-js'
+import * as analytics from '@/lib/analytics'
 import { FileTextIcon, MessageSquareIcon } from 'lucide-react'
 import {
   CommandDialog,
@@ -68,6 +70,8 @@ export function SearchDialog({ open, onOpenChange, onSelectFile, onSelectRun }: 
       .then((res) => {
         if (!cancelled) {
           setResults(res.results)
+          analytics.searchExecuted(types)
+          posthog.people.set_once({ has_used_search: true })
         }
       })
       .catch((err) => {
