@@ -563,7 +563,7 @@ function ChatInputInner({
                 className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <span className="max-w-[150px] truncate">
-                  {configuredModels.find((m) => `${m.flavor}/${m.model}` === activeModelKey)?.model || 'Model'}
+                  {configuredModels.find((m) => `${m.flavor}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model'}
                 </span>
                 <ChevronDown className="h-3 w-3" />
               </button>
