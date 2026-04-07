@@ -20,6 +20,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
+  ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import {
   Message,
@@ -4420,6 +4421,7 @@ function App() {
                               </>
                             )}
                           </ConversationContent>
+                          <ConversationScrollButton />
                         </Conversation>
                       </div>
                     )

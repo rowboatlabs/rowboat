@@ -8,6 +8,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
+  ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import {
   Message,
@@ -487,11 +488,11 @@ export function ChatSidebar({
                       )}
                       data-chat-tab-panel={tab.id}
                       aria-hidden={!isActive}
-                    >
-                      <Conversation
-                        anchorMessageId={viewportAnchors[tab.id]?.messageId}
-                        anchorRequestKey={viewportAnchors[tab.id]?.requestKey}
-                        className="relative flex-1"
+                      >
+                        <Conversation
+                          anchorMessageId={viewportAnchors[tab.id]?.messageId}
+                          anchorRequestKey={viewportAnchors[tab.id]?.requestKey}
+                          className="relative flex-1"
                       >
                         <ConversationContent className={tabHasConversation ? 'mx-auto w-full max-w-4xl px-3 pb-28' : 'mx-auto w-full max-w-4xl min-h-full items-center justify-center px-3 pb-0'}>
                           {!tabHasConversation ? (
@@ -550,10 +551,11 @@ export function ChatSidebar({
                                 </Message>
                               )}
                             </>
-                          )}
-                        </ConversationContent>
-                      </Conversation>
-                    </div>
+                            )}
+                          </ConversationContent>
+                          <ConversationScrollButton />
+                        </Conversation>
+                      </div>
                   )
                 })}
               </div>
