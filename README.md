@@ -59,15 +59,19 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 ### Google setup
 To connect Google services (Gmail, Calendar, and Drive), follow [Google setup](https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md).
 
-### Voice notes
-To enable voice notes (optional), add a Deepgram API key in ~/.rowboat/config/deepgram.json:
+### Voice input
+To enable voice input and voice notes (optional), add a Deepgram API key in ~/.rowboat/config/deepgram.json:
 ```
 {
   "apiKey": "<key>"
 }
 ```
+
+### Voice output
+
+To enable voice output (optional), add a Elevenlabs API key in ~/.rowboat/config/elevenlabs.json
+
 ### Web search
-To use Brave web search (optional), add the Brave API key in ~/.rowboat/config/brave-search.json.
 
 To use Exa research search (optional), add the Exa API key in ~/.rowboat/config/exa-search.json.
 
