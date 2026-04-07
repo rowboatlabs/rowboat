@@ -106,10 +106,7 @@ export const ToolCallStack = ({
     if (!allPermissionRequests.has(tool.id)) return false;
     return !permissionResponses.has(tool.id);
   });
-  const defaultOpen =
-    hasPendingPermission ||
-    tools.some((tool) => tool.status === "pending" || tool.status === "running");
-  const effectiveOpen = hasPendingPermission || (open ?? defaultOpen);
+  const effectiveOpen = hasPendingPermission || (open ?? false);
   const groupStatus = getGroupStatus(tools, hasPendingPermission);
 
   const handleOpenChange = (nextOpen: boolean) => {

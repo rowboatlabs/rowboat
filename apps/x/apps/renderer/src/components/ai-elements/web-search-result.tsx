@@ -41,7 +41,6 @@ export function WebSearchResult({
 
   return (
     <Collapsible
-      defaultOpen
       className={cn("not-prose mb-4 w-full rounded-md border", className)}
       {...props}
     >
