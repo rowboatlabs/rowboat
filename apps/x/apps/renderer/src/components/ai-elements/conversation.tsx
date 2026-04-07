@@ -81,16 +81,20 @@ export const Conversation = ({
 
       spacer.style.height = "0px";
 
+      const contentPaddingTop = Number.parseFloat(
+        window.getComputedStyle(content).paddingTop || "0"
+      );
       const anchorTop = anchor.offsetTop;
+      const targetScrollTop = Math.max(0, anchorTop - contentPaddingTop);
       const requiredSlack = Math.max(
         0,
-        anchorTop - (content.scrollHeight - container.clientHeight)
+        targetScrollTop - (content.scrollHeight - container.clientHeight)
       );
 
       spacer.style.height = `${Math.ceil(requiredSlack)}px`;
 
       if (scrollToAnchor) {
-        container.scrollTop = anchorTop;
+        container.scrollTop = targetScrollTop;
       }
 
       updateBottomState();
