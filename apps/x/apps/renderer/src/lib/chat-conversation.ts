@@ -47,6 +47,11 @@ export type ChatTabViewState = {
   permissionResponses: Map<string, PermissionResponse>
 }
 
+export type ChatViewportAnchorState = {
+  messageId: string | null
+  requestKey: number
+}
+
 export const createEmptyChatTabViewState = (): ChatTabViewState => ({
   runId: null,
   conversation: [],
