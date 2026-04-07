@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import {
   Collapsible,
   CollapsibleContent,
@@ -11,8 +12,9 @@ import {
   GlobeIcon,
   LoaderIcon,
 } from "lucide-react";
+import type { ComponentProps } from "react";
 
-interface WebSearchResultProps {
+interface WebSearchResultProps extends ComponentProps<typeof Collapsible> {
   query: string;
   results: Array<{ title: string; url: string; description: string }>;
   status: "pending" | "running" | "completed" | "error";
@@ -27,11 +29,22 @@ function getDomain(url: string): string {
   }
 }
 
-export function WebSearchResult({ query, results, status, title = "Searched the web" }: WebSearchResultProps) {
+export function WebSearchResult({
+  className,
+  query,
+  results,
+  status,
+  title = "Searched the web",
+  ...props
+}: WebSearchResultProps) {
   const isRunning = status === "pending" || status === "running";
 
   return (
-    <Collapsible defaultOpen className="not-prose mb-4 w-full rounded-md border">
+    <Collapsible
+      defaultOpen
+      className={cn("not-prose mb-4 w-full rounded-md border", className)}
+      {...props}
+    >
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
         <div className="flex items-center gap-2">
           <GlobeIcon className="size-4 text-muted-foreground" />

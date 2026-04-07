@@ -38,9 +38,9 @@ import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/a
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
-import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
+import { ToolCallStack } from '@/components/ai-elements/tool-call-stack';
 import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
@@ -67,6 +67,7 @@ import {
   type ConversationItem,
   type ToolCall,
   createEmptyChatTabViewState,
+  groupConversationItems,
   getWebSearchCardData,
   getAppActionCardData,
   getComposioConnectCardData,
@@ -842,6 +843,7 @@ function App() {
   const chatDraftsRef = useRef(new Map<string, string>())
   const chatScrollTopByTabRef = useRef(new Map<string, number>())
   const [toolOpenByTab, setToolOpenByTab] = useState<Record<string, Record<string, boolean>>>({})
+  const [toolGroupOpenByTab, setToolGroupOpenByTab] = useState<Record<string, Record<string, boolean>>>({})
   const [chatViewportAnchorByTab, setChatViewportAnchorByTab] = useState<Record<string, ChatViewportAnchorState>>({})
   const activeChatTabIdRef = useRef(activeChatTabId)
   activeChatTabIdRef.current = activeChatTabId
@@ -864,6 +866,22 @@ function App() {
         [tabId]: {
           ...prevForTab,
           [toolId]: open,
+        },
+      }
+    })
+  }, [])
+  const getToolGroupOpenForTab = useCallback((tabId: string, groupId: string): boolean | undefined => {
+    return toolGroupOpenByTab[tabId]?.[groupId]
+  }, [toolGroupOpenByTab])
+  const setToolGroupOpenForTab = useCallback((tabId: string, groupId: string, open: boolean) => {
+    setToolGroupOpenByTab((prev) => {
+      const prevForTab = prev[tabId] ?? {}
+      if (prevForTab[groupId] === open) return prev
+      return {
+        ...prev,
+        [tabId]: {
+          ...prevForTab,
+          [groupId]: open,
         },
       }
     })
@@ -986,6 +1004,22 @@ function App() {
     setChatViewportAnchorByTab((prev) => {
       let changed = false
       const next: Record<string, ChatViewportAnchorState> = {}
+      for (const [tabId, state] of Object.entries(prev)) {
+        if (tabIds.has(tabId)) {
+          next[tabId] = state
+        } else {
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [chatTabs])
+
+  useEffect(() => {
+    const tabIds = new Set(chatTabs.map((tab) => tab.id))
+    setToolGroupOpenByTab((prev) => {
+      let changed = false
+      const next: Record<string, Record<string, boolean>> = {}
       for (const [tabId, state] of Object.entries(prev)) {
         if (tabIds.has(tabId)) {
           next[tabId] = state
@@ -2477,6 +2511,12 @@ function App() {
       delete next[tabId]
       return next
     })
+    setToolGroupOpenByTab((prev) => {
+      if (!(tabId in prev)) return prev
+      const next = { ...prev }
+      delete next[tabId]
+      return next
+    })
 
     if (tabId === activeChatTabId && nextTabs.length > 0) {
       const newIdx = Math.min(idx, nextTabs.length - 1)
@@ -3808,6 +3848,63 @@ function App() {
     }
   }, [isGraphOpen, knowledgeFilePaths])
 
+  const renderToolCallItem = (item: ToolCall, tabId: string, className?: string) => {
+    const appActionData = getAppActionCardData(item)
+    if (appActionData) {
+      return <AppActionCard key={item.id} className={cn('mb-0', className)} data={appActionData} status={item.status} />
+    }
+    const webSearchData = getWebSearchCardData(item)
+    if (webSearchData) {
+      return (
+        <WebSearchResult
+          key={item.id}
+          className={cn('mb-0', className)}
+          query={webSearchData.query}
+          results={webSearchData.results}
+          status={item.status}
+          title={webSearchData.title}
+        />
+      )
+    }
+    const composioConnectData = getComposioConnectCardData(item)
+    if (composioConnectData) {
+      // Skip rendering if this is a duplicate "already connected" card
+      if (composioConnectData.hidden) return null
+      return (
+        <ComposioConnectCard
+          key={item.id}
+          className={cn('mb-0', className)}
+          toolkitSlug={composioConnectData.toolkitSlug}
+          toolkitDisplayName={composioConnectData.toolkitDisplayName}
+          status={item.status}
+          alreadyConnected={composioConnectData.alreadyConnected}
+          onConnected={handleComposioConnected}
+        />
+      )
+    }
+    const toolTitle = getToolDisplayName(item)
+    const errorText = item.status === 'error' ? 'Tool error' : ''
+    const output = normalizeToolOutput(item.result, item.status)
+    const input = normalizeToolInput(item.input)
+    return (
+      <Tool
+        key={item.id}
+        className={cn('mb-0', className)}
+        open={isToolOpenForTab(tabId, item.id)}
+        onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
+      >
+        <ToolHeader
+          title={toolTitle}
+          type={`tool-${item.name}`}
+          state={toToolState(item.status)}
+        />
+        <ToolContent>
+          <ToolTabbedContent input={input} output={output} errorText={errorText} />
+        </ToolContent>
+      </Tool>
+    )
+  }
+
   const renderConversationItem = (item: ConversationItem, tabId: string) => {
     if (isChatMessage(item)) {
       if (item.role === 'user') {
@@ -3854,57 +3951,7 @@ function App() {
     }
 
     if (isToolCall(item)) {
-      const appActionData = getAppActionCardData(item)
-      if (appActionData) {
-        return <AppActionCard key={item.id} data={appActionData} status={item.status} />
-      }
-      const webSearchData = getWebSearchCardData(item)
-      if (webSearchData) {
-        return (
-          <WebSearchResult
-            key={item.id}
-            query={webSearchData.query}
-            results={webSearchData.results}
-            status={item.status}
-            title={webSearchData.title}
-          />
-        )
-      }
-      const composioConnectData = getComposioConnectCardData(item)
-      if (composioConnectData) {
-        // Skip rendering if this is a duplicate "already connected" card
-        if (composioConnectData.hidden) return null
-        return (
-          <ComposioConnectCard
-            key={item.id}
-            toolkitSlug={composioConnectData.toolkitSlug}
-            toolkitDisplayName={composioConnectData.toolkitDisplayName}
-            status={item.status}
-            alreadyConnected={composioConnectData.alreadyConnected}
-            onConnected={handleComposioConnected}
-          />
-        )
-      }
-      const toolTitle = getToolDisplayName(item)
-      const errorText = item.status === 'error' ? 'Tool error' : ''
-      const output = normalizeToolOutput(item.result, item.status)
-      const input = normalizeToolInput(item.input)
-      return (
-        <Tool
-          key={item.id}
-          open={isToolOpenForTab(tabId, item.id)}
-          onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
-        >
-          <ToolHeader
-            title={toolTitle}
-            type={`tool-${item.name}`}
-            state={toToolState(item.status)}
-          />
-          <ToolContent>
-            <ToolTabbedContent input={input} output={output} errorText={errorText} />
-          </ToolContent>
-        </Tool>
-      )
+      return renderToolCallItem(item, tabId)
     }
 
     if (isErrorMessage(item)) {
@@ -4369,29 +4416,23 @@ function App() {
                               </ConversationEmptyState>
                             ) : (
                               <>
-                                {tabState.conversation.map(item => {
-                                  const rendered = renderConversationItem(item, tab.id)
-                                  if (isToolCall(item)) {
-                                    const permRequest = tabState.allPermissionRequests.get(item.id)
-                                    if (permRequest) {
-                                      const response = tabState.permissionResponses.get(item.id) || null
-                                      return (
-                                        <React.Fragment key={item.id}>
-                                          {rendered}
-                                          <PermissionRequest
-                                            toolCall={permRequest.toolCall}
-                                            onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                            onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                            onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
-                                            onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            isProcessing={isActive && isProcessing}
-                                            response={response}
-                                          />
-                                        </React.Fragment>
-                                      )
-                                    }
+                                {groupConversationItems(tabState.conversation).map((block) => {
+                                  if (block.kind === 'tool-group') {
+                                    return (
+                                      <ToolCallStack
+                                        key={block.key}
+                                        tools={block.tools}
+                                        open={getToolGroupOpenForTab(tab.id, block.key)}
+                                        onOpenChange={(open) => setToolGroupOpenForTab(tab.id, block.key, open)}
+                                        allPermissionRequests={tabState.allPermissionRequests}
+                                        permissionResponses={tabState.permissionResponses}
+                                        isProcessing={isActive && isProcessing}
+                                        onPermissionResponse={handlePermissionResponse}
+                                        renderToolCall={(tool) => renderToolCallItem(tool, tab.id)}
+                                      />
+                                    )
                                   }
-                                  return rendered
+                                  return renderConversationItem(block.item, tab.id)
                                 })}
 
                                 {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
@@ -4518,6 +4559,8 @@ function App() {
                 onAskHumanResponse={handleAskHumanResponse}
                 isToolOpenForTab={isToolOpenForTab}
                 onToolOpenChangeForTab={setToolOpenForTab}
+                getToolGroupOpenForTab={getToolGroupOpenForTab}
+                onToolGroupOpenChangeForTab={setToolGroupOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
                 onActivate={() => setActiveShortcutPane('right')}
                 isRecording={isRecording}

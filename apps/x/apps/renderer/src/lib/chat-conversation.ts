@@ -37,6 +37,17 @@ export interface ErrorMessage {
 
 export type ConversationItem = ChatMessage | ToolCall | ErrorMessage
 export type PermissionResponse = 'approve' | 'deny'
+export type ConversationRenderBlock =
+  | {
+      kind: 'item'
+      key: string
+      item: ChatMessage | ErrorMessage
+    }
+  | {
+      kind: 'tool-group'
+      key: string
+      tools: ToolCall[]
+    }
 
 export type ChatTabViewState = {
   runId: string | null
@@ -67,6 +78,38 @@ export const isChatMessage = (item: ConversationItem): item is ChatMessage => 'r
 export const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
 export const isErrorMessage = (item: ConversationItem): item is ErrorMessage =>
   'kind' in item && item.kind === 'error'
+
+export const groupConversationItems = (items: ConversationItem[]): ConversationRenderBlock[] => {
+  const blocks: ConversationRenderBlock[] = []
+  let pendingTools: ToolCall[] = []
+
+  const flushPendingTools = () => {
+    if (pendingTools.length === 0) return
+    blocks.push({
+      kind: 'tool-group',
+      key: pendingTools[0].id,
+      tools: pendingTools,
+    })
+    pendingTools = []
+  }
+
+  for (const item of items) {
+    if (isToolCall(item)) {
+      pendingTools.push(item)
+      continue
+    }
+
+    flushPendingTools()
+    blocks.push({
+      kind: 'item',
+      key: item.id,
+      item,
+    })
+  }
+
+  flushPendingTools()
+  return blocks
+}
 
 export const toToolState = (status: ToolCall['status']): ToolState => {
   switch (status) {

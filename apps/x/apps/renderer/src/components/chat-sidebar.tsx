@@ -16,10 +16,11 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message'
 import { Shimmer } from '@/components/ai-elements/shimmer'
+import { AppActionCard } from '@/components/ai-elements/app-action-card'
 import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
+import { ToolCallStack } from '@/components/ai-elements/tool-call-stack'
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
-import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { Suggestions } from '@/components/ai-elements/suggestions'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
@@ -34,10 +35,13 @@ import {
   type ChatTabViewState,
   type ConversationItem,
   type PermissionResponse,
+  type ToolCall,
   createEmptyChatTabViewState,
+  getAppActionCardData,
   getWebSearchCardData,
   getComposioConnectCardData,
   getToolDisplayName,
+  groupConversationItems,
   isChatMessage,
   isErrorMessage,
   isToolCall,
@@ -111,6 +115,8 @@ interface ChatSidebarProps {
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
+  getToolGroupOpenForTab?: (tabId: string, groupId: string) => boolean | undefined
+  onToolGroupOpenChangeForTab?: (tabId: string, groupId: string, open: boolean) => void
   onOpenKnowledgeFile?: (path: string) => void
   onActivate?: () => void
   // Voice / TTS props
@@ -164,6 +170,8 @@ export function ChatSidebar({
   onAskHumanResponse,
   isToolOpenForTab,
   onToolOpenChangeForTab,
+  getToolGroupOpenForTab,
+  onToolGroupOpenChangeForTab,
   onOpenKnowledgeFile,
   onActivate,
   isRecording,
@@ -287,6 +295,58 @@ export function ChatSidebar({
   }, [activeChatTabId, activeTabState, chatTabStates, emptyTabState])
   const hasConversation = activeTabState.conversation.length > 0 || Boolean(activeTabState.currentAssistantMessage)
 
+  const renderToolCallItem = (item: ToolCall, tabId: string, className?: string) => {
+    const appActionData = getAppActionCardData(item)
+    if (appActionData) {
+      return <AppActionCard key={item.id} className={cn('mb-0', className)} data={appActionData} status={item.status} />
+    }
+    const webSearchData = getWebSearchCardData(item)
+    if (webSearchData) {
+      return (
+        <WebSearchResult
+          key={item.id}
+          className={cn('mb-0', className)}
+          query={webSearchData.query}
+          results={webSearchData.results}
+          status={item.status}
+          title={webSearchData.title}
+        />
+      )
+    }
+    const composioConnectData = getComposioConnectCardData(item)
+    if (composioConnectData) {
+      if (composioConnectData.hidden) return null
+      return (
+        <ComposioConnectCard
+          key={item.id}
+          className={cn('mb-0', className)}
+          toolkitSlug={composioConnectData.toolkitSlug}
+          toolkitDisplayName={composioConnectData.toolkitDisplayName}
+          status={item.status}
+          alreadyConnected={composioConnectData.alreadyConnected}
+          onConnected={onComposioConnected}
+        />
+      )
+    }
+    const toolTitle = getToolDisplayName(item)
+    const errorText = item.status === 'error' ? 'Tool error' : ''
+    const output = normalizeToolOutput(item.result, item.status)
+    const input = normalizeToolInput(item.input)
+    return (
+      <Tool
+        key={item.id}
+        className={cn('mb-0', className)}
+        open={isToolOpenForTab?.(tabId, item.id) ?? false}
+        onOpenChange={(open) => onToolOpenChangeForTab?.(tabId, item.id, open)}
+      >
+        <ToolHeader title={toolTitle} type={`tool-${item.name}`} state={toToolState(item.status)} />
+        <ToolContent>
+          <ToolTabbedContent input={input} output={output} errorText={errorText} />
+        </ToolContent>
+      </Tool>
+    )
+  }
+
   const renderConversationItem = (item: ConversationItem, tabId: string) => {
     if (isChatMessage(item)) {
       if (item.role === 'user') {
@@ -333,48 +393,7 @@ export function ChatSidebar({
     }
 
     if (isToolCall(item)) {
-      const webSearchData = getWebSearchCardData(item)
-      if (webSearchData) {
-        return (
-          <WebSearchResult
-            key={item.id}
-            query={webSearchData.query}
-            results={webSearchData.results}
-            status={item.status}
-            title={webSearchData.title}
-          />
-        )
-      }
-      const composioConnectData = getComposioConnectCardData(item)
-      if (composioConnectData) {
-        if (composioConnectData.hidden) return null
-        return (
-          <ComposioConnectCard
-            key={item.id}
-            toolkitSlug={composioConnectData.toolkitSlug}
-            toolkitDisplayName={composioConnectData.toolkitDisplayName}
-            status={item.status}
-            alreadyConnected={composioConnectData.alreadyConnected}
-            onConnected={onComposioConnected}
-          />
-        )
-      }
-      const toolTitle = getToolDisplayName(item)
-      const errorText = item.status === 'error' ? 'Tool error' : ''
-      const output = normalizeToolOutput(item.result, item.status)
-      const input = normalizeToolInput(item.input)
-      return (
-        <Tool
-          key={item.id}
-          open={isToolOpenForTab?.(tabId, item.id) ?? false}
-          onOpenChange={(open) => onToolOpenChangeForTab?.(tabId, item.id, open)}
-        >
-          <ToolHeader title={toolTitle} type={`tool-${item.name}`} state={toToolState(item.status)} />
-          <ToolContent>
-            <ToolTabbedContent input={input} output={output} errorText={errorText} />
-          </ToolContent>
-        </Tool>
-      )
+      return renderToolCallItem(item, tabId)
     }
 
     if (isErrorMessage(item)) {
@@ -501,29 +520,23 @@ export function ChatSidebar({
                             </ConversationEmptyState>
                           ) : (
                             <>
-                              {tabState.conversation.map((item) => {
-                                const rendered = renderConversationItem(item, tab.id)
-                                if (isToolCall(item) && onPermissionResponse) {
-                                  const permRequest = tabState.allPermissionRequests.get(item.id)
-                                  if (permRequest) {
-                                    const response = tabState.permissionResponses.get(item.id) || null
-                                    return (
-                                      <React.Fragment key={item.id}>
-                                        {rendered}
-                                        <PermissionRequest
-                                          toolCall={permRequest.toolCall}
-                                          onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                          onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                          onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
-                                          onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                          isProcessing={isActive && isProcessing}
-                                          response={response}
-                                        />
-                                      </React.Fragment>
-                                    )
-                                  }
+                              {groupConversationItems(tabState.conversation).map((block) => {
+                                if (block.kind === 'tool-group') {
+                                  return (
+                                    <ToolCallStack
+                                      key={block.key}
+                                      tools={block.tools}
+                                      open={getToolGroupOpenForTab?.(tab.id, block.key)}
+                                      onOpenChange={(open) => onToolGroupOpenChangeForTab?.(tab.id, block.key, open)}
+                                      allPermissionRequests={tabState.allPermissionRequests}
+                                      permissionResponses={tabState.permissionResponses}
+                                      isProcessing={isActive && isProcessing}
+                                      onPermissionResponse={onPermissionResponse}
+                                      renderToolCall={(tool) => renderToolCallItem(tool, tab.id)}
+                                    />
+                                  )
                                 }
-                                return rendered
+                                return renderConversationItem(block.item, tab.id)
                               })}
 
                               {onAskHumanResponse && Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (

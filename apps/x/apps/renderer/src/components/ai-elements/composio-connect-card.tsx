@@ -8,8 +8,10 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { ComponentProps } from "react";
 
-interface ComposioConnectCardProps {
+interface ComposioConnectCardProps extends ComponentProps<"div"> {
   toolkitSlug: string;
   toolkitDisplayName: string;
   status: "pending" | "running" | "completed" | "error";
@@ -18,11 +20,13 @@ interface ComposioConnectCardProps {
 }
 
 export function ComposioConnectCard({
+  className,
   toolkitSlug,
   toolkitDisplayName,
   status,
   alreadyConnected,
   onConnected,
+  ...props
 }: ComposioConnectCardProps) {
   const [connectionState, setConnectionState] = useState<
     "idle" | "connecting" | "connected" | "error"
@@ -73,7 +77,10 @@ export function ComposioConnectCard({
   const displayName = toolkitDisplayName || toolkitSlug;
 
   return (
-    <div className="not-prose mb-4 flex items-center gap-3 rounded-lg border px-3 py-2.5">
+    <div
+      className={cn("not-prose mb-4 flex items-center gap-3 rounded-lg border px-3 py-2.5", className)}
+      {...props}
+    >
       {/* Toolkit initial */}
       <div className="size-7 rounded bg-muted flex items-center justify-center flex-shrink-0">
         <span className="text-xs font-bold text-muted-foreground">

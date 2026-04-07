@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import {
   CheckCircleIcon,
   FileTextIcon,
@@ -10,8 +11,9 @@ import {
   PlusCircleIcon,
 } from "lucide-react";
 import type { AppActionCardData } from "@/lib/chat-conversation";
+import type { ComponentProps } from "react";
 
-interface AppActionCardProps {
+interface AppActionCardProps extends ComponentProps<"div"> {
   data: AppActionCardData;
   status: "pending" | "running" | "completed" | "error";
 }
@@ -23,12 +25,15 @@ const actionIcons: Record<string, React.ReactNode> = {
   "create-base": <PlusCircleIcon className="size-4" />,
 };
 
-export function AppActionCard({ data, status }: AppActionCardProps) {
+export function AppActionCard({ className, data, status, ...props }: AppActionCardProps) {
   const isRunning = status === "pending" || status === "running";
   const isError = status === "error";
 
   return (
-    <div className="not-prose mb-4 flex items-center gap-2 rounded-md border px-3 py-2">
+    <div
+      className={cn("not-prose mb-4 flex items-center gap-2 rounded-md border px-3 py-2", className)}
+      {...props}
+    >
       <span className="text-muted-foreground">
         {actionIcons[data.action] || <LayoutGridIcon className="size-4" />}
       </span>
