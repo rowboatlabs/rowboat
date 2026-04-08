@@ -42,11 +42,9 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 
 
 ## Demo
+[![Demo](https://github.com/user-attachments/assets/8b9a859b-d4f1-47ca-9d1d-9d26d982e15d)](https://www.youtube.com/watch?v=7xTpciZCfpw)
 
-
-[![Demo](https://github.com/user-attachments/assets/3f560bcf-d93c-4064-81eb-75a9fae31742)](https://www.youtube.com/watch?v=5AWoGo-L16I)
-
-[Watch the full video](https://www.youtube.com/watch?v=5AWoGo-L16I)
+[Watch the full video](https://www.youtube.com/watch?v=7xTpciZCfpw)
 
 ---
 
