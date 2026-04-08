@@ -60,24 +60,26 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 To connect Google services (Gmail, Calendar, and Drive), follow [Google setup](https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md).
 
 ### Voice input
-To enable voice input and voice notes (optional), add a Deepgram API key in ~/.rowboat/config/deepgram.json:
+To enable voice input and voice notes (optional), add a Deepgram API key in `~/.rowboat/config/deepgram.json`
+
+### Voice output
+
+To enable voice output (optional), add an ElevenLabs API key in `~/.rowboat/config/elevenlabs.json`
+
+### Web search
+
+To use Exa research search (optional), add the Exa API key in `~/.rowboat/config/exa-search.json`
+
+### External tools
+
+To enable external tools (optional), you can add any MCP server or use Composio tools by adding an API key in `~/.rowboat/config/composio.json`
+
+All API key files use the same format:
 ```
 {
   "apiKey": "<key>"
 }
 ```
-
-### Voice output
-
-To enable voice output (optional), add a Elevenlabs API key in ~/.rowboat/config/elevenlabs.json
-
-### Web search
-
-To use Exa research search (optional), add the Exa API key in ~/.rowboat/config/exa-search.json.
-
-### Tools integration
-
-To enable more tools (optional), add a Composio API key in ~/.rowboat/config/composio.json
 
 ## What it does
 
