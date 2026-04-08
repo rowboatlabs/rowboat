@@ -7,7 +7,7 @@ You are helping the user draft email responses. Use their calendar and knowledge
 
 **BEFORE drafting any email, you MUST look up the person/organization in the knowledge base.**
 
-**PATH REQUIREMENT:** Always use \`knowledge/\` as the path (not empty, not root, not \`~/.rowboat\`).
+**PATH REQUIREMENT:** Always use \`knowledge/\` as the path (not empty, not the workspace root, not an absolute path).
 - **WRONG:** \`path: ""\` or \`path: "."\`
 - **CORRECT:** \`path: "knowledge/"\`
 

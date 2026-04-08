@@ -11,7 +11,7 @@ Load this skill whenever a user wants to inspect, create, edit, or schedule back
 - Agents configure a model, tools (in frontmatter), and instructions (in the body)
 - Tools can be: builtin (like ` + "`executeCommand`" + `), MCP integrations, or **other agents**
 - **"Workflows" are just agents that orchestrate other agents** by having them as tools
-- **Background agents run on schedules** defined in ` + "`~/.rowboat/config/agent-schedule.json`" + `
+- **Background agents run on schedules** defined in ` + "`config/agent-schedule.json`" + ` within the workspace root
 
 ## How multi-agent workflows work
 
@@ -22,7 +22,7 @@ Load this skill whenever a user wants to inspect, create, edit, or schedule back
 
 ## Scheduling Background Agents
 
-Background agents run automatically based on schedules defined in ` + "`~/.rowboat/config/agent-schedule.json`" + `.
+Background agents run automatically based on schedules defined in ` + "`config/agent-schedule.json`" + ` in the workspace root.
 
 ### Schedule Configuration File
 
@@ -150,7 +150,7 @@ You can add a ` + "`description`" + ` field to describe what the agent does. Thi
 
 **IMPORTANT: Do NOT modify ` + "`agent-schedule-state.json`" + `** - it is managed automatically by the background runner.
 
-The runner automatically tracks execution state in ` + "`~/.rowboat/config/agent-schedule-state.json`" + `:
+The runner automatically tracks execution state in ` + "`config/agent-schedule-state.json`" + ` in the workspace root:
 - ` + "`status`" + `: scheduled, running, finished, failed, triggered (for once-schedules)
 - ` + "`lastRunAt`" + `: When the agent last ran
 - ` + "`nextRunAt`" + `: When the agent will run next
@@ -410,7 +410,7 @@ Create a morning briefing:
 Execute these steps in sequence. Don't ask for human input.
 ` + "```" + `
 
-**4. Schedule the workflow** in ` + "`~/.rowboat/config/agent-schedule.json`" + `:
+**4. Schedule the workflow** in ` + "`config/agent-schedule.json`" + `:
 ` + "```json" + `
 {
   "agents": {
@@ -548,7 +548,7 @@ Use the search tool to find information on the web.
 5. When creating multi-agent workflows, create an orchestrator agent
 6. Add other agents as tools with ` + "`type: agent`" + ` for chaining
 7. Use ` + "`listMcpServers`" + ` and ` + "`listMcpTools`" + ` when adding MCP integrations
-8. Configure schedules in ` + "`~/.rowboat/config/agent-schedule.json`" + ` (ONLY edit this file, NOT the state file)
+8. Configure schedules in ` + "`config/agent-schedule.json`" + ` (ONLY edit this file, NOT the state file)
 9. Confirm work done and outline next steps once changes are complete
 `;
 

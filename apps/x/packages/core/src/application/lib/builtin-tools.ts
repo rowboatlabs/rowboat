@@ -1092,14 +1092,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     } catch {
                         return {
                             success: false,
-                            error: 'Exa Search API key not configured. Create ~/.rowboat/config/exa-search.json with { "apiKey": "<your-key>" }',
+                            error: `Exa Search API key not configured. Create ${exaConfigPath} with { "apiKey": "<your-key>" }`,
                         };
                     }
 
                     if (!apiKey) {
                         return {
                             success: false,
-                            error: 'Exa Search API key is empty. Set "apiKey" in ~/.rowboat/config/exa-search.json',
+                            error: `Exa Search API key is empty. Set "apiKey" in ${exaConfigPath}`,
                         };
                     }
 

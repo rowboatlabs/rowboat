@@ -166,7 +166,7 @@ workspace-readFile("knowledge/Projects/[Project].md")
 
 ## Document Locations
 
-Documents are stored in \`~/.rowboat/knowledge/\` with subfolders:
+Documents are stored in \`knowledge/\` within the workspace root, with subfolders:
 - \`People/\` - Notes about individuals
 - \`Organizations/\` - Notes about companies, teams
 - \`Projects/\` - Project documentation
