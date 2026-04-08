@@ -90,6 +90,59 @@ Rowboat is a **local-first AI coworker** that can:
 
 Under the hood, Rowboat maintains an **Obsidian-compatible vault** of plain Markdown notes with backlinks — a transparent “working memory” you can inspect and edit.
 
+<table>
+<tr>
+<td width="40%" valign="middle">
+<h3>Obsidian-style knowledge graph</h3>
+Rowboat builds a living knowledge graph from your work sources.
+</td>
+<td width="60%">
+  <img width="100%" alt="Screenshot 2026-04-08 at 5 27 13 PM" src="https://github.com/user-attachments/assets/984fefaa-75a0-4506-b16a-5091a08e5a1f" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Auto-updates notes for People, Organizations & Topics</h3>
+As emails and meeting happen the notes for the relevant people, company or topic are autoupdated.
+</td>
+<td width="60%">
+  <img width="100%" alt="Screenshot 2026-04-08 at 5 34 35 PM" src="https://github.com/user-attachments/assets/b2c263cf-13f0-48c9-a37e-157a14d18940" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Native meeting note taker</h3>
+Rowboat taps into you speaker and mic and live transcribes your meetings and takes actionable meeting notes. 
+</td>
+<td width="60%">
+  <img width="100%" alt="Screenshot 2026-04-08 at 5 52 46 PM" src="https://github.com/user-attachments/assets/801a037d-376f-42ca-8ddb-00b253d4c706" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Live notes & background agents</h3>
+Create live notes which uses background agents to do tasks and update the note.
+</td>
+<td width="60%">
+  <img width="100%" alt="Screenshot 2026-04-08 at 5 57 36 PM" src="https://github.com/user-attachments/assets/9ce793cf-b8b4-4e75-9f94-fe9011041dd8" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Search</h3>
+Do search across generic web, people, news, X and more. 
+</td>
+<td width="60%">
+  <img width="100%" height="947" alt="Screenshot 2026-04-08 at 6 01 33 PM" src="https://github.com/user-attachments/assets/c2252311-72b3-44d9-9c02-6e612c075d3d" />
+</td>
+</tr>
+</table>
+
+
+
+
+
+
 ## Integrations
 
 Rowboat builds memory from the work you already do, including:
