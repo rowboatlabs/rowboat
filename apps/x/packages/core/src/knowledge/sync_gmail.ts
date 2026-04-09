@@ -410,7 +410,7 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
 }
 
 async function performSync() {
-    const LOOKBACK_DAYS = 30; // Default to 1 month
+    const LOOKBACK_DAYS = 7; // Default to 1 week
     const ATTACHMENTS_DIR = path.join(SYNC_DIR, 'attachments');
     const STATE_FILE = path.join(SYNC_DIR, 'sync_state.json');
 
@@ -444,7 +444,7 @@ async function performSync() {
 
 // --- Composio-based Sync ---
 
-const COMPOSIO_LOOKBACK_DAYS = 30;
+const COMPOSIO_LOOKBACK_DAYS = 7;
 
 interface ComposioSyncState {
     last_sync: string; // ISO string
