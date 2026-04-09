@@ -24,7 +24,7 @@ import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
-import { execSync, exec } from "node:child_process";
+import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 
@@ -38,25 +38,30 @@ if (started) app.quit();
 
 // Fix PATH for packaged Electron apps on macOS/Linux.
 // Packaged apps inherit a minimal environment that doesn't include paths from
-// the user's shell profile (nvm, Homebrew, etc.). Spawn the user's login shell
-// to resolve the full PATH, using delimiters to safely extract it from any
-// surrounding shell output (motd, greeting messages, etc.).
-if (process.platform !== 'win32') {
+// the user's shell profile (such as those provided by nvm, Homebrew, etc.).
+// The function below spawns the user's login shell and runs a Node.js one-liner
+// to print the full environment as JSON, then merges it into process.env.
+// This ensures the Electron app has the same PATH and environment as user shell
+// (helping find tools installed via Homebrew/nvm/npm, etc.)
+function initializeExecutionEnvironment(): void {
+  if (process.platform === 'win32') return;
+
+  const shell = process.env.SHELL || '/bin/zsh';
+
   try {
-    const userShell = process.env.SHELL || '/bin/zsh';
-    const delimiter = '__ROWBOAT_PATH__';
-    const output = execSync(
-      `${userShell} -lc 'echo -n "${delimiter}$PATH${delimiter}"'`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
-    const match = output.match(new RegExp(`${delimiter}(.+?)${delimiter}`));
-    if (match?.[1]) {
-      process.env.PATH = match[1];
-    }
-  } catch {
-    // Silently fall back to the existing PATH if shell resolution fails
+    const stdout = execFileSync(
+      shell,
+      ['-l', '-c', `node -p "JSON.stringify(process.env)"`],
+      { encoding: 'utf8' }
+    ).trim();
+
+    const env = JSON.parse(stdout) as Record<string, string>;
+    process.env = { ...env, ...process.env };
+  } catch (error) {
+    console.error('Failed to load shell environment', error);
   }
 }
+initializeExecutionEnvironment();
 
 // Path resolution differs between development and production:
 const preloadPath = app.isPackaged
@@ -107,6 +112,8 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    minWidth: 600,
+    minHeight: 480,
     show: false, // Don't show until ready
     backgroundColor: "#252525", // Prevent white flash (matches dark mode)
     titleBarStyle: "hiddenInset",

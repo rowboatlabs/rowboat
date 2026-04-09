@@ -205,7 +205,7 @@ function formatRunTime(ts: string): string {
 }
 
 function SyncStatusBar() {
-  const { state, isMobile } = useSidebar()
+  const { state } = useSidebar()
   const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [logEvents, setLogEvents] = useState<ServiceEventType[]>([])
@@ -301,7 +301,7 @@ function SyncStatusBar() {
 
   return (
     <>
-      {!isMobile && isCollapsed && isSyncing && (
+      {isCollapsed && isSyncing && (
         <div
           className="fixed bottom-4 z-40 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background shadow-sm"
           style={{ left: "0.5rem" }}
