@@ -6,12 +6,66 @@ import { WorkDir } from "../config/config.js";
 const CACHE_PATH = path.join(WorkDir, "config", "models.dev.json");
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+/*
+ "claude-opus-4-6": {
+    "id": "claude-opus-4-6",
+    "name": "Claude Opus 4.6",
+    "family": "claude-opus",
+    "attachment": true,
+    "reasoning": true,
+    "tool_call": true,
+    "temperature": true,
+    "knowledge": "2025-05",
+    "release_date": "2026-02-05",
+    "last_updated": "2026-03-13",
+    "modalities": {
+      "input": [
+        "text",
+        "image",
+        "pdf"
+      ],
+      "output": [
+        "text"
+      ]
+    },
+    "open_weights": false,
+    "cost": {
+      "input": 5,
+      "output": 25,
+      "cache_read": 0.5,
+      "cache_write": 6.25
+    },
+    "limit": {
+      "context": 1000000,
+      "output": 128000
+    },
+    "experimental": {
+      "modes": {
+        "fast": {
+          "cost": {
+            "input": 30,
+            "output": 150,
+            "cache_read": 3,
+            "cache_write": 37.5
+          },
+          "provider": {
+            "body": {
+              "speed": "fast"
+            },
+            "headers": {
+              "anthropic-beta": "fast-mode-2026-02-01"
+            }
+          }
+        }
+      }
+    }
+  }
+*/
 const ModelsDevModel = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
   release_date: z.string().optional(),
   tool_call: z.boolean().optional(),
-  experimental: z.boolean().optional(),
   status: z.enum(["alpha", "beta", "deprecated"]).optional(),
 }).passthrough();
 
@@ -125,7 +179,6 @@ function pickProvider(
 }
 
 function isStableModel(model: z.infer<typeof ModelsDevModel>): boolean {
-  if (model.experimental) return false;
   if (model.status && ["alpha", "beta", "deprecated"].includes(model.status)) return false;
   return true;
 }
@@ -141,7 +194,6 @@ function normalizeModels(models: Record<string, z.infer<typeof ModelsDevModel>>)
       name: model.name,
       release_date: model.release_date,
       tool_call: model.tool_call,
-      experimental: model.experimental,
       status: model.status,
     }))
     .filter((model) => isStableModel(model) && supportsToolCall(model))

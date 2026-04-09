@@ -30,13 +30,13 @@ export function useAnalyticsIdentity() {
 
         // Count notes for total_notes property
         try {
-          const entries = await window.ipc.invoke('workspace:readdir', { path: '/' })
+          const entries = await window.ipc.invoke('workspace:readdir', { path: '' })
           let totalNotes = 0
           if (entries) {
             for (const entry of entries) {
               if (entry.kind === 'dir') {
                 try {
-                  const sub = await window.ipc.invoke('workspace:readdir', { path: `/${entry.name}` })
+                  const sub = await window.ipc.invoke('workspace:readdir', { path: `${entry.name}` })
                   totalNotes += sub?.length ?? 0
                 } catch {
                   // skip inaccessible dirs
