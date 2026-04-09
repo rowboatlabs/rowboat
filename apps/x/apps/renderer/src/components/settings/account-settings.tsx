@@ -179,8 +179,8 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
                   <p className="text-xs text-muted-foreground">Subscribe to access AI features</p>
                 )}
               </div>
-              <Button variant="outline" size="sm" onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}>
-                {!billing.subscriptionPlan ? 'Subscribe' : 'Change plan'}
+              <Button variant="outline" size="sm" onClick={() => appUrl && window.open(appUrl)}>
+                View plan
               </Button>
             </div>
           </div>
@@ -204,7 +204,14 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
           variant="outline"
           size="sm"
           disabled={!billing?.subscriptionPlan}
-          onClick={() => appUrl && window.open(appUrl)}
+          onClick={async () => {
+            try {
+              const { url } = await window.ipc.invoke('billing:getPortalUrl', null);
+              window.open(url);
+            } catch {
+              toast.error('Failed to open billing portal');
+            }
+          }}
           className="gap-1.5"
         >
           <ExternalLink className="size-3" />

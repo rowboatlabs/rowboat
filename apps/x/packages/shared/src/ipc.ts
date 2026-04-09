@@ -572,6 +572,12 @@ const ipcSchemas = {
       availableCredits: z.number(),
     }),
   },
+  'billing:getPortalUrl': {
+    req: z.null(),
+    res: z.object({
+      url: z.string(),
+    }),
+  },
 } as const;
 
 // ============================================================================

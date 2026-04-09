@@ -11,6 +11,19 @@ export interface BillingInfo {
   availableCredits: number;
 }
 
+export async function getBillingPortalUrl(): Promise<string> {
+  const accessToken = await getAccessToken();
+  const response = await fetch(`${API_URL}/v1/billing/portal-session`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Portal session failed: ${response.status}`);
+  }
+  const body = await response.json() as { url: string };
+  return body.url;
+}
+
 export async function getBillingInfo(): Promise<BillingInfo> {
   const accessToken = await getAccessToken();
   const response = await fetch(`${API_URL}/v1/me`, {

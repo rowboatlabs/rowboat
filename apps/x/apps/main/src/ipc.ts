@@ -40,7 +40,7 @@ import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedu
 import { search } from '@x/core/dist/search/search.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
-import { getBillingInfo } from '@x/core/dist/billing/billing.js';
+import { getBillingInfo, getBillingPortalUrl } from '@x/core/dist/billing/billing.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
@@ -758,6 +758,10 @@ export function setupIpcHandlers() {
     // Billing handler
     'billing:getInfo': async () => {
       return await getBillingInfo();
+    },
+    'billing:getPortalUrl': async () => {
+      const url = await getBillingPortalUrl();
+      return { url };
     },
   });
 }
