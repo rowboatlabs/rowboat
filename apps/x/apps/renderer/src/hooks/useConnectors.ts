@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { getGoogleClientId, setGoogleClientId, clearGoogleClientId } from "@/lib/google-client-id-store"
+import { setGoogleCredentials, clearGoogleCredentials } from "@/lib/google-credentials-store"
 import { toast } from "sonner"
 
 export interface ProviderState {
@@ -318,14 +318,14 @@ export function useConnectors(active: boolean) {
   }, [startGmailConnect])
 
   // OAuth connect/disconnect
-  const startConnect = useCallback(async (provider: string, clientId?: string) => {
+  const startConnect = useCallback(async (provider: string, credentials?: { clientId: string; clientSecret: string }) => {
     setProviderStates(prev => ({
       ...prev,
       [provider]: { ...prev[provider], isConnecting: true }
     }))
 
     try {
-      const result = await window.ipc.invoke('oauth:connect', { provider, clientId })
+      const result = await window.ipc.invoke('oauth:connect', { provider, clientId: credentials?.clientId, clientSecret: credentials?.clientSecret })
 
       if (!result.success) {
         toast.error(result.error || (provider === 'rowboat' ? 'Failed to log in to Rowboat' : `Failed to connect to ${provider}`))
@@ -347,23 +347,18 @@ export function useConnectors(active: boolean) {
   const handleConnect = useCallback(async (provider: string) => {
     if (provider === 'google') {
       setGoogleClientIdDescription(undefined)
-      const existingClientId = getGoogleClientId()
-      if (!existingClientId) {
-        setGoogleClientIdOpen(true)
-        return
-      }
-      await startConnect(provider, existingClientId)
+      setGoogleClientIdOpen(true)
       return
     }
 
     await startConnect(provider)
   }, [startConnect])
 
-  const handleGoogleClientIdSubmit = useCallback((clientId: string) => {
-    setGoogleClientId(clientId)
+  const handleGoogleClientIdSubmit = useCallback((clientId: string, clientSecret: string) => {
+    setGoogleCredentials(clientId, clientSecret)
     setGoogleClientIdOpen(false)
     setGoogleClientIdDescription(undefined)
-    startConnect('google', clientId)
+    startConnect('google', { clientId, clientSecret })
   }, [startConnect])
 
   const handleDisconnect = useCallback(async (provider: string) => {
@@ -377,7 +372,7 @@ export function useConnectors(active: boolean) {
 
       if (result.success) {
         if (provider === 'google') {
-          clearGoogleClientId()
+          clearGoogleCredentials()
         }
         const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
         toast.success(provider === 'rowboat' ? 'Logged out of Rowboat' : `Disconnected from ${displayName}`)
@@ -426,9 +421,6 @@ export function useConnectors(active: boolean) {
     try {
       const result = await window.ipc.invoke('oauth:getState', null)
       const config = result.config || {}
-      if (config.google?.clientId) {
-        setGoogleClientId(config.google.clientId)
-      }
       const statusMap: Record<string, ProviderStatus> = {}
 
       for (const provider of providers) {
@@ -565,7 +557,7 @@ export function useConnectors(active: boolean) {
     handleDisconnect,
     startConnect,
 
-    // Google client ID modal
+    // Google credentials modal
     googleClientIdOpen,
     setGoogleClientIdOpen,
     googleClientIdDescription,

@@ -18,21 +18,23 @@ export class GoogleClientFactory {
         client: OAuth2Client | null;
         tokens: OAuthTokens | null;
         clientId: string | null;
+        clientSecret: string | null;
     } = {
         config: null,
         client: null,
         tokens: null,
         clientId: null,
+        clientSecret: null,
     };
 
-    private static async resolveClientId(): Promise<string> {
+    private static async resolveCredentials(): Promise<{ clientId: string; clientSecret?: string }> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
-        const { clientId } = await oauthRepo.read(this.PROVIDER_NAME);
-        if (!clientId) {
+        const connection = await oauthRepo.read(this.PROVIDER_NAME);
+        if (!connection.clientId) {
             await oauthRepo.upsert(this.PROVIDER_NAME, { error: 'Google client ID missing. Please reconnect.' });
             throw new Error('Google client ID missing. Please reconnect.');
         }
-        return clientId;
+        return { clientId: connection.clientId, clientSecret: connection.clientSecret ?? undefined };
     }
 
     /**
@@ -82,9 +84,11 @@ export class GoogleClientFactory {
                 // Update cached tokens and recreate client
                 this.cache.tokens = refreshedTokens;
                 if (!this.cache.clientId) {
-                    this.cache.clientId = await this.resolveClientId();
+                    const creds = await this.resolveCredentials();
+                    this.cache.clientId = creds.clientId;
+                    this.cache.clientSecret = creds.clientSecret ?? null;
                 }
-                this.cache.client = this.createClientFromTokens(refreshedTokens, this.cache.clientId);
+                this.cache.client = this.createClientFromTokens(refreshedTokens, this.cache.clientId, this.cache.clientSecret ?? undefined);
                 console.log(`[OAuth] Token refreshed successfully`);
                 return this.cache.client;
             } catch (error) {
@@ -105,9 +109,11 @@ export class GoogleClientFactory {
         console.log(`[OAuth] Creating new OAuth2Client instance`);
         this.cache.tokens = tokens;
         if (!this.cache.clientId) {
-            this.cache.clientId = await this.resolveClientId();
+            const creds = await this.resolveCredentials();
+            this.cache.clientId = creds.clientId;
+            this.cache.clientSecret = creds.clientSecret ?? null;
         }
-        this.cache.client = this.createClientFromTokens(tokens, this.cache.clientId);
+        this.cache.client = this.createClientFromTokens(tokens, this.cache.clientId, this.cache.clientSecret ?? undefined);
         return this.cache.client;
     }
 
@@ -138,19 +144,20 @@ export class GoogleClientFactory {
         this.cache.client = null;
         this.cache.tokens = null;
         this.cache.clientId = null;
+        this.cache.clientSecret = null;
     }
 
     /**
      * Initialize cached configuration (called once)
      */
     private static async initializeConfigCache(): Promise<void> {
-        const clientId = await this.resolveClientId();
+        const { clientId, clientSecret } = await this.resolveCredentials();
 
-        if (this.cache.config && this.cache.clientId === clientId) {
-            return; // Already initialized for this client ID
+        if (this.cache.config && this.cache.clientId === clientId && this.cache.clientSecret === (clientSecret ?? null)) {
+            return; // Already initialized for these credentials
         }
 
-        if (this.cache.clientId && this.cache.clientId !== clientId) {
+        if (this.cache.clientId && (this.cache.clientId !== clientId || this.cache.clientSecret !== (clientSecret ?? null))) {
             this.clearCache();
         }
 
@@ -163,18 +170,19 @@ export class GoogleClientFactory {
                 console.log(`[OAuth] Discovery mode: issuer with static client ID`);
                 this.cache.config = await oauthClient.discoverConfiguration(
                     providerConfig.discovery.issuer,
-                    clientId
+                    clientId,
+                    clientSecret
                 );
             } else {
                 // DCR mode - need existing registration
                 console.log(`[OAuth] Discovery mode: issuer with DCR`);
                 const clientRepo = container.resolve<IClientRegistrationRepo>('clientRegistrationRepo');
                 const existingRegistration = await clientRepo.getClientRegistration(this.PROVIDER_NAME);
-                
+
                 if (!existingRegistration) {
                     throw new Error('Google client not registered. Please connect account first.');
                 }
-                
+
                 this.cache.config = await oauthClient.discoverConfiguration(
                     providerConfig.discovery.issuer,
                     existingRegistration.client_id
@@ -185,28 +193,29 @@ export class GoogleClientFactory {
             if (providerConfig.client.mode !== 'static') {
                 throw new Error('DCR requires discovery mode "issuer", not "static"');
             }
-            
+
             console.log(`[OAuth] Using static endpoints (no discovery)`);
             this.cache.config = oauthClient.createStaticConfiguration(
                 providerConfig.discovery.authorizationEndpoint,
                 providerConfig.discovery.tokenEndpoint,
                 clientId,
-                providerConfig.discovery.revocationEndpoint
+                providerConfig.discovery.revocationEndpoint,
+                clientSecret
             );
         }
 
         this.cache.clientId = clientId;
+        this.cache.clientSecret = clientSecret ?? null;
         console.log(`[OAuth] Google OAuth configuration initialized`);
     }
 
     /**
      * Create OAuth2Client from OAuthTokens
      */
-    private static createClientFromTokens(tokens: OAuthTokens, clientId: string): OAuth2Client {
-        // Create OAuth2Client directly (PKCE flow doesn't use client secret)
+    private static createClientFromTokens(tokens: OAuthTokens, clientId: string, clientSecret?: string): OAuth2Client {
         const client = new OAuth2Client(
             clientId,
-            undefined, // client_secret not needed for PKCE
+            clientSecret ?? undefined,
             undefined  // redirect_uri not needed for token usage
         );
 

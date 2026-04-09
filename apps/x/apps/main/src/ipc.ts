@@ -460,7 +460,10 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'oauth:connect': async (_event, args) => {
-      return await connectProvider(args.provider, args.clientId?.trim());
+      const credentials = args.clientId && args.clientSecret
+        ? { clientId: args.clientId.trim(), clientSecret: args.clientSecret.trim() }
+        : undefined;
+      return await connectProvider(args.provider, credentials);
     },
     'oauth:disconnect': async (_event, args) => {
       return await disconnectProvider(args.provider);

@@ -111,19 +111,19 @@ function getClientRegistrationRepo(): IClientRegistrationRepo {
 /**
  * Get or create OAuth configuration for a provider
  */
-async function getProviderConfiguration(provider: string, clientIdOverride?: string): Promise<Configuration> {
+async function getProviderConfiguration(provider: string, credentialsOverride?: { clientId: string; clientSecret: string }): Promise<Configuration> {
   const config = await getProviderConfig(provider);
-  const resolveClientId = async (): Promise<string> => {
+  const resolveClientCredentials = async (): Promise<{ clientId: string; clientSecret?: string }> => {
     if (config.client.mode === 'static' && config.client.clientId) {
-      return config.client.clientId;
+      return { clientId: config.client.clientId, clientSecret: credentialsOverride?.clientSecret };
     }
-    if (clientIdOverride) {
-      return clientIdOverride;
+    if (credentialsOverride) {
+      return { clientId: credentialsOverride.clientId, clientSecret: credentialsOverride.clientSecret };
     }
     const oauthRepo = getOAuthRepo();
-    const { clientId } = await oauthRepo.read(provider);
-    if (clientId) {
-      return clientId;
+    const connection = await oauthRepo.read(provider);
+    if (connection.clientId) {
+      return { clientId: connection.clientId, clientSecret: connection.clientSecret ?? undefined };
     }
     throw new Error(`${provider} client ID not configured. Please provide a client ID.`);
   };
@@ -132,10 +132,11 @@ async function getProviderConfiguration(provider: string, clientIdOverride?: str
     if (config.client.mode === 'static') {
       // Discover endpoints, use static client ID
       console.log(`[OAuth] ${provider}: Discovery from issuer with static client ID`);
-      const clientId = await resolveClientId();
+      const { clientId, clientSecret } = await resolveClientCredentials();
       return await oauthClient.discoverConfiguration(
         config.discovery.issuer,
-        clientId
+        clientId,
+        clientSecret
       );
     } else {
       // DCR mode - check for existing registration or register new
@@ -172,12 +173,13 @@ async function getProviderConfiguration(provider: string, clientIdOverride?: str
     }
     
     console.log(`[OAuth] ${provider}: Using static endpoints (no discovery)`);
-    const clientId = await resolveClientId();
+    const { clientId, clientSecret } = await resolveClientCredentials();
     return oauthClient.createStaticConfiguration(
       config.discovery.authorizationEndpoint,
       config.discovery.tokenEndpoint,
       clientId,
-      config.discovery.revocationEndpoint
+      config.discovery.revocationEndpoint,
+      clientSecret
     );
   }
 }
@@ -185,7 +187,7 @@ async function getProviderConfiguration(provider: string, clientIdOverride?: str
 /**
  * Initiate OAuth flow for a provider
  */
-export async function connectProvider(provider: string, clientId?: string): Promise<{ success: boolean; error?: string }> {
+export async function connectProvider(provider: string, credentials?: { clientId: string; clientSecret: string }): Promise<{ success: boolean; error?: string }> {
   try {
     console.log(`[OAuth] Starting connection flow for ${provider}...`);
 
@@ -196,18 +198,13 @@ export async function connectProvider(provider: string, clientId?: string): Prom
     const providerConfig = await getProviderConfig(provider);
 
     if (provider === 'google') {
-      if (!clientId) {
-        return { success: false, error: 'Google client ID is required to connect.' };
+      if (!credentials?.clientId || !credentials?.clientSecret) {
+        return { success: false, error: 'Google client ID and client secret are required to connect.' };
       }
     }
 
     // Get or create OAuth configuration
-    const config = await getProviderConfiguration(provider, clientId);
-
-    // Persist Google client ID so it survives restarts and failed token exchanges
-    if (provider === 'google' && clientId) {
-      await oauthRepo.upsert(provider, { clientId });
-    }
+    const config = await getProviderConfiguration(provider, credentials);
 
     // Generate PKCE codes
     const { verifier: codeVerifier, challenge: codeChallenge } = await oauthClient.generatePKCE();
@@ -258,13 +255,13 @@ export async function connectProvider(provider: string, clientId?: string): Prom
           state
         );
 
-        // Save tokens
+        // Save tokens and credentials
         console.log(`[OAuth] Token exchange successful for ${provider}`);
-        await oauthRepo.upsert(provider, { tokens });
-        if (provider === 'google' && clientId) {
-          await oauthRepo.upsert(provider, { clientId });
-        }
-        await oauthRepo.upsert(provider, { error: null });
+        await oauthRepo.upsert(provider, {
+          tokens,
+          ...(credentials ? { clientId: credentials.clientId, clientSecret: credentials.clientSecret } : {}),
+          error: null,
+        });
 
         // Trigger immediate sync for relevant providers
         if (provider === 'google') {

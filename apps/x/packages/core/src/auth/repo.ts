@@ -7,6 +7,7 @@ import z from 'zod';
 const ProviderConnectionSchema = z.object({
   tokens: OAuthTokens.nullable().optional(),
   clientId: z.string().nullable().optional(),
+  clientSecret: z.string().nullable().optional(),
   error: z.string().nullable().optional(),
 });
 
