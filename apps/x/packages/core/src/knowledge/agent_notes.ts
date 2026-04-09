@@ -3,7 +3,7 @@ import path from 'path';
 import { google } from 'googleapis';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
-import { bus } from '../runs/bus.js';
+import { waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { loadUserConfig, updateUserEmail } from '../config/user_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
@@ -188,19 +188,6 @@ function extractConversationMessages(runFilePath: string): { role: string; text:
         // ignore
     }
     return messages;
-}
-
-// --- Wait for agent run completion ---
-
-async function waitForRunCompletion(runId: string): Promise<void> {
-    return new Promise(async (resolve) => {
-        const unsubscribe = await bus.subscribe('*', async (event) => {
-            if (event.type === 'run-processing-end' && event.runId === runId) {
-                unsubscribe();
-                resolve();
-            }
-        });
-    });
 }
 
 // --- User email resolution ---
