@@ -81,33 +81,18 @@ function SidebarProvider({
     [setOpenProp, open]
   )
 
-  // Auto-collapse sidebar when window is too narrow, re-expand when wide enough
-  const autoCollapsedRef = React.useRef(false)
+  // Auto-collapse sidebar when window crosses below the threshold
   React.useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${SIDEBAR_AUTO_COLLAPSE_WIDTH - 1}px)`)
     const onChange = () => {
-      if (mql.matches && open) {
-        // Window became narrow — auto-collapse
-        autoCollapsedRef.current = true
-        setOpen(false)
-      } else if (!mql.matches && !open && autoCollapsedRef.current) {
-        // Window became wide again — restore if we auto-collapsed it
-        autoCollapsedRef.current = false
-        setOpen(true)
-      }
-    }
-    // Check on mount
-    if (mql.matches && open) {
-      autoCollapsedRef.current = true
-      setOpen(false)
+      if (mql.matches) setOpen(false)
     }
     mql.addEventListener("change", onChange)
     return () => mql.removeEventListener("change", onChange)
-  }, [open, setOpen])
+  }, [setOpen])
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
-    autoCollapsedRef.current = false // User manually toggled, don't auto-restore
     return setOpen((open) => !open)
   }, [setOpen])
 
