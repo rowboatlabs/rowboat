@@ -14,6 +14,43 @@ import { emitOAuthEvent } from './ipc.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
 
+/** Top-level openid-client messages that often wrap a more specific cause. */
+const OPAQUE_OAUTH_TOP_MESSAGES = new Set(['invalid response encountered']);
+
+function firstCauseMessage(error: unknown): string | undefined {
+  if (error == null || typeof error !== 'object' || !('cause' in error)) {
+    return undefined;
+  }
+  const cause = (error as { cause?: unknown }).cause;
+  if (cause instanceof Error && cause.message.trim()) {
+    return cause.message;
+  }
+  if (typeof cause === 'string' && cause.trim()) {
+    return cause;
+  }
+  return undefined;
+}
+
+/**
+ * User-facing message for token-exchange failures. Prefer the first cause message when
+ * the top-level message is opaque (common for openid-client) or when code is OAUTH_INVALID_RESPONSE.
+ * The catch block below still logs the full cause chain for any error; this helper stays conservative.
+ */
+function getOAuthErrorMessage(error: unknown): string {
+  const msg = error instanceof Error ? error.message : 'Unknown error';
+  const code = error != null && typeof error === 'object' && 'code' in error
+    ? (error as { code?: string }).code
+    : undefined;
+  const causeMsg = firstCauseMessage(error);
+  if (code === 'OAUTH_INVALID_RESPONSE' && causeMsg) {
+    return causeMsg;
+  }
+  if (causeMsg && OPAQUE_OAUTH_TOP_MESSAGES.has(msg.trim().toLowerCase())) {
+    return causeMsg;
+  }
+  return msg;
+}
+
 // Store active OAuth flows (state -> { codeVerifier, provider, config })
 const activeFlows = new Map<string, {
   codeVerifier: string;
@@ -167,6 +204,11 @@ export async function connectProvider(provider: string, clientId?: string): Prom
     // Get or create OAuth configuration
     const config = await getProviderConfiguration(provider, clientId);
 
+    // Persist Google client ID so it survives restarts and failed token exchanges
+    if (provider === 'google' && clientId) {
+      await oauthRepo.upsert(provider, { clientId });
+    }
+
     // Generate PKCE codes
     const { verifier: codeVerifier, challenge: codeChallenge } = await oauthClient.generatePKCE();
     const state = oauthClient.generateState();
@@ -187,12 +229,17 @@ export async function connectProvider(provider: string, clientId?: string): Prom
 
     // Create callback server
     let callbackHandled = false;
-    const { server } = await createAuthServer(8080, async (params: Record<string, string>) => {
+    const { server } = await createAuthServer(8080, async (callbackUrl) => {
       // Guard against duplicate callbacks (browser may send multiple requests)
       if (callbackHandled) return;
       callbackHandled = true;
-      // Validate state
-      if (params.state !== state) {
+      const receivedState = callbackUrl.searchParams.get('state');
+      if (receivedState == null || receivedState === '') {
+        throw new Error(
+          'OAuth callback missing state parameter. Complete sign-in in the browser or check the redirect URI.'
+        );
+      }
+      if (receivedState !== state) {
         throw new Error('Invalid state parameter - possible CSRF attack');
       }
 
@@ -202,10 +249,7 @@ export async function connectProvider(provider: string, clientId?: string): Prom
       }
 
       try {
-        // Build callback URL for token exchange
-        const callbackUrl = new URL(`${REDIRECT_URI}?${new URLSearchParams(params).toString()}`);
-
-        // Exchange code for tokens
+        // Use full callback URL (includes iss, scope, etc.) so openid-client validation succeeds
         console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);
         const tokens = await oauthClient.exchangeCodeForTokens(
           flow.config,
@@ -234,7 +278,15 @@ export async function connectProvider(provider: string, clientId?: string): Prom
         emitOAuthEvent({ provider, success: true });
       } catch (error) {
         console.error('OAuth token exchange failed:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        // Log cause chain for debugging (e.g. OAUTH_INVALID_RESPONSE -> OperationProcessingError)
+        let cause: unknown = error;
+        while (cause != null && typeof cause === 'object' && 'cause' in cause) {
+          cause = (cause as { cause?: unknown }).cause;
+          if (cause != null) {
+            console.error('[OAuth] Caused by:', cause);
+          }
+        }
+        const errorMessage = getOAuthErrorMessage(error);
         emitOAuthEvent({ provider, success: false, error: errorMessage });
         throw error;
       } finally {
@@ -302,8 +354,8 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
 export async function getAccessToken(provider: string): Promise<string | null> {
   try {
     const oauthRepo = getOAuthRepo();
-    
-    const { tokens } = await oauthRepo.read(provider);
+
+    let { tokens } = await oauthRepo.read(provider);
     if (!tokens) {
       return null;
     }
@@ -319,11 +371,12 @@ export async function getAccessToken(provider: string): Promise<string | null> {
       try {
         // Get configuration for refresh
         const config = await getProviderConfiguration(provider);
-        
+
         // Refresh token, preserving existing scopes
         const existingScopes = tokens.scopes;
         const refreshedTokens = await oauthClient.refreshTokens(config, tokens.refresh_token, existingScopes);
-        await oauthRepo.upsert(provider, { tokens });
+        await oauthRepo.upsert(provider, { tokens: refreshedTokens });
+        tokens = refreshedTokens;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Token refresh failed';
         await oauthRepo.upsert(provider, { error: message });
